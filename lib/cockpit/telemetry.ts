@@ -35,7 +35,7 @@ const n0 = (x: number) => x.toFixed(0);
 const n1 = (x: number) => x.toFixed(1);
 const n2 = (x: number) => x.toFixed(2);
 const sgn = (x: number, d = 2) => (x >= 0 ? '+' : '') + x.toFixed(d);
-const grp = (x: number) => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const grp = (x: number) => Math.round(x).toLocaleString('en-US');
 const arrow = (x: number) => (x > 0 ? '▲' : x < 0 ? '▼' : '·');
 const pctf = (x: number, d = 1) => (x * 100).toFixed(d) + '%';
 const bar = (frac: number, w = 8) => {
@@ -63,12 +63,12 @@ function nyCountdown(): string {
 type Gen = (f: Feed) => { tag: string; text: string };
 
 const GENERATORS: Array<{ w: number; fn: Gen }> = [
-  { w: 9, fn: (f) => ({ tag: 'FEED', text: `XAUUSD  bid ${n2(f.bid)}  ask ${n2(f.ask)}  spr ${n2(f.spread)}  Δ ${sgn(f.dPx)}` }) },
+  { w: 9, fn: (f) => ({ tag: 'FEED', text: `bid ${n2(f.bid)}  ask ${n2(f.ask)}  spr ${n2(f.spread)}  Δ ${sgn(f.dPx)}` }) },
   { w: 7, fn: (f) => ({ tag: 'TICK', text: `px ${n2(f.mid)}  ${arrow(f.dPx)} ${sgn(f.dPct, 3)}%  vwap~${n1(f.vwap)}  n ${f.ticks.toLocaleString('en-US')}` }) },
   { w: 5, fn: (f) => ({ tag: 'MOM', text: `mom ${sgn(f.dPct * 20, 2)}σ  vel ${sgn(f.velocity, 3)}/s  ${f.up ? 'streak ▲▲▲' : 'streak ▼▼▼'}` }) },
   { w: 4, fn: (f) => ({ tag: 'VOL', text: `atr ${n2(f.atr)}  pctl ${n0(f.atrPct)}  band ±${n2((f.atr / Math.max(1, f.mid)) * 100)}%  ${bar(f.atrPct / 100)}` }) },
   { w: 4, fn: (f) => ({ tag: 'TREND', text: `adx ${n1(f.adx)} ${f.adx > 25 ? '↑ strong' : f.adx < 18 ? '· weak' : '· building'}  bias ${f.emaBias}  regime ${f.regime}` }) },
-  { w: 3, fn: (f) => ({ tag: 'SESS', text: `${f.session.toUpperCase()} ${f.tradable ? 'OPEN' : 'LOCKED'}  ·  NY open T-${nyCountdown()}  ·  liq ${f.session === 'overlap' ? 'PEAK' : f.session === 'closed' ? 'thin' : 'rising'}` }) },
+  { w: 3, fn: (f) => ({ tag: 'SESS', text: `${f.session.toUpperCase()} ${f.tradable ? 'OPEN' : 'LOCKED'}  ·  NY T-${nyCountdown()}  ·  liq ${f.session === 'overlap' ? 'PEAK' : f.session === 'closed' ? 'thin' : 'rising'}` }) },
   {
     w: 4,
     fn: (f) => {
@@ -78,7 +78,7 @@ const GENERATORS: Array<{ w: number; fn: Gen }> = [
       return { tag: 'LVL', text: `round ${n1(rl)} (Δ ${sgn(d, 1)})  ·  psy ${n0(big)} magnet  ·  ${Math.abs(d) < 0.6 ? 'TAGGED' : 'tracking'}` };
     },
   },
-  { w: 3, fn: (f) => ({ tag: 'RISK', text: `eq ${grp(f.equity)}  dP&L ${sgn(f.dayPnL)}  expo ${pctf(f.openRiskPct)}  pos ${f.openPositions}  ${f.killed ? '⛔ KILL' : 'armed'}` }) },
+  { w: 3, fn: (f) => ({ tag: 'RISK', text: `eq ${grp(f.equity)}  dP&L ${sgn(f.dayPnL, 1)}  expo ${pctf(f.openRiskPct)}  pos ${f.openPositions}${f.killed ? '  ⛔KILL' : ''}` }) },
   {
     w: 4,
     fn: (f) =>
@@ -98,9 +98,9 @@ const GENERATORS: Array<{ w: number; fn: Gen }> = [
       ({
         tag: 'SYS',
         text: pick([
-          `metaapi ●  feed ${f.feedLagMs}ms  copier ●  uptime ${hms(f.uptimeMs)}`,
-          `link master ●  social-trader-hub ●  rt ●  drift 0.${(Math.random() * 9) | 0}ms`,
-          `heartbeat ok  ·  ${f.live ? 'feed LIVE' : 'feed SIM'}  ·  q 0  ·  seq ${f.ticks % 9999}`,
+          `data-feed ${f.live ? 'LIVE ●' : 'SIM ○'}  ·  lag ${f.live ? f.feedLagMs + 'ms' : '—'}  ·  up ${hms(f.uptimeMs)}`,
+          `metaapi ${f.live ? '● up' : '○ idle'}  ·  realtime ●  ·  q 0  ·  seq ${f.ticks % 9999}`,
+          `heartbeat ok  ·  feed ${f.live ? 'LIVE' : 'SIM'}  ·  engine ${f.tradable ? 'armed' : 'idle'}`,
         ]),
       }),
   },

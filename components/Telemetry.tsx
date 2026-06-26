@@ -169,14 +169,14 @@ export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
         <span style={{ color: 'var(--cyan)' }}>ALGORIA&nbsp;AI · mission&nbsp;control</span>
         <span className={live ? 'pulse' : ''} style={{ color: live ? 'var(--up)' : 'var(--dim)', fontSize: 10.5, letterSpacing: 0.5 }}>{live ? '● LIVE FEED' : '◌ SIM FEED'}</span>
       </div>
-      <div ref={scroller} style={{ padding: '6px 10px', fontSize: 11, lineHeight: 1.5, flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div ref={scroller} style={{ padding: '6px 10px', fontSize: 11, lineHeight: 1.5, flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
         {lines.map((l) => (
-          <div key={l.id} style={{ whiteSpace: 'nowrap', textShadow: l.glow ? `0 0 8px ${l.color}` : undefined }}>
-            <span style={{ color: 'var(--dim)', display: 'inline-block', width: 92 }}>
+          <div key={l.id} style={{ display: 'flex', gap: 6, textShadow: l.glow ? `0 0 8px ${l.color}` : undefined }}>
+            <span style={{ color: 'var(--dim)', flex: '0 0 84px' }}>
               {new Date(l.t).toLocaleTimeString('en-GB')}.{String(l.t % 1000).padStart(3, '0')}
             </span>
-            <span style={{ color: l.color, opacity: 0.9, display: 'inline-block', width: 56 }}>{l.tag}</span>
-            <span style={{ color: l.glow ? l.color : 'var(--text)' }}>{l.text}</span>
+            <span style={{ color: l.color, opacity: 0.9, flex: '0 0 42px' }}>{l.tag}</span>
+            <span style={{ color: l.glow ? l.color : 'var(--text)', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.text}</span>
           </div>
         ))}
         <span className="blink" style={{ color: 'var(--cyan)' }}>▌</span>
