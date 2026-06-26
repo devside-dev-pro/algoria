@@ -35,8 +35,6 @@ async function main() {
   const seed = await loadHistory(account, BROKER, TF, 300);
   let state: EngineState = readState(terminal, BROKER, { dayStartBalance: terminal.accountInformation?.balance });
   let mode: Mode = 'normal';
-  let flatBars = 0; // throttle des analyses de marché (marché calme)
-  let oppBars = 0; // throttle des call-outs d'opportunité (setup en formation)
 
   // commandes venues du cockpit (mode, kill switch, flatten)
   watchCommands((cmd) => {
@@ -68,14 +66,12 @@ async function main() {
       if (signal) {
         const line = await narrate({ kind: 'trade', ctx: context, signal, confluence, threshold });
         if (line) await logNarration(line, signal.time, { kind: 'trade', direction: signal.direction, confidence: signal.confidence, entry: signal.entry, sl: signal.stopLoss, tp: signal.takeProfits[0] });
-      } else if (confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.8) {
-        // setup en formation (proche du seuil) → call-out "opportunité", au plus 1 bougie sur 2
-        if (++oppBars % 2 === 1) {
-          const line = await narrate({ kind: 'opportunity', ctx: context, confluence, threshold });
-          if (line) await logNarration(line, context.time, { kind: 'opportunity', direction: confluence.direction, confidence: confluence.confidence });
-        }
-      } else if (++flatBars % 3 === 0) {
-        // marché calme → analyse périodique
+      } else if (confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.7) {
+        // setup en formation (proche du seuil) → call-out "opportunité" à chaque bougie qui couve
+        const line = await narrate({ kind: 'opportunity', ctx: context, confluence, threshold });
+        if (line) await logNarration(line, context.time, { kind: 'opportunity', direction: confluence.direction, confidence: confluence.confidence });
+      } else {
+        // sinon → lecture de marché à chaque clôture (le desk a toujours quelque chose de frais)
         const line = await narrate({ kind: 'analysis', ctx: context, logLines: events.map((e) => e.msg) });
         if (line) await logNarration(line, context.time, { kind: 'analysis' });
       }
