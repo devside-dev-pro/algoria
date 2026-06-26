@@ -1,10 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 import type { Database } from './database.types';
 import type { Bar, EngineEvent, EngineState, MarketContext, Mode, Signal } from '../engine/types';
 
 /** Client runner — clé SERVICE (bypass RLS). À n'utiliser QUE côté serveur/runner. */
 const db = createClient<Database>(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!, {
   auth: { persistSession: false },
+  realtime: { transport: ws as unknown as typeof WebSocket },
 });
 
 export async function logEvents(events: EngineEvent[]) {

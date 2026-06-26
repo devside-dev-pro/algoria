@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
@@ -8,28 +9,29 @@ import { FEATURES } from '../lib/engine/features';
 import { logEvents, logSignal, pushState, logCandle, logCandles, watchCommands } from '../lib/supabase/sync';
 import type { Bar, EngineState, Mode } from '../lib/engine/types';
 
-const SYMBOL = process.env.ALGORIA_SYMBOL ?? 'XAUUSD';
+const BROKER = process.env.ALGORIA_SYMBOL ?? 'XAUUSD'; // nom du symbole chez le broker (ex. "Gold")
+const DISPLAY = 'XAUUSD'; // label stocké/affiché dans le cockpit (cohérent)
 const TF = '5m';
 
 async function main() {
   console.log('[algoria] runner démarre…');
   const { account, stream, terminal } = await connectMaster();
-  await stream.subscribeToMarketData(SYMBOL);
-  console.log(`[algoria] connecté · ${SYMBOL} · TF ${TF}`);
+  await stream.subscribeToMarketData(BROKER);
+  console.log(`[algoria] connecté · broker=${BROKER} → display=${DISPLAY} · TF ${TF}`);
 
   // Backfill d'historique profond pour le chart (tous les timeframes).
   for (const tf of ['M5', 'M15', 'H1', 'D1']) {
     try {
-      const hist = await backfill(account, SYMBOL, tf, 5);
-      await logCandles(SYMBOL, hist, tf);
+      const hist = await backfill(account, BROKER, tf, 5);
+      await logCandles(DISPLAY, hist, tf);
       console.log(`[algoria] backfill ${tf}: ${hist.length} bougies`);
     } catch (e) {
       console.error(`[algoria] backfill ${tf} échoué (getHistoricalCandles non supporté ?):`, e);
     }
   }
 
-  const seed = await loadHistory(account, SYMBOL, TF, 300);
-  let state: EngineState = readState(terminal, SYMBOL, { dayStartBalance: terminal.accountInformation?.balance });
+  const seed = await loadHistory(account, BROKER, TF, 300);
+  let state: EngineState = readState(terminal, BROKER, { dayStartBalance: terminal.accountInformation?.balance });
   let mode: Mode = 'normal';
 
   // commandes venues du cockpit (mode, kill switch, flatten)
@@ -40,18 +42,18 @@ async function main() {
   });
 
   const onClosed = async (bars: Bar[]) => {
-    state = readState(terminal, SYMBOL, state);
-    const { signal, events, context } = runTick({ symbol: SYMBOL, bars, mode, state, ctxOpts: { spread: state.spread } }, FEATURES, DEFAULT_CONFIG);
-    await logCandle(SYMBOL, bars[bars.length - 1], 'M5');
+    state = readState(terminal, BROKER, state);
+    const { signal, events, context } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts: { spread: state.spread } }, FEATURES, DEFAULT_CONFIG);
+    await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
     await logEvents(events);
     await pushState(context, state, mode);
     if (signal) {
       try {
-        const res = await placeSignal(stream, signal);
+        const res = await placeSignal(stream, signal, BROKER);
         state.tradesToday++;
         state.lastTradeTime = signal.time;
         await logSignal(signal, res);
-        console.log('[algoria] ORDRE', signal.direction, signal.symbol, signal.lot, '→', res.ticket);
+        console.log('[algoria] ORDRE', signal.direction, BROKER, signal.lot, '→', res.ticket);
       } catch (e) {
         console.error('[algoria] échec ordre:', e);
       }
@@ -60,7 +62,7 @@ async function main() {
 
   const agg = makeAggregator(TF, seed, onClosed);
   setInterval(() => {
-    const p = terminal.price(SYMBOL);
+    const p = terminal.price(BROKER);
     if (p) agg(p.bid, p.ask, Date.now());
   }, 1000);
 }
