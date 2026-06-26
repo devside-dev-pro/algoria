@@ -2,17 +2,17 @@ import type { Confluence, MarketContext, Mode, Signal, Zone } from './types';
 import type { EngineConfig } from './config';
 
 const LABELS: Record<string, string> = {
-  emaStack: 'tendance EMA',
-  macd: 'momentum MACD',
-  rsiPullback: 'pullback RSI',
-  srZone: 'zone S/R',
+  emaStack: 'EMA trend',
+  macd: 'MACD momentum',
+  rsiPullback: 'RSI pullback',
+  srZone: 'S/R zone',
   divergence: 'divergence',
   liquiditySweep: 'liquidity sweep',
-  roundLevel: 'niveau rond',
+  roundLevel: 'round level',
 };
 const round2 = (x: number) => Math.round(x * 100) / 100;
 
-/** Étage 4 — transforme un score en trade dimensionné. null si pas exploitable. */
+/** Stage 4 — turn a score into a sized trade. null if not exploitable. */
 export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, balance: number, cfg: EngineConfig): Signal | null {
   if (cf.direction === 'flat') return null;
   const long = cf.direction === 'long';
@@ -20,17 +20,17 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
   const entry = ctx.price;
   const atr = ctx.atr;
 
-  // Structure défendue = base du stop (zones déjà triées par proximité)
+  // Defended structure = stop basis (zones already sorted by proximity)
   const supports = ctx.zones.filter((z) => z.kind === 'support');
   const resistances = ctx.zones.filter((z) => z.kind === 'resistance');
   const defend: Zone | undefined = long ? supports[0] : resistances[0];
 
   const structural = defend ? (long ? defend.lower : defend.upper) : entry - dir * 1.2 * atr;
-  const stopLoss = structural - dir * cfg.slAtrMult * atr; // buffer au-delà de la structure
+  const stopLoss = structural - dir * cfg.slAtrMult * atr; // buffer beyond structure
   const riskDist = Math.abs(entry - stopLoss);
   if (riskDist < cfg.minStopAtr * atr || riskDist > cfg.maxStopAtr * atr) return null;
 
-  // TP : R:R cible, collé à la prochaine structure opposée (jamais à travers un mur)
+  // TP: target R:R, clamped to the next opposing structure (never through a wall)
   const wall: Zone | undefined = long ? resistances[0] : supports[0];
   const tpByRR = entry + dir * cfg.targetRR * riskDist;
   let tp1 = tpByRR;
@@ -39,10 +39,10 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
     tp1 = long ? Math.min(tpByRR, edge - 0.1 * atr) : Math.max(tpByRR, edge + 0.1 * atr);
   }
   const riskReward = Math.abs(tp1 - entry) / riskDist;
-  if (riskReward < cfg.minRR) return null; // pas assez de place → on jette
+  if (riskReward < cfg.minRR) return null; // not enough room → discard
   const tp2 = entry + dir * Math.max(cfg.targetRR * 1.6, riskReward + 0.8) * riskDist;
 
-  // Sizing : risque fixe en €, dérivé du stop
+  // Sizing: fixed risk amount, derived from the stop
   const riskAmount = balance * cfg.riskPct[mode];
   const perLot = riskDist * cfg.contractSize;
   const lot = Math.floor(riskAmount / perLot / cfg.lotStep) * cfg.lotStep;
@@ -68,9 +68,9 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
 function buildRationale(cf: Confluence, ctx: MarketContext, defend?: Zone): string[] {
   const top = [...cf.contributions].sort((a, b) => Math.abs(b.weighted) - Math.abs(a.weighted)).slice(0, 3);
   const out = top.map(
-    (c) => `${LABELS[c.key] ?? c.key} ${c.score > 0 ? 'haussier' : 'baissier'} (${c.weighted >= 0 ? '+' : ''}${c.weighted.toFixed(2)})`,
+    (c) => `${LABELS[c.key] ?? c.key} ${c.score > 0 ? 'bullish' : 'bearish'} (${c.weighted >= 0 ? '+' : ''}${c.weighted.toFixed(2)})`,
   );
-  if (defend) out.push(`${defend.kind === 'support' ? 'Support' : 'Résistance'} ${round2(defend.price)} défendu (force ${defend.strength.toFixed(2)})`);
-  out.push(`Session ${ctx.session} · ${ctx.regime} · confiance ${(cf.confidence * 100) | 0}%`);
+  if (defend) out.push(`${defend.kind === 'support' ? 'Support' : 'Resistance'} ${round2(defend.price)} defended (strength ${defend.strength.toFixed(2)})`);
+  out.push(`Session ${ctx.session} · ${ctx.regime} · conf ${(cf.confidence * 100) | 0}%`);
   return out;
 }

@@ -12,6 +12,7 @@ export interface SessionConfig {
 export interface ContextOptions {
   macroBias?: number; // -1..+1 depuis le feed DXY/US10Y ; 0 = inconnu
   spread?: number; // injecté par la couche data (tick MetaApi)
+  forceTradable?: boolean; // démo/test : ignore le gate de session
   atrPeriod?: number;
   adxPeriod?: number;
   atrLookback?: number;
@@ -40,6 +41,7 @@ function withDefaults(o: ContextOptions) {
   return {
     macroBias: o.macroBias ?? 0,
     spread: o.spread ?? 0,
+    forceTradable: o.forceTradable ?? false,
     atrPeriod: o.atrPeriod ?? 14,
     adxPeriod: o.adxPeriod ?? 14,
     atrLookback: o.atrLookback ?? 100,
@@ -141,6 +143,6 @@ export function buildContext(symbol: string, bars: Bar[], htfBars?: Bar[], opts:
     macroBias: o.macroBias,
     spread: o.spread,
     zones,
-    tradable: sessionOk && volOk,
+    tradable: o.forceTradable ? volOk : sessionOk && volOk,
   };
 }

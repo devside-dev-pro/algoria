@@ -1,11 +1,11 @@
 import { connectMaster } from './metaapi/client';
-import { loadHistory, makeAggregator } from './metaapi/candles';
+import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
 import { placeSignal } from './metaapi/execution';
 import { runTick } from '../lib/engine/pipeline';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { FEATURES } from '../lib/engine/features';
-import { logEvents, logSignal, pushState, watchCommands } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, watchCommands } from '../lib/supabase/sync';
 import type { Bar, EngineState, Mode } from '../lib/engine/types';
 
 const SYMBOL = process.env.ALGORIA_SYMBOL ?? 'XAUUSD';
@@ -16,6 +16,17 @@ async function main() {
   const { account, stream, terminal } = await connectMaster();
   await stream.subscribeToMarketData(SYMBOL);
   console.log(`[algoria] connecté · ${SYMBOL} · TF ${TF}`);
+
+  // Backfill d'historique profond pour le chart (tous les timeframes).
+  for (const tf of ['M5', 'M15', 'H1', 'D1']) {
+    try {
+      const hist = await backfill(account, SYMBOL, tf, 5);
+      await logCandles(SYMBOL, hist, tf);
+      console.log(`[algoria] backfill ${tf}: ${hist.length} bougies`);
+    } catch (e) {
+      console.error(`[algoria] backfill ${tf} échoué (getHistoricalCandles non supporté ?):`, e);
+    }
+  }
 
   const seed = await loadHistory(account, SYMBOL, TF, 300);
   let state: EngineState = readState(terminal, SYMBOL, { dayStartBalance: terminal.accountInformation?.balance });
@@ -31,6 +42,7 @@ async function main() {
   const onClosed = async (bars: Bar[]) => {
     state = readState(terminal, SYMBOL, state);
     const { signal, events, context } = runTick({ symbol: SYMBOL, bars, mode, state, ctxOpts: { spread: state.spread } }, FEATURES, DEFAULT_CONFIG);
+    await logCandle(SYMBOL, bars[bars.length - 1], 'M5');
     await logEvents(events);
     await pushState(context, state, mode);
     if (signal) {

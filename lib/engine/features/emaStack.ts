@@ -2,7 +2,7 @@ import type { Feature, FeatureInput, FeatureScore } from '../types';
 import { ema } from '../indicators';
 import { clamp01, last } from './_util';
 
-/** Tendance : alignement EMA(9/21/50) + pente. +1 stack haussier, -1 baissier. */
+/** Trend: EMA(9/21/50) alignment + slope. +1 bullish stack, -1 bearish. */
 export const emaStack: Feature = {
   key: 'emaStack',
   compute({ bars }: FeatureInput): FeatureScore | null {
@@ -17,10 +17,10 @@ export const emaStack: Feature = {
 
     const bullish = a > b && b > c;
     const bearish = a < b && b < c;
-    if (!bullish && !bearish) return { key: 'emaStack', score: 0, strength: 0.2, note: 'EMA entrelacées' };
+    if (!bullish && !bearish) return { key: 'emaStack', score: 0, strength: 0.2, note: 'EMAs tangled' };
 
     const slope = (a - e9[e9.length - 4]) / Math.max(1e-9, Math.abs(a - c));
     const strength = clamp01(Math.min(1, Math.abs(slope)) * 0.6 + 0.4);
-    return { key: 'emaStack', score: bullish ? 1 : -1, strength, note: bullish ? 'stack haussier' : 'stack baissier' };
+    return { key: 'emaStack', score: bullish ? 1 : -1, strength, note: bullish ? 'bullish stack' : 'bearish stack' };
   },
 };

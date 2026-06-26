@@ -6,6 +6,12 @@ export type Database = {
   };
   public: {
     Tables: {
+      candles: {
+        Row: { close: number; high: number; id: number; low: number; open: number; symbol: string; time: number; timeframe: string; volume: number | null };
+        Insert: { close: number; high: number; id?: never; low: number; open: number; symbol?: string; time: number; timeframe?: string; volume?: number | null };
+        Update: { close?: number; high?: number; id?: never; low?: number; open?: number; symbol?: string; time?: number; timeframe?: string; volume?: number | null };
+        Relationships: [];
+      };
       commands: {
         Row: { consumed: boolean; id: number; payload: Json | null; ts: string; type: string };
         Insert: { consumed?: boolean; id?: never; payload?: Json | null; ts?: string; type: string };

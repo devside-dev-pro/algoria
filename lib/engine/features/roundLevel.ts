@@ -1,7 +1,7 @@
 import type { Feature, FeatureInput, FeatureScore } from '../types';
 import { clamp01, last } from './_util';
 
-/** Niveaux psychologiques de l'or (tous les $10, plus forts tous les $50). */
+/** Gold psychological levels (every $10, stronger every $50). */
 export const roundLevel: Feature = {
   key: 'roundLevel',
   compute({ bars, ctx }: FeatureInput): FeatureScore | null {
@@ -18,7 +18,7 @@ export const roundLevel: Feature = {
       key: 'roundLevel',
       score: fromBelow ? (bull ? 0.6 : -0.4) : !bull ? -0.6 : 0.4,
       strength: clamp01((strong ? 0.5 : 0.3) + (1 - dist / (0.5 * atr)) * 0.3),
-      note: `niveau ${nearest}`,
+      note: `round level ${nearest}`,
     };
   },
 };

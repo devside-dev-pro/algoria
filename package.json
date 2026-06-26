@@ -9,6 +9,7 @@
     "start": "next start",
     "runner": "tsx runner/index.ts",
     "backtest": "tsx backtest/run.ts",
+    "demo": "tsx scripts/demo.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -23,6 +24,7 @@
     "@types/node": "^22.20.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "dotenv": "^17.4.2",
     "tsx": "^4.22.4",
     "typescript": "^5.9.3"
   }

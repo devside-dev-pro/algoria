@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './database.types';
-import type { EngineEvent, EngineState, MarketContext, Mode, Signal } from '../engine/types';
+import type { Bar, EngineEvent, EngineState, MarketContext, Mode, Signal } from '../engine/types';
 
 /** Client runner — clé SERVICE (bypass RLS). À n'utiliser QUE côté serveur/runner. */
 const db = createClient<Database>(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!, {
@@ -50,6 +50,23 @@ export async function pushState(ctx: MarketContext, state: EngineState, mode: Mo
     mode,
     killed: state.killed,
   });
+}
+
+/** Persiste une bougie (upsert sur symbol+timeframe+time) → alimente le chart. */
+export async function logCandle(symbol: string, bar: Bar, timeframe = 'M5') {
+  await db.from('candles').upsert(
+    { symbol, timeframe, time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume },
+    { onConflict: 'symbol,timeframe,time' },
+  );
+}
+
+/** Upsert en masse (backfill d'historique). */
+export async function logCandles(symbol: string, bars: Bar[], timeframe = 'M5') {
+  if (!bars.length) return;
+  await db.from('candles').upsert(
+    bars.map((bar) => ({ symbol, timeframe, time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume })),
+    { onConflict: 'symbol,timeframe,time' },
+  );
 }
 
 /** Le runner écoute les commandes du cockpit (mode, kill, flatten…). */

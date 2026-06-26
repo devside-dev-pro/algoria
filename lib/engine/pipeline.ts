@@ -7,7 +7,7 @@ import { checkRisk } from './risk';
 
 export interface TickInput {
   symbol: string;
-  bars: Bar[]; // bougies de l'entry-TF, la plus récente en dernier
+  bars: Bar[]; // entry-TF bars, most recent last
   htfBars?: Bar[];
   mode: Mode;
   state: EngineState;
@@ -20,46 +20,46 @@ export interface TickResult {
   events: EngineEvent[];
 }
 
-/** Une passe du moteur. Renvoie un signal (ou null) + le flux d'events du terminal. */
+/** One pass of the engine. Returns a signal (or null) + the terminal event stream. */
 export function runTick(input: TickInput, features: Feature[], cfg: EngineConfig): TickResult {
   const events: EngineEvent[] = [];
   const now = input.bars[input.bars.length - 1].time;
   const emit = (level: EngineEvent['level'], msg: string, data?: Record<string, unknown>) => events.push({ t: now, level, msg, data });
 
-  // Étage 1 — contexte / régime
+  // Stage 1 — context / regime
   const ctx = buildContext(input.symbol, input.bars, input.htfBars, input.ctxOpts);
   emit('scan', `tick ${input.symbol} · ${ctx.session} · ${ctx.regime} · atr=${ctx.atr.toFixed(2)}`);
   if (!ctx.tradable) {
-    emit('info', `hors fenêtre (${ctx.session}) — veille`);
+    emit('info', `out of session (${ctx.session}) — idle`);
     return { context: ctx, signal: null, events };
   }
 
-  // Étage 2 — features
+  // Stage 2 — features
   const fi: FeatureInput = { bars: input.bars, htfBars: input.htfBars, ctx };
   const scores = features.map((f) => f.compute(fi)).filter((s): s is NonNullable<typeof s> => s !== null);
   for (const s of scores) emit('scan', `${s.key}=${s.score.toFixed(2)} (×${s.strength.toFixed(2)})${s.note ? ' · ' + s.note : ''}`);
 
-  // Étage 3 — score & confiance
+  // Stage 3 — score & confidence
   const cf = scoreConfluence(scores, ctx, cfg);
   const threshold = cfg.threshold[input.mode];
-  emit('info', `score=${cf.rawScore.toFixed(2)} align=${cf.alignment.toFixed(2)} → conf=${cf.confidence.toFixed(2)} / seuil ${threshold}`);
+  emit('info', `score=${cf.rawScore.toFixed(2)} align=${cf.alignment.toFixed(2)} → conf=${cf.confidence.toFixed(2)} / threshold ${threshold}`);
   if (cf.direction === 'flat' || cf.confidence < threshold) {
-    emit('info', `pas d'entrée (conf ${cf.confidence.toFixed(2)} < ${threshold})`);
+    emit('info', `no entry (conf ${cf.confidence.toFixed(2)} < ${threshold})`);
     return { context: ctx, signal: null, events };
   }
 
-  // Étage 4 — construction
+  // Stage 4 — trade construction
   const draft = constructTrade(cf, ctx, input.mode, input.state.balance, cfg);
   if (!draft) {
-    emit('info', 'setup rejeté (pas de structure exploitable)');
+    emit('info', 'setup rejected (no usable structure)');
     return { context: ctx, signal: null, events };
   }
-  emit('signal', `${draft.direction.toUpperCase()} ${draft.symbol} conf ${(draft.confidence * 100) | 0}% · entrée ${draft.entry} sl ${draft.stopLoss} tp ${draft.takeProfits[0]} · ${draft.lot} lot`);
+  emit('signal', `${draft.direction.toUpperCase()} ${draft.symbol} conf ${(draft.confidence * 100) | 0}% · entry ${draft.entry} sl ${draft.stopLoss} tp ${draft.takeProfits[0]} · ${draft.lot} lot`);
 
-  // Étage 5 — risk / véto
+  // Stage 5 — risk / veto
   const verdict = checkRisk(draft, input.state, cfg);
   if (!verdict.ok) {
-    emit('veto', `bloqué: ${verdict.reasons.join(', ')}`);
+    emit('veto', `blocked: ${verdict.reasons.join(', ')}`);
     return { context: ctx, signal: null, events };
   }
 
