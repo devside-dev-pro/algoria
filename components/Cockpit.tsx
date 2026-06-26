@@ -2,21 +2,14 @@
 import type { CSSProperties } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
-import { useEvents, useSignals, useLatestState, sendCommand } from '@/lib/cockpit/useRealtime';
+import { Desk } from '@/components/Desk';
+import { Telemetry } from '@/components/Telemetry';
+import { useSignals, useLatestState, sendCommand } from '@/lib/cockpit/useRealtime';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
 
-const LEVEL_COLOR: Record<string, string> = {
-  scan: '#4fb8ff',
-  info: '#8298be',
-  signal: '#22e0a6',
-  order: '#2be3f5',
-  veto: '#ff6b8a',
-};
-
 export function Cockpit() {
-  const events = useEvents(120);
   const signals = useSignals(8);
   const st = useLatestState() as any;
 
@@ -48,18 +41,10 @@ export function Cockpit() {
           </div>
         </section>
 
-        <section className="panel mono" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', color: 'var(--cyan)', fontSize: 12 }}>ALGORIA AI · engine.log</div>
-          <div style={{ padding: '8px 12px', fontSize: 11.5, lineHeight: 1.8, height: 520, overflowY: 'auto' }}>
-            {events.length === 0 && <span style={{ color: 'var(--dim)' }}>waiting for the runner…</span>}
-            {events.map((e: any, i: number) => (
-              <div key={i}>
-                <span style={{ color: 'var(--dim)' }}>{new Date(e.ts).toLocaleTimeString()}</span>{' '}
-                <span style={{ color: LEVEL_COLOR[e.level] ?? 'var(--text)' }}>{e.msg}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+        <div style={{ display: 'grid', gridTemplateRows: '1fr 1.6fr', gap: 12, height: 540, minHeight: 0 }}>
+          <Desk />
+          <Telemetry state={st} signals={signals} />
+        </div>
       </div>
 
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }}>

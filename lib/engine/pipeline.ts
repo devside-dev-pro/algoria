@@ -1,4 +1,4 @@
-import type { Bar, EngineEvent, EngineState, Feature, FeatureInput, MarketContext, Mode, Signal } from './types';
+import type { Bar, Confluence, EngineEvent, EngineState, Feature, FeatureInput, MarketContext, Mode, Signal } from './types';
 import type { EngineConfig } from './config';
 import { scoreConfluence } from './score';
 import { buildContext, type ContextOptions } from './context';
@@ -18,6 +18,8 @@ export interface TickResult {
   context: MarketContext;
   signal: Signal | null;
   events: EngineEvent[];
+  confluence: Confluence | null; // état de confluence (même sans trade) → desk "opportunité"
+  threshold: number;
 }
 
 /** One pass of the engine. Returns a signal (or null) + the terminal event stream. */
@@ -25,13 +27,15 @@ export function runTick(input: TickInput, features: Feature[], cfg: EngineConfig
   const events: EngineEvent[] = [];
   const now = input.bars[input.bars.length - 1].time;
   const emit = (level: EngineEvent['level'], msg: string, data?: Record<string, unknown>) => events.push({ t: now, level, msg, data });
+  const threshold = cfg.threshold[input.mode];
+  let confluence: Confluence | null = null;
 
   // Stage 1 — context / regime
   const ctx = buildContext(input.symbol, input.bars, input.htfBars, input.ctxOpts);
   emit('scan', `tick ${input.symbol} · ${ctx.session} · ${ctx.regime} · atr=${ctx.atr.toFixed(2)}`);
   if (!ctx.tradable) {
     emit('info', `out of session (${ctx.session}) — idle`);
-    return { context: ctx, signal: null, events };
+    return { context: ctx, signal: null, events, confluence, threshold };
   }
 
   // Stage 2 — features
@@ -41,18 +45,18 @@ export function runTick(input: TickInput, features: Feature[], cfg: EngineConfig
 
   // Stage 3 — score & confidence
   const cf = scoreConfluence(scores, ctx, cfg);
-  const threshold = cfg.threshold[input.mode];
+  confluence = cf;
   emit('info', `score=${cf.rawScore.toFixed(2)} align=${cf.alignment.toFixed(2)} → conf=${cf.confidence.toFixed(2)} / threshold ${threshold}`);
   if (cf.direction === 'flat' || cf.confidence < threshold) {
     emit('info', `no entry (conf ${cf.confidence.toFixed(2)} < ${threshold})`);
-    return { context: ctx, signal: null, events };
+    return { context: ctx, signal: null, events, confluence, threshold };
   }
 
   // Stage 4 — trade construction
   const draft = constructTrade(cf, ctx, input.mode, input.state.balance, cfg);
   if (!draft) {
     emit('info', 'setup rejected (no usable structure)');
-    return { context: ctx, signal: null, events };
+    return { context: ctx, signal: null, events, confluence, threshold };
   }
   emit('signal', `${draft.direction.toUpperCase()} ${draft.symbol} conf ${(draft.confidence * 100) | 0}% · entry ${draft.entry} sl ${draft.stopLoss} tp ${draft.takeProfits[0]} · ${draft.lot} lot`);
 
@@ -60,9 +64,9 @@ export function runTick(input: TickInput, features: Feature[], cfg: EngineConfig
   const verdict = checkRisk(draft, input.state, cfg);
   if (!verdict.ok) {
     emit('veto', `blocked: ${verdict.reasons.join(', ')}`);
-    return { context: ctx, signal: null, events };
+    return { context: ctx, signal: null, events, confluence, threshold };
   }
 
   emit('order', `order.send(master) → ${draft.symbol} ${draft.direction} ${draft.lot} lot`);
-  return { context: ctx, signal: draft, events };
+  return { context: ctx, signal: draft, events, confluence, threshold };
 }

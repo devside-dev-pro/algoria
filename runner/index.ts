@@ -3,10 +3,11 @@ import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
 import { placeSignal } from './metaapi/execution';
+import { narrate, narrationReady } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { FEATURES } from '../lib/engine/features';
-import { logEvents, logSignal, pushState, logCandle, logCandles, watchCommands } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, broadcastTick, watchCommands } from '../lib/supabase/sync';
 import type { Bar, EngineState, Mode } from '../lib/engine/types';
 
 const BROKER = process.env.ALGORIA_SYMBOL ?? 'XAUUSD'; // nom du symbole chez le broker (ex. "Gold")
@@ -18,6 +19,7 @@ async function main() {
   const { account, stream, terminal } = await connectMaster();
   await stream.subscribeToMarketData(BROKER);
   console.log(`[algoria] connecté · broker=${BROKER} → display=${DISPLAY} · TF ${TF}`);
+  console.log(`[algoria] narration ${narrationReady() ? 'ON (Claude)' : 'OFF — ajoute ANTHROPIC_API_KEY dans .env'}`);
 
   // Backfill d'historique profond pour le chart (tous les timeframes).
   for (const tf of ['M5', 'M15', 'H1', 'D1']) {
@@ -33,6 +35,8 @@ async function main() {
   const seed = await loadHistory(account, BROKER, TF, 300);
   let state: EngineState = readState(terminal, BROKER, { dayStartBalance: terminal.accountInformation?.balance });
   let mode: Mode = 'normal';
+  let flatBars = 0; // throttle des analyses de marché (marché calme)
+  let oppBars = 0; // throttle des call-outs d'opportunité (setup en formation)
 
   // commandes venues du cockpit (mode, kill switch, flatten)
   watchCommands((cmd) => {
@@ -43,7 +47,7 @@ async function main() {
 
   const onClosed = async (bars: Bar[]) => {
     state = readState(terminal, BROKER, state);
-    const { signal, events, context } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts: { spread: state.spread } }, FEATURES, DEFAULT_CONFIG);
+    const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts: { spread: state.spread } }, FEATURES, DEFAULT_CONFIG);
     await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
     await logEvents(events);
     await pushState(context, state, mode);
@@ -58,12 +62,33 @@ async function main() {
         console.error('[algoria] échec ordre:', e);
       }
     }
+
+    // Desk Claude — trades / opportunités / analyses. No-op sans ANTHROPIC_API_KEY ; après l'ordre (ne bloque jamais l'exécution).
+    if (narrationReady()) {
+      if (signal) {
+        const line = await narrate({ kind: 'trade', ctx: context, signal, confluence, threshold });
+        if (line) await logNarration(line, signal.time, { kind: 'trade', direction: signal.direction, confidence: signal.confidence, entry: signal.entry, sl: signal.stopLoss, tp: signal.takeProfits[0] });
+      } else if (confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.8) {
+        // setup en formation (proche du seuil) → call-out "opportunité", au plus 1 bougie sur 2
+        if (++oppBars % 2 === 1) {
+          const line = await narrate({ kind: 'opportunity', ctx: context, confluence, threshold });
+          if (line) await logNarration(line, context.time, { kind: 'opportunity', direction: confluence.direction, confidence: confluence.confidence });
+        }
+      } else if (++flatBars % 3 === 0) {
+        // marché calme → analyse périodique
+        const line = await narrate({ kind: 'analysis', ctx: context, logLines: events.map((e) => e.msg) });
+        if (line) await logNarration(line, context.time, { kind: 'analysis' });
+      }
+    }
   };
 
   const agg = makeAggregator(TF, seed, onClosed);
   setInterval(() => {
     const p = terminal.price(BROKER);
-    if (p) agg(p.bid, p.ask, Date.now());
+    if (p) {
+      agg(p.bid, p.ask, Date.now());
+      broadcastTick(p.bid, p.ask); // → mission control (prix live)
+    }
   }, 1000);
 }
 

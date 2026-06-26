@@ -9,11 +9,29 @@ const db = createClient<Database>(process.env.SUPABASE_URL!, process.env.SUPABAS
   realtime: { transport: ws as unknown as typeof WebSocket },
 });
 
+// Canal Realtime "broadcast" pour le prix live (éphémère, aucune écriture DB) → alimente le firehose du cockpit.
+const tickCh = db.channel('algoria-ticks');
+let tickReady = false;
+tickCh.subscribe((status) => {
+  if (status === 'SUBSCRIBED') tickReady = true;
+});
+
+/** Diffuse un tick de prix au cockpit (mission control). No-op tant que le canal n'est pas prêt. */
+export function broadcastTick(bid: number, ask: number) {
+  if (!tickReady) return;
+  void tickCh.send({ type: 'broadcast', event: 'tick', payload: { bid, ask, t: Date.now() } });
+}
+
 export async function logEvents(events: EngineEvent[]) {
   if (!events.length) return;
   await db.from('events').insert(
     events.map((e) => ({ ts: new Date(e.t).toISOString(), level: e.level, msg: e.msg, data: (e.data ?? null) as never })),
   );
+}
+
+/** Commentaire desk Claude (niveau 'ai'). `meta` = { kind, direction, confidence, entry, sl, tp } → badge/couleur côté cockpit. */
+export async function logNarration(text: string, t?: number, meta?: Record<string, unknown>) {
+  await db.from('events').insert({ ts: new Date(t ?? Date.now()).toISOString(), level: 'ai', msg: text, data: (meta ?? null) as never });
 }
 
 export async function logSignal(s: Signal, res: { ticket?: string; code?: string }) {

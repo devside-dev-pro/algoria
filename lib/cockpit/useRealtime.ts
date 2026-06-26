@@ -83,5 +83,33 @@ export function useLatestState() {
   return state;
 }
 
+/** Desk ALGORIA AI : commentaires/opportunités/trades (events level='ai'), du plus récent au plus ancien. */
+export function useDesk(limit = 10) {
+  const [items, setItems] = useState<Row[]>([]);
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from('events')
+      .select('*')
+      .eq('level', 'ai')
+      .order('ts', { ascending: false })
+      .limit(limit)
+      .then(({ data }) => {
+        if (alive && data) setItems(data);
+      });
+    const ch = supabase
+      .channel('rt-desk')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events', filter: 'level=eq.ai' }, ({ new: e }) =>
+        setItems((p) => [e as Row, ...p].slice(0, limit)),
+      )
+      .subscribe();
+    return () => {
+      alive = false;
+      supabase.removeChannel(ch);
+    };
+  }, [limit]);
+  return items;
+}
+
 /** Cockpit → runner (mode pills, kill switch). */
 export const sendCommand = (type: string, payload?: unknown) => supabase.from('commands').insert({ type, payload: (payload ?? null) as never });
