@@ -1,0 +1,19 @@
+node_modules
+.next
+out
+build
+
+# env
+.env
+.env*.local
+
+# logs / os
+*.log
+.DS_Store
+
+# editor
+.vscode
+.idea
+
+# typescript build cache
+*.tsbuildinfo

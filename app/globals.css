@@ -1,0 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #08101f;
+  --panel: #0e1b33;
+  --panel-2: #0c1730;
+  --border: rgba(43, 227, 245, 0.14);
+  --cyan: #2be3f5;
+  --blue: #2e8bf0;
+  --royal: #1e40e5;
+  --text: #dce9ff;
+  --muted: #8298be;
+  --dim: #54688e;
+  --up: #1fd8b0;
+  --down: #ff6b8a;
+  --gold: #f5c24a;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+.glow { box-shadow: 0 0 12px rgba(43, 227, 245, 0.35); }

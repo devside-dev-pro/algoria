@@ -1,0 +1,87 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { supabase } from '../supabase/client';
+
+type Row = Record<string, unknown>;
+
+/** Terminal ALGORIA AI : seed des N derniers events + abonnement aux inserts. */
+export function useEvents(limit = 60) {
+  const [events, setEvents] = useState<Row[]>([]);
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from('events')
+      .select('*')
+      .order('ts', { ascending: false })
+      .limit(limit)
+      .then(({ data }) => {
+        if (alive && data) setEvents([...data].reverse());
+      });
+    const ch = supabase
+      .channel('rt-events')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' }, ({ new: e }) =>
+        setEvents((p) => [...p.slice(-limit + 1), e as Row]),
+      )
+      .subscribe();
+    return () => {
+      alive = false;
+      supabase.removeChannel(ch);
+    };
+  }, [limit]);
+  return events;
+}
+
+/** Cartes de signaux. */
+export function useSignals(limit = 12) {
+  const [signals, setSignals] = useState<Row[]>([]);
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from('signals')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+      .then(({ data }) => {
+        if (alive && data) setSignals(data);
+      });
+    const ch = supabase
+      .channel('rt-signals')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'signals' }, ({ new: s }) =>
+        setSignals((p) => [s as Row, ...p].slice(0, limit)),
+      )
+      .subscribe();
+    return () => {
+      alive = false;
+      supabase.removeChannel(ch);
+    };
+  }, [limit]);
+  return signals;
+}
+
+/** Barre haute + risk panel : dernier snapshot. */
+export function useLatestState() {
+  const [state, setState] = useState<Row | null>(null);
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from('state_snapshots')
+      .select('*')
+      .order('ts', { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        if (alive && data?.[0]) setState(data[0]);
+      });
+    const ch = supabase
+      .channel('rt-state')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'state_snapshots' }, ({ new: s }) => setState(s as Row))
+      .subscribe();
+    return () => {
+      alive = false;
+      supabase.removeChannel(ch);
+    };
+  }, []);
+  return state;
+}
+
+/** Cockpit → runner (mode pills, kill switch). */
+export const sendCommand = (type: string, payload?: unknown) => supabase.from('commands').insert({ type, payload: (payload ?? null) as never });
