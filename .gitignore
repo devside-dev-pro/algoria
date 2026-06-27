@@ -17,3 +17,6 @@ build
 
 # typescript build cache
 *.tsbuildinfo
+
+# backtest data cache
+backtest/.cache/

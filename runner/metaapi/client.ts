@@ -20,3 +20,11 @@ export async function connectMaster() {
 
   return { api, account, stream, terminal: stream.terminalState };
 }
+
+/** Connexion légère RPC-only (historique de bougies) — pas de flux temps réel. Idéal pour le backtest (même marché fermé). */
+export async function connectAccount() {
+  const api = new MetaApi(token);
+  const account = await api.metatraderAccountApi.getAccount(accountId);
+  await account.waitConnected();
+  return { api, account };
+}

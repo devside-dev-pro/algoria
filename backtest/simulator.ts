@@ -11,6 +11,7 @@ export interface SimParams {
   commissionPerLot: number;
   contractSize: number;
   warmup: number; // bougies avant de commencer (≥210)
+  window?: number; // si défini, le moteur ne voit que les N dernières bougies (= comportement live après un restart). 0/undefined = tout l'historique.
 }
 
 export interface SimTrade {
@@ -122,7 +123,8 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       newsWindows: [],
       killed: dayKilled,
     };
-    const { signal } = runTick({ symbol: p.symbol, bars: bars.slice(0, i + 1), mode: p.mode, state, ctxOpts: { spread: p.spread } }, features, cfg);
+    const lo = p.window && p.window > 0 ? Math.max(0, i + 1 - p.window) : 0;
+    const { signal } = runTick({ symbol: p.symbol, bars: bars.slice(lo, i + 1), mode: p.mode, state, ctxOpts: { spread: p.spread } }, features, cfg);
 
     // 5) entrée à l'OUVERTURE de i+1 (jamais sur la bougie qu'on vient de lire → pas de lookahead)
     if (signal) {
