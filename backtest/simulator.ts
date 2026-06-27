@@ -12,6 +12,11 @@ export interface SimParams {
   contractSize: number;
   warmup: number; // bougies avant de commencer (≥210)
   window?: number; // si défini, le moteur ne voit que les N dernières bougies (= comportement live après un restart). 0/undefined = tout l'historique.
+  // Gestion de trade dynamique (optionnelle) :
+  beTrigger?: number; // déplace le SL à ~breakeven quand le profit ≥ beTrigger × riskDist
+  trailActivate?: number; // active le trailing quand le profit ≥ trailActivate × riskDist
+  trailDist?: number; // distance du trailing en × riskDist (le SL suit à peak − trailDist)
+  ignoreTp?: boolean; // ignore le TP fixe → on ne sort que sur le stop (trailing) ou en fin de données
 }
 
 export interface SimTrade {
@@ -20,7 +25,7 @@ export interface SimTrade {
   entryPrice: number;
   exitTime: number;
   exitPrice: number;
-  reason: 'tp' | 'sl' | 'eod';
+  reason: 'tp' | 'sl' | 'eod' | 'be' | 'trail';
   lot: number;
   pnl: number;
   r: number;
@@ -40,7 +45,10 @@ interface OpenPos {
   signal: Signal;
   entryPrice: number;
   entryTime: number;
-  risk: number;
+  risk: number; // risque $ (riskDist × lot × contractSize)
+  riskDist: number; // distance prix entrée→SL initial
+  stop: number; // SL COURANT (dynamique : breakeven puis trailing)
+  peak: number; // meilleur prix atteint (high pour long, low pour short)
 }
 const dayOf = (t: number) => Math.floor(t / 86_400_000);
 
@@ -54,6 +62,7 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
   const open: OpenPos[] = [];
   const trades: SimTrade[] = [];
   const equity: EquityPoint[] = [];
+  const beTrig = p.beTrigger ?? cfg.beTrigger ?? 0; // breakeven piloté par la config moteur (override possible via SimParams)
 
   const close = (pos: OpenPos, px: number, time: number, reason: SimTrade['reason']) => {
     const dir = pos.signal.direction === 'long' ? 1 : -1;
@@ -76,18 +85,39 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
   for (let i = p.warmup; i < bars.length - 1; i++) {
     const bar = bars[i];
 
-    // 1) exits sur la bougie i — pessimiste : SL avant TP si les deux sont dans le range
+    // 1) gestion + sorties sur la bougie i — stop dynamique (breakeven → trailing), pessimiste : stop avant TP.
+    // Le stop testé sur la bougie i a été figé par les bougies ≤ i-1 (mis à jour en fin de boucle) → aucun lookahead.
     for (let k = open.length - 1; k >= 0; k--) {
-      const s = open[k].signal;
-      const long = s.direction === 'long';
-      const sl = s.stopLoss;
-      const tp = s.takeProfits[0];
+      const pos = open[k];
+      const long = pos.signal.direction === 'long';
+      const dir = long ? 1 : -1;
+      const tp = pos.signal.takeProfits[0];
+
+      const hitStop = long ? bar.low <= pos.stop : bar.high >= pos.stop;
+      const hitTp = !p.ignoreTp && (long ? bar.high >= tp : bar.low <= tp);
       let ex: { px: number; reason: SimTrade['reason'] } | null = null;
-      if (long) ex = bar.low <= sl ? { px: sl, reason: 'sl' } : bar.high >= tp ? { px: tp, reason: 'tp' } : null;
-      else ex = bar.high >= sl ? { px: sl, reason: 'sl' } : bar.low <= tp ? { px: tp, reason: 'tp' } : null;
+      if (hitStop) {
+        const above = dir * (pos.stop - pos.entryPrice); // >0 = stop déjà en profit
+        ex = { px: pos.stop, reason: above > 0.1 * pos.riskDist ? 'trail' : above >= -1e-9 ? 'be' : 'sl' };
+      } else if (hitTp) {
+        ex = { px: tp, reason: 'tp' };
+      }
       if (ex) {
-        close(open[k], ex.px, bar.time, ex.reason);
+        close(pos, ex.px, bar.time, ex.reason);
         open.splice(k, 1);
+        continue;
+      }
+
+      // sinon : on remonte le stop pour la PROCHAINE bougie (jamais dans le mauvais sens)
+      pos.peak = long ? Math.max(pos.peak, bar.high) : Math.min(pos.peak, bar.low);
+      const fav = dir * (pos.peak - pos.entryPrice); // distance favorable max atteinte
+      if (beTrig && fav >= beTrig * pos.riskDist) {
+        const be = pos.entryPrice + dir * 0.05 * pos.riskDist; // BE+ : couvre les coûts
+        pos.stop = long ? Math.max(pos.stop, be) : Math.min(pos.stop, be);
+      }
+      if (p.trailActivate && p.trailDist && fav >= p.trailActivate * pos.riskDist) {
+        const trail = pos.peak - dir * p.trailDist * pos.riskDist;
+        pos.stop = long ? Math.max(pos.stop, trail) : Math.min(pos.stop, trail);
       }
     }
 
@@ -131,7 +161,8 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       const next = bars[i + 1];
       const dir = signal.direction === 'long' ? 1 : -1;
       const entryPrice = next.open + dir * (p.spread / 2 + p.slippage);
-      open.push({ signal, entryPrice, entryTime: next.time, risk: Math.abs(entryPrice - signal.stopLoss) * signal.lot * p.contractSize });
+      const riskDist = Math.abs(entryPrice - signal.stopLoss);
+      open.push({ signal, entryPrice, entryTime: next.time, risk: riskDist * signal.lot * p.contractSize, riskDist, stop: signal.stopLoss, peak: entryPrice });
       tradesToday++;
       lastTradeTime = signal.time;
     }

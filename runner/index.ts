@@ -3,6 +3,7 @@ import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
 import { placeSignal } from './metaapi/execution';
+import { manageBreakeven } from './metaapi/manage';
 import { narrate, narrationReady } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
@@ -85,6 +86,7 @@ async function main() {
       agg(p.bid, p.ask, Date.now());
       broadcastTick(p.bid, p.ask); // → mission control (prix live)
     }
+    void manageBreakeven(stream, terminal, BROKER); // SL → breakeven dès que le trade est assez en profit
   }, 1000);
 }
 

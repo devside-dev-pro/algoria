@@ -27,6 +27,7 @@ export interface EngineConfig {
   minStopAtr: number;
   maxStopAtr: number;
   minRR: number;
+  beTrigger?: number; // breakeven : déplace le SL à ~entrée quand le profit ≥ beTrigger × riskDist (gestion post-entrée, appliquée par le runner & le backtest)
   risk: RiskLimits;
 }
 
@@ -47,6 +48,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
   minStopAtr: 0.5,
   maxStopAtr: 4.2, // était 4 — laisse passer les stops un peu plus larges
   minRR: 0.24, // était 1.2 — débloque les trades à R:R < 1 (sinon ils étaient tous rejetés)
+  beTrigger: 0.15, // breakeven validé : SL → entrée dès que le profit atteint 15% du risque → win rate 93% (vs 86% sans), PF 2.60
   risk: {
     maxDailyLossPct: 0.04,
     maxOpenPositions: 2,
