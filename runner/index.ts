@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import './env-check'; // valide les variables d'env et arrête net avec un message clair si une manque
 import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
