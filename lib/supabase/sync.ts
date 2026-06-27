@@ -34,6 +34,11 @@ export async function logNarration(text: string, t?: number, meta?: Record<strin
   await db.from('events').insert({ ts: new Date(t ?? Date.now()).toISOString(), level: 'ai', msg: text, data: (meta ?? null) as never });
 }
 
+/** Note générique → terminal (ex. breakeven sécurisé). */
+export async function logNote(msg: string, level: 'scan' | 'info' | 'signal' | 'order' | 'veto' | 'ai' = 'info') {
+  await db.from('events').insert({ ts: new Date().toISOString(), level, msg, data: null as never });
+}
+
 export async function logSignal(s: Signal, res: { ticket?: string; code?: string }) {
   await db.from('signals').insert({
     ref: s.id,

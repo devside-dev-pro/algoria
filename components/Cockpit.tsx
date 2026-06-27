@@ -65,6 +65,14 @@ export function Cockpit() {
                 <span>TP {fmt(s.take_profits?.[0])}</span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8 }}>conf {pct(s.confidence)} · R:R {fmt(s.risk_reward)} · {fmt(s.lot)} lot</div>
+              {Array.isArray(s.rationale) && s.rationale.length > 0 && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <div style={{ fontSize: 9.5, color: 'var(--cyan)', letterSpacing: 0.5, opacity: 0.85 }}>WHY THIS TRADE</div>
+                  {(s.rationale as string[]).slice(0, 3).map((r: string, i: number) => (
+                    <div key={i} style={{ fontSize: 10.5, color: 'var(--muted)', lineHeight: 1.35 }}>◢ {r}</div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

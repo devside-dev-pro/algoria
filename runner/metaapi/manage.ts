@@ -1,4 +1,5 @@
 import { DEFAULT_CONFIG } from '../../lib/engine/config';
+import { logNote } from '../../lib/supabase/sync';
 
 // Breakeven LIVE : dès qu'une position atteint beTrigger × (risque initial), on remonte son SL à ~l'entrée.
 // Un trade ainsi sécurisé ne peut plus se transformer en perte → c'est ce qui fait passer le win rate de 86% à 93% au backtest.
@@ -34,6 +35,7 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     try {
       await stream.modifyPosition(String(p.id), beSL, p.takeProfit);
       console.log(`[algoria] breakeven → pos ${p.id} SL=${beSL}`);
+      void logNote(`breakeven secured · ${long ? 'long' : 'short'} · SL → ${beSL} · trade can't lose now`, 'order');
     } catch (e) {
       done.delete(p.id); // échec → on réessaiera au prochain tick
       console.error('[algoria] breakeven échec:', (e as { message?: string })?.message ?? e);

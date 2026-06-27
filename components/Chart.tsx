@@ -32,6 +32,7 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
+  const tradeLinesRef = useRef<IPriceLine[]>([]);
   const barsRef = useRef<Bar[]>([]);
   const loadingRef = useRef(false);
   const tfRef = useRef<TF>('M5');
@@ -70,6 +71,24 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     markers.setMarkers(mk);
   }
 
+  // Trace les niveaux du dernier trade : entrée, SL (large, sous le support) et TP (au 1/3) → on VOIT la structure.
+  function drawTrade() {
+    const series = seriesRef.current;
+    if (!series) return;
+    tradeLinesRef.current.forEach((l) => series.removePriceLine(l));
+    tradeLinesRef.current = [];
+    const sig = signalsRef.current[0]; // le plus récent (signaux triés du + récent au + ancien)
+    if (!sig) return;
+    const long = sig.direction === 'long';
+    const entry = Number(sig.entry);
+    const sl = Number(sig.stop_loss);
+    const tp = Number((sig.take_profits as number[] | undefined)?.[0]);
+    const lines = tradeLinesRef.current;
+    if (Number.isFinite(entry)) lines.push(series.createPriceLine({ price: entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'LONG' : 'SHORT'} ${entry.toFixed(1)}` }));
+    if (Number.isFinite(sl)) lines.push(series.createPriceLine({ price: sl, color: '#ff6b8a', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `SL ${sl.toFixed(1)}` }));
+    if (Number.isFinite(tp)) lines.push(series.createPriceLine({ price: tp, color: '#1fd8b0', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `TP ${tp.toFixed(1)}` }));
+  }
+
   async function loadRecent(t: TF) {
     const series = seriesRef.current;
     if (!series) return;
@@ -81,6 +100,7 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     series.setData(bars.map(toCandle));
     drawLevels();
     drawMarkers();
+    drawTrade();
     chartRef.current?.timeScale().fitContent();
   }
 
@@ -157,6 +177,7 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
   // signaux changent → redessine les markers
   useEffect(() => {
     drawMarkers();
+    drawTrade();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signals]);
 
