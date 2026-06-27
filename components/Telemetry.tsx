@@ -7,7 +7,7 @@ import { TAG_COLOR, pickLine, type Feed } from '@/lib/cockpit/telemetry';
 interface Line { id: number; tag: string; text: string; color: string; glow?: boolean; t: number }
 
 const BUFFER = 150;
-const TICK_MS = 180; // ~5-6 lignes / seconde
+const TICK_MS = 300; // ~3 lignes / seconde (rythme posé mais vivant)
 
 // niveau d'event moteur → tag/couleur dans le flux
 const EVENT_TAG: Record<string, { tag: string; color: string; glow?: boolean }> = {
