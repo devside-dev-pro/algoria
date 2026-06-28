@@ -12,6 +12,11 @@ const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixe
 export function Cockpit() {
   const signals = useSignals(8);
   const st = useLatestState() as any;
+  // feedback optimiste : on reflète le clic tout de suite (sinon il faut attendre la prochaine clôture de bougie)
+  const [optMode, setOptMode] = useState<string | null>(null);
+  const [optKilled, setOptKilled] = useState<boolean | null>(null);
+  const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'normal';
+  const killed = optKilled ?? !!st?.killed;
 
   return (
     <main style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100vh' }}>
@@ -24,11 +29,17 @@ export function Cockpit() {
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {(['soft', 'normal', 'turbo'] as const).map((m) => (
-            <button key={m} onClick={() => sendCommand('set_mode', { mode: m })} style={pill(st?.mode === m)}>
+            <button key={m} onClick={() => { setOptMode(m); void sendCommand('set_mode', { mode: m }); }} style={pill(activeMode === m)} title={`mode ${m}`}>
               {m}
             </button>
           ))}
-          <button onClick={() => sendCommand('kill')} style={{ ...pill(false), color: '#ff8aa2', borderColor: 'rgba(255,107,138,.45)' }}>kill</button>
+          <button
+            onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
+            style={{ ...pill(killed), color: killed ? '#ff8aa2' : 'var(--muted)', borderColor: 'rgba(255,107,138,.45)', background: killed ? 'rgba(255,107,138,.15)' : 'transparent' }}
+            title={killed ? 'reprendre le trading' : 'kill switch — coupe toute nouvelle position'}
+          >
+            {killed ? '● KILLED' : 'kill'}
+          </button>
           <button onClick={() => supabase.auth.signOut()} style={pill(false)} title="sign out">⎋</button>
         </div>
       </header>
@@ -84,7 +95,7 @@ export function Cockpit() {
         <Metric label="Day P&L" value={st ? fmt(st.day_pnl, 0) : '—'} color={st && st.day_pnl >= 0 ? 'var(--up)' : 'var(--down)'} accent={st && st.day_pnl >= 0 ? 'var(--up)' : 'var(--down)'} />
         <Metric label="Positions" value={st ? String(st.open_positions ?? 0) : '—'} accent="var(--muted)" />
         <Metric label="Risk exposure" value={st ? pct(st.open_risk_pct) : '—'} accent="var(--gold)" />
-        <Metric label="Kill switch" value={st?.killed ? 'ON' : 'off'} color={st?.killed ? 'var(--down)' : 'var(--dim)'} accent={st?.killed ? 'var(--down)' : 'var(--dim)'} />
+        <Metric label="Kill switch" value={killed ? 'ON' : 'off'} color={killed ? 'var(--down)' : 'var(--dim)'} accent={killed ? 'var(--down)' : 'var(--dim)'} />
       </section>
     </main>
   );

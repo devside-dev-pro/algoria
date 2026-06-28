@@ -42,6 +42,7 @@ async function main() {
   watchCommands((cmd) => {
     if (cmd.type === 'set_mode' && (cmd.payload as any)?.mode) mode = (cmd.payload as any).mode;
     if (cmd.type === 'kill') state.killed = true;
+    if (cmd.type === 'resume') state.killed = false;
     console.log('[algoria] commande:', cmd.type, cmd.payload ?? '');
   });
 

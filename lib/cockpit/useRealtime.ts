@@ -141,5 +141,8 @@ export function usePrice() {
   return px;
 }
 
-/** Cockpit → runner (mode pills, kill switch). */
-export const sendCommand = (type: string, payload?: unknown) => supabase.from('commands').insert({ type, payload: (payload ?? null) as never });
+/** Cockpit → runner (mode pills, kill switch). On AWAIT : sinon supabase-js n'envoie jamais la requête. */
+export async function sendCommand(type: string, payload?: unknown) {
+  const { error } = await supabase.from('commands').insert({ type, payload: (payload ?? null) as never });
+  if (error) console.error('[algoria] sendCommand échec:', error.message);
+}
