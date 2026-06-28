@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase/client';
+import { subscribeTicks } from './tickStore';
 
 type Row = Record<string, unknown>;
 
@@ -109,6 +110,35 @@ export function useDesk(limit = 10) {
     };
   }, [limit]);
   return items;
+}
+
+/** Prix live (broadcast runner) pour le ticker du header. `dir` = sens du dernier mouvement. */
+export function usePrice() {
+  const [px, setPx] = useState<{ bid: number; ask: number; mid: number; dir: -1 | 0 | 1 } | null>(null);
+  useEffect(() => {
+    let prev = 0;
+    supabase
+      .from('candles')
+      .select('close')
+      .eq('symbol', 'XAUUSD')
+      .eq('timeframe', 'M5')
+      .order('time', { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        const c = (data?.[0] as { close?: number } | undefined)?.close;
+        if (typeof c === 'number') {
+          prev = c;
+          setPx((q) => q ?? { bid: c, ask: c, mid: c, dir: 0 });
+        }
+      });
+    return subscribeTicks((t) => {
+      const mid = (t.bid + t.ask) / 2;
+      const dir = mid > prev ? 1 : mid < prev ? -1 : 0;
+      prev = mid;
+      setPx({ bid: t.bid, ask: t.ask, mid, dir });
+    });
+  }, []);
+  return px;
 }
 
 /** Cockpit → runner (mode pills, kill switch). */

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useEvents } from '@/lib/cockpit/useRealtime';
+import { subscribeTicks } from '@/lib/cockpit/tickStore';
 import { TAG_COLOR, pickLine, type Feed } from '@/lib/cockpit/telemetry';
 
 interface Line { id: number; tag: string; text: string; color: string; glow?: boolean; t: number }
@@ -61,12 +62,10 @@ export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
       });
   }, []);
 
-  // prix LIVE réel (broadcast depuis le runner) → ancre le flux
-  useEffect(() => {
-    const ch = supabase
-      .channel('algoria-ticks')
-      .on('broadcast', { event: 'tick' }, ({ payload }) => {
-        const p = payload as { bid: number; ask: number; t: number };
+  // prix LIVE réel (broadcast depuis le runner, via le store partagé) → ancre le flux
+  useEffect(
+    () =>
+      subscribeTicks((p) => {
         const f = feed.current;
         const mid = (p.bid + p.ask) / 2;
         const prev = f.mid;
@@ -76,10 +75,9 @@ export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
         const s = seen.current; s.sum += mid; s.n++; f.vwap = s.sum / s.n;
         f.feedLagMs = Math.max(8, Date.now() - p.t);
         lastRealAt.current = Date.now();
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, []);
+      }),
+    [],
+  );
 
   // dernier snapshot moteur → modèle de flux
   useEffect(() => {

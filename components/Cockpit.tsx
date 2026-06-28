@@ -1,10 +1,10 @@
 'use client';
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
-import { useSignals, useLatestState, sendCommand } from '@/lib/cockpit/useRealtime';
+import { useSignals, useLatestState, sendCommand, usePrice } from '@/lib/cockpit/useRealtime';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
@@ -19,8 +19,8 @@ export function Cockpit() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="glow" style={{ width: 22, height: 22, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
           <strong style={{ fontSize: 16, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
-          <span style={{ color: 'var(--muted)' }}>XAU/USD</span>
-          <span style={{ color: st?.tradable ? 'var(--up)' : 'var(--dim)' }}>{st?.session ?? '—'} · {st?.regime ?? '—'}</span>
+          <PriceTicker />
+          <MarketStatus session={st?.session as string | undefined} regime={st?.regime as string | undefined} tradable={!!st?.tradable} />
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {(['soft', 'normal', 'turbo'] as const).map((m) => (
@@ -79,23 +79,75 @@ export function Cockpit() {
       </section>
 
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 10 }}>
-        <Metric label="Balance" value={st ? fmt(st.balance, 0) : '—'} />
-        <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} />
-        <Metric label="Day P&L" value={st ? fmt(st.day_pnl, 0) : '—'} color={st && st.day_pnl >= 0 ? 'var(--up)' : 'var(--down)'} />
-        <Metric label="Positions" value={st ? String(st.open_positions ?? 0) : '—'} />
-        <Metric label="Risk exposure" value={st ? pct(st.open_risk_pct) : '—'} />
-        <Metric label="Kill switch" value={st?.killed ? 'ON' : 'off'} color={st?.killed ? 'var(--down)' : 'var(--dim)'} />
+        <Metric label="Balance" value={st ? fmt(st.balance, 0) : '—'} accent="var(--cyan)" />
+        <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} accent="var(--blue)" />
+        <Metric label="Day P&L" value={st ? fmt(st.day_pnl, 0) : '—'} color={st && st.day_pnl >= 0 ? 'var(--up)' : 'var(--down)'} accent={st && st.day_pnl >= 0 ? 'var(--up)' : 'var(--down)'} />
+        <Metric label="Positions" value={st ? String(st.open_positions ?? 0) : '—'} accent="var(--muted)" />
+        <Metric label="Risk exposure" value={st ? pct(st.open_risk_pct) : '—'} accent="var(--gold)" />
+        <Metric label="Kill switch" value={st?.killed ? 'ON' : 'off'} color={st?.killed ? 'var(--down)' : 'var(--dim)'} accent={st?.killed ? 'var(--down)' : 'var(--dim)'} />
       </section>
     </main>
   );
 }
 
-function Metric({ label, value, color }: { label: string; value: string; color?: string }) {
+function Metric({ label, value, color, accent }: { label: string; value: string; color?: string; accent?: string }) {
   return (
-    <div style={{ background: 'var(--panel-2)', borderRadius: 8, padding: '10px 12px' }}>
-      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{label}</div>
-      <div style={{ fontSize: 19, fontWeight: 500, color: color ?? 'var(--text)' }}>{value}</div>
+    <div style={{ background: 'var(--panel-2)', borderRadius: 8, padding: '9px 12px', borderLeft: `2px solid ${accent ?? 'var(--border)'}` }}>
+      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, color: color ?? 'var(--text)' }}>{value}</div>
     </div>
+  );
+}
+
+function PriceTicker() {
+  const px = usePrice();
+  if (!px) return <span className="mono" style={{ color: 'var(--dim)', fontSize: 13 }}>XAU/USD —</span>;
+  const col = px.dir > 0 ? 'var(--up)' : px.dir < 0 ? 'var(--down)' : 'var(--text)';
+  const arrow = px.dir > 0 ? '▲' : px.dir < 0 ? '▼' : '·';
+  return (
+    <span style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+      <span style={{ color: 'var(--muted)', fontSize: 11.5, letterSpacing: 0.5 }}>XAU/USD</span>
+      <span className="mono" style={{ fontSize: 22, fontWeight: 600, color: col, lineHeight: 1 }}>{px.mid.toFixed(2)}</span>
+      <span className="mono" style={{ fontSize: 12, color: col }}>{arrow}</span>
+      <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>spr {(px.ask - px.bid).toFixed(2)}</span>
+    </span>
+  );
+}
+
+/** ms jusqu'à la réouverture du gold (≈ dimanche 22:00 UTC), ou null si le marché est ouvert. */
+function goldReopenMs(): number | null {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const h = now.getUTCHours();
+  const inGap = (day === 5 && h >= 21) || day === 6 || (day === 0 && h < 22);
+  if (!inGap) return null;
+  const reopen = new Date(now);
+  if (day === 0) reopen.setUTCHours(22, 0, 0, 0);
+  else {
+    reopen.setUTCDate(now.getUTCDate() + (7 - day));
+    reopen.setUTCHours(22, 0, 0, 0);
+  }
+  return Math.max(0, reopen.getTime() - now.getTime());
+}
+
+function MarketStatus({ session, regime, tradable }: { session?: string; regime?: string; tradable: boolean }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const i = setInterval(() => force((x) => x + 1), 20000);
+    return () => clearInterval(i);
+  }, []);
+  const reopen = goldReopenMs();
+  if (reopen != null) {
+    const hh = Math.floor(reopen / 3_600_000);
+    const mm = Math.floor((reopen % 3_600_000) / 60_000);
+    return (
+      <span style={{ fontSize: 12, color: 'var(--gold)' }}>⏸ market closed · reopens in {hh}h{String(mm).padStart(2, '0')}</span>
+    );
+  }
+  return (
+    <span style={{ fontSize: 12.5, color: tradable ? 'var(--up)' : 'var(--dim)' }}>
+      {session ?? '—'} · {regime ?? '—'}
+    </span>
   );
 }
 

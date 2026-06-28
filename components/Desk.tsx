@@ -19,7 +19,14 @@ function badge(e: any): { label: string; color: string } {
 }
 
 export function Desk() {
-  const items = useDesk(10);
+  const items = useDesk(12);
+  // déduplique les lectures consécutives quasi-identiques (le moteur narre souvent la même chose quand le marché est plat)
+  const shown = items.filter((e: any, i: number) => {
+    if (i === 0) return true;
+    const a = String(e?.msg ?? '').slice(0, 45).toLowerCase();
+    const b = String(items[i - 1]?.msg ?? '').slice(0, 45).toLowerCase();
+    return a !== b;
+  });
   return (
     <section className="panel" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0, borderColor: 'rgba(43,227,245,.3)' }}>
       <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -27,8 +34,8 @@ export function Desk() {
         <span className="pulse" style={{ fontSize: 10.5, color: 'var(--cyan)' }}>● live analysis</span>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {items.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 12 }}>ALGORIA is watching the tape… opportunities and calls appear here.</span>}
-        {items.map((e: any, i: number) => {
+        {shown.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 12 }}>ALGORIA is watching the tape… opportunities and calls appear here.</span>}
+        {shown.map((e: any, i: number) => {
           const b = badge(e);
           const d = e?.data ?? {};
           return (
