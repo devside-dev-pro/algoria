@@ -85,8 +85,12 @@ async function main() {
   setInterval(() => {
     const p = terminal.price(BROKER);
     if (p) {
-      agg(p.bid, p.ask, Date.now());
-      broadcastTick(p.bid, p.ask); // → mission control (prix live)
+      const quoteMs = new Date(p.time).getTime();
+      const stale = Number.isFinite(quoteMs) && Date.now() - quoteMs > 90_000; // quote > 90s = marché fermé (week-end/férié)
+      if (!stale) {
+        agg(p.bid, p.ask, Date.now()); // → bougies + moteur (uniquement marché ouvert, sinon fausses bougies plates + desk qui narre dans le vide)
+        broadcastTick(p.bid, p.ask); // → mission control (prix live)
+      }
     }
     void manageBreakeven(stream, terminal, BROKER); // SL → breakeven dès que le trade est assez en profit
   }, 1000);
