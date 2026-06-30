@@ -1,8 +1,5 @@
 import type { Signal } from '../../lib/engine/types';
 
-// MetaApi impose : longueur(clientId) + longueur(comment) ≤ 26. On reste court (base36 du timestamp).
-const clientId = (s: Signal) => `a${s.time.toString(36)}`.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 16);
-
 /**
  * Prépare lot + SL/TP selon les contraintes DU BROKER.
  * - Trade « nu » (stopLoss=0 ET takeProfits vide) → on N'ENVOIE PAS de SL/TP (l'utilisateur gère la sortie).
@@ -48,7 +45,7 @@ function prepareOrder(stream: any, s: Signal, symbol: string): { sl?: number; tp
 /** Place l'ordre sur le compte master. `symbol` = nom CHEZ LE BROKER (ex. "Gold"). */
 export async function placeSignal(stream: any, s: Signal, symbol: string) {
   const { sl, tp, lot } = prepareOrder(stream, s, symbol);
-  const opts = { comment: 'algoria', clientId: clientId(s) }; // ≤ 26 au total (sinon MetaApi rejette l'ordre)
+  const opts = { comment: 'algoria' }; // PAS de clientId : MetaApi impose un pattern strict et on suit nos trades par positionId
   const result =
     s.direction === 'long'
       ? await stream.createMarketBuyOrder(symbol, lot, sl, tp, opts)
