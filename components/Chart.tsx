@@ -13,6 +13,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import { supabase } from '@/lib/supabase/client';
+import { subscribeTicks } from '@/lib/cockpit/tickStore';
 import { swings } from '@/lib/engine/indicators';
 import type { Bar } from '@/lib/engine/types';
 
@@ -20,6 +21,7 @@ const SYMBOL = 'XAUUSD';
 const TFS = ['M5', 'M15', 'H1', 'D1'] as const;
 type TF = (typeof TFS)[number];
 const PAGE = 1500;
+const TF_MS: Record<TF, number> = { M5: 300_000, M15: 900_000, H1: 3_600_000, D1: 86_400_000 };
 const toSec = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp;
 const toCandle = (b: Bar) => ({ time: toSec(b.time), open: b.open, high: b.high, low: b.low, close: b.close });
 const toBar = (c: Record<string, unknown>): Bar => ({
@@ -71,13 +73,12 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     markers.setMarkers(mk);
   }
 
-  // Trace les niveaux du dernier trade : entrée, SL (large, sous le support) et TP (au 1/3) → on VOIT la structure.
   function drawTrade() {
     const series = seriesRef.current;
     if (!series) return;
     tradeLinesRef.current.forEach((l) => series.removePriceLine(l));
     tradeLinesRef.current = [];
-    const sig = signalsRef.current[0]; // le plus récent (signaux triés du + récent au + ancien)
+    const sig = signalsRef.current[0];
     if (!sig) return;
     const long = sig.direction === 'long';
     const entry = Number(sig.entry);
@@ -85,8 +86,8 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     const tp = Number((sig.take_profits as number[] | undefined)?.[0]);
     const lines = tradeLinesRef.current;
     if (Number.isFinite(entry)) lines.push(series.createPriceLine({ price: entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'LONG' : 'SHORT'} ${entry.toFixed(1)}` }));
-    if (Number.isFinite(sl)) lines.push(series.createPriceLine({ price: sl, color: '#ff6b8a', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `SL ${sl.toFixed(1)}` }));
-    if (Number.isFinite(tp)) lines.push(series.createPriceLine({ price: tp, color: '#1fd8b0', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `TP ${tp.toFixed(1)}` }));
+    if (Number.isFinite(sl) && sl > 0) lines.push(series.createPriceLine({ price: sl, color: '#ff6b8a', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `SL ${sl.toFixed(1)}` }));
+    if (Number.isFinite(tp) && tp > 0) lines.push(series.createPriceLine({ price: tp, color: '#1fd8b0', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `TP ${tp.toFixed(1)}` }));
   }
 
   async function loadRecent(t: TF) {
@@ -125,7 +126,6 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     drawLevels();
   }
 
-  // create chart once
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -141,7 +141,6 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     seriesRef.current = series;
     markersRef.current = createSeriesMarkers(series, []);
 
-    // scroll infini : on charge les bougies plus anciennes quand on approche du bord gauche
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (range && range.from < 12) void loadOlder();
     });
@@ -153,12 +152,41 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'candles' }, (p) => {
         const c = p.new as Record<string, unknown>;
         if (c.symbol !== SYMBOL || c.timeframe !== tfRef.current) return;
-        seriesRef.current?.update(toCandle(toBar(c)));
+        const bar = toBar(c);
+        const bars = barsRef.current;
+        const last = bars[bars.length - 1];
+        if (last && bar.time === last.time) bars[bars.length - 1] = bar; // réconcilie la bougie en formation avec la bougie clôturée officielle
+        else if (!last || bar.time > last.time) bars.push(bar);
+        else return;
+        seriesRef.current?.update(toCandle(bar));
       })
       .subscribe();
 
+    // Flux tick temps réel (même source que le ticker) → met à jour la bougie EN FORMATION à chaque tick.
+    // Sinon le chart ne bouge qu'à la clôture M5 (toutes les 5 min) et les markers s'empilent sur une bougie figée.
+    const unsubTicks = subscribeTicks((tick) => {
+      const series = seriesRef.current;
+      const bars = barsRef.current;
+      if (!series || !bars.length) return;
+      const step = TF_MS[tfRef.current];
+      const mid = (tick.bid + tick.ask) / 2;
+      const bucket = Math.floor(tick.t / step) * step;
+      const last = bars[bars.length - 1];
+      if (bucket > last.time) {
+        const nb: Bar = { time: bucket, open: mid, high: mid, low: mid, close: mid, volume: 1 };
+        bars.push(nb);
+        series.update(toCandle(nb));
+      } else if (bucket === last.time) {
+        last.high = Math.max(last.high, mid);
+        last.low = Math.min(last.low, mid);
+        last.close = mid;
+        series.update(toCandle(last));
+      }
+    });
+
     return () => {
       supabase.removeChannel(live);
+      unsubTicks();
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -167,14 +195,12 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // changement de timeframe → recharge
   useEffect(() => {
     tfRef.current = tf;
     if (seriesRef.current) void loadRecent(tf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tf]);
 
-  // signaux changent → redessine les markers
   useEffect(() => {
     drawMarkers();
     drawTrade();
