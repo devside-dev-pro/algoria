@@ -10,19 +10,19 @@ const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
 
 export function Cockpit() {
-  const signals = useSignals(8);
+  const signals = useSignals(40);
   const st = useLatestState() as any;
-  const trades = useTrades(60);
+  const trades = useTrades(80);
   const dayStartEq = useDayStartEquity();
   const [optMode, setOptMode] = useState<string | null>(null);
   const [optKilled, setOptKilled] = useState<boolean | null>(null);
-  const [action, setAction] = useState(false);
-  const [rafale, setRafale] = useState(false);
+  const [show, setShow] = useState(false); // SHOW = générateur d'activité (ex action + rafale fusionnés → set_rafale)
   const [lastFire, setLastFire] = useState<string | null>(null);
   const [lot, setLot] = useState('0.10');
   const [slIn, setSlIn] = useState('');
   const [tpIn, setTpIn] = useState('');
   const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'normal';
+  const strategy = activeMode === 'scalp' ? 'scalp' : 'normal'; // 2 stratégies seulement
   const killed = optKilled ?? !!st?.killed;
   const openPos = Number(st?.open_positions ?? 0);
   const dayPnl =
@@ -35,7 +35,7 @@ export function Cockpit() {
     if (!prev || (t.closed_at && !prev.closed_at)) tradeByTicket.set(k, t);
   }
 
-  // position OUVERTE a materialiser sur le chart (entree/SL/TP) ; null si aucune
+  // open position to draw on the chart (entry/SL/TP); null if none
   const openSig = signals.find((s: any) => {
     if (s.ticket == null) return false;
     const t = tradeByTicket.get(String(s.ticket));
@@ -59,189 +59,144 @@ export function Cockpit() {
     fire(direction, () => sendCommand('manual_trade', p));
   }
 
+  function setStrategy(mode: 'normal' | 'scalp') {
+    setOptMode(mode);
+    void sendCommand('set_mode', { mode });
+  }
+
   return (
-    <main style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100vh' }}>
+    <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', gap: 8, padding: 10, overflow: 'hidden' }}>
       {lastFire === 'long' && <div className="flashbar" style={{ background: 'linear-gradient(90deg,transparent,#1fd8b0,transparent)' }} />}
       {lastFire === 'short' && <div className="flashbar" style={{ background: 'linear-gradient(90deg,transparent,#ff6b8a,transparent)' }} />}
 
-      <header className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '10px 14px' }}>
+      {/* ===== HEADER ===== */}
+      <header className="panel" style={{ flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '8px 12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span className="glow" style={{ width: 22, height: 22, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
-          <strong style={{ fontSize: 16, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--up)', letterSpacing: 1 }}>
-            <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--up)' }} /> LIVE
+          <span className="glow" style={{ width: 20, height: 20, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
+          <strong style={{ fontSize: 15, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: 'var(--up)', letterSpacing: 1 }}>
+            <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--up)' }} /> LIVE
           </span>
           <PriceTicker />
           <MarketStatus session={st?.session as string | undefined} regime={st?.regime as string | undefined} tradable={!!st?.tradable} />
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(['soft', 'normal', 'turbo', 'scalp'] as const).map((m) => {
-            const isScalp = m === 'scalp';
-            const on = activeMode === m;
-            return (
-              <button
-                key={m}
-                onClick={() => { setOptMode(m); void sendCommand('set_mode', { mode: m }); }}
-                style={isScalp
-                  ? { ...pill(on), color: on ? '#0b0e14' : '#ffd166', borderColor: 'rgba(255,209,102,.55)', background: on ? '#ffd166' : 'transparent', fontWeight: 700, letterSpacing: 0.5 }
-                  : pill(on)}
-                title={isScalp ? 'SCALP mode — validated scalp strategy (trades often, fast TP)' : `${m} mode`}
-              >
-                {isScalp ? '⚡ SCALP' : m}
-              </button>
-            );
-          })}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* STRATEGY : 2 stratégies seulement */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={grpLabel}>STRATEGY</span>
+            <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
+              <button onClick={() => setStrategy('normal')} style={seg(strategy === 'normal', false)} title="Normal — selective real edge">NORMAL</button>
+              <button onClick={() => setStrategy('scalp')} style={seg(strategy === 'scalp', true)} title="Scalp — validated scalp strategy (trades often, fast TP)">⚡ SCALP</button>
+            </div>
+          </div>
+          {/* SHOW : générateur d'activité (action + rafale fusionnés) */}
+          <button
+            onClick={() => { const n = !show; setShow(n); void sendCommand('set_rafale', { on: n }); }}
+            style={showBtn(show)}
+            title="SHOW — continuous micro-scalps for the stream. Pure show, not an edge: small lot, burns fees. Best on demo."
+          >
+            {show ? '⚡ SHOW ON' : '⚡ SHOW'}
+          </button>
           <button
             onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
-            style={{ ...pill(killed), color: killed ? '#ff8aa2' : 'var(--muted)', borderColor: 'rgba(255,107,138,.45)', background: killed ? 'rgba(255,107,138,.15)' : 'transparent' }}
+            style={{ ...pill(killed), padding: '5px 12px', color: killed ? '#ff8aa2' : 'var(--muted)', borderColor: 'rgba(255,107,138,.45)', background: killed ? 'rgba(255,107,138,.15)' : 'transparent' }}
             title={killed ? 'resume trading' : 'kill switch — stops any new position'}
           >
-            {killed ? '● KILLED' : 'kill'}
+            {killed ? '● KILLED' : 'KILL'}
           </button>
           <button onClick={() => supabase.auth.signOut()} style={pill(false)} title="sign out">⎋</button>
         </div>
       </header>
 
-      <section className="panel" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85 }}>CONTROL&nbsp;DECK</span>
-        <label style={lbl}>lot<input value={lot} onChange={(e) => setLot(e.target.value)} inputMode="decimal" style={inp(56)} /></label>
-        <label style={lbl}>SL<input value={slIn} onChange={(e) => setSlIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(70)} /></label>
-        <label style={lbl}>TP<input value={tpIn} onChange={(e) => setTpIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(70)} /></label>
-        <button onClick={() => manualTrade('long')} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="open a LONG at market (SL/TP optional)">
-          ▲ LONG NOW
-        </button>
-        <button onClick={() => manualTrade('short')} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="open a SHORT at market (SL/TP optional)">
-          ▼ SHORT NOW
-        </button>
-        <button onClick={() => fire('flat', () => sendCommand('close_all'))} style={deckBtn('flat', lastFire === 'flat', false)} title="close all open positions">
-          ✕ CLOSE ALL
-        </button>
-        <div style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 4px' }} />
-        <button
-          onClick={() => { const n = !action; setAction(n); void sendCommand('set_action', { on: n }); }}
-          style={deckBtn(action ? 'action-on' : 'action-off', false, false)}
-          title="Action mode: Algoria sends trades continuously"
-        >
-          {action ? '● ACTION ON' : '○ ACTION'}
-        </button>
-        <button
-          onClick={() => { const n = !rafale; setRafale(n); void sendCommand('set_rafale', { on: n }); }}
-          style={{
-            padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 800, letterSpacing: 0.5, cursor: 'pointer',
-            border: '1px solid rgba(255,209,102,.6)',
-            color: rafale ? '#0b0e14' : '#ffd166',
-            background: rafale ? 'linear-gradient(90deg,#ffd166,#ff9f1c)' : 'transparent',
-            boxShadow: rafale ? '0 0 14px rgba(255,159,28,.55)' : 'none',
-          }}
-          title="RAFALE — continuous micro-scalps (1-5/min). Pure show, not an edge: small lot, burns fees. Best on demo."
-        >
-          {rafale ? '⚡ RAFALE ON' : '⚡ RAFALE'}
-        </button>
-        {openPos > 0 ? (
-          <span className="liveGlow" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', borderRadius: 8, background: 'rgba(31,216,176,.08)' }}>
-            <span className="pulse" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--up)' }} />
-            <span style={{ fontSize: 11.5, color: 'var(--up)', letterSpacing: 0.5 }}>IN POSITION ×{openPos}</span>
-            {dayPnl != null && <span className="mono popVal" key={dayPnl} style={{ fontSize: 13, fontWeight: 600, color: dayPnl >= 0 ? 'var(--up)' : 'var(--down)' }}>{dayPnl >= 0 ? '+' : ''}{dayPnl.toFixed(0)}$</span>}
+      {/* ===== CONTROL DECK (manual) ===== */}
+      <section className="panel" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', flexWrap: 'wrap' }}>
+        <span style={grpLabel}>MANUAL</span>
+        <label style={lbl}>lot<input value={lot} onChange={(e) => setLot(e.target.value)} inputMode="decimal" style={inp(52)} /></label>
+        <label style={lbl}>SL<input value={slIn} onChange={(e) => setSlIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(64)} /></label>
+        <label style={lbl}>TP<input value={tpIn} onChange={(e) => setTpIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(64)} /></label>
+        <button onClick={() => manualTrade('long')} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="open a LONG at market (SL/TP optional)">▲ LONG</button>
+        <button onClick={() => manualTrade('short')} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="open a SHORT at market (SL/TP optional)">▼ SHORT</button>
+        <button onClick={() => fire('flat', () => sendCommand('close_all'))} style={deckBtn('flat', lastFire === 'flat', false)} title="close all open positions">✕ CLOSE ALL</button>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: openPos > 0 ? 'var(--up)' : 'var(--dim)' }}>
+            {openPos > 0 && <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--up)' }} />}
+            {openPos > 0 ? `IN POSITION ×${openPos}` : 'flat'}
           </span>
-        ) : (
-          <span style={{ fontSize: 10.5, color: 'var(--dim)', marginLeft: 'auto' }}>manual control — demo · SL/TP optional</span>
-        )}
+          <span style={{ fontSize: 11, color: 'var(--dim)' }}>day</span>
+          <span className="mono popVal" key={dayPnl ?? 'x'} style={{ fontSize: 16, fontWeight: 700, color: (dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>
+            {dayPnl == null ? '—' : (dayPnl >= 0 ? '+' : '') + dayPnl.toFixed(0) + '$'}
+          </span>
+        </div>
       </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: 12 }}>
-        <section className="panel" style={{ padding: 12, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ fontSize: 13, marginBottom: 6, color: 'var(--muted)' }}>XAU/USD</div>
-          <div style={{ height: 540 }}>
+      {/* ===== MAIN (fills, fixed) : chart | desk + mission control ===== */}
+      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: 10 }}>
+        <section className="panel" style={{ minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ fontSize: 11.5, marginBottom: 6, color: 'var(--muted)', flex: 'none' }}>XAU/USD</div>
+          <div style={{ flex: 1, minHeight: 0 }}>
             <Chart signals={signals} activeTrade={activeTrade} />
           </div>
         </section>
-
-        <div style={{ display: 'grid', gridTemplateRows: '1fr 1.6fr', gap: 12, height: 540, minHeight: 0 }}>
+        <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
           <Desk />
           <Telemetry state={st} signals={signals} />
         </div>
       </div>
 
-      <div style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1 }}>
-        TRADES <span style={{ color: 'var(--dim)' }}>— newest left (#{signals.length || 0}) → oldest right</span>
-      </div>
-      {(() => {
-        const openTrades = [...tradeByTicket.values()].filter((t: any) => !t.closed_at);
-        if (!openTrades.length) return null;
-        return (
-          <section className="panel" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85 }}>OPEN&nbsp;POSITIONS</span>
-            {openTrades.map((t: any) => {
-              const long = t.direction === 'long';
-              const k = String(t.ticket);
-              return (
-                <span key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px 4px 10px', borderRadius: 8, border: `1px solid ${long ? 'rgba(34,224,166,.35)' : 'rgba(255,107,138,.35)'}` }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: long ? 'var(--up)' : 'var(--down)' }}>{String(t.direction).toUpperCase()}</span>
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{fmt(t.lot)} lot @ {fmt(t.entry)}</span>
-                  <button
-                    onClick={() => fire('close-' + k, () => sendCommand('close_position', { ticket: k }))}
-                    title="close this position at market (without waiting for TP/SL)"
-                    style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 6, border: '1px solid rgba(255,107,138,.5)', background: lastFire === 'close-' + k ? 'rgba(255,107,138,.2)' : 'transparent', color: '#ff8aa2', cursor: 'pointer' }}
-                  >
-                    ✕ close
-                  </button>
-                </span>
-              );
-            })}
-          </section>
-        );
-      })()}
-
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 12 }}>
-        {signals.length === 0 && <div className="panel" style={{ padding: 12, color: 'var(--dim)' }}>no trades yet</div>}
-        {signals.map((s: any, i: number) => {
-          const long = s.direction === 'long';
-          const tr = s.ticket != null ? tradeByTicket.get(String(s.ticket)) : null;
-          const closed = !!tr?.closed_at;
-          const pnl = tr?.pnl != null ? Number(tr.pnl) : null;
-          const reason = (tr?.reason as string | undefined) ?? '';
-          const num = signals.length - i;
-          const time = s.created_at ? new Date(s.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
-          const edge = long ? 'rgba(34,224,166,.35)' : 'rgba(255,107,138,.35)';
-          return (
-            <div key={s.id} className="panel cardIn" style={{ padding: 12, borderColor: closed ? 'var(--border)' : edge, opacity: closed ? 0.9 : 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>#{num}</span>
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{time}</span>
-                  <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 6, background: long ? 'rgba(34,224,166,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>{String(s.direction).toUpperCase()}</span>
-                </span>
-                {closed ? (
+      {/* ===== TRADES — single-line chips, horizontal scroll (open positions first, with close) ===== */}
+      <section className="panel" style={{ flex: 'none', padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0 }}>
+        <div style={{ fontSize: 9.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85, flex: 'none' }}>
+          TRADES <span style={{ color: 'var(--dim)' }}>— newest left → scroll ▸</span>
+        </div>
+        <div className="mono" style={{ display: 'flex', gap: 8, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 2 }}>
+          {signals.length === 0 && <span style={{ fontSize: 11, color: 'var(--dim)', padding: '6px 2px' }}>no trades yet</span>}
+          {signals.map((s: any, i: number) => {
+            const long = s.direction === 'long';
+            const tr = s.ticket != null ? tradeByTicket.get(String(s.ticket)) : null;
+            const closed = !!tr?.closed_at;
+            const open = !!tr && !closed;
+            const pnl = tr?.pnl != null ? Number(tr.pnl) : null;
+            const reason = (tr?.reason as string | undefined) ?? '';
+            const num = signals.length - i;
+            const time = s.created_at ? new Date(s.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+            const edge = open ? (long ? 'rgba(34,224,166,.6)' : 'rgba(255,107,138,.6)') : 'var(--border)';
+            const rationale = Array.isArray(s.rationale) ? (s.rationale as string[]).join(' · ') : '';
+            const k = s.ticket != null ? String(s.ticket) : '';
+            return (
+              <div key={s.id} className="cardIn" title={rationale} style={{
+                flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
+                padding: '5px 10px', borderRadius: 8, border: `1px solid ${edge}`,
+                background: open ? (long ? 'rgba(34,224,166,.07)' : 'rgba(255,107,138,.07)') : 'rgba(255,255,255,.012)',
+              }}>
+                <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>#{num}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{time}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 5, background: long ? 'rgba(34,224,166,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>{String(s.direction).toUpperCase()}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{fmt(s.lot)}@{fmt(s.entry, 1)}</span>
+                <span style={{ fontSize: 10, color: 'var(--dim)' }}>SL {s.stop_loss > 0 ? fmt(s.stop_loss, 1) : '—'} · TP {s.take_profits?.[0] ? fmt(s.take_profits[0], 1) : '—'}</span>
+                {open ? (
+                  <>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--cyan)' }}>
+                      <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--cyan)' }} /> OPEN
+                    </span>
+                    <button onClick={() => fire('close-' + k, () => sendCommand('close_position', { ticket: k }))} title="close this position at market (without waiting for TP/SL)"
+                      style={{ fontSize: 9.5, padding: '2px 8px', borderRadius: 5, border: '1px solid rgba(255,107,138,.5)', background: lastFire === 'close-' + k ? 'rgba(255,107,138,.2)' : 'transparent', color: '#ff8aa2', cursor: 'pointer' }}>✕ close</button>
+                  </>
+                ) : closed ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {reason && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 5, background: 'rgba(130,152,190,.15)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{reason}</span>}
-                    <span className="mono" style={{ fontSize: 12.5, fontWeight: 700, color: (pnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>{(pnl ?? 0) >= 0 ? '✓ +' : '✗ '}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
+                    {reason && <span style={{ fontSize: 8.5, padding: '1px 5px', borderRadius: 4, background: 'rgba(130,152,190,.15)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{reason}</span>}
+                    <span style={{ fontSize: 12, fontWeight: 700, color: (pnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>{(pnl ?? 0) >= 0 ? '✓+' : '✗'}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
                   </span>
                 ) : (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 0.5 }}>
-                    <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cyan)' }} /> OPEN
-                  </span>
+                  <span style={{ fontSize: 10, color: 'var(--dim)' }}>placed</span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>entry {fmt(s.entry)}</span>
-                <span>SL {s.stop_loss > 0 ? fmt(s.stop_loss) : '—'}</span>
-                <span>TP {s.take_profits?.[0] ? fmt(s.take_profits[0]) : '—'}</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8 }}>{fmt(s.lot)} lot{closed && tr?.exit ? ` · exit ${fmt(tr.exit)}` : ''}</div>
-              {Array.isArray(s.rationale) && s.rationale.length > 0 && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <div style={{ fontSize: 9.5, color: 'var(--cyan)', letterSpacing: 0.5, opacity: 0.85 }}>WHY THIS TRADE</div>
-                  {(s.rationale as string[]).slice(0, 2).map((r: string, j: number) => (
-                    <div key={j} style={{ fontSize: 10.5, color: 'var(--muted)', lineHeight: 1.35 }}>◢ {r}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </section>
 
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 10 }}>
+      {/* ===== METRICS (compact, fixed) ===== */}
+      <section style={{ flex: 'none', display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
         <Metric label="Balance" value={st ? fmt(st.balance, 0) : '—'} accent="var(--cyan)" />
         <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} accent="var(--blue)" />
         <Metric label="Day P&L" value={dayPnl == null ? '—' : (dayPnl >= 0 ? '+' : '') + dayPnl.toFixed(0)} color={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} accent={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} />
@@ -255,9 +210,9 @@ export function Cockpit() {
 
 function Metric({ label, value, color, accent }: { label: string; value: string; color?: string; accent?: string }) {
   return (
-    <div style={{ background: 'var(--panel-2)', borderRadius: 8, padding: '9px 12px', borderLeft: `2px solid ${accent ?? 'var(--border)'}` }}>
-      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600, color: color ?? 'var(--text)' }}>{value}</div>
+    <div style={{ background: 'var(--panel-2)', borderRadius: 8, padding: '6px 11px', borderLeft: `2px solid ${accent ?? 'var(--border)'}` }}>
+      <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 600, color: color ?? 'var(--text)', lineHeight: 1.2 }}>{value}</div>
     </div>
   );
 }
@@ -269,10 +224,10 @@ function PriceTicker() {
   const arrow = px.dir > 0 ? '▲' : px.dir < 0 ? '▼' : '·';
   return (
     <span style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-      <span style={{ color: 'var(--muted)', fontSize: 11.5, letterSpacing: 0.5 }}>XAU/USD</span>
-      <span className="mono" style={{ fontSize: 22, fontWeight: 600, color: col, lineHeight: 1 }}>{px.mid.toFixed(2)}</span>
-      <span className="mono" style={{ fontSize: 12, color: col }}>{arrow}</span>
-      <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>spr {(px.ask - px.bid).toFixed(2)}</span>
+      <span style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: 0.5 }}>XAU/USD</span>
+      <span className="mono" style={{ fontSize: 20, fontWeight: 600, color: col, lineHeight: 1 }}>{px.mid.toFixed(2)}</span>
+      <span className="mono" style={{ fontSize: 11, color: col }}>{arrow}</span>
+      <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>spr {(px.ask - px.bid).toFixed(2)}</span>
     </span>
   );
 }
@@ -302,17 +257,16 @@ function MarketStatus({ session, regime, tradable }: { session?: string; regime?
   if (reopen != null) {
     const hh = Math.floor(reopen / 3_600_000);
     const mm = Math.floor((reopen % 3_600_000) / 60_000);
-    return (
-      <span style={{ fontSize: 12, color: 'var(--gold)' }}>⏸ market closed · reopens in {hh}h{String(mm).padStart(2, '0')}</span>
-    );
+    return <span style={{ fontSize: 12, color: 'var(--gold)' }}>⏸ market closed · reopens in {hh}h{String(mm).padStart(2, '0')}</span>;
   }
   return (
-    <span style={{ fontSize: 12.5, color: tradable ? 'var(--up)' : 'var(--dim)' }}>
+    <span style={{ fontSize: 12, color: tradable ? 'var(--up)' : 'var(--dim)' }}>
       {session ?? '—'} · {regime ?? '—'}
     </span>
   );
 }
 
+const grpLabel: CSSProperties = { fontSize: 9, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85, textTransform: 'uppercase' };
 const lbl: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--muted)', letterSpacing: 0.5 };
 function inp(width: number): CSSProperties {
   return {
@@ -328,19 +282,47 @@ function inp(width: number): CSSProperties {
   };
 }
 
-function deckBtn(kind: 'long' | 'short' | 'flat' | 'action-on' | 'action-off', flash: boolean, disabled: boolean): CSSProperties {
+// Segmented strategy button (NORMAL | SCALP). scalp = gold accent.
+function seg(active: boolean, gold: boolean): CSSProperties {
+  return {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: 0.4,
+    padding: '5px 12px',
+    cursor: 'pointer',
+    border: 'none',
+    color: active ? (gold ? '#0b0e14' : '#7fc4ff') : 'var(--muted)',
+    background: active ? (gold ? '#ffd166' : 'rgba(46,139,240,.22)') : 'transparent',
+  };
+}
+
+// SHOW toggle (gold/electric).
+function showBtn(on: boolean): CSSProperties {
+  return {
+    padding: '5px 13px',
+    borderRadius: 7,
+    fontSize: 11.5,
+    fontWeight: 800,
+    letterSpacing: 0.5,
+    cursor: 'pointer',
+    border: '1px solid rgba(255,209,102,.6)',
+    color: on ? '#0b0e14' : '#ffd166',
+    background: on ? 'linear-gradient(90deg,#ffd166,#ff9f1c)' : 'transparent',
+    boxShadow: on ? '0 0 12px rgba(255,159,28,.5)' : 'none',
+  };
+}
+
+function deckBtn(kind: 'long' | 'short' | 'flat', flash: boolean, disabled: boolean): CSSProperties {
   const map = {
     long: { fg: '#1fd8b0', bd: 'rgba(34,224,166,.5)', bg: 'rgba(34,224,166,.12)' },
     short: { fg: '#ff6b8a', bd: 'rgba(255,107,138,.5)', bg: 'rgba(255,107,138,.12)' },
     flat: { fg: 'var(--muted)', bd: 'rgba(130,152,190,.35)', bg: 'transparent' },
-    'action-on': { fg: '#f5c24a', bd: 'rgba(245,194,74,.6)', bg: 'rgba(245,194,74,.16)' },
-    'action-off': { fg: 'var(--muted)', bd: 'rgba(130,152,190,.3)', bg: 'transparent' },
   }[kind];
   return {
     fontSize: 12,
     fontWeight: 600,
     letterSpacing: 0.4,
-    padding: '6px 14px',
+    padding: '6px 13px',
     borderRadius: 7,
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.4 : 1,
@@ -349,7 +331,6 @@ function deckBtn(kind: 'long' | 'short' | 'flat' | 'action-on' | 'action-off', f
     border: `1px solid ${map.bd}`,
     transform: flash ? 'scale(1.06)' : 'scale(1)',
     transition: 'transform .15s ease, background .2s ease',
-    animation: kind === 'action-on' ? 'pulseDot 1.4s ease-in-out infinite' : undefined,
   };
 }
 
