@@ -120,15 +120,27 @@ async function main() {
   const actionTick = async () => {
     state = readState(terminal, BROKER, state);
     if (state.killed) return; // le kill switch coupe aussi le mode action
-    if (state.openPositions >= 1) return; // évite l'empilement
     const p = terminal.price(BROKER);
     if (!p?.bid || !p?.ask) return;
     const mid = (p.bid + p.ask) / 2;
-    const dir: 'long' | 'short' = mid >= actionPrev ? 'long' : 'short'; // suit le micro-momentum
+    const positions = ((terminal.positions ?? []) as any[]).filter((x) => x.symbol === BROKER);
+    const longs = positions.filter((x) => x.type === 'POSITION_TYPE_BUY').length;
+    const shorts = positions.length - longs;
+    let dir: 'long' | 'short';
+    if (positions.length === 0) {
+      dir = mid >= actionPrev ? 'long' : 'short'; // a plat -> on suit le micro-momentum
+    } else {
+      // EN POSITION : jamais le sens oppose (pas de hedge). On REMPILE seulement dans le sens existant ET si en drawdown.
+      if (positions.length >= 3) { actionPrev = mid; return; } // cap d'empilement (max 3)
+      const unrealized = positions.reduce((acc, x) => acc + Number(x.profit ?? x.unrealizedProfit ?? 0), 0);
+      if (unrealized >= 0) { actionPrev = mid; return; } // en profit -> on laisse courir
+      dir = longs >= shorts ? 'long' : 'short'; // en drawdown -> on renforce le sens existant
+    }
     actionPrev = mid;
     const sig = buildManualSignal(dir, { tight: true });
-    if (sig) await executeSignal(sig); // clôture auto
+    if (sig) await executeSignal(sig);
   };
+
   const setActionMode = (on: boolean) => {
     if (on && !actionTimer) {
       actionTimer = setInterval(() => void actionTick(), ACTION_MS);
