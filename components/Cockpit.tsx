@@ -92,10 +92,10 @@ export function Cockpit() {
           {/* SHOW : générateur d'activité (action + rafale fusionnés) */}
           <button
             onClick={() => { const n = !show; setShow(n); void sendCommand('set_rafale', { on: n }); }}
-            style={showBtn(show)}
-            title="SHOW — continuous micro-scalps for the stream. Pure show, not an edge: small lot, burns fees. Best on demo."
+            style={beastBtn(show)}
+            title="BEAST MODE — rapid-fire micro-scalps for the stream (3-5/min). Pure show, not an edge: small lot, burns fees. Best on demo."
           >
-            {show ? '⚡ SHOW ON' : '⚡ SHOW'}
+            {show ? '🔥 BEAST ON' : '🔥 BEAST MODE'}
           </button>
           <button
             onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
@@ -296,8 +296,8 @@ function seg(active: boolean, gold: boolean): CSSProperties {
   };
 }
 
-// SHOW toggle (gold/electric).
-function showBtn(on: boolean): CSSProperties {
+// BEAST MODE toggle (fiery red/orange — distinct from gold SCALP).
+function beastBtn(on: boolean): CSSProperties {
   return {
     padding: '5px 13px',
     borderRadius: 7,
@@ -305,10 +305,11 @@ function showBtn(on: boolean): CSSProperties {
     fontWeight: 800,
     letterSpacing: 0.5,
     cursor: 'pointer',
-    border: '1px solid rgba(255,209,102,.6)',
-    color: on ? '#0b0e14' : '#ffd166',
-    background: on ? 'linear-gradient(90deg,#ffd166,#ff9f1c)' : 'transparent',
-    boxShadow: on ? '0 0 12px rgba(255,159,28,.5)' : 'none',
+    border: `1px solid ${on ? 'rgba(255,90,60,.8)' : 'rgba(255,107,61,.55)'}`,
+    color: on ? '#fff' : '#ff8a5c',
+    background: on ? 'linear-gradient(90deg,#ff7a18,#ff2d55)' : 'transparent',
+    boxShadow: on ? '0 0 16px rgba(255,77,77,.6)' : 'none',
+    animation: on ? 'pulseDot 1.4s ease-in-out infinite' : undefined,
   };
 }
 
