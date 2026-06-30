@@ -93,7 +93,7 @@ export interface TradeClose {
   closedAt: number; // ms epoch
 }
 
-/** Clôture d'un trade : met à jour la ligne ouverte (match sur ticket). Si aucune ligne (position ouverte avant ce process), insère une ligne close-only. */
+/** Clôture d'un trade : met à jour la ligne ouverte (match sur ticket). Idempotent : ignore les deals de clôture livrés en double. */
 export async function recordTradeClose(ticket: string, symbol: string, c: TradeClose) {
   const patch = { exit: c.exit, pnl: c.pnl, r: c.r, reason: c.reason, closed_at: new Date(c.closedAt).toISOString() };
   const { data, error } = await db.from('trades').update(patch).eq('ticket', ticket).is('closed_at', null).select('id');
@@ -102,8 +102,10 @@ export async function recordTradeClose(ticket: string, symbol: string, c: TradeC
     return;
   }
   if (!data || data.length === 0) {
-    // pas de ligne d'ouverture connue (trade ouvert avant le démarrage de ce runner) → ligne close-only honnête
-    const { error: insErr } = await db.from('trades').insert({ ticket, symbol, ...patch });
+    // aucune ligne ouverte à mettre à jour → soit ce ticket est DÉJÀ clôturé (deal livré 2×), soit position ouverte avant ce process.
+    const { data: already } = await db.from('trades').select('id').eq('ticket', ticket).not('closed_at', 'is', null).limit(1);
+    if (already && already.length > 0) return; // déjà enregistrée comme clôturée → on ignore le doublon (plus de ligne en double)
+    const { error: insErr } = await db.from('trades').insert({ ticket, symbol, ...patch }); // ligne close-only honnête
     if (insErr) console.error('[sync] recordTradeClose (insert close-only) échoué:', insErr.message);
   }
 }
