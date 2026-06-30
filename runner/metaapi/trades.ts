@@ -14,11 +14,11 @@ interface TradeCtx {
 
 /**
  * Enregistre la CLÔTURE des trades dans Supabase à partir des deals MetaApi.
- * - On n'écrit qu'après la synchro initiale (onDealsSynchronized) : sinon chaque redémarrage rejouerait tout l'historique.
+ * - Filtre par ANCIENNETÉ (deal < 5 min) : on ignore l'historique rejoué à la connexion mais on capte TOUTES les
+ *   clôtures live, même juste après un redémarrage du runner (le filtre onDealsSynchronized ratait des clôtures).
  * - L'ouverture est écrite ailleurs (runner/index.ts au moment du placeSignal), où l'on a déjà le SL pour le R.
  */
 export class DealRecorder extends Base {
-  private live = false; // passe à true une fois la synchro initiale terminée
   private readonly ctx = new Map<string, TradeCtx>(); // positionId → contexte (pour calculer R + reason)
 
   constructor(private readonly brokerSymbol: string, private readonly displaySymbol: string) {
@@ -30,12 +30,7 @@ export class DealRecorder extends Base {
     this.ctx.set(ticket, { entry: s.entry, sl: s.stopLoss, tp: s.takeProfits[0], direction: s.direction });
   }
 
-  async onDealsSynchronized(): Promise<void> {
-    this.live = true;
-  }
-
   async onDealAdded(_instanceIndex: string, deal: any): Promise<void> {
-    if (!this.live) return; // ignore l'historique rejoué à la connexion
     if (deal?.symbol !== this.brokerSymbol) return;
     if (deal?.type !== 'DEAL_TYPE_BUY' && deal?.type !== 'DEAL_TYPE_SELL') return; // ignore balance/commission/etc.
     if (deal?.entryType === 'DEAL_ENTRY_IN') return; // l'ouverture est gérée par le runner (placeSignal)
@@ -44,6 +39,7 @@ export class DealRecorder extends Base {
     const exit = typeof deal.price === 'number' ? deal.price : 0;
     const pnl = typeof deal.profit === 'number' ? deal.profit : 0;
     const when = deal.time ? new Date(deal.time).getTime() : Date.now();
+    if (Date.now() - when > 5 * 60_000) return; // deal ancien → historique rejoué, on ignore (recordTradeClose reste idempotent)
 
     const c = this.ctx.get(ticket);
     let r: number | null = null;

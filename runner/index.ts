@@ -87,8 +87,14 @@ async function main() {
     if (!p?.bid || !p?.ask) return null;
     const price = r2((p.bid + p.ask) / 2);
     const lot = opts.lot && opts.lot > 0 ? opts.lot : opts.tight ? ACTION_LOT : MANUAL_LOT;
-    const stopLoss = typeof opts.sl === 'number' && opts.sl > 0 ? r2(opts.sl) : 0; // 0 = pas de SL (ordre nu)
-    const takeProfits = typeof opts.tp === 'number' && opts.tp > 0 ? [r2(opts.tp)] : []; // [] = pas de TP
+    const dir = direction === 'long' ? 1 : -1;
+    let stopLoss = typeof opts.sl === 'number' && opts.sl > 0 ? r2(opts.sl) : 0;
+    let takeProfits = typeof opts.tp === 'number' && opts.tp > 0 ? [r2(opts.tp)] : [];
+    if (opts.tight && !stopLoss && !takeProfits.length) {
+      const d = Math.max(price * 0.0008, 0.5);
+      stopLoss = r2(price - dir * d);
+      takeProfits = [r2(price + dir * d)];
+    }
     const custom = stopLoss > 0 || takeProfits.length > 0;
     const confluence: Confluence = { direction, rawScore: 0, alignment: 0, quality: 0, macro: 0, confidence: 1, contributions: [] };
     return {
@@ -121,9 +127,7 @@ async function main() {
     const dir: 'long' | 'short' = mid >= actionPrev ? 'long' : 'short'; // suit le micro-momentum
     actionPrev = mid;
     const sig = buildManualSignal(dir, { tight: true });
-    if (!sig) return;
-    const ticket = await executeSignal(sig);
-    if (ticket) setTimeout(() => void closePosition(stream, ticket).catch(() => {}), ACTION_HOLD_MS); // clôture auto
+    if (sig) await executeSignal(sig); // clôture auto
   };
   const setActionMode = (on: boolean) => {
     if (on && !actionTimer) {
