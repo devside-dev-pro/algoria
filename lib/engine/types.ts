@@ -1,7 +1,7 @@
 // Contrats partagés du moteur Algoria. Aucune dépendance — mêmes types en live et en backtest.
 
 export type Direction = 'long' | 'short' | 'flat';
-export type Mode = 'soft' | 'normal' | 'turbo';
+export type Mode = 'soft' | 'normal' | 'turbo' | 'scalp';
 export type Session = 'asia' | 'london' | 'overlap' | 'newyork' | 'closed';
 export type Regime = 'trend' | 'range';
 

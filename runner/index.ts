@@ -8,7 +8,7 @@ import { manageBreakeven } from './metaapi/manage';
 import { DealRecorder } from './metaapi/trades';
 import { narrate, narrationReady } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
-import { DEFAULT_CONFIG } from '../lib/engine/config';
+import { DEFAULT_CONFIG, SCALP_CONFIG } from '../lib/engine/config';
 import { FEATURES } from '../lib/engine/features';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, broadcastTick, watchCommands } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
@@ -193,7 +193,8 @@ async function main() {
 
   const onClosed = async (bars: Bar[]) => {
     state = readState(terminal, BROKER, state);
-    const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts: { spread: state.spread } }, FEATURES, DEFAULT_CONFIG);
+    const cfg = mode === 'scalp' ? SCALP_CONFIG : DEFAULT_CONFIG; // mode scalp = stratégie scalp validée (TP rapide, seuil bas, breakeven précoce)
+    const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts: { spread: state.spread } }, FEATURES, cfg);
     await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
     await logEvents(events);
     await pushState(context, state, mode);
