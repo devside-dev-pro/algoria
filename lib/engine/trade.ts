@@ -17,7 +17,7 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
   if (cf.direction === 'flat') return null;
   const long = cf.direction === 'long';
   const dir = long ? 1 : -1;
-  const entry = ctx.price;
+  const entry = round2(ctx.price);
   const atr = ctx.atr;
 
   // Defended structure = stop basis (zones already sorted by proximity)
@@ -26,7 +26,7 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
   const defend: Zone | undefined = long ? supports[0] : resistances[0];
 
   const structural = defend ? (long ? defend.lower : defend.upper) : entry - dir * 1.2 * atr;
-  const stopLoss = structural - dir * cfg.slAtrMult * atr; // buffer beyond structure
+  const stopLoss = round2(structural - dir * cfg.slAtrMult * atr); // buffer beyond structure — arrondi au pas de prix (sinon le broker rejette l'ordre)
   const riskDist = Math.abs(entry - stopLoss);
   if (riskDist < cfg.minStopAtr * atr || riskDist > cfg.maxStopAtr * atr) return null;
 

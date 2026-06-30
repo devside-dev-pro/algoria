@@ -39,8 +39,9 @@ export async function logNote(msg: string, level: 'scan' | 'info' | 'signal' | '
   await db.from('events').insert({ ts: new Date().toISOString(), level, msg, data: null as never });
 }
 
-export async function logSignal(s: Signal, res: { ticket?: string; code?: string }) {
-  await db.from('signals').insert({
+/** Persiste le signal — qu'il ait été exécuté OU rejeté. `status` distingue 'placed' (ordre parti) de 'rejected' (échec d'envoi). */
+export async function logSignal(s: Signal, res: { ticket?: string; code?: string; status?: string }) {
+  const { error } = await db.from('signals').insert({
     ref: s.id,
     symbol: s.symbol,
     direction: s.direction,
@@ -55,7 +56,56 @@ export async function logSignal(s: Signal, res: { ticket?: string; code?: string
     confluence: s.confluence as never,
     ticket: res.ticket ?? null,
     result_code: res.code ?? null,
+    ...(res.status ? { status: res.status } : {}),
   });
+  if (error) console.error('[sync] logSignal échoué:', error.message);
+}
+
+export interface TradeOpen {
+  ticket: string;
+  signalRef: string;
+  symbol: string;
+  direction: 'long' | 'short';
+  entry: number;
+  lot: number;
+  openedAt: number; // ms epoch
+}
+
+/** Trade ouvert → ligne dans `trades` (clôture renseignée plus tard par recordTradeClose). */
+export async function recordTradeOpen(t: TradeOpen) {
+  const { error } = await db.from('trades').insert({
+    ticket: t.ticket,
+    signal_ref: t.signalRef,
+    symbol: t.symbol,
+    direction: t.direction,
+    entry: t.entry,
+    lot: t.lot,
+    opened_at: new Date(t.openedAt).toISOString(),
+  });
+  if (error) console.error('[sync] recordTradeOpen échoué:', error.message);
+}
+
+export interface TradeClose {
+  exit: number;
+  pnl: number;
+  r: number | null;
+  reason: string;
+  closedAt: number; // ms epoch
+}
+
+/** Clôture d'un trade : met à jour la ligne ouverte (match sur ticket). Si aucune ligne (position ouverte avant ce process), insère une ligne close-only. */
+export async function recordTradeClose(ticket: string, symbol: string, c: TradeClose) {
+  const patch = { exit: c.exit, pnl: c.pnl, r: c.r, reason: c.reason, closed_at: new Date(c.closedAt).toISOString() };
+  const { data, error } = await db.from('trades').update(patch).eq('ticket', ticket).is('closed_at', null).select('id');
+  if (error) {
+    console.error('[sync] recordTradeClose (update) échoué:', error.message);
+    return;
+  }
+  if (!data || data.length === 0) {
+    // pas de ligne d'ouverture connue (trade ouvert avant le démarrage de ce runner) → ligne close-only honnête
+    const { error: insErr } = await db.from('trades').insert({ ticket, symbol, ...patch });
+    if (insErr) console.error('[sync] recordTradeClose (insert close-only) échoué:', insErr.message);
+  }
 }
 
 export async function pushState(ctx: MarketContext, state: EngineState, mode: Mode = 'normal') {

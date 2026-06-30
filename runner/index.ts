@@ -5,11 +5,12 @@ import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
 import { placeSignal } from './metaapi/execution';
 import { manageBreakeven } from './metaapi/manage';
+import { DealRecorder } from './metaapi/trades';
 import { narrate, narrationReady } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { FEATURES } from '../lib/engine/features';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, broadcastTick, watchCommands } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, broadcastTick, watchCommands } from '../lib/supabase/sync';
 import type { Bar, EngineState, Mode } from '../lib/engine/types';
 
 const BROKER = process.env.ALGORIA_SYMBOL ?? 'XAUUSD'; // nom du symbole chez le broker (ex. "Gold")
@@ -20,6 +21,11 @@ async function main() {
   console.log('[algoria] runner démarre…');
   const { account, stream, terminal } = await connectMaster();
   await stream.subscribeToMarketData(BROKER);
+
+  // Enregistre la CLÔTURE des trades (deals de sortie) dans Supabase → mesure honnête de la perf en démo/réel.
+  const dealRecorder = new DealRecorder(BROKER, DISPLAY);
+  stream.addSynchronizationListener(dealRecorder);
+
   console.log(`[algoria] connecté · broker=${BROKER} → display=${DISPLAY} · TF ${TF}`);
   console.log(`[algoria] narration ${narrationReady() ? 'ON (Claude)' : 'OFF — ajoute ANTHROPIC_API_KEY dans .env'}`);
 
@@ -57,9 +63,25 @@ async function main() {
         const res = await placeSignal(stream, signal, BROKER);
         state.tradesToday++;
         state.lastTradeTime = signal.time;
-        await logSignal(signal, res);
+        await logSignal(signal, { ...res, status: 'placed' });
+        if (res.ticket) {
+          dealRecorder.remember(res.ticket, signal); // pour calculer R + reason à la clôture
+          await recordTradeOpen({
+            ticket: res.ticket,
+            signalRef: signal.id,
+            symbol: DISPLAY,
+            direction: signal.direction,
+            entry: signal.entry,
+            lot: signal.lot,
+            openedAt: signal.time,
+          });
+        }
         console.log('[algoria] ORDRE', signal.direction, BROKER, signal.lot, '→', res.ticket);
       } catch (e) {
+        // Échec d'envoi : on le rend VISIBLE (events Supabase, pas seulement la console Railway) ET on persiste le signal rejeté.
+        const reason = (e as { message?: string })?.message ?? String(e);
+        await logNote(`échec ordre · ${signal.direction} ${BROKER} ${signal.lot} lot · ${reason}`, 'veto');
+        await logSignal(signal, { code: reason.slice(0, 120), status: 'rejected' });
         console.error('[algoria] échec ordre:', e);
       }
     }
