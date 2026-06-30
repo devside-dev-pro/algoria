@@ -120,7 +120,7 @@ async function main() {
   const actionTick = async () => {
     state = readState(terminal, BROKER, state);
     if (state.killed) return; // le kill switch coupe aussi le mode action
-    if (state.openPositions >= 4) return; // évite l'empilement
+    if (state.openPositions >= 1) return; // évite l'empilement
     const p = terminal.price(BROKER);
     if (!p?.bid || !p?.ask) return;
     const mid = (p.bid + p.ask) / 2;
