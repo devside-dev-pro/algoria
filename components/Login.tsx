@@ -25,12 +25,12 @@ export function Login() {
           <strong style={{ fontSize: 18, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
         </div>
         <input type="email" required placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />
-        <input type="password" required placeholder="mot de passe" value={pw} onChange={(e) => setPw(e.target.value)} style={field} />
+        <input type="password" required placeholder="password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} />
         {err && <div style={{ color: 'var(--down)', fontSize: 12 }}>{err}</div>}
         <button type="submit" disabled={busy} style={{ ...field, cursor: 'pointer', color: '#06101f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none', fontWeight: 600 }}>
-          {busy ? '…' : 'Connexion'}
+          {busy ? '…' : 'Sign in'}
         </button>
-        <p style={{ fontSize: 11, color: 'var(--dim)', margin: 0, lineHeight: 1.5 }}>Crée ton compte une fois : Supabase → Authentication → Users → Add user.</p>
+        <p style={{ fontSize: 11, color: 'var(--dim)', margin: 0, lineHeight: 1.5 }}>Create your account once: Supabase → Authentication → Users → Add user.</p>
       </form>
     </main>
   );

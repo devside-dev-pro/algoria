@@ -3,12 +3,12 @@ import type { ReactNode } from 'react';
 
 export const metadata = {
   title: 'Algoria AI',
-  description: 'Cockpit de trading IA spécialisé or (XAU/USD)',
+  description: 'AI gold (XAU/USD) trading cockpit',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="fr">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );
