@@ -105,7 +105,7 @@ async function main() {
     slAtrMult: o.slAtrMult,
     minRR: Math.min(0.3, o.targetRR * 0.8),
     maxStopAtr: Math.max(4, o.slAtrMult + 3),
-    threshold: { soft: o.thr, normal: o.thr, turbo: o.thr },
+    threshold: { soft: o.thr, normal: o.thr, turbo: o.thr, scalp: o.thr },
   });
 
   type Res = { targetRR: number; slAtr: number; thr: number; trades: number; winRate: number; pf: number; expR: number; net: number; ddl: number };

@@ -19,7 +19,7 @@ const pct = (x: number) => (x * 100).toFixed(1) + '%';
 const r2 = (x: number) => x.toFixed(2);
 
 // même base d'entrées que la config validée (sl 1.2, seuil 0.55), R:R variable
-const base = (targetRR: number): EngineConfig => ({ ...DEFAULT_CONFIG, slAtrMult: 1.2, targetRR, minRR: 0.24, maxStopAtr: 4.2, threshold: { soft: 0.55, normal: 0.55, turbo: 0.55 } });
+const base = (targetRR: number): EngineConfig => ({ ...DEFAULT_CONFIG, slAtrMult: 1.2, targetRR, minRR: 0.24, maxStopAtr: 4.2, threshold: { soft: 0.55, normal: 0.55, turbo: 0.55, scalp: 0.55 } });
 
 interface TM { beTrigger?: number; trailActivate?: number; trailDist?: number; ignoreTp?: boolean }
 const exits = (run: BacktestRun) => run.trades.reduce<Record<string, number>>((a, t) => ((a[t.reason] = (a[t.reason] ?? 0) + 1), a), {});

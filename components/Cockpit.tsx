@@ -74,11 +74,22 @@ export function Cockpit() {
           <MarketStatus session={st?.session as string | undefined} regime={st?.regime as string | undefined} tradable={!!st?.tradable} />
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          {(['soft', 'normal', 'turbo'] as const).map((m) => (
-            <button key={m} onClick={() => { setOptMode(m); void sendCommand('set_mode', { mode: m }); }} style={pill(activeMode === m)} title={`mode ${m}`}>
-              {m}
-            </button>
-          ))}
+          {(['soft', 'normal', 'turbo', 'scalp'] as const).map((m) => {
+            const isScalp = m === 'scalp';
+            const on = activeMode === m;
+            return (
+              <button
+                key={m}
+                onClick={() => { setOptMode(m); void sendCommand('set_mode', { mode: m }); }}
+                style={isScalp
+                  ? { ...pill(on), color: on ? '#0b0e14' : '#ffd166', borderColor: 'rgba(255,209,102,.55)', background: on ? '#ffd166' : 'transparent', fontWeight: 700, letterSpacing: 0.5 }
+                  : pill(on)}
+                title={isScalp ? 'mode SCALP — stratégie scalp validée (trade souvent, TP rapide)' : `mode ${m}`}
+              >
+                {isScalp ? '⚡ SCALP' : m}
+              </button>
+            );
+          })}
           <button
             onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
             style={{ ...pill(killed), color: killed ? '#ff8aa2' : 'var(--muted)', borderColor: 'rgba(255,107,138,.45)', background: killed ? 'rgba(255,107,138,.15)' : 'transparent' }}

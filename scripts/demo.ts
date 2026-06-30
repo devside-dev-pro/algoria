@@ -9,7 +9,7 @@ import type { Bar, EngineState } from '../lib/engine/types';
 // Écrit via la service key (sync.ts) → nécessite SUPABASE_SERVICE_KEY dans .env.
 const SYMBOL = 'XAUUSD';
 const STEP = 300_000; // 5 min
-const cfg = { ...DEFAULT_CONFIG, threshold: { soft: 0.35, normal: 0.25, turbo: 0.2 } }; // seuils bas POUR la démo
+const cfg = { ...DEFAULT_CONFIG, threshold: { soft: 0.35, normal: 0.25, turbo: 0.2, scalp: 0.2 } }; // seuils bas POUR la démo
 
 let seed = 73244;
 const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
