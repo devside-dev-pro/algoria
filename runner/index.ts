@@ -10,7 +10,7 @@ import { narrate, narrationReady } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
 import { DEFAULT_CONFIG, SCALP_CONFIG } from '../lib/engine/config';
 import { FEATURES } from '../lib/engine/features';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, broadcastTick, watchCommands } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, reconcileOpenTrades, broadcastTick, watchCommands } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
 
 const BROKER = process.env.ALGORIA_SYMBOL ?? 'XAUUSD'; // nom du symbole chez le broker (ex. "Gold")
@@ -313,6 +313,20 @@ async function main() {
     }
     void manageBreakeven(stream, terminal, BROKER); // no-op sur les ordres nus (sans SL)
   }, 1000);
+
+  // Réconciliation anti-fantômes (toutes les 60 s) : ferme en base les trades "ouverts" qui n'existent plus chez le broker.
+  // Garde-fous : on attend la synchro (accountInformation présent) + 120 s de grâce au démarrage → on ne ferme jamais une vraie position pas encore vue.
+  const startedAt = Date.now();
+  setInterval(() => {
+    if (!terminal.accountInformation || Date.now() - startedAt < 120_000) return; // pas synchronisé / trop tôt → on attend
+    const live = ((terminal.positions ?? []) as any[]).filter((x) => x.symbol === BROKER).map((x) => String(x.id));
+    void reconcileOpenTrades(DISPLAY, live).then((n) => {
+      if (n > 0) {
+        console.log(`[algoria] réconciliation : ${n} position(s) fantôme(s) fermée(s) en base`);
+        void logNote(`${n} position(s) fantôme(s) nettoyée(s) (fermées côté broker, pas en base)`, 'info');
+      }
+    });
+  }, 60_000);
 }
 
 main().catch((e) => {

@@ -110,6 +110,27 @@ export async function recordTradeClose(ticket: string, symbol: string, c: TradeC
   }
 }
 
+/**
+ * Réconciliation anti-fantômes : ferme en base les trades marqués OUVERTS qui n'existent plus chez le broker
+ * (fermés à la main sur MT5, ou clôture ratée par le DealRecorder, ou runner redémarré). reason='reconcile', P&L inconnu.
+ * Garde-fou : ne touche QUE les trades ouverts depuis > graceMs → jamais une position fraîche pas encore synchronisée.
+ * Retourne le nombre de fantômes nettoyés.
+ */
+export async function reconcileOpenTrades(symbol: string, liveTickets: string[], graceMs = 120_000): Promise<number> {
+  const { data, error } = await db.from('trades').select('ticket,opened_at').eq('symbol', symbol).is('closed_at', null);
+  if (error || !data?.length) return 0;
+  const live = new Set(liveTickets.map(String));
+  const cutoff = Date.now() - graceMs;
+  const ghosts = data.filter((t) => !live.has(String(t.ticket)) && new Date(t.opened_at as string).getTime() < cutoff).map((t) => String(t.ticket));
+  if (!ghosts.length) return 0;
+  const { error: upErr } = await db.from('trades').update({ closed_at: new Date().toISOString(), reason: 'reconcile' }).in('ticket', ghosts).is('closed_at', null);
+  if (upErr) {
+    console.error('[sync] reconcileOpenTrades échoué:', upErr.message);
+    return 0;
+  }
+  return ghosts.length;
+}
+
 export async function pushState(ctx: MarketContext, state: EngineState, mode: Mode = 'normal') {
   await db.from('state_snapshots').insert({
     session: ctx.session,
