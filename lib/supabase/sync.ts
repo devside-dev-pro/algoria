@@ -137,13 +137,16 @@ export async function logCandle(symbol: string, bar: Bar, timeframe = 'M5') {
   );
 }
 
-/** Upsert en masse (backfill d'historique). */
+/** Upsert en masse (backfill d'historique). Découpé en lots pour encaisser un gros backfill (ex. 20k bougies M1). */
 export async function logCandles(symbol: string, bars: Bar[], timeframe = 'M5') {
   if (!bars.length) return;
-  await db.from('candles').upsert(
-    bars.map((bar) => ({ symbol, timeframe, time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume })),
-    { onConflict: 'symbol,timeframe,time' },
-  );
+  const CHUNK = 2000;
+  for (let i = 0; i < bars.length; i += CHUNK) {
+    await db.from('candles').upsert(
+      bars.slice(i, i + CHUNK).map((bar) => ({ symbol, timeframe, time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume })),
+      { onConflict: 'symbol,timeframe,time' },
+    );
+  }
 }
 
 /** Le runner écoute les commandes du cockpit (mode, kill, flatten…). */
