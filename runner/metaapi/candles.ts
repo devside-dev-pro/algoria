@@ -1,7 +1,7 @@
 import type { Bar } from '../../lib/engine/types';
 
 const TF_MS: Record<string, number> = { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000 };
-const TF_API: Record<string, string> = { M5: '5m', M15: '15m', H1: '1h', D1: '1d' };
+const TF_API: Record<string, string> = { M1: '1m', M5: '5m', M15: '15m', H1: '1h', D1: '1d' };
 
 /** Bougies historiques (getHistoricalCandles : G1 / MT4 G2). */
 export async function loadHistory(account: any, symbol: string, tf = '5m', count = 300): Promise<Bar[]> {

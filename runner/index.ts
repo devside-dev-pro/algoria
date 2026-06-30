@@ -34,10 +34,12 @@ async function main() {
   console.log(`[algoria] connecté · broker=${BROKER} → display=${DISPLAY} · TF ${TF}`);
   console.log(`[algoria] narration ${narrationReady() ? 'ON (Claude)' : 'OFF — ajoute ANTHROPIC_API_KEY dans .env'}`);
 
-  // Backfill d'historique profond pour le chart (tous les timeframes).
-  for (const tf of ['M5', 'M15', 'H1', 'D1']) {
+  // Backfill d'historique profond pour le chart + le backtest (tous les timeframes).
+  // M1 plus profond (20 × 1000 ≈ 20k bougies ≈ 2 semaines de session) → assez pour backtester une vraie strat M1.
+  const BACKFILL_PAGES: Record<string, number> = { M1: 20, M5: 5, M15: 5, H1: 5, D1: 5 };
+  for (const tf of ['M1', 'M5', 'M15', 'H1', 'D1']) {
     try {
-      const hist = await backfill(account, BROKER, tf, 5);
+      const hist = await backfill(account, BROKER, tf, BACKFILL_PAGES[tf] ?? 5);
       await logCandles(DISPLAY, hist, tf);
       console.log(`[algoria] backfill ${tf}: ${hist.length} bougies`);
     } catch (e) {
@@ -215,6 +217,24 @@ async function main() {
   };
 
   const agg = makeAggregator(TF, seed, onClosed);
+
+  // Agrégateur M1 LÉGER : log chaque bougie M1 clôturée (chart + data fraîche pour le backtest), sans retenir l'historique (pas de fuite mémoire).
+  let m1cur: Bar | null = null;
+  const feedM1 = (mid: number, t: number) => {
+    const bucket = Math.floor(t / 60_000) * 60_000;
+    if (!m1cur) {
+      m1cur = { time: bucket, open: mid, high: mid, low: mid, close: mid, volume: 1 };
+    } else if (bucket > m1cur.time) {
+      void logCandle(DISPLAY, m1cur, 'M1');
+      m1cur = { time: bucket, open: mid, high: mid, low: mid, close: mid, volume: 1 };
+    } else {
+      m1cur.high = Math.max(m1cur.high, mid);
+      m1cur.low = Math.min(m1cur.low, mid);
+      m1cur.close = mid;
+      m1cur.volume++;
+    }
+  };
+
   setInterval(() => {
     const p = terminal.price(BROKER);
     if (p) {
@@ -222,6 +242,7 @@ async function main() {
       const stale = Number.isFinite(quoteMs) && Date.now() - quoteMs > 90_000;
       if (!stale) {
         agg(p.bid, p.ask, Date.now());
+        feedM1((p.bid + p.ask) / 2, Date.now());
         broadcastTick(p.bid, p.ask);
       }
     }
