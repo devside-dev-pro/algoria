@@ -43,6 +43,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   const bbUpRef = useRef<ISeriesApi<'Line'> | null>(null);
   const bbMidRef = useRef<ISeriesApi<'Line'> | null>(null);
   const bbLoRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const vwapRef = useRef<ISeriesApi<'Line'> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
   const tradeLinesRef = useRef<IPriceLine[]>([]);
   const barsRef = useRef<Bar[]>([]);
@@ -53,6 +54,10 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   const activeRef = useRef<ActiveTrade>(activeTrade);
   activeRef.current = activeTrade;
   const [tf, setTf] = useState<TF>('M5');
+  // Visibilité des indicateurs (toggles cliquables). On garde le calcul, on masque juste l'affichage.
+  const [vis, setVis] = useState({ ema: true, bb: true, vwap: true, sr: true });
+  const visRef = useRef(vis);
+  visRef.current = vis;
 
   // EMA 9/21 (ruban de tendance) + Bandes de Bollinger (20, 2σ) — recalculés en direct → l'impression qu'Algoria « travaille ».
   function drawIndicators() {
@@ -66,6 +71,10 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     const lo: { time: UTCTimestamp; value: number }[] = [];
     const fast: { time: UTCTimestamp; value: number }[] = [];
     const slow: { time: UTCTimestamp; value: number }[] = [];
+    const vwap: { time: UTCTimestamp; value: number }[] = [];
+    let vday = -1; // VWAP de SESSION : cumul prix×volume remis à zéro à chaque jour UTC
+    let cumPV = 0;
+    let cumV = 0;
     for (let i = 0; i < bars.length; i++) {
       const t = toSec(bars[i].time);
       fast.push({ time: t, value: ef[i] });
@@ -77,12 +86,24 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
       mid.push({ time: t, value: m });
       up.push({ time: t, value: m + 2 * sd });
       lo.push({ time: t, value: m - 2 * sd });
+      const day = Math.floor(bars[i].time / 86_400_000);
+      if (day !== vday) {
+        vday = day;
+        cumPV = 0;
+        cumV = 0;
+      }
+      const tp = (bars[i].high + bars[i].low + bars[i].close) / 3;
+      const v = bars[i].volume || 1;
+      cumPV += tp * v;
+      cumV += v;
+      vwap.push({ time: t, value: cumPV / cumV });
     }
     emaFastRef.current?.setData(fast);
     emaSlowRef.current?.setData(slow);
     bbUpRef.current?.setData(up);
     bbMidRef.current?.setData(mid);
     bbLoRef.current?.setData(lo);
+    vwapRef.current?.setData(vwap);
   }
 
   // Support / résistance les plus proches (swings) — lignes discrètes.
@@ -92,6 +113,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     if (!series) return;
     linesRef.current.forEach((l) => series.removePriceLine(l));
     linesRef.current = [];
+    if (!visRef.current.sr) return; // toggle S/R désactivé → on n'affiche aucun niveau
     if (bars.length < 20) return;
     const sw = swings(bars, 5, 5);
     const lastClose = bars[bars.length - 1].close;
@@ -185,12 +207,14 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     const bbLo = chart.addSeries(LineSeries, { color: 'rgba(130,152,190,.45)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const emaFast = chart.addSeries(LineSeries, { color: 'rgba(43,227,245,.9)', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const emaSlow = chart.addSeries(LineSeries, { color: 'rgba(245,194,74,.9)', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const vwap = chart.addSeries(LineSeries, { color: 'rgba(190,120,245,.95)', lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const series = chart.addSeries(CandlestickSeries, { upColor: '#1fd8b0', downColor: '#ff6b8a', borderVisible: false, wickUpColor: '#1fd8b0', wickDownColor: '#ff6b8a' });
     chartRef.current = chart;
     seriesRef.current = series;
     bbUpRef.current = bbUp;
     bbMidRef.current = bbMid;
     bbLoRef.current = bbLo;
+    vwapRef.current = vwap;
     emaFastRef.current = emaFast;
     emaSlowRef.current = emaSlow;
     markersRef.current = createSeriesMarkers(series, []);
@@ -251,6 +275,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
       bbUpRef.current = null;
       bbMidRef.current = null;
       bbLoRef.current = null;
+      vwapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -267,19 +292,31 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signals, activeTrade]);
 
+  // Toggles indicateurs : masque/affiche les séries (EMA/Bollinger/VWAP) et redessine les niveaux S/R.
+  useEffect(() => {
+    emaFastRef.current?.applyOptions({ visible: vis.ema });
+    emaSlowRef.current?.applyOptions({ visible: vis.ema });
+    bbUpRef.current?.applyOptions({ visible: vis.bb });
+    bbMidRef.current?.applyOptions({ visible: vis.bb });
+    bbLoRef.current?.applyOptions({ visible: vis.bb });
+    vwapRef.current?.applyOptions({ visible: vis.vwap });
+    drawLevels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vis]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         {TFS.map((t) => (
           <button key={t} onClick={() => setTf(t)} style={tfBtn(t === tf)}>
             {t}
           </button>
         ))}
-        <span style={{ marginLeft: 10, display: 'flex', gap: 10, fontSize: 10, color: 'var(--dim)' }}>
-          <span style={{ color: 'rgba(43,227,245,.9)' }}>— EMA9</span>
-          <span style={{ color: 'rgba(245,194,74,.9)' }}>— EMA21</span>
-          <span style={{ color: 'rgba(130,152,190,.8)' }}>·· Bollinger 20</span>
-        </span>
+        <span style={{ width: 1, height: 16, background: 'var(--border)', margin: '0 5px' }} />
+        <button onClick={() => setVis((v) => ({ ...v, ema: !v.ema }))} style={indBtn(vis.ema, 'rgba(43,227,245,.95)')}>EMA 9/21</button>
+        <button onClick={() => setVis((v) => ({ ...v, bb: !v.bb }))} style={indBtn(vis.bb, 'rgba(150,170,205,.95)')}>Bollinger</button>
+        <button onClick={() => setVis((v) => ({ ...v, vwap: !v.vwap }))} style={indBtn(vis.vwap, 'rgba(190,120,245,.95)')}>VWAP</button>
+        <button onClick={() => setVis((v) => ({ ...v, sr: !v.sr }))} style={indBtn(vis.sr, 'rgba(245,194,74,.95)')}>S/R</button>
       </div>
       <div ref={ref} style={{ flex: 1, minHeight: 240 }} />
     </div>
@@ -295,6 +332,21 @@ function tfBtn(active: boolean) {
     background: active ? 'rgba(43,227,245,.16)' : 'transparent',
     color: active ? '#2be3f5' : 'var(--muted)',
     border: `1px solid ${active ? 'rgba(43,227,245,.4)' : 'rgba(130,152,190,.25)'}`,
+  } as const;
+}
+
+// Chip toggle d'un indicateur : allumé = couleur de l'indicateur, éteint = grisé/barré.
+function indBtn(active: boolean, color: string) {
+  return {
+    fontSize: 10.5,
+    padding: '2px 8px',
+    borderRadius: 6,
+    cursor: 'pointer',
+    background: active ? 'rgba(255,255,255,.04)' : 'transparent',
+    color: active ? color : 'var(--dim)',
+    border: `1px solid ${active ? color.replace(/[\d.]+\)$/, '.4)') : 'rgba(130,152,190,.2)'}`,
+    opacity: active ? 1 : 0.5,
+    textDecoration: active ? 'none' : 'line-through',
   } as const;
 }
 
