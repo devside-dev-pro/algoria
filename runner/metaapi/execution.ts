@@ -4,31 +4,15 @@ import type { Signal } from '../../lib/engine/types';
 const clientId = (s: Signal) => `a${s.time.toString(36)}`.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 16);
 
 /**
- * Prépare lot + SL/TP pour qu'ils respectent les contraintes DU BROKER (sinon « Validation failed ») :
- * - SL/TP au moins à `stopsLevel` points du prix marché (on élargit si besoin) ;
- * - volume clampé à [minVolume, maxVolume] et arrondi au `volumeStep`.
+ * Prépare lot + SL/TP selon les contraintes DU BROKER.
+ * - Trade « nu » (stopLoss=0 ET takeProfits vide) → on N'ENVOIE PAS de SL/TP (l'utilisateur gère la sortie).
+ * - Sinon : SL/TP au moins à `stopsLevel` points du prix ; volume borné et arrondi au pas.
  */
-function prepareOrder(stream: any, s: Signal, symbol: string) {
+function prepareOrder(stream: any, s: Signal, symbol: string): { sl?: number; tp?: number; lot: number } {
   const spec = stream?.terminalState?.specification?.(symbol);
   const digits = typeof spec?.digits === 'number' ? spec.digits : 2;
   const point = Math.pow(10, -digits);
   const round = (x: number) => Number(x.toFixed(digits));
-
-  // ----- SL / TP : distance mini au prix marché -----
-  const minDist = (typeof spec?.stopsLevel === 'number' ? spec.stopsLevel : 0) * point;
-  const buf = Math.max(minDist * 1.15, point * 10); // marge de sécurité au-delà du stops level
-  const px = stream?.terminalState?.price?.(symbol);
-  const long = s.direction === 'long';
-  const ref = long ? px?.ask ?? s.entry : px?.bid ?? s.entry;
-  let sl = s.stopLoss;
-  let tp = s.takeProfits[0];
-  if (long) {
-    sl = round(Math.min(sl, ref - buf));
-    tp = round(Math.max(tp, ref + buf));
-  } else {
-    sl = round(Math.max(sl, ref + buf));
-    tp = round(Math.min(tp, ref - buf));
-  }
 
   // ----- volume : bornes + pas -----
   const minV = typeof spec?.minVolume === 'number' ? spec.minVolume : 0.01;
@@ -38,10 +22,30 @@ function prepareOrder(stream: any, s: Signal, symbol: string) {
   lot = Math.round(lot / stepV) * stepV;
   lot = Number(lot.toFixed(2));
 
+  // ----- ordre nu : aucun SL/TP envoyé -----
+  const hasSL = typeof s.stopLoss === 'number' && s.stopLoss > 0;
+  const hasTP = Array.isArray(s.takeProfits) && typeof s.takeProfits[0] === 'number' && s.takeProfits[0] > 0;
+  if (!hasSL && !hasTP) return { lot };
+
+  // ----- SL / TP : au moins à `stopsLevel` du prix marché -----
+  const minDist = (typeof spec?.stopsLevel === 'number' ? spec.stopsLevel : 0) * point;
+  const buf = Math.max(minDist * 1.15, point * 10);
+  const px = stream?.terminalState?.price?.(symbol);
+  const long = s.direction === 'long';
+  const ref = long ? px?.ask ?? s.entry : px?.bid ?? s.entry;
+  let sl = hasSL ? s.stopLoss : undefined;
+  let tp = hasTP ? s.takeProfits[0] : undefined;
+  if (long) {
+    if (sl != null) sl = round(Math.min(sl, ref - buf));
+    if (tp != null) tp = round(Math.max(tp, ref + buf));
+  } else {
+    if (sl != null) sl = round(Math.max(sl, ref + buf));
+    if (tp != null) tp = round(Math.min(tp, ref - buf));
+  }
   return { sl, tp, lot };
 }
 
-/** Place l'ordre sur le compte master. `symbol` = nom du symbole CHEZ LE BROKER (ex. "Gold"). */
+/** Place l'ordre sur le compte master. `symbol` = nom CHEZ LE BROKER (ex. "Gold"). */
 export async function placeSignal(stream: any, s: Signal, symbol: string) {
   const { sl, tp, lot } = prepareOrder(stream, s, symbol);
   const opts = { comment: 'algoria', clientId: clientId(s) }; // ≤ 26 au total (sinon MetaApi rejette l'ordre)
@@ -52,7 +56,12 @@ export async function placeSignal(stream: any, s: Signal, symbol: string) {
   return { ticket: result.positionId ?? result.orderId, code: result.stringCode };
 }
 
-/** Ferme TOUTES les positions ouvertes sur le symbole (bouton « close all » du cockpit). */
+/** Ferme une position précise (mode Action : clôture programmée). */
+export async function closePosition(stream: any, ticket: string) {
+  return stream.closePosition(String(ticket), {});
+}
+
+/** Ferme TOUTES les positions ouvertes sur le symbole (bouton « close all »). */
 export async function closeAll(stream: any, symbol: string) {
   return stream.closePositionsBySymbol(symbol, {});
 }
