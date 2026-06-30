@@ -13,3 +13,8 @@ export async function placeSignal(stream: any, s: Signal, symbol: string) {
       : await stream.createMarketSellOrder(symbol, s.lot, sl, tp, opts);
   return { ticket: result.positionId ?? result.orderId, code: result.stringCode };
 }
+
+/** Ferme TOUTES les positions ouvertes sur le symbole (bouton « close all » du cockpit). */
+export async function closeAll(stream: any, symbol: string) {
+  return stream.closePositionsBySymbol(symbol, {});
+}

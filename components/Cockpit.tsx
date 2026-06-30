@@ -15,8 +15,16 @@ export function Cockpit() {
   // feedback optimiste : on reflète le clic tout de suite (sinon il faut attendre la prochaine clôture de bougie)
   const [optMode, setOptMode] = useState<string | null>(null);
   const [optKilled, setOptKilled] = useState<boolean | null>(null);
+  const [action, setAction] = useState(false); // mode Action (trades en continu)
+  const [lastFire, setLastFire] = useState<string | null>(null); // flash visuel au clic
   const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'normal';
   const killed = optKilled ?? !!st?.killed;
+
+  function fire(kind: string, fn: () => void) {
+    setLastFire(kind);
+    fn();
+    setTimeout(() => setLastFire((k) => (k === kind ? null : k)), 600);
+  }
 
   return (
     <main style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100vh' }}>
@@ -43,6 +51,28 @@ export function Cockpit() {
           <button onClick={() => supabase.auth.signOut()} style={pill(false)} title="sign out">⎋</button>
         </div>
       </header>
+
+      <section className="panel" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85 }}>CONTROL&nbsp;DECK</span>
+        <button onClick={() => fire('long', () => sendCommand('manual_trade', { direction: 'long' }))} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="ouvre un LONG au marché tout de suite">
+          ▲ LONG NOW
+        </button>
+        <button onClick={() => fire('short', () => sendCommand('manual_trade', { direction: 'short' }))} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="ouvre un SHORT au marché tout de suite">
+          ▼ SHORT NOW
+        </button>
+        <button onClick={() => fire('flat', () => sendCommand('close_all'))} style={deckBtn('flat', lastFire === 'flat', false)} title="ferme toutes les positions ouvertes">
+          ✕ CLOSE ALL
+        </button>
+        <div style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 4px' }} />
+        <button
+          onClick={() => { const n = !action; setAction(n); void sendCommand('set_action', { on: n }); }}
+          style={deckBtn(action ? 'action-on' : 'action-off', false, false)}
+          title="mode Action : Algoria envoie des trades en continu (écran vivant pour le live)"
+        >
+          {action ? '● ACTION ON' : '○ ACTION'}
+        </button>
+        <span style={{ fontSize: 10.5, color: 'var(--dim)', marginLeft: 'auto' }}>contrôle manuel — démo</span>
+      </section>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: 12 }}>
         <section className="panel" style={{ padding: 12, display: 'flex', flexDirection: 'column' }}>
@@ -160,6 +190,31 @@ function MarketStatus({ session, regime, tradable }: { session?: string; regime?
       {session ?? '—'} · {regime ?? '—'}
     </span>
   );
+}
+
+function deckBtn(kind: 'long' | 'short' | 'flat' | 'action-on' | 'action-off', flash: boolean, disabled: boolean): CSSProperties {
+  const map = {
+    long: { fg: '#1fd8b0', bd: 'rgba(34,224,166,.5)', bg: 'rgba(34,224,166,.12)' },
+    short: { fg: '#ff6b8a', bd: 'rgba(255,107,138,.5)', bg: 'rgba(255,107,138,.12)' },
+    flat: { fg: 'var(--muted)', bd: 'rgba(130,152,190,.35)', bg: 'transparent' },
+    'action-on': { fg: '#f5c24a', bd: 'rgba(245,194,74,.6)', bg: 'rgba(245,194,74,.16)' },
+    'action-off': { fg: 'var(--muted)', bd: 'rgba(130,152,190,.3)', bg: 'transparent' },
+  }[kind];
+  return {
+    fontSize: 12,
+    fontWeight: 600,
+    letterSpacing: 0.4,
+    padding: '6px 14px',
+    borderRadius: 7,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.4 : 1,
+    color: map.fg,
+    background: flash ? map.fg : map.bg,
+    border: `1px solid ${map.bd}`,
+    transform: flash ? 'scale(1.06)' : 'scale(1)',
+    transition: 'transform .15s ease, background .2s ease',
+    animation: kind === 'action-on' ? 'pulseDot 1.4s ease-in-out infinite' : undefined,
+  };
 }
 
 function pill(active: boolean): CSSProperties {
