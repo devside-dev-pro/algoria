@@ -33,6 +33,16 @@ body {
 @keyframes blinkCur { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 .blink { animation: blinkCur 1s step-end infinite; }
 
+/* === effet wow === */
+@keyframes cardIn { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: none; } }
+.cardIn { animation: cardIn 0.45s cubic-bezier(0.2, 0.9, 0.25, 1); }
+@keyframes flashBar { 0% { opacity: 0; } 12% { opacity: 0.9; } 100% { opacity: 0; } }
+.flashbar { position: fixed; left: 0; right: 0; top: 0; height: 3px; z-index: 50; animation: flashBar 0.7s ease-out; }
+@keyframes liveGlow { 0%, 100% { box-shadow: 0 0 0 1px var(--border), 0 0 14px rgba(31, 216, 176, 0.18); } 50% { box-shadow: 0 0 0 1px rgba(31, 216, 176, 0.5), 0 0 26px rgba(31, 216, 176, 0.4); } }
+.liveGlow { animation: liveGlow 2.2s ease-in-out infinite; }
+@keyframes popVal { from { transform: scale(1.18); } to { transform: scale(1); } }
+.popVal { animation: popVal 0.3s ease-out; }
+
 /* scrollbar fine cyan pour le terminal mission control */
 .mono::-webkit-scrollbar { width: 8px; height: 8px; }
 .mono::-webkit-scrollbar-thumb { background: rgba(43, 227, 245, 0.25); border-radius: 4px; }

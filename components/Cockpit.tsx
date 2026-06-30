@@ -12,26 +12,44 @@ const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixe
 export function Cockpit() {
   const signals = useSignals(8);
   const st = useLatestState() as any;
-  // feedback optimiste : on reflète le clic tout de suite (sinon il faut attendre la prochaine clôture de bougie)
   const [optMode, setOptMode] = useState<string | null>(null);
   const [optKilled, setOptKilled] = useState<boolean | null>(null);
-  const [action, setAction] = useState(false); // mode Action (trades en continu)
-  const [lastFire, setLastFire] = useState<string | null>(null); // flash visuel au clic
+  const [action, setAction] = useState(false);
+  const [lastFire, setLastFire] = useState<string | null>(null);
+  const [lot, setLot] = useState('0.10');
+  const [slIn, setSlIn] = useState('');
+  const [tpIn, setTpIn] = useState('');
   const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'normal';
   const killed = optKilled ?? !!st?.killed;
+  const openPos = Number(st?.open_positions ?? 0);
+  const dayPnl = st?.day_pnl == null ? null : Number(st.day_pnl);
 
   function fire(kind: string, fn: () => void) {
     setLastFire(kind);
     fn();
-    setTimeout(() => setLastFire((k) => (k === kind ? null : k)), 600);
+    setTimeout(() => setLastFire((k) => (k === kind ? null : k)), 700);
+  }
+
+  function manualTrade(direction: 'long' | 'short') {
+    const p: Record<string, unknown> = { direction };
+    const l = parseFloat(lot); if (l > 0) p.lot = l;
+    const s = parseFloat(slIn); if (s > 0) p.sl = s;
+    const t = parseFloat(tpIn); if (t > 0) p.tp = t;
+    fire(direction, () => sendCommand('manual_trade', p));
   }
 
   return (
     <main style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100vh' }}>
+      {lastFire === 'long' && <div className="flashbar" style={{ background: 'linear-gradient(90deg,transparent,#1fd8b0,transparent)' }} />}
+      {lastFire === 'short' && <div className="flashbar" style={{ background: 'linear-gradient(90deg,transparent,#ff6b8a,transparent)' }} />}
+
       <header className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '10px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="glow" style={{ width: 22, height: 22, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
           <strong style={{ fontSize: 16, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--up)', letterSpacing: 1 }}>
+            <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--up)' }} /> LIVE
+          </span>
           <PriceTicker />
           <MarketStatus session={st?.session as string | undefined} regime={st?.regime as string | undefined} tradable={!!st?.tradable} />
         </div>
@@ -54,10 +72,13 @@ export function Cockpit() {
 
       <section className="panel" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85 }}>CONTROL&nbsp;DECK</span>
-        <button onClick={() => fire('long', () => sendCommand('manual_trade', { direction: 'long' }))} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="ouvre un LONG au marché tout de suite">
+        <label style={lbl}>lot<input value={lot} onChange={(e) => setLot(e.target.value)} inputMode="decimal" style={inp(56)} /></label>
+        <label style={lbl}>SL<input value={slIn} onChange={(e) => setSlIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(70)} /></label>
+        <label style={lbl}>TP<input value={tpIn} onChange={(e) => setTpIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(70)} /></label>
+        <button onClick={() => manualTrade('long')} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="ouvre un LONG au marché (SL/TP optionnels)">
           ▲ LONG NOW
         </button>
-        <button onClick={() => fire('short', () => sendCommand('manual_trade', { direction: 'short' }))} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="ouvre un SHORT au marché tout de suite">
+        <button onClick={() => manualTrade('short')} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="ouvre un SHORT au marché (SL/TP optionnels)">
           ▼ SHORT NOW
         </button>
         <button onClick={() => fire('flat', () => sendCommand('close_all'))} style={deckBtn('flat', lastFire === 'flat', false)} title="ferme toutes les positions ouvertes">
@@ -67,11 +88,19 @@ export function Cockpit() {
         <button
           onClick={() => { const n = !action; setAction(n); void sendCommand('set_action', { on: n }); }}
           style={deckBtn(action ? 'action-on' : 'action-off', false, false)}
-          title="mode Action : Algoria envoie des trades en continu (écran vivant pour le live)"
+          title="mode Action : Algoria envoie des trades en continu"
         >
           {action ? '● ACTION ON' : '○ ACTION'}
         </button>
-        <span style={{ fontSize: 10.5, color: 'var(--dim)', marginLeft: 'auto' }}>contrôle manuel — démo</span>
+        {openPos > 0 ? (
+          <span className="liveGlow" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', borderRadius: 8, background: 'rgba(31,216,176,.08)' }}>
+            <span className="pulse" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--up)' }} />
+            <span style={{ fontSize: 11.5, color: 'var(--up)', letterSpacing: 0.5 }}>EN POSITION ×{openPos}</span>
+            {dayPnl != null && <span className="mono popVal" key={dayPnl} style={{ fontSize: 13, fontWeight: 600, color: dayPnl >= 0 ? 'var(--up)' : 'var(--down)' }}>{dayPnl >= 0 ? '+' : ''}{dayPnl.toFixed(0)}$</span>}
+          </span>
+        ) : (
+          <span style={{ fontSize: 10.5, color: 'var(--dim)', marginLeft: 'auto' }}>contrôle manuel — démo · SL/TP optionnels</span>
+        )}
       </section>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: 12 }}>
@@ -93,7 +122,7 @@ export function Cockpit() {
         {signals.map((s: any) => {
           const long = s.direction === 'long';
           return (
-            <div key={s.id} className="panel" style={{ padding: 12, borderColor: long ? 'rgba(34,224,166,.3)' : 'rgba(255,107,138,.3)' }}>
+            <div key={s.id} className="panel cardIn" style={{ padding: 12, borderColor: long ? 'rgba(34,224,166,.3)' : 'rgba(255,107,138,.3)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                 <strong>{s.symbol}</strong>
                 <span style={{ fontSize: 11, padding: '2px 9px', borderRadius: 6, background: long ? 'rgba(34,224,166,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>
@@ -102,8 +131,8 @@ export function Cockpit() {
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
                 <span>entry {fmt(s.entry)}</span>
-                <span>SL {fmt(s.stop_loss)}</span>
-                <span>TP {fmt(s.take_profits?.[0])}</span>
+                <span>SL {s.stop_loss > 0 ? fmt(s.stop_loss) : '—'}</span>
+                <span>TP {s.take_profits?.[0] ? fmt(s.take_profits[0]) : '—'}</span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8 }}>conf {pct(s.confidence)} · R:R {fmt(s.risk_reward)} · {fmt(s.lot)} lot</div>
               {Array.isArray(s.rationale) && s.rationale.length > 0 && (
@@ -155,7 +184,6 @@ function PriceTicker() {
   );
 }
 
-/** ms jusqu'à la réouverture du gold (≈ dimanche 22:00 UTC), ou null si le marché est ouvert. */
 function goldReopenMs(): number | null {
   const now = new Date();
   const day = now.getUTCDay();
@@ -190,6 +218,21 @@ function MarketStatus({ session, regime, tradable }: { session?: string; regime?
       {session ?? '—'} · {regime ?? '—'}
     </span>
   );
+}
+
+const lbl: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--muted)', letterSpacing: 0.5 };
+function inp(width: number): CSSProperties {
+  return {
+    width,
+    fontSize: 12,
+    fontFamily: 'JetBrains Mono, monospace',
+    padding: '4px 7px',
+    borderRadius: 6,
+    color: 'var(--text)',
+    background: 'var(--panel-2)',
+    border: '1px solid rgba(130,152,190,.3)',
+    outline: 'none',
+  };
 }
 
 function deckBtn(kind: 'long' | 'short' | 'flat' | 'action-on' | 'action-off', flash: boolean, disabled: boolean): CSSProperties {
