@@ -14,8 +14,10 @@ import {
 } from 'lightweight-charts';
 import { supabase } from '@/lib/supabase/client';
 import { subscribeTicks } from '@/lib/cockpit/tickStore';
-import { swings } from '@/lib/engine/indicators';
 import type { Bar } from '@/lib/engine/types';
+
+/** Position ouverte à matérialiser sur le chart (entrée/SL/TP). null = aucune → chart propre. */
+export type ActiveTrade = { direction: string; entry: number; sl: number | null; tp: number | null } | null;
 
 const SYMBOL = 'XAUUSD';
 const TFS = ['M5', 'M15', 'H1', 'D1'] as const;
@@ -28,7 +30,7 @@ const toBar = (c: Record<string, unknown>): Bar => ({
   time: Number(c.time), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
 });
 
-export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) {
+export function Chart({ signals, activeTrade = null }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -40,21 +42,16 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
   const tfRef = useRef<TF>('M5');
   const signalsRef = useRef(signals);
   signalsRef.current = signals;
+  const activeRef = useRef<ActiveTrade>(activeTrade);
+  activeRef.current = activeTrade;
   const [tf, setTf] = useState<TF>('M5');
 
   function drawLevels() {
+    // S/R retirés du chart pour désencombrer l'axe de droite — le desk IA narre déjà les niveaux clés.
     const series = seriesRef.current;
-    const bars = barsRef.current;
     if (!series) return;
     linesRef.current.forEach((l) => series.removePriceLine(l));
     linesRef.current = [];
-    if (!bars.length) return;
-    const sw = swings(bars, 5, 5);
-    const lastClose = bars[bars.length - 1].close;
-    const res = sw.filter((s) => s.kind === 'high' && s.price > lastClose).sort((a, b) => a.price - b.price)[0];
-    const sup = sw.filter((s) => s.kind === 'low' && s.price < lastClose).sort((a, b) => b.price - a.price)[0];
-    if (res) linesRef.current.push(series.createPriceLine({ price: res.price, color: '#f5c24a', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'R' }));
-    if (sup) linesRef.current.push(series.createPriceLine({ price: sup.price, color: '#2be3f5', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'S' }));
   }
 
   function drawMarkers() {
@@ -73,21 +70,19 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     markers.setMarkers(mk);
   }
 
+  // Niveaux de la position OUVERTE uniquement (entrée/SL/TP) → chart propre, plus de niveaux fantômes.
   function drawTrade() {
     const series = seriesRef.current;
     if (!series) return;
     tradeLinesRef.current.forEach((l) => series.removePriceLine(l));
     tradeLinesRef.current = [];
-    const sig = signalsRef.current[0];
-    if (!sig) return;
-    const long = sig.direction === 'long';
-    const entry = Number(sig.entry);
-    const sl = Number(sig.stop_loss);
-    const tp = Number((sig.take_profits as number[] | undefined)?.[0]);
+    const a = activeRef.current;
+    if (!a) return; // aucune position ouverte → aucune ligne (chart propre)
+    const long = a.direction === 'long';
     const lines = tradeLinesRef.current;
-    if (Number.isFinite(entry)) lines.push(series.createPriceLine({ price: entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'LONG' : 'SHORT'} ${entry.toFixed(1)}` }));
-    if (Number.isFinite(sl) && sl > 0) lines.push(series.createPriceLine({ price: sl, color: '#ff6b8a', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `SL ${sl.toFixed(1)}` }));
-    if (Number.isFinite(tp) && tp > 0) lines.push(series.createPriceLine({ price: tp, color: '#1fd8b0', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `TP ${tp.toFixed(1)}` }));
+    if (Number.isFinite(a.entry)) lines.push(series.createPriceLine({ price: a.entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'LONG' : 'SHORT'} ${a.entry.toFixed(1)}` }));
+    if (a.sl != null && Number.isFinite(a.sl)) lines.push(series.createPriceLine({ price: a.sl, color: '#ff6b8a', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `SL ${a.sl.toFixed(1)}` }));
+    if (a.tp != null && Number.isFinite(a.tp)) lines.push(series.createPriceLine({ price: a.tp, color: '#1fd8b0', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `TP ${a.tp.toFixed(1)}` }));
   }
 
   async function loadRecent(t: TF) {
@@ -155,15 +150,14 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
         const bar = toBar(c);
         const bars = barsRef.current;
         const last = bars[bars.length - 1];
-        if (last && bar.time === last.time) bars[bars.length - 1] = bar; // réconcilie la bougie en formation avec la bougie clôturée officielle
+        if (last && bar.time === last.time) bars[bars.length - 1] = bar;
         else if (!last || bar.time > last.time) bars.push(bar);
         else return;
         seriesRef.current?.update(toCandle(bar));
       })
       .subscribe();
 
-    // Flux tick temps réel (même source que le ticker) → met à jour la bougie EN FORMATION à chaque tick.
-    // Sinon le chart ne bouge qu'à la clôture M5 (toutes les 5 min) et les markers s'empilent sur une bougie figée.
+    // Flux tick temps réel → bougie EN FORMATION mise à jour à chaque tick (sinon chart figé entre les clôtures M5).
     const unsubTicks = subscribeTicks((tick) => {
       const series = seriesRef.current;
       const bars = barsRef.current;
@@ -205,7 +199,7 @@ export function Chart({ signals }: { signals: Array<Record<string, unknown>> }) 
     drawMarkers();
     drawTrade();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signals]);
+  }, [signals, activeTrade]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

@@ -34,6 +34,16 @@ export function Cockpit() {
     if (!prev || (t.closed_at && !prev.closed_at)) tradeByTicket.set(k, t);
   }
 
+  // position OUVERTE a materialiser sur le chart (entree/SL/TP) ; null si aucune
+  const openSig = signals.find((s: any) => {
+    if (s.ticket == null) return false;
+    const t = tradeByTicket.get(String(s.ticket));
+    return t && !t.closed_at;
+  }) as any;
+  const activeTrade = openSig
+    ? { direction: String(openSig.direction), entry: Number(openSig.entry), sl: Number(openSig.stop_loss) || null, tp: Number(openSig.take_profits?.[0]) || null }
+    : null;
+
   function fire(kind: string, fn: () => void) {
     setLastFire(kind);
     fn();
@@ -117,7 +127,7 @@ export function Cockpit() {
         <section className="panel" style={{ padding: 12, display: 'flex', flexDirection: 'column' }}>
           <div style={{ fontSize: 13, marginBottom: 6, color: 'var(--muted)' }}>XAU/USD</div>
           <div style={{ height: 540 }}>
-            <Chart signals={signals} />
+            <Chart signals={signals} activeTrade={activeTrade} />
           </div>
         </section>
 
