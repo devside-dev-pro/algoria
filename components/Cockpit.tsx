@@ -17,6 +17,7 @@ export function Cockpit() {
   const [optMode, setOptMode] = useState<string | null>(null);
   const [optKilled, setOptKilled] = useState<boolean | null>(null);
   const [action, setAction] = useState(false);
+  const [rafale, setRafale] = useState(false);
   const [lastFire, setLastFire] = useState<string | null>(null);
   const [lot, setLot] = useState('0.10');
   const [slIn, setSlIn] = useState('');
@@ -122,6 +123,19 @@ export function Cockpit() {
           title="mode Action : Algoria envoie des trades en continu"
         >
           {action ? '● ACTION ON' : '○ ACTION'}
+        </button>
+        <button
+          onClick={() => { const n = !rafale; setRafale(n); void sendCommand('set_rafale', { on: n }); }}
+          style={{
+            padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 800, letterSpacing: 0.5, cursor: 'pointer',
+            border: '1px solid rgba(255,209,102,.6)',
+            color: rafale ? '#0b0e14' : '#ffd166',
+            background: rafale ? 'linear-gradient(90deg,#ffd166,#ff9f1c)' : 'transparent',
+            boxShadow: rafale ? '0 0 14px rgba(255,159,28,.55)' : 'none',
+          }}
+          title="RAFALE — micro-scalps en continu (1-5/min). SHOW assumé, pas un edge : petit lot, brûle des frais. Idéal démo."
+        >
+          {rafale ? '⚡ RAFALE ON' : '⚡ RAFALE'}
         </button>
         {openPos > 0 ? (
           <span className="liveGlow" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', borderRadius: 8, background: 'rgba(31,216,176,.08)' }}>

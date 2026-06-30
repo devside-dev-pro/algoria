@@ -20,6 +20,10 @@ const ACTION_MS = 20_000; // mode Action : un trade toutes les ~20s
 const ACTION_HOLD_MS = 9_000; // mode Action : on ferme la position auto après ~9s (open/close → écran vivant)
 const MANUAL_LOT = 0.1; // lot par défaut d'un trade manuel (pilotable via le payload)
 const ACTION_LOT = 0.05; // lot du mode Action (petit, juste pour l'animation)
+const RAFALE_LOT = 0.05; // lot de la RAFALE (petit — c'est du SHOW, pas un edge ; brûle des frais)
+const RAFALE_MIN_MS = 9_000; // cadence RAFALE : entre ~9 et ~21 s (variable → 3-5 trades/min, pas robotique)
+const RAFALE_JITTER_MS = 12_000;
+const RAFALE_MAX_OPEN = 4; // cap d'empilement (jamais de hedge — voir rafaleTick)
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
 async function main() {
@@ -84,16 +88,18 @@ async function main() {
   };
 
   /** Trade au PRIX COURANT. SL/TP optionnels (fournis par le cockpit) ; sinon « nu » → l'utilisateur gère la sortie. */
-  const buildManualSignal = (direction: 'long' | 'short', opts: { lot?: number; sl?: number; tp?: number; tight?: boolean } = {}): Signal | null => {
+  const buildManualSignal = (direction: 'long' | 'short', opts: { lot?: number; sl?: number; tp?: number; tight?: boolean; ultraTight?: boolean } = {}): Signal | null => {
     const p = terminal.price(BROKER);
     if (!p?.bid || !p?.ask) return null;
     const price = r2((p.bid + p.ask) / 2);
-    const lot = opts.lot && opts.lot > 0 ? opts.lot : opts.tight ? ACTION_LOT : MANUAL_LOT;
+    const auto = opts.tight || opts.ultraTight; // SL/TP auto serrés → c'est le BROKER qui clôture (clôture propre)
+    const lot = opts.lot && opts.lot > 0 ? opts.lot : auto ? ACTION_LOT : MANUAL_LOT;
     const dir = direction === 'long' ? 1 : -1;
     let stopLoss = typeof opts.sl === 'number' && opts.sl > 0 ? r2(opts.sl) : 0;
     let takeProfits = typeof opts.tp === 'number' && opts.tp > 0 ? [r2(opts.tp)] : [];
-    if (opts.tight && !stopLoss && !takeProfits.length) {
-      const d = Math.max(price * 0.0008, 0.5);
+    if (auto && !stopLoss && !takeProfits.length) {
+      // RAFALE (ultraTight) : TP/SL très serrés → ouverture/clôture rapides (1-5/min). ACTION : un peu plus large.
+      const d = opts.ultraTight ? Math.max(price * 0.0003, 0.3) : Math.max(price * 0.0008, 0.5);
       stopLoss = r2(price - dir * d);
       takeProfits = [r2(price + dir * d)];
     }
@@ -111,7 +117,7 @@ async function main() {
       takeProfits,
       riskReward: 0,
       lot,
-      rationale: [opts.tight ? 'ACTION mode — trade auto' : `Trade MANUEL ${direction.toUpperCase()}${custom ? ' (SL/TP perso)' : ' au marché'}`],
+      rationale: [opts.ultraTight ? 'RAFALE — micro-scalp' : opts.tight ? 'ACTION mode — trade auto' : `Trade MANUEL ${direction.toUpperCase()}${custom ? ' (SL/TP perso)' : ' au marché'}`],
       confluence,
     };
   };
@@ -154,6 +160,51 @@ async function main() {
     }
   };
 
+  // ===== RAFALE : bouton manuel HFT-show. Micro-scalps ultra-serrés (fermés par le broker) à 3-5/min, cadence variable.
+  // C'est de l'ACTIVITÉ assumée (pas un edge — cf. backtest M1 : les coûts mangent tout). Petit lot. Jamais de hedge.
+  let rafaleOn = false;
+  let rafaleTimer: ReturnType<typeof setTimeout> | null = null;
+  let rafalePrev = 0;
+  const scheduleRafale = () => {
+    if (!rafaleOn) return;
+    rafaleTimer = setTimeout(() => void rafaleTick(), RAFALE_MIN_MS + Math.floor(Math.random() * RAFALE_JITTER_MS));
+  };
+  const rafaleTick = async () => {
+    try {
+      state = readState(terminal, BROKER, state);
+      if (state.killed) return; // le kill switch coupe aussi la rafale
+      const p = terminal.price(BROKER);
+      if (!p?.bid || !p?.ask) return;
+      const mid = (p.bid + p.ask) / 2;
+      const positions = ((terminal.positions ?? []) as any[]).filter((x) => x.symbol === BROKER);
+      if (positions.length >= RAFALE_MAX_OPEN) {
+        rafalePrev = mid;
+        return; // cap d'empilement atteint → on attend que ça se ferme
+      }
+      const longs = positions.filter((x) => x.type === 'POSITION_TYPE_BUY').length;
+      const shorts = positions.length - longs;
+      // direction : micro-momentum si à plat, sinon on RENFORCE le sens existant (jamais l'opposé → pas de hedge)
+      const dir: 'long' | 'short' = positions.length === 0 ? (mid >= rafalePrev ? 'long' : 'short') : longs >= shorts ? 'long' : 'short';
+      rafalePrev = mid;
+      const sig = buildManualSignal(dir, { lot: RAFALE_LOT, ultraTight: true });
+      if (sig) await executeSignal(sig);
+    } finally {
+      scheduleRafale(); // se replanifie toujours tant que la rafale est ON
+    }
+  };
+  const setRafaleMode = (on: boolean) => {
+    if (on && !rafaleOn) {
+      rafaleOn = true;
+      void logNote('⚡ RAFALE ON — micro-scalps en continu (SHOW, pas un edge — petit lot, brûle des frais)', 'order');
+      scheduleRafale();
+    } else if (!on && rafaleOn) {
+      rafaleOn = false;
+      if (rafaleTimer) clearTimeout(rafaleTimer);
+      rafaleTimer = null;
+      void logNote('RAFALE OFF', 'info');
+    }
+  };
+
   // commandes venues du cockpit (mode, kill switch, contrôle manuel, action)
   watchCommands((cmd) => {
     void (async () => {
@@ -162,6 +213,7 @@ async function main() {
         else if (cmd.type === 'kill') {
           state.killed = true;
           setActionMode(false); // kill coupe aussi le mode action
+          setRafaleMode(false); // …et la rafale
         } else if (cmd.type === 'resume') state.killed = false;
         else if (cmd.type === 'manual_trade') {
           const pl = cmd.payload as any;
@@ -185,6 +237,8 @@ async function main() {
           }
         } else if (cmd.type === 'set_action') {
           setActionMode(!!(cmd.payload as any)?.on);
+        } else if (cmd.type === 'set_rafale') {
+          setRafaleMode(!!(cmd.payload as any)?.on);
         }
         console.log('[algoria] commande:', cmd.type, cmd.payload ?? '');
       } catch (e) {

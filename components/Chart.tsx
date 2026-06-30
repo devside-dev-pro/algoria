@@ -22,10 +22,10 @@ import type { Bar } from '@/lib/engine/types';
 export type ActiveTrade = { direction: string; entry: number; sl: number | null; tp: number | null } | null;
 
 const SYMBOL = 'XAUUSD';
-const TFS = ['M5', 'M15', 'H1', 'D1'] as const;
+const TFS = ['M1', 'M5', 'M15', 'H1', 'D1'] as const;
 type TF = (typeof TFS)[number];
 const PAGE = 1500;
-const TF_MS: Record<TF, number> = { M5: 300_000, M15: 900_000, H1: 3_600_000, D1: 86_400_000 };
+const TF_MS: Record<TF, number> = { M1: 60_000, M5: 300_000, M15: 900_000, H1: 3_600_000, D1: 86_400_000 };
 const BB_PERIOD = 20;
 const toSec = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp;
 const toCandle = (b: Bar) => ({ time: toSec(b.time), open: b.open, high: b.high, low: b.low, close: b.close });
