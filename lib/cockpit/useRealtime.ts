@@ -141,6 +141,56 @@ export function usePrice() {
   return px;
 }
 
+/** Trades (ouvertures + clôtures) → corrélés aux signaux : statut ouvert/fermé, P&L, raison. Refetch sur tout changement. */
+export function useTrades(limit = 60) {
+  const [trades, setTrades] = useState<Row[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      supabase
+        .from('trades')
+        .select('*')
+        .order('opened_at', { ascending: false, nullsFirst: false })
+        .limit(limit)
+        .then(({ data }) => {
+          if (alive && data) setTrades(data);
+        });
+    void load();
+    const ch = supabase
+      .channel('rt-trades')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trades' }, () => void load())
+      .subscribe();
+    return () => {
+      alive = false;
+      supabase.removeChannel(ch);
+    };
+  }, [limit]);
+  return trades;
+}
+
+/** Équity au DÉBUT du jour UTC (1er snapshot du jour) → day P&L correct, insensible aux redémarrages du runner. */
+export function useDayStartEquity() {
+  const [eq, setEq] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const midnight = new Date();
+    midnight.setUTCHours(0, 0, 0, 0);
+    supabase
+      .from('state_snapshots')
+      .select('equity')
+      .gte('ts', midnight.toISOString())
+      .order('ts', { ascending: true })
+      .limit(1)
+      .then(({ data }) => {
+        if (alive && data?.[0]) setEq(Number((data[0] as { equity: number }).equity));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return eq;
+}
+
 /** Cockpit → runner (mode pills, kill switch). On AWAIT : sinon supabase-js n'envoie jamais la requête. */
 export async function sendCommand(type: string, payload?: unknown) {
   const { error } = await supabase.from('commands').insert({ type, payload: (payload ?? null) as never });

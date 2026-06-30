@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
-import { useSignals, useLatestState, sendCommand, usePrice } from '@/lib/cockpit/useRealtime';
+import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity } from '@/lib/cockpit/useRealtime';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
@@ -12,6 +12,8 @@ const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixe
 export function Cockpit() {
   const signals = useSignals(8);
   const st = useLatestState() as any;
+  const trades = useTrades(60);
+  const dayStartEq = useDayStartEquity();
   const [optMode, setOptMode] = useState<string | null>(null);
   const [optKilled, setOptKilled] = useState<boolean | null>(null);
   const [action, setAction] = useState(false);
@@ -22,7 +24,15 @@ export function Cockpit() {
   const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'normal';
   const killed = optKilled ?? !!st?.killed;
   const openPos = Number(st?.open_positions ?? 0);
-  const dayPnl = st?.day_pnl == null ? null : Number(st.day_pnl);
+  const dayPnl =
+    dayStartEq != null && st?.equity != null ? Number(st.equity) - dayStartEq : st?.day_pnl == null ? null : Number(st.day_pnl);
+  const tradeByTicket = new Map<string, any>();
+  for (const t of trades) {
+    if (t.ticket == null) continue;
+    const k = String(t.ticket);
+    const prev = tradeByTicket.get(k);
+    if (!prev || (t.closed_at && !prev.closed_at)) tradeByTicket.set(k, t);
+  }
 
   function fire(kind: string, fn: () => void) {
     setLastFire(kind);
@@ -117,29 +127,50 @@ export function Cockpit() {
         </div>
       </div>
 
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }}>
-        {signals.length === 0 && <div className="panel" style={{ padding: 12, color: 'var(--dim)' }}>no signal yet</div>}
-        {signals.map((s: any) => {
+      <div style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1 }}>
+        TRADES <span style={{ color: 'var(--dim)' }}>— le plus récent à gauche (#{signals.length || 0}) → le plus ancien à droite</span>
+      </div>
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 12 }}>
+        {signals.length === 0 && <div className="panel" style={{ padding: 12, color: 'var(--dim)' }}>aucun trade pour l'instant</div>}
+        {signals.map((s: any, i: number) => {
           const long = s.direction === 'long';
+          const tr = s.ticket != null ? tradeByTicket.get(String(s.ticket)) : null;
+          const closed = !!tr?.closed_at;
+          const pnl = tr?.pnl != null ? Number(tr.pnl) : null;
+          const reason = (tr?.reason as string | undefined) ?? '';
+          const num = signals.length - i;
+          const time = s.created_at ? new Date(s.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+          const edge = long ? 'rgba(34,224,166,.35)' : 'rgba(255,107,138,.35)';
           return (
-            <div key={s.id} className="panel cardIn" style={{ padding: 12, borderColor: long ? 'rgba(34,224,166,.3)' : 'rgba(255,107,138,.3)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <strong>{s.symbol}</strong>
-                <span style={{ fontSize: 11, padding: '2px 9px', borderRadius: 6, background: long ? 'rgba(34,224,166,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>
-                  {String(s.direction).toUpperCase()}
+            <div key={s.id} className="panel cardIn" style={{ padding: 12, borderColor: closed ? 'var(--border)' : edge, opacity: closed ? 0.9 : 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>#{num}</span>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{time}</span>
+                  <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 6, background: long ? 'rgba(34,224,166,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>{String(s.direction).toUpperCase()}</span>
                 </span>
+                {closed ? (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {reason && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 5, background: 'rgba(130,152,190,.15)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{reason}</span>}
+                    <span className="mono" style={{ fontSize: 12.5, fontWeight: 700, color: (pnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>{(pnl ?? 0) >= 0 ? '✓ +' : '✗ '}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
+                  </span>
+                ) : (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 0.5 }}>
+                    <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cyan)' }} /> OUVERT
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
                 <span>entry {fmt(s.entry)}</span>
                 <span>SL {s.stop_loss > 0 ? fmt(s.stop_loss) : '—'}</span>
                 <span>TP {s.take_profits?.[0] ? fmt(s.take_profits[0]) : '—'}</span>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8 }}>conf {pct(s.confidence)} · R:R {fmt(s.risk_reward)} · {fmt(s.lot)} lot</div>
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8 }}>{fmt(s.lot)} lot{closed && tr?.exit ? ` · sortie ${fmt(tr.exit)}` : ''}</div>
               {Array.isArray(s.rationale) && s.rationale.length > 0 && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   <div style={{ fontSize: 9.5, color: 'var(--cyan)', letterSpacing: 0.5, opacity: 0.85 }}>WHY THIS TRADE</div>
-                  {(s.rationale as string[]).slice(0, 3).map((r: string, i: number) => (
-                    <div key={i} style={{ fontSize: 10.5, color: 'var(--muted)', lineHeight: 1.35 }}>◢ {r}</div>
+                  {(s.rationale as string[]).slice(0, 2).map((r: string, j: number) => (
+                    <div key={j} style={{ fontSize: 10.5, color: 'var(--muted)', lineHeight: 1.35 }}>◢ {r}</div>
                   ))}
                 </div>
               )}
@@ -151,7 +182,7 @@ export function Cockpit() {
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 10 }}>
         <Metric label="Balance" value={st ? fmt(st.balance, 0) : '—'} accent="var(--cyan)" />
         <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} accent="var(--blue)" />
-        <Metric label="Day P&L" value={st ? fmt(st.day_pnl, 0) : '—'} color={st && st.day_pnl >= 0 ? 'var(--up)' : 'var(--down)'} accent={st && st.day_pnl >= 0 ? 'var(--up)' : 'var(--down)'} />
+        <Metric label="Day P&L" value={dayPnl == null ? '—' : (dayPnl >= 0 ? '+' : '') + dayPnl.toFixed(0)} color={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} accent={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} />
         <Metric label="Positions" value={st ? String(st.open_positions ?? 0) : '—'} accent="var(--muted)" />
         <Metric label="Risk exposure" value={st ? pct(st.open_risk_pct) : '—'} accent="var(--gold)" />
         <Metric label="Kill switch" value={killed ? 'ON' : 'off'} color={killed ? 'var(--down)' : 'var(--dim)'} accent={killed ? 'var(--down)' : 'var(--dim)'} />
