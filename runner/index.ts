@@ -17,8 +17,8 @@ const BROKER = process.env.ALGORIA_SYMBOL ?? 'XAUUSD'; // nom du symbole chez le
 const DISPLAY = 'XAUUSD'; // label stocké/affiché dans le cockpit (cohérent)
 const TF = '5m';
 const ACTION_MS = 20_000; // mode Action : un trade toutes les ~20s
-const ACTION_HOLD_MS = 9_000; // mode Action : on ferme la position auto après ~9s (open/close en continu → écran vivant)
-const MANUAL_LOT = 0.1; // lot par défaut d'un trade manuel (l'utilisateur le pilotera via le payload)
+const ACTION_HOLD_MS = 9_000; // mode Action : on ferme la position auto après ~9s (open/close → écran vivant)
+const MANUAL_LOT = 0.1; // lot par défaut d'un trade manuel (pilotable via le payload)
 const ACTION_LOT = 0.05; // lot du mode Action (petit, juste pour l'animation)
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -71,7 +71,6 @@ async function main() {
       console.log('[algoria] ORDRE', signal.direction, BROKER, signal.lot, '→', res.ticket);
       return res.ticket;
     } catch (e) {
-      // Échec d'envoi rendu VISIBLE (events Supabase) + signal rejeté persisté, AVEC le détail MetaApi.
       const err = e as { message?: string; stringCode?: string; numericCode?: number; details?: unknown };
       const extra = [err.stringCode ? `code=${err.stringCode}` : '', err.numericCode != null ? `num=${err.numericCode}` : '', err.details ? `details=${JSON.stringify(err.details)}` : ''].filter(Boolean).join(' / ');
       const reason = `${err.message ?? String(e)}${extra ? ' / ' + extra : ''}`;
@@ -82,12 +81,15 @@ async function main() {
     }
   };
 
-  /** Trade au PRIX COURANT. Par défaut « nu » (sans SL/TP) — l'utilisateur gère la sortie (CLOSE ALL ou MT5). */
-  const buildManualSignal = (direction: 'long' | 'short', opts: { lot?: number; tight?: boolean } = {}): Signal | null => {
+  /** Trade au PRIX COURANT. SL/TP optionnels (fournis par le cockpit) ; sinon « nu » → l'utilisateur gère la sortie. */
+  const buildManualSignal = (direction: 'long' | 'short', opts: { lot?: number; sl?: number; tp?: number; tight?: boolean } = {}): Signal | null => {
     const p = terminal.price(BROKER);
     if (!p?.bid || !p?.ask) return null;
     const price = r2((p.bid + p.ask) / 2);
     const lot = opts.lot && opts.lot > 0 ? opts.lot : opts.tight ? ACTION_LOT : MANUAL_LOT;
+    const stopLoss = typeof opts.sl === 'number' && opts.sl > 0 ? r2(opts.sl) : 0; // 0 = pas de SL (ordre nu)
+    const takeProfits = typeof opts.tp === 'number' && opts.tp > 0 ? [r2(opts.tp)] : []; // [] = pas de TP
+    const custom = stopLoss > 0 || takeProfits.length > 0;
     const confluence: Confluence = { direction, rawScore: 0, alignment: 0, quality: 0, macro: 0, confidence: 1, contributions: [] };
     return {
       id: `${DISPLAY}-${Date.now()}-${direction}`,
@@ -97,11 +99,11 @@ async function main() {
       mode,
       confidence: 1,
       entry: price,
-      stopLoss: 0, // ordre nu : aucun SL imposé
-      takeProfits: [], // ordre nu : aucun TP imposé
+      stopLoss,
+      takeProfits,
       riskReward: 0,
       lot,
-      rationale: [opts.tight ? 'ACTION mode — trade auto' : `Trade MANUEL ${direction.toUpperCase()} au marché`],
+      rationale: [opts.tight ? 'ACTION mode — trade auto' : `Trade MANUEL ${direction.toUpperCase()}${custom ? ' (SL/TP perso)' : ' au marché'}`],
       confluence,
     };
   };
@@ -147,10 +149,12 @@ async function main() {
           const pl = cmd.payload as any;
           const dir = pl?.direction === 'short' ? 'short' : 'long';
           const lot = typeof pl?.lot === 'number' && pl.lot > 0 ? pl.lot : undefined;
+          const sl = typeof pl?.sl === 'number' && pl.sl > 0 ? pl.sl : undefined;
+          const tp = typeof pl?.tp === 'number' && pl.tp > 0 ? pl.tp : undefined;
           if (state.killed) {
             await logNote(`trade manuel ${dir} ignoré — kill switch actif`, 'veto');
           } else {
-            const sig = buildManualSignal(dir, { lot });
+            const sig = buildManualSignal(dir, { lot, sl, tp });
             if (sig) await executeSignal(sig);
             else await logNote(`trade manuel ${dir} ignoré — pas de prix live`, 'veto');
           }
@@ -179,7 +183,6 @@ async function main() {
     await pushState(context, state, mode);
     if (signal) await executeSignal(signal);
 
-    // Desk Claude — trades / opportunités / analyses. No-op sans ANTHROPIC_API_KEY ; après l'ordre.
     if (narrationReady()) {
       if (signal) {
         const line = await narrate({ kind: 'trade', ctx: context, signal, confluence, threshold });
@@ -199,7 +202,7 @@ async function main() {
     const p = terminal.price(BROKER);
     if (p) {
       const quoteMs = new Date(p.time).getTime();
-      const stale = Number.isFinite(quoteMs) && Date.now() - quoteMs > 90_000; // quote > 90s = marché fermé
+      const stale = Number.isFinite(quoteMs) && Date.now() - quoteMs > 90_000;
       if (!stale) {
         agg(p.bid, p.ask, Date.now());
         broadcastTick(p.bid, p.ask);
