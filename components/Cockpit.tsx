@@ -165,6 +165,33 @@ export function Cockpit() {
       <div style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1 }}>
         TRADES <span style={{ color: 'var(--dim)' }}>— le plus récent à gauche (#{signals.length || 0}) → le plus ancien à droite</span>
       </div>
+      {(() => {
+        const openTrades = [...tradeByTicket.values()].filter((t: any) => !t.closed_at);
+        if (!openTrades.length) return null;
+        return (
+          <section className="panel" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85 }}>POSITIONS&nbsp;OUVERTES</span>
+            {openTrades.map((t: any) => {
+              const long = t.direction === 'long';
+              const k = String(t.ticket);
+              return (
+                <span key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px 4px 10px', borderRadius: 8, border: `1px solid ${long ? 'rgba(34,224,166,.35)' : 'rgba(255,107,138,.35)'}` }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: long ? 'var(--up)' : 'var(--down)' }}>{String(t.direction).toUpperCase()}</span>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{fmt(t.lot)} lot @ {fmt(t.entry)}</span>
+                  <button
+                    onClick={() => fire('close-' + k, () => sendCommand('close_position', { ticket: k }))}
+                    title="fermer cette position au marché (sans attendre TP/SL)"
+                    style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 6, border: '1px solid rgba(255,107,138,.5)', background: lastFire === 'close-' + k ? 'rgba(255,107,138,.2)' : 'transparent', color: '#ff8aa2', cursor: 'pointer' }}
+                  >
+                    ✕ fermer
+                  </button>
+                </span>
+              );
+            })}
+          </section>
+        );
+      })()}
+
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 12 }}>
         {signals.length === 0 && <div className="panel" style={{ padding: 12, color: 'var(--dim)' }}>aucun trade pour l'instant</div>}
         {signals.map((s: any, i: number) => {

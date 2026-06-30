@@ -239,6 +239,17 @@ async function main() {
           setActionMode(!!(cmd.payload as any)?.on);
         } else if (cmd.type === 'set_rafale') {
           setRafaleMode(!!(cmd.payload as any)?.on);
+        } else if (cmd.type === 'close_position') {
+          const ticket = String((cmd.payload as any)?.ticket ?? '');
+          if (!ticket) await logNote('close_position ignoré — pas de ticket', 'veto');
+          else {
+            try {
+              await closePosition(stream, ticket);
+              await logNote(`✕ position ${ticket} fermée manuellement`, 'order');
+            } catch (e) {
+              await logNote(`fermeture position ${ticket} échouée · ${(e as { message?: string })?.message ?? String(e)}`, 'veto');
+            }
+          }
         }
         console.log('[algoria] commande:', cmd.type, cmd.payload ?? '');
       } catch (e) {
