@@ -80,7 +80,7 @@ async function main() {
       const err = e as { message?: string; stringCode?: string; numericCode?: number; details?: unknown };
       const extra = [err.stringCode ? `code=${err.stringCode}` : '', err.numericCode != null ? `num=${err.numericCode}` : '', err.details ? `details=${JSON.stringify(err.details)}` : ''].filter(Boolean).join(' / ');
       const reason = `${err.message ?? String(e)}${extra ? ' / ' + extra : ''}`;
-      await logNote(`échec ordre · ${signal.direction} ${BROKER} ${signal.lot} lot · ${reason}`, 'veto');
+      await logNote(`order failed · ${signal.direction} ${BROKER} ${signal.lot} lot · ${reason}`, 'veto');
       await logSignal(signal, { code: reason.slice(0, 250), status: 'rejected' });
       console.error('[algoria] échec ordre:', e);
       return undefined;
@@ -117,7 +117,7 @@ async function main() {
       takeProfits,
       riskReward: 0,
       lot,
-      rationale: [opts.ultraTight ? 'RAFALE — micro-scalp' : opts.tight ? 'ACTION mode — trade auto' : `Trade MANUEL ${direction.toUpperCase()}${custom ? ' (SL/TP perso)' : ' au marché'}`],
+      rationale: [opts.ultraTight ? 'RAFALE — micro-scalp' : opts.tight ? 'ACTION mode — auto trade' : `MANUAL ${direction.toUpperCase()} trade${custom ? ' (custom SL/TP)' : ' at market'}`],
       confluence,
     };
   };
@@ -152,7 +152,7 @@ async function main() {
   const setActionMode = (on: boolean) => {
     if (on && !actionTimer) {
       actionTimer = setInterval(() => void actionTick(), ACTION_MS);
-      void logNote('● ACTION mode ON — Algoria envoie des trades en continu', 'order');
+      void logNote('● ACTION mode ON — Algoria sends trades continuously', 'order');
     } else if (!on && actionTimer) {
       clearInterval(actionTimer);
       actionTimer = null;
@@ -195,7 +195,7 @@ async function main() {
   const setRafaleMode = (on: boolean) => {
     if (on && !rafaleOn) {
       rafaleOn = true;
-      void logNote('⚡ RAFALE ON — micro-scalps en continu (SHOW, pas un edge — petit lot, brûle des frais)', 'order');
+      void logNote('⚡ RAFALE ON — continuous micro-scalps (show, not an edge — small lot, burns fees)', 'order');
       scheduleRafale();
     } else if (!on && rafaleOn) {
       rafaleOn = false;
@@ -222,18 +222,18 @@ async function main() {
           const sl = typeof pl?.sl === 'number' && pl.sl > 0 ? pl.sl : undefined;
           const tp = typeof pl?.tp === 'number' && pl.tp > 0 ? pl.tp : undefined;
           if (state.killed) {
-            await logNote(`trade manuel ${dir} ignoré — kill switch actif`, 'veto');
+            await logNote(`manual trade ${dir} ignored — kill switch active`, 'veto');
           } else {
             const sig = buildManualSignal(dir, { lot, sl, tp });
             if (sig) await executeSignal(sig);
-            else await logNote(`trade manuel ${dir} ignoré — pas de prix live`, 'veto');
+            else await logNote(`manual trade ${dir} ignored — no live price`, 'veto');
           }
         } else if (cmd.type === 'close_all') {
           try {
             await closeAll(stream, BROKER);
-            await logNote('✕ close all — toutes les positions fermées manuellement', 'order');
+            await logNote('✕ close all — all positions closed manually', 'order');
           } catch (e) {
-            await logNote(`close all échoué · ${(e as { message?: string })?.message ?? String(e)}`, 'veto');
+            await logNote(`close all failed · ${(e as { message?: string })?.message ?? String(e)}`, 'veto');
           }
         } else if (cmd.type === 'set_action') {
           setActionMode(!!(cmd.payload as any)?.on);
@@ -241,13 +241,13 @@ async function main() {
           setRafaleMode(!!(cmd.payload as any)?.on);
         } else if (cmd.type === 'close_position') {
           const ticket = String((cmd.payload as any)?.ticket ?? '');
-          if (!ticket) await logNote('close_position ignoré — pas de ticket', 'veto');
+          if (!ticket) await logNote('close_position ignored — no ticket', 'veto');
           else {
             try {
               await closePosition(stream, ticket);
-              await logNote(`✕ position ${ticket} fermée manuellement`, 'order');
+              await logNote(`✕ position ${ticket} closed manually`, 'order');
             } catch (e) {
-              await logNote(`fermeture position ${ticket} échouée · ${(e as { message?: string })?.message ?? String(e)}`, 'veto');
+              await logNote(`failed to close position ${ticket} · ${(e as { message?: string })?.message ?? String(e)}`, 'veto');
             }
           }
         }
@@ -323,7 +323,7 @@ async function main() {
     void reconcileOpenTrades(DISPLAY, live).then((n) => {
       if (n > 0) {
         console.log(`[algoria] réconciliation : ${n} position(s) fantôme(s) fermée(s) en base`);
-        void logNote(`${n} position(s) fantôme(s) nettoyée(s) (fermées côté broker, pas en base)`, 'info');
+        void logNote(`${n} ghost position(s) cleaned up (closed on broker, not in DB)`, 'info');
       }
     });
   }, 60_000);

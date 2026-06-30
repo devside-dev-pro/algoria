@@ -85,7 +85,7 @@ export function Cockpit() {
                 style={isScalp
                   ? { ...pill(on), color: on ? '#0b0e14' : '#ffd166', borderColor: 'rgba(255,209,102,.55)', background: on ? '#ffd166' : 'transparent', fontWeight: 700, letterSpacing: 0.5 }
                   : pill(on)}
-                title={isScalp ? 'mode SCALP — stratégie scalp validée (trade souvent, TP rapide)' : `mode ${m}`}
+                title={isScalp ? 'SCALP mode — validated scalp strategy (trades often, fast TP)' : `${m} mode`}
               >
                 {isScalp ? '⚡ SCALP' : m}
               </button>
@@ -94,7 +94,7 @@ export function Cockpit() {
           <button
             onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
             style={{ ...pill(killed), color: killed ? '#ff8aa2' : 'var(--muted)', borderColor: 'rgba(255,107,138,.45)', background: killed ? 'rgba(255,107,138,.15)' : 'transparent' }}
-            title={killed ? 'reprendre le trading' : 'kill switch — coupe toute nouvelle position'}
+            title={killed ? 'resume trading' : 'kill switch — stops any new position'}
           >
             {killed ? '● KILLED' : 'kill'}
           </button>
@@ -107,20 +107,20 @@ export function Cockpit() {
         <label style={lbl}>lot<input value={lot} onChange={(e) => setLot(e.target.value)} inputMode="decimal" style={inp(56)} /></label>
         <label style={lbl}>SL<input value={slIn} onChange={(e) => setSlIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(70)} /></label>
         <label style={lbl}>TP<input value={tpIn} onChange={(e) => setTpIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(70)} /></label>
-        <button onClick={() => manualTrade('long')} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="ouvre un LONG au marché (SL/TP optionnels)">
+        <button onClick={() => manualTrade('long')} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="open a LONG at market (SL/TP optional)">
           ▲ LONG NOW
         </button>
-        <button onClick={() => manualTrade('short')} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="ouvre un SHORT au marché (SL/TP optionnels)">
+        <button onClick={() => manualTrade('short')} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="open a SHORT at market (SL/TP optional)">
           ▼ SHORT NOW
         </button>
-        <button onClick={() => fire('flat', () => sendCommand('close_all'))} style={deckBtn('flat', lastFire === 'flat', false)} title="ferme toutes les positions ouvertes">
+        <button onClick={() => fire('flat', () => sendCommand('close_all'))} style={deckBtn('flat', lastFire === 'flat', false)} title="close all open positions">
           ✕ CLOSE ALL
         </button>
         <div style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 4px' }} />
         <button
           onClick={() => { const n = !action; setAction(n); void sendCommand('set_action', { on: n }); }}
           style={deckBtn(action ? 'action-on' : 'action-off', false, false)}
-          title="mode Action : Algoria envoie des trades en continu"
+          title="Action mode: Algoria sends trades continuously"
         >
           {action ? '● ACTION ON' : '○ ACTION'}
         </button>
@@ -133,18 +133,18 @@ export function Cockpit() {
             background: rafale ? 'linear-gradient(90deg,#ffd166,#ff9f1c)' : 'transparent',
             boxShadow: rafale ? '0 0 14px rgba(255,159,28,.55)' : 'none',
           }}
-          title="RAFALE — micro-scalps en continu (1-5/min). SHOW assumé, pas un edge : petit lot, brûle des frais. Idéal démo."
+          title="RAFALE — continuous micro-scalps (1-5/min). Pure show, not an edge: small lot, burns fees. Best on demo."
         >
           {rafale ? '⚡ RAFALE ON' : '⚡ RAFALE'}
         </button>
         {openPos > 0 ? (
           <span className="liveGlow" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', borderRadius: 8, background: 'rgba(31,216,176,.08)' }}>
             <span className="pulse" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--up)' }} />
-            <span style={{ fontSize: 11.5, color: 'var(--up)', letterSpacing: 0.5 }}>EN POSITION ×{openPos}</span>
+            <span style={{ fontSize: 11.5, color: 'var(--up)', letterSpacing: 0.5 }}>IN POSITION ×{openPos}</span>
             {dayPnl != null && <span className="mono popVal" key={dayPnl} style={{ fontSize: 13, fontWeight: 600, color: dayPnl >= 0 ? 'var(--up)' : 'var(--down)' }}>{dayPnl >= 0 ? '+' : ''}{dayPnl.toFixed(0)}$</span>}
           </span>
         ) : (
-          <span style={{ fontSize: 10.5, color: 'var(--dim)', marginLeft: 'auto' }}>contrôle manuel — démo · SL/TP optionnels</span>
+          <span style={{ fontSize: 10.5, color: 'var(--dim)', marginLeft: 'auto' }}>manual control — demo · SL/TP optional</span>
         )}
       </section>
 
@@ -163,14 +163,14 @@ export function Cockpit() {
       </div>
 
       <div style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1 }}>
-        TRADES <span style={{ color: 'var(--dim)' }}>— le plus récent à gauche (#{signals.length || 0}) → le plus ancien à droite</span>
+        TRADES <span style={{ color: 'var(--dim)' }}>— newest left (#{signals.length || 0}) → oldest right</span>
       </div>
       {(() => {
         const openTrades = [...tradeByTicket.values()].filter((t: any) => !t.closed_at);
         if (!openTrades.length) return null;
         return (
           <section className="panel" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85 }}>POSITIONS&nbsp;OUVERTES</span>
+            <span style={{ fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85 }}>OPEN&nbsp;POSITIONS</span>
             {openTrades.map((t: any) => {
               const long = t.direction === 'long';
               const k = String(t.ticket);
@@ -180,10 +180,10 @@ export function Cockpit() {
                   <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{fmt(t.lot)} lot @ {fmt(t.entry)}</span>
                   <button
                     onClick={() => fire('close-' + k, () => sendCommand('close_position', { ticket: k }))}
-                    title="fermer cette position au marché (sans attendre TP/SL)"
+                    title="close this position at market (without waiting for TP/SL)"
                     style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 6, border: '1px solid rgba(255,107,138,.5)', background: lastFire === 'close-' + k ? 'rgba(255,107,138,.2)' : 'transparent', color: '#ff8aa2', cursor: 'pointer' }}
                   >
-                    ✕ fermer
+                    ✕ close
                   </button>
                 </span>
               );
@@ -193,7 +193,7 @@ export function Cockpit() {
       })()}
 
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 12 }}>
-        {signals.length === 0 && <div className="panel" style={{ padding: 12, color: 'var(--dim)' }}>aucun trade pour l'instant</div>}
+        {signals.length === 0 && <div className="panel" style={{ padding: 12, color: 'var(--dim)' }}>no trades yet</div>}
         {signals.map((s: any, i: number) => {
           const long = s.direction === 'long';
           const tr = s.ticket != null ? tradeByTicket.get(String(s.ticket)) : null;
@@ -201,7 +201,7 @@ export function Cockpit() {
           const pnl = tr?.pnl != null ? Number(tr.pnl) : null;
           const reason = (tr?.reason as string | undefined) ?? '';
           const num = signals.length - i;
-          const time = s.created_at ? new Date(s.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+          const time = s.created_at ? new Date(s.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
           const edge = long ? 'rgba(34,224,166,.35)' : 'rgba(255,107,138,.35)';
           return (
             <div key={s.id} className="panel cardIn" style={{ padding: 12, borderColor: closed ? 'var(--border)' : edge, opacity: closed ? 0.9 : 1 }}>
@@ -218,7 +218,7 @@ export function Cockpit() {
                   </span>
                 ) : (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: 'var(--cyan)', letterSpacing: 0.5 }}>
-                    <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cyan)' }} /> OUVERT
+                    <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cyan)' }} /> OPEN
                   </span>
                 )}
               </div>
@@ -227,7 +227,7 @@ export function Cockpit() {
                 <span>SL {s.stop_loss > 0 ? fmt(s.stop_loss) : '—'}</span>
                 <span>TP {s.take_profits?.[0] ? fmt(s.take_profits[0]) : '—'}</span>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8 }}>{fmt(s.lot)} lot{closed && tr?.exit ? ` · sortie ${fmt(tr.exit)}` : ''}</div>
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8 }}>{fmt(s.lot)} lot{closed && tr?.exit ? ` · exit ${fmt(tr.exit)}` : ''}</div>
               {Array.isArray(s.rationale) && s.rationale.length > 0 && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   <div style={{ fontSize: 9.5, color: 'var(--cyan)', letterSpacing: 0.5, opacity: 0.85 }}>WHY THIS TRADE</div>
