@@ -37,7 +37,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
     trend: { emaStack: 1.0, macd: 0.8, rsiPullback: 0.9, srZone: 0.6, divergence: 0.3, liquiditySweep: 0.5, roundLevel: 0.3 },
     range: { emaStack: 0.3, macd: 0.3, rsiPullback: 0.0, srZone: 1.0, divergence: 0.9, liquiditySweep: 0.9, roundLevel: 0.6 },
   },
-  threshold: { soft: 0.62, normal: 0.55, turbo: 0.5 }, // validé (était 0.8/0.72/0.65 → 2 trades en 2,5 mois, trop sélectif)
+  threshold: { soft: 0.48, normal: 0.38, turbo: 0.25 }, // validé (était 0.8/0.72/0.65 → 2 trades en 2,5 mois, trop sélectif)
   riskPct: { soft: 0.005, normal: 0.01, turbo: 0.0025 },
   macroBeta: 0.15,
   slAtrMult: 1.2, // était 0.6 — le stop trop serré se faisait sortir par le bruit et tuait l'edge (LE déblocage clé)
@@ -53,7 +53,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
     maxDailyLossPct: 0.04,
     maxOpenPositions: 2,
     maxOpenRiskPct: 0.03,
-    maxTradesPerDay: 12,
+    maxTradesPerDay: 60,
     maxSpread: 0.5,
     minSecondsBetweenTrades: 60,
     newsLockoutBeforeSec: 120,

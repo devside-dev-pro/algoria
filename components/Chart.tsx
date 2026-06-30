@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   createChart,
   CandlestickSeries,
+  LineSeries,
   createSeriesMarkers,
   type IChartApi,
   type IPriceLine,
@@ -14,6 +15,7 @@ import {
 } from 'lightweight-charts';
 import { supabase } from '@/lib/supabase/client';
 import { subscribeTicks } from '@/lib/cockpit/tickStore';
+import { ema, swings } from '@/lib/engine/indicators';
 import type { Bar } from '@/lib/engine/types';
 
 /** Position ouverte à matérialiser sur le chart (entrée/SL/TP). null = aucune → chart propre. */
@@ -24,6 +26,7 @@ const TFS = ['M5', 'M15', 'H1', 'D1'] as const;
 type TF = (typeof TFS)[number];
 const PAGE = 1500;
 const TF_MS: Record<TF, number> = { M5: 300_000, M15: 900_000, H1: 3_600_000, D1: 86_400_000 };
+const BB_PERIOD = 20;
 const toSec = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp;
 const toCandle = (b: Bar) => ({ time: toSec(b.time), open: b.open, high: b.high, low: b.low, close: b.close });
 const toBar = (c: Record<string, unknown>): Bar => ({
@@ -35,6 +38,11 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const emaFastRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const emaSlowRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bbUpRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bbMidRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bbLoRef = useRef<ISeriesApi<'Line'> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
   const tradeLinesRef = useRef<IPriceLine[]>([]);
   const barsRef = useRef<Bar[]>([]);
@@ -46,12 +54,51 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   activeRef.current = activeTrade;
   const [tf, setTf] = useState<TF>('M5');
 
+  // EMA 9/21 (ruban de tendance) + Bandes de Bollinger (20, 2σ) — recalculés en direct → l'impression qu'Algoria « travaille ».
+  function drawIndicators() {
+    const bars = barsRef.current;
+    if (bars.length < BB_PERIOD) return;
+    const closes = bars.map((b) => b.close);
+    const ef = ema(closes, 9);
+    const es = ema(closes, 21);
+    const up: { time: UTCTimestamp; value: number }[] = [];
+    const mid: { time: UTCTimestamp; value: number }[] = [];
+    const lo: { time: UTCTimestamp; value: number }[] = [];
+    const fast: { time: UTCTimestamp; value: number }[] = [];
+    const slow: { time: UTCTimestamp; value: number }[] = [];
+    for (let i = 0; i < bars.length; i++) {
+      const t = toSec(bars[i].time);
+      fast.push({ time: t, value: ef[i] });
+      slow.push({ time: t, value: es[i] });
+      const start = Math.max(0, i - BB_PERIOD + 1);
+      const win = closes.slice(start, i + 1);
+      const m = win.reduce((a, b) => a + b, 0) / win.length;
+      const sd = Math.sqrt(win.reduce((a, b) => a + (b - m) * (b - m), 0) / win.length);
+      mid.push({ time: t, value: m });
+      up.push({ time: t, value: m + 2 * sd });
+      lo.push({ time: t, value: m - 2 * sd });
+    }
+    emaFastRef.current?.setData(fast);
+    emaSlowRef.current?.setData(slow);
+    bbUpRef.current?.setData(up);
+    bbMidRef.current?.setData(mid);
+    bbLoRef.current?.setData(lo);
+  }
+
+  // Support / résistance les plus proches (swings) — lignes discrètes.
   function drawLevels() {
-    // S/R retirés du chart pour désencombrer l'axe de droite — le desk IA narre déjà les niveaux clés.
     const series = seriesRef.current;
+    const bars = barsRef.current;
     if (!series) return;
     linesRef.current.forEach((l) => series.removePriceLine(l));
     linesRef.current = [];
+    if (bars.length < 20) return;
+    const sw = swings(bars, 5, 5);
+    const lastClose = bars[bars.length - 1].close;
+    const res = sw.filter((s) => s.kind === 'high' && s.price > lastClose).sort((a, b) => a.price - b.price)[0];
+    const sup = sw.filter((s) => s.kind === 'low' && s.price < lastClose).sort((a, b) => b.price - a.price)[0];
+    if (res) linesRef.current.push(series.createPriceLine({ price: res.price, color: 'rgba(245,194,74,.5)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'R' }));
+    if (sup) linesRef.current.push(series.createPriceLine({ price: sup.price, color: 'rgba(43,227,245,.5)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'S' }));
   }
 
   function drawMarkers() {
@@ -77,7 +124,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     tradeLinesRef.current.forEach((l) => series.removePriceLine(l));
     tradeLinesRef.current = [];
     const a = activeRef.current;
-    if (!a) return; // aucune position ouverte → aucune ligne (chart propre)
+    if (!a) return;
     const long = a.direction === 'long';
     const lines = tradeLinesRef.current;
     if (Number.isFinite(a.entry)) lines.push(series.createPriceLine({ price: a.entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'LONG' : 'SHORT'} ${a.entry.toFixed(1)}` }));
@@ -94,6 +141,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     const bars = (data ?? []).slice().reverse().map(toBar);
     barsRef.current = bars;
     series.setData(bars.map(toCandle));
+    drawIndicators();
     drawLevels();
     drawMarkers();
     drawTrade();
@@ -118,6 +166,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     const merged = [...data.slice().reverse().map(toBar), ...bars];
     barsRef.current = merged;
     series.setData(merged.map(toCandle));
+    drawIndicators();
     drawLevels();
   }
 
@@ -131,9 +180,19 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
       rightPriceScale: { borderColor: 'rgba(43,227,245,0.14)' },
       timeScale: { borderColor: 'rgba(43,227,245,0.14)', timeVisible: true, secondsVisible: false },
     });
+    const bbUp = chart.addSeries(LineSeries, { color: 'rgba(130,152,190,.45)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const bbMid = chart.addSeries(LineSeries, { color: 'rgba(130,152,190,.3)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const bbLo = chart.addSeries(LineSeries, { color: 'rgba(130,152,190,.45)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const emaFast = chart.addSeries(LineSeries, { color: 'rgba(43,227,245,.9)', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const emaSlow = chart.addSeries(LineSeries, { color: 'rgba(245,194,74,.9)', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const series = chart.addSeries(CandlestickSeries, { upColor: '#1fd8b0', downColor: '#ff6b8a', borderVisible: false, wickUpColor: '#1fd8b0', wickDownColor: '#ff6b8a' });
     chartRef.current = chart;
     seriesRef.current = series;
+    bbUpRef.current = bbUp;
+    bbMidRef.current = bbMid;
+    bbLoRef.current = bbLo;
+    emaFastRef.current = emaFast;
+    emaSlowRef.current = emaSlow;
     markersRef.current = createSeriesMarkers(series, []);
 
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
@@ -154,10 +213,11 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
         else if (!last || bar.time > last.time) bars.push(bar);
         else return;
         seriesRef.current?.update(toCandle(bar));
+        drawIndicators();
       })
       .subscribe();
 
-    // Flux tick temps réel → bougie EN FORMATION mise à jour à chaque tick (sinon chart figé entre les clôtures M5).
+    // Flux tick temps réel → bougie EN FORMATION + indicateurs recalculés à chaque tick (le chart « respire »).
     const unsubTicks = subscribeTicks((tick) => {
       const series = seriesRef.current;
       const bars = barsRef.current;
@@ -175,7 +235,8 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
         last.low = Math.min(last.low, mid);
         last.close = mid;
         series.update(toCandle(last));
-      }
+      } else return;
+      drawIndicators();
     });
 
     return () => {
@@ -185,6 +246,11 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
       chartRef.current = null;
       seriesRef.current = null;
       markersRef.current = null;
+      emaFastRef.current = null;
+      emaSlowRef.current = null;
+      bbUpRef.current = null;
+      bbMidRef.current = null;
+      bbLoRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -203,12 +269,17 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center' }}>
         {TFS.map((t) => (
           <button key={t} onClick={() => setTf(t)} style={tfBtn(t === tf)}>
             {t}
           </button>
         ))}
+        <span style={{ marginLeft: 10, display: 'flex', gap: 10, fontSize: 10, color: 'var(--dim)' }}>
+          <span style={{ color: 'rgba(43,227,245,.9)' }}>— EMA9</span>
+          <span style={{ color: 'rgba(245,194,74,.9)' }}>— EMA21</span>
+          <span style={{ color: 'rgba(130,152,190,.8)' }}>·· Bollinger 20</span>
+        </span>
       </div>
       <div ref={ref} style={{ flex: 1, minHeight: 240 }} />
     </div>
