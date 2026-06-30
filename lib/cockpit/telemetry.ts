@@ -40,7 +40,7 @@ const arrow = (x: number) => (x > 0 ? '▲' : x < 0 ? '▼' : '·');
 const pctf = (x: number, d = 1) => (x * 100).toFixed(d) + '%';
 const bar = (frac: number, w = 8) => {
   const k = Math.max(0, Math.min(w, Math.round(frac * w)));
-  return '█'.repeat(k) + '░'.repeat(w - k);
+  return '█'.repeat(k) + '·'.repeat(w - k); // '·' (pas '░') → rendu net dans toutes les polices
 };
 export const hms = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -78,7 +78,7 @@ const GENERATORS: Array<{ w: number; fn: Gen }> = [
       return { tag: 'LVL', text: `round ${n1(rl)} (Δ ${sgn(d, 1)})  ·  psy ${n0(big)} magnet  ·  ${Math.abs(d) < 0.6 ? 'TAGGED' : 'tracking'}` };
     },
   },
-  { w: 3, fn: (f) => ({ tag: 'RISK', text: `eq ${grp(f.equity)}  dP&L ${sgn(f.dayPnL, 1)}  expo ${pctf(f.openRiskPct)}  pos ${f.openPositions}${f.killed ? '  ⛔KILL' : ''}` }) },
+  { w: 3, fn: (f) => ({ tag: 'RISK', text: `eq ${grp(f.equity)}  dP&L ${sgn(f.dayPnL, 1)}  expo ${pctf(f.openRiskPct)}  pos ${f.openPositions}${f.killed ? '  [KILL]' : ''}` }) },
   {
     w: 4,
     fn: (f) =>
