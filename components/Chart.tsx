@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   createChart,
   CandlestickSeries,
@@ -17,6 +17,8 @@ import { supabase } from '@/lib/supabase/client';
 import { subscribeTicks } from '@/lib/cockpit/tickStore';
 import { ema, swings } from '@/lib/engine/indicators';
 import { TradeZonePrimitive } from '@/components/chart/tradeZonePrimitive';
+import { DrawingsPrimitive } from '@/components/chart/drawingsPrimitive';
+import { loadDrawings, saveDrawings, newId, topHit, anchorXY, type Drawing, type DrawKind, type Anchor, type HitHandle } from '@/components/chart/drawings';
 import type { Bar } from '@/lib/engine/types';
 
 /** Position ouverte à matérialiser sur le chart (entrée/SL/TP). tps = échelle de TP (TP1, TP2…). null = aucune. */
@@ -31,6 +33,7 @@ type TF = (typeof TFS)[number];
 const PAGE = 1500;
 const TF_MS: Record<TF, number> = { M1: 60_000, M5: 300_000, M15: 900_000, H1: 3_600_000, D1: 86_400_000 };
 const BB_PERIOD = 20;
+const COLORS = ['#2be3f5', '#f5c24a', '#1fd8b0', '#ff6b8a', '#dce9ff']; // palette des dessins (cyan/or/vert/rouge/blanc)
 const toSec = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp;
 const toCandle = (b: Bar) => ({ time: toSec(b.time), open: b.open, high: b.high, low: b.low, close: b.close });
 const toBar = (c: Record<string, unknown>): Bar => ({
@@ -68,6 +71,22 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   const lastIndRef = useRef<Partial<Ind>>({}); // dernières valeurs EMA/VWAP/BB (pour le HUD hors survol)
   const hudRafRef = useRef<number | null>(null);
   const indRafRef = useRef<number | null>(null); // coalesce des updates d'indicateurs par frame
+
+  // === DESSINS utilisateur (trendline / hline / rect / texte) — persistés en localStorage par TF ===
+  const drawRef = useRef<DrawingsPrimitive | null>(null);
+  const drawingsRef = useRef<Drawing[]>([]); // source de vérité (la primitive lit ce tableau)
+  const draftRef = useRef<Drawing | null>(null); // tracé en cours
+  const dragRef = useRef<{ id: string; handle: HitHandle; start: Anchor; orig: Drawing } | null>(null);
+  const [tool, setTool] = useState<DrawKind | 'cursor' | null>(null);
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const [activeColor, setActiveColor] = useState(COLORS[0]);
+  const activeColorRef = useRef(activeColor);
+  activeColorRef.current = activeColor;
+  const [textEdit, setTextEdit] = useState<{ x: number; y: number; anchor: Anchor } | null>(null);
 
   // EMA 9/21 (ruban de tendance) + Bandes de Bollinger (20, 2σ) — recalculés en direct → l'impression qu'Algoria « travaille ».
   function drawIndicators() {
@@ -271,6 +290,170 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     drawLevels();
   }
 
+  // --- Dessins : persistance + rendu + sélection ---
+  const persist = () => saveDrawings(SYMBOL, tfRef.current, drawingsRef.current);
+  const repaint = () => drawRef.current?.setDrawings(drawingsRef.current, selectedIdRef.current);
+  const select = (id: string | null) => {
+    selectedIdRef.current = id;
+    setSelectedId(id);
+    repaint();
+  };
+  const toggleTool = (t: DrawKind | 'cursor') => {
+    const next = toolRef.current === t ? null : t;
+    toolRef.current = next;
+    setTool(next);
+  };
+
+  // pixel (px,py) → ancre { time (calé bougie), price }. Au-delà de la dernière bougie → calé sur elle.
+  const snapAnchor = (px: number, py: number): Anchor | null => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return null;
+    const p = series.coordinateToPrice(py);
+    if (p == null) return null;
+    const rawT = chart.timeScale().coordinateToTime(px);
+    let time: number;
+    if (rawT == null) {
+      const bars = barsRef.current;
+      if (!bars.length) return null;
+      time = Math.floor(bars[bars.length - 1].time / 1000);
+    } else time = Number(rawT);
+    return { time, price: Number(p) };
+  };
+
+  // Déplace le dessin sélectionné (poignée 'a'/'b' = une extrémité, 'body' = le tout) selon le delta souris.
+  const applyDrag = (cur: Anchor) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dT = cur.time - drag.start.time;
+    const dP = cur.price - drag.start.price;
+    const arr = drawingsRef.current;
+    const idx = arr.findIndex((x) => x.id === drag.id);
+    if (idx < 0) return;
+    const o = drag.orig;
+    const nd: Drawing = { ...o };
+    if (o.kind === 'hline') nd.a = { time: o.a.time, price: o.a.price + dP };
+    else if (drag.handle === 'a') nd.a = { time: o.a.time + dT, price: o.a.price + dP };
+    else if (drag.handle === 'b' && o.b) nd.b = { time: o.b.time + dT, price: o.b.price + dP };
+    else {
+      nd.a = { time: o.a.time + dT, price: o.a.price + dP };
+      if (o.b) nd.b = { time: o.b.time + dT, price: o.b.price + dP };
+    }
+    const next = arr.slice();
+    next[idx] = nd;
+    drawingsRef.current = next;
+    repaint();
+  };
+
+  const onDrawPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const t = toolRef.current;
+    if (!t) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    if (t === 'text') {
+      const a = snapAnchor(px, py);
+      if (a) setTextEdit({ x: px, y: py, anchor: a });
+      return;
+    }
+    if (t === 'cursor') {
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      if (!chart || !series) return;
+      const hit = topHit(chart, series, drawingsRef.current, px, py, chart.timeScale().width());
+      if (hit) {
+        const start = snapAnchor(px, py);
+        if (start) dragRef.current = { id: hit.d.id, handle: hit.handle, start, orig: JSON.parse(JSON.stringify(hit.d)) as Drawing };
+        select(hit.d.id);
+      } else select(null);
+      return;
+    }
+    const a = snapAnchor(px, py);
+    if (!a) return;
+    const color = activeColorRef.current;
+    draftRef.current = t === 'hline' ? { id: newId(), kind: 'hline', color, a } : { id: newId(), kind: t, color, a, b: a };
+    drawRef.current?.setDraft(draftRef.current);
+  };
+
+  const onDrawPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!toolRef.current) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    if (dragRef.current) {
+      const cur = snapAnchor(px, py);
+      if (cur) applyDrag(cur);
+      return;
+    }
+    const d = draftRef.current;
+    if (!d) return;
+    const a = snapAnchor(px, py);
+    if (!a) return;
+    if (d.kind === 'hline') d.a = a;
+    else d.b = a;
+    drawRef.current?.setDraft({ ...d });
+  };
+
+  const onDrawPointerUp = () => {
+    if (dragRef.current) {
+      dragRef.current = null;
+      persist();
+      return;
+    }
+    const d = draftRef.current;
+    draftRef.current = null;
+    drawRef.current?.setDraft(null);
+    if (!d) return;
+    if (d.kind === 'trend' || d.kind === 'rect') {
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      const A = chart && series ? anchorXY(chart, series, d.a) : null;
+      const B = chart && series && d.b ? anchorXY(chart, series, d.b) : null;
+      if (A && B && Math.hypot(A.x - B.x, A.y - B.y) < 4) return; // tracé trop petit → ignoré
+    }
+    drawingsRef.current = [...drawingsRef.current, d];
+    persist();
+    toolRef.current = null;
+    setTool(null); // retour au pan après un tracé
+    select(d.id);
+  };
+
+  const deleteSelected = () => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    drawingsRef.current = drawingsRef.current.filter((d) => d.id !== id);
+    persist();
+    select(null);
+  };
+  const clearDrawings = () => {
+    drawingsRef.current = [];
+    persist();
+    select(null);
+  };
+  const pickColor = (c: string) => {
+    setActiveColor(c);
+    activeColorRef.current = c;
+    const id = selectedIdRef.current;
+    if (id) {
+      drawingsRef.current = drawingsRef.current.map((d) => (d.id === id ? { ...d, color: c } : d));
+      persist();
+      repaint();
+    }
+  };
+  const commitText = (value: string) => {
+    const te = textEdit;
+    setTextEdit(null);
+    toolRef.current = null;
+    setTool(null);
+    const v = value.trim();
+    if (!te || !v) return;
+    const d: Drawing = { id: newId(), kind: 'text', color: activeColorRef.current, a: te.anchor, text: v };
+    drawingsRef.current = [...drawingsRef.current, d];
+    persist();
+    select(d.id);
+  };
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -303,6 +486,12 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     const zone = new TradeZonePrimitive();
     series.attachPrimitive(zone as Parameters<typeof series.attachPrimitive>[0]);
     zoneRef.current = zone;
+    // primitive DESSINS utilisateur (au-dessus des bougies) + restauration localStorage
+    const draw = new DrawingsPrimitive();
+    series.attachPrimitive(draw as Parameters<typeof series.attachPrimitive>[0]);
+    drawRef.current = draw;
+    drawingsRef.current = loadDrawings(SYMBOL, tfRef.current);
+    draw.setDrawings(drawingsRef.current, null);
 
     // HUD crosshair (O/H/L/C + indicateurs) — coalescé en 1 flush par frame (subscribeCrosshairMove tire à chaque mousemove)
     chart.subscribeCrosshairMove((param) => {
@@ -384,6 +573,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
       bbLoRef.current = null;
       vwapRef.current = null;
       zoneRef.current = null; // chart.remove() dispose la primitive
+      drawRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -391,8 +581,36 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   useEffect(() => {
     tfRef.current = tf;
     if (seriesRef.current) void loadRecent(tf);
+    // recharge le jeu de dessins de la nouvelle TF (les dessins sont scopés par timeframe)
+    drawingsRef.current = loadDrawings(SYMBOL, tf);
+    selectedIdRef.current = null;
+    setSelectedId(null);
+    drawRef.current?.setDrawings(drawingsRef.current, null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tf]);
+
+  // Raccourcis clavier : Échap = annuler/désélectionner ; Suppr/Retour = supprimer le dessin sélectionné.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return; // ne pas capturer pendant la saisie texte
+      if (e.key === 'Escape') {
+        draftRef.current = null;
+        dragRef.current = null;
+        drawRef.current?.setDraft(null);
+        setTextEdit(null);
+        toolRef.current = null;
+        setTool(null);
+        select(null);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIdRef.current) {
+        e.preventDefault();
+        deleteSelected();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     drawMarkers();
@@ -427,9 +645,39 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
         <button onClick={() => setVis((v) => ({ ...v, vwap: !v.vwap }))} style={indBtn(vis.vwap, 'rgba(190,120,245,.95)')}>VWAP</button>
         <button onClick={() => setVis((v) => ({ ...v, sr: !v.sr }))} style={indBtn(vis.sr, 'rgba(245,194,74,.95)')}>S/R</button>
         <button onClick={() => setVis((v) => ({ ...v, marks: !v.marks }))} style={indBtn(vis.marks, 'rgba(220,233,255,.9)')}>MARKS</button>
+        <span style={{ width: 1, height: 16, background: 'var(--border)', margin: '0 5px' }} />
+        <button onClick={() => toggleTool('cursor')} style={toolBtn(tool === 'cursor')}>SELECT</button>
+        <button onClick={() => toggleTool('trend')} style={toolBtn(tool === 'trend')}>TREND</button>
+        <button onClick={() => toggleTool('hline')} style={toolBtn(tool === 'hline')}>H-LINE</button>
+        <button onClick={() => toggleTool('rect')} style={toolBtn(tool === 'rect')}>RECT</button>
+        <button onClick={() => toggleTool('text')} style={toolBtn(tool === 'text')}>TEXT</button>
+        {COLORS.map((c) => (
+          <button key={c} onClick={() => pickColor(c)} style={swatch(c, c === activeColor)} aria-label={`color ${c}`} />
+        ))}
+        <button onClick={deleteSelected} disabled={!selectedId} style={toolBtn(false, !selectedId)}>DEL</button>
+        <button onClick={clearDrawings} style={toolBtn(false)}>CLEAR</button>
       </div>
       <div style={{ position: 'relative', flex: 1, minHeight: 240 }}>
         <div ref={ref} style={{ position: 'absolute', inset: 0 }} />
+        {/* overlay de capture souris : actif seulement quand un outil est sélectionné (sinon le chart pan/zoom normalement) */}
+        <div
+          onPointerDown={onDrawPointerDown}
+          onPointerMove={onDrawPointerMove}
+          onPointerUp={onDrawPointerUp}
+          style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: tool ? 'auto' : 'none', cursor: tool && tool !== 'cursor' ? 'crosshair' : 'default' }}
+        />
+        {textEdit && (
+          <TextEditInput
+            textEdit={textEdit}
+            color={activeColor}
+            onCommit={commitText}
+            onCancel={() => {
+              setTextEdit(null);
+              toolRef.current = null;
+              setTool(null);
+            }}
+          />
+        )}
         {hud && <ChartHud hud={hud} />}
       </div>
     </div>
@@ -464,6 +712,79 @@ function ChartHud({ hud }: { hud: NonNullable<Hud> }) {
       </span>
     </div>
   );
+}
+
+// Champ de saisie inline pour l'outil TEXTE : Entrée = valider, Échap/blur = fermer (une seule issue via `done`).
+function TextEditInput({
+  textEdit,
+  color,
+  onCommit,
+  onCancel,
+}: {
+  textEdit: { x: number; y: number };
+  color: string;
+  onCommit: (v: string) => void;
+  onCancel: () => void;
+}) {
+  const [v, setV] = useState('');
+  const done = useRef(false);
+  const commit = () => {
+    if (done.current) return;
+    done.current = true;
+    onCommit(v);
+  };
+  const cancel = () => {
+    if (done.current) return;
+    done.current = true;
+    onCancel();
+  };
+  return (
+    <input
+      autoFocus
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          cancel();
+        }
+      }}
+      onBlur={commit}
+      placeholder="text…"
+      className="mono"
+      style={{ position: 'absolute', left: textEdit.x, top: textEdit.y - 12, zIndex: 4, background: 'rgba(8,16,31,.92)', color, border: `1px solid ${color}`, borderRadius: 4, padding: '2px 6px', fontSize: 13, outline: 'none', minWidth: 90 }}
+    />
+  );
+}
+
+// Chip d'outil de dessin (SELECT/TREND/…) : allumé = cyan, désactivé = grisé.
+function toolBtn(active: boolean, disabled = false) {
+  return {
+    fontSize: 10.5,
+    padding: '2px 8px',
+    borderRadius: 6,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    background: active ? 'rgba(43,227,245,.16)' : 'transparent',
+    color: disabled ? 'var(--dim)' : active ? '#2be3f5' : 'var(--muted)',
+    border: `1px solid ${active ? 'rgba(43,227,245,.4)' : 'rgba(130,152,190,.22)'}`,
+    opacity: disabled ? 0.45 : 1,
+  } as const;
+}
+
+// Pastille de couleur : anneau blanc si couleur active.
+function swatch(color: string, active: boolean) {
+  return {
+    width: 16,
+    height: 16,
+    padding: 0,
+    borderRadius: 4,
+    cursor: 'pointer',
+    background: color,
+    border: active ? '2px solid #fff' : '1px solid rgba(255,255,255,.25)',
+  } as const;
 }
 
 function tfBtn(active: boolean) {
