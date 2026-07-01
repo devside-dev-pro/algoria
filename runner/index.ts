@@ -6,7 +6,7 @@ import { readState } from './metaapi/state';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
 import { manageBreakeven } from './metaapi/manage';
 import { DealRecorder } from './metaapi/trades';
-import { narrate, narrationReady } from './llm/narrate';
+import { narrate, narrationReady, deskMeta, type DeskKind } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
@@ -280,18 +280,21 @@ async function main() {
         if (isPrimary) {
           await logEvents(events);
           await pushState(context, state, mode);
+          // Desk : on émet TOUJOURS le meta structuré (le hero « ce que fait le bot maintenant » reste vivant même sans LLM).
+          // La clause de prose (msg) est ajoutée par-dessus quand la narration est active.
+          const kind: DeskKind = signal ? 'trade' : confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.7 ? 'opportunity' : 'analysis';
+          const meta = deskMeta(kind, context, { signal, confluence, threshold });
+          let clause: string | null = null;
           if (narrationReady()) {
-            if (signal) {
-              const line = await narrate({ kind: 'trade', ctx: context, signal, confluence, threshold });
-              if (line) await logNarration(line, signal.time, { kind: 'trade', direction: signal.direction, confidence: signal.confidence, entry: signal.entry, sl: signal.stopLoss, tp: signal.takeProfits[0] });
-            } else if (confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.7) {
-              const line = await narrate({ kind: 'opportunity', ctx: context, confluence, threshold });
-              if (line) await logNarration(line, context.time, { kind: 'opportunity', direction: confluence.direction, confidence: confluence.confidence });
-            } else {
-              const line = await narrate({ kind: 'analysis', ctx: context, logLines: events.map((e) => e.msg) });
-              if (line) await logNarration(line, context.time, { kind: 'analysis' });
-            }
+            clause = await narrate(
+              kind === 'trade'
+                ? { kind, ctx: context, signal, confluence, threshold }
+                : kind === 'opportunity'
+                  ? { kind, ctx: context, confluence, threshold }
+                  : { kind, ctx: context, logLines: events.map((e) => e.msg) },
+            );
           }
+          await logNarration(clause ?? '', signal ? signal.time : context.time, meta as unknown as Record<string, unknown>);
         }
       } catch (e) {
         console.error(`[algoria] onClosed ${DISPLAY} échoué:`, e);
