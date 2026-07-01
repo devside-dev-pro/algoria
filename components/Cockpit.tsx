@@ -24,6 +24,22 @@ export function Cockpit() {
   const [lot, setLot] = useState('0.10');
   const [slIn, setSlIn] = useState('');
   const [tpIn, setTpIn] = useState('');
+  const [broadcast, setBroadcast] = useState(false); // mode diffusion : vue épurée pour le live (masque les contrôles opérateur)
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get('broadcast'); // ?broadcast=1 → source OBS dédiée
+    if (p != null) setBroadcast(p === '1' || p === 'true');
+    else setBroadcast(localStorage.getItem('algoria.broadcast') === '1');
+  }, []);
+  const toggleBroadcast = () =>
+    setBroadcast((b) => {
+      const n = !b;
+      try {
+        localStorage.setItem('algoria.broadcast', n ? '1' : '0');
+      } catch {
+        /* private mode */
+      }
+      return n;
+    });
   const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'normal';
   const strategy = activeMode === 'scalp' ? 'scalp' : 'normal'; // 2 stratégies seulement
   const killed = optKilled ?? !!st?.killed;
@@ -118,34 +134,42 @@ export function Cockpit() {
           <MarketStatus session={st?.session as string | undefined} regime={st?.regime as string | undefined} tradable={!!st?.tradable} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* STRATEGY : 2 stratégies seulement */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={grpLabel}>STRATEGY</span>
-            <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
-              <button onClick={() => setStrategy('normal')} style={seg(strategy === 'normal', false)} title="Normal — selective real edge">NORMAL</button>
-              <button onClick={() => setStrategy('scalp')} style={seg(strategy === 'scalp', true)} title="Scalp — validated scalp strategy (trades often, fast TP)">⚡ SCALP</button>
-            </div>
-          </div>
-          {/* SHOW : générateur d'activité (action + rafale fusionnés) */}
-          <button
-            onClick={() => { const n = !show; setShow(n); void sendCommand('set_rafale', { on: n }); }}
-            style={beastBtn(show)}
-            title="BEAST MODE — rapid-fire micro-scalps for the stream (3-5/min). Pure show, not an edge: small lot, burns fees. Best on demo."
-          >
-            {show ? '🔥 BEAST ON' : '🔥 BEAST MODE'}
+          {!broadcast && (
+            <>
+              {/* STRATEGY : 2 stratégies seulement */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={grpLabel}>STRATEGY</span>
+                <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
+                  <button onClick={() => setStrategy('normal')} style={seg(strategy === 'normal', false)} title="Normal — selective real edge">NORMAL</button>
+                  <button onClick={() => setStrategy('scalp')} style={seg(strategy === 'scalp', true)} title="Scalp — validated scalp strategy (trades often, fast TP)">⚡ SCALP</button>
+                </div>
+              </div>
+              {/* SHOW : générateur d'activité (action + rafale fusionnés) */}
+              <button
+                onClick={() => { const n = !show; setShow(n); void sendCommand('set_rafale', { on: n }); }}
+                style={beastBtn(show)}
+                title="BEAST MODE — rapid-fire micro-scalps for the stream (3-5/min). Pure show, not an edge: small lot, burns fees. Best on demo."
+              >
+                {show ? '🔥 BEAST ON' : '🔥 BEAST MODE'}
+              </button>
+              <button
+                onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
+                style={{ ...pill(killed), padding: '5px 12px', color: killed ? '#ff8aa2' : 'var(--muted)', borderColor: 'rgba(255,107,138,.45)', background: killed ? 'rgba(255,107,138,.15)' : 'transparent' }}
+                title={killed ? 'resume trading' : 'kill switch — stops any new position'}
+              >
+                {killed ? '● KILLED' : 'KILL'}
+              </button>
+              <button onClick={() => supabase.auth.signOut()} style={pill(false)} title="sign out">⎋</button>
+            </>
+          )}
+          <button onClick={toggleBroadcast} style={broadcast ? onAirBtn : pill(false)} title="Broadcast mode — clean full-screen view for streaming (hides operator controls). Also via ?broadcast=1">
+            {broadcast ? '● ON AIR' : 'Broadcast'}
           </button>
-          <button
-            onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
-            style={{ ...pill(killed), padding: '5px 12px', color: killed ? '#ff8aa2' : 'var(--muted)', borderColor: 'rgba(255,107,138,.45)', background: killed ? 'rgba(255,107,138,.15)' : 'transparent' }}
-            title={killed ? 'resume trading' : 'kill switch — stops any new position'}
-          >
-            {killed ? '● KILLED' : 'KILL'}
-          </button>
-          <button onClick={() => supabase.auth.signOut()} style={pill(false)} title="sign out">⎋</button>
         </div>
       </header>
 
-      {/* ===== CONTROL DECK (manual) ===== */}
+      {/* ===== CONTROL DECK (manual) — masqué en mode diffusion ===== */}
+      {!broadcast && (
       <section className="panel" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', flexWrap: 'wrap' }}>
         <span style={grpLabel}>MANUAL</span>
         <label style={lbl}>lot<input value={lot} onChange={(e) => setLot(e.target.value)} inputMode="decimal" style={inp(52)} /></label>
@@ -165,6 +189,7 @@ export function Cockpit() {
           </span>
         </div>
       </section>
+      )}
 
       {/* ===== MAIN (fills, fixed) : chart | desk + mission control ===== */}
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: 10 }}>
@@ -227,8 +252,10 @@ export function Cockpit() {
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--cyan)' }}>
                       <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--cyan)' }} /> OPEN
                     </span>
-                    <button onClick={() => fire('close-' + k, () => sendCommand('close_position', { ticket: k }))} title="close this position at market (without waiting for TP/SL)"
-                      style={{ fontSize: 9.5, padding: '2px 8px', borderRadius: 5, border: '1px solid rgba(255,107,138,.5)', background: lastFire === 'close-' + k ? 'rgba(255,107,138,.2)' : 'transparent', color: '#ff8aa2', cursor: 'pointer' }}>✕ close</button>
+                    {!broadcast && (
+                      <button onClick={() => fire('close-' + k, () => sendCommand('close_position', { ticket: k }))} title="close this position at market (without waiting for TP/SL)"
+                        style={{ fontSize: 9.5, padding: '2px 8px', borderRadius: 5, border: '1px solid rgba(255,107,138,.5)', background: lastFire === 'close-' + k ? 'rgba(255,107,138,.2)' : 'transparent', color: '#ff8aa2', cursor: 'pointer' }}>✕ close</button>
+                    )}
                   </>
                 ) : closed ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -643,6 +670,18 @@ function deckBtn(kind: 'long' | 'short' | 'flat', flash: boolean, disabled: bool
     transition: 'transform .15s ease, background .2s ease',
   };
 }
+
+const onAirBtn: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: 0.5,
+  padding: '4px 11px',
+  borderRadius: 6,
+  cursor: 'pointer',
+  color: '#ff8aa2',
+  background: 'rgba(255,107,138,.14)',
+  border: '1px solid rgba(255,107,138,.5)',
+};
 
 function pill(active: boolean): CSSProperties {
   return {
