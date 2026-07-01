@@ -17,7 +17,11 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
   if (cf.direction === 'flat') return null;
   const long = cf.direction === 'long';
   const dir = long ? 1 : -1;
-  const entry = round2(ctx.price);
+  // Arrondi des PRIX au pas du broker. Défaut 0.01 (or) ; DOIT être plus fin pour le Forex (EURUSD 0.00001)
+  // sinon entry et SL s'écrasent sur la même valeur → riskDist ≈ 0 → tout est rejeté (bug qui bloquait le Forex).
+  const step = cfg.priceStep && cfg.priceStep > 0 ? cfg.priceStep : 0.01;
+  const roundP = (x: number) => Math.round(x / step) * step;
+  const entry = roundP(ctx.price);
   const atr = ctx.atr;
 
   // Defended structure = stop basis (zones already sorted by proximity)
@@ -26,7 +30,7 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
   const defend: Zone | undefined = long ? supports[0] : resistances[0];
 
   const structural = defend ? (long ? defend.lower : defend.upper) : entry - dir * 1.2 * atr;
-  const stopLoss = round2(structural - dir * cfg.slAtrMult * atr); // buffer beyond structure — arrondi au pas de prix (sinon le broker rejette l'ordre)
+  const stopLoss = roundP(structural - dir * cfg.slAtrMult * atr); // buffer beyond structure — arrondi au pas de prix (sinon le broker rejette l'ordre)
   const riskDist = Math.abs(entry - stopLoss);
   if (riskDist < cfg.minStopAtr * atr || riskDist > cfg.maxStopAtr * atr) return null;
 
@@ -57,7 +61,7 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
     confidence: cf.confidence,
     entry,
     stopLoss,
-    takeProfits: [round2(tp1), round2(tp2)],
+    takeProfits: [roundP(tp1), roundP(tp2)],
     riskReward: round2(riskReward),
     lot: +lot.toFixed(2),
     rationale: buildRationale(cf, ctx, defend),
