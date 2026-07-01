@@ -16,10 +16,11 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { subscribeTicks } from '@/lib/cockpit/tickStore';
 import { ema, swings } from '@/lib/engine/indicators';
+import { TradeZonePrimitive } from '@/components/chart/tradeZonePrimitive';
 import type { Bar } from '@/lib/engine/types';
 
-/** Position ouverte à matérialiser sur le chart (entrée/SL/TP). null = aucune → chart propre. */
-export type ActiveTrade = { direction: string; entry: number; sl: number | null; tp: number | null } | null;
+/** Position ouverte à matérialiser sur le chart (entrée/SL/TP). tps = échelle de TP (TP1, TP2…). null = aucune. */
+export type ActiveTrade = { direction: string; entry: number; sl: number | null; tp: number | null; tps?: number[] } | null;
 
 const SYMBOL = 'XAUUSD';
 const TFS = ['M1', 'M5', 'M15', 'H1', 'D1'] as const;
@@ -46,6 +47,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   const vwapRef = useRef<ISeriesApi<'Line'> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
   const tradeLinesRef = useRef<IPriceLine[]>([]);
+  const zoneRef = useRef<TradeZonePrimitive | null>(null);
   const barsRef = useRef<Bar[]>([]);
   const loadingRef = useRef(false);
   const tfRef = useRef<TF>('M5');
@@ -155,6 +157,12 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     tradeLinesRef.current.forEach((l) => series.removePriceLine(l));
     tradeLinesRef.current = [];
     const a = activeRef.current;
+    // ZONES remplies TP (vert) / SL (rouge) via la primitive — sous les bougies
+    zoneRef.current?.setTrade(
+      a && Number.isFinite(a.entry)
+        ? { direction: a.direction === 'long' ? 'long' : 'short', entry: a.entry, sl: a.sl, tps: a.tps && a.tps.length ? a.tps : a.tp != null ? [a.tp] : [] }
+        : null,
+    );
     if (!a) return;
     const long = a.direction === 'long';
     const lines = tradeLinesRef.current;
@@ -229,6 +237,10 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     emaFastRef.current = emaFast;
     emaSlowRef.current = emaSlow;
     markersRef.current = createSeriesMarkers(series, []);
+    // primitive ZONES TP/SL (attachée à la série → hérite de l'échelle de prix)
+    const zone = new TradeZonePrimitive();
+    series.attachPrimitive(zone as Parameters<typeof series.attachPrimitive>[0]);
+    zoneRef.current = zone;
 
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (range && range.from < 12) void loadOlder();
@@ -287,6 +299,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
       bbMidRef.current = null;
       bbLoRef.current = null;
       vwapRef.current = null;
+      zoneRef.current = null; // chart.remove() dispose la primitive
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
