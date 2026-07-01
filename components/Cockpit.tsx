@@ -159,7 +159,7 @@ export function Cockpit() {
               >
                 {killed ? '● KILLED' : 'KILL'}
               </button>
-              <button onClick={() => supabase.auth.signOut()} style={pill(false)} title="sign out">⎋</button>
+              <button onClick={() => supabase.auth.signOut()} style={{ ...pill(false), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 9px' }} title="sign out" aria-label="sign out"><LogoutIcon /></button>
             </>
           )}
           <button onClick={toggleBroadcast} style={broadcast ? onAirBtn : pill(false)} title="Broadcast mode — clean full-screen view for streaming (hides operator controls). Also via ?broadcast=1">
@@ -669,6 +669,16 @@ function deckBtn(kind: 'long' | 'short' | 'flat', flash: boolean, disabled: bool
     transform: flash ? 'scale(1.06)' : 'scale(1)',
     transition: 'transform .15s ease, background .2s ease',
   };
+}
+
+// Icône déconnexion (porte + flèche sortante) — remplace le glyphe ⎋ ambigu.
+function LogoutIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M8 5V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-1" />
+      <path d="M3 10h9M9 7l3 3-3 3" />
+    </svg>
+  );
 }
 
 const onAirBtn: CSSProperties = {
