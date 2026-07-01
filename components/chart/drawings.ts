@@ -2,8 +2,10 @@
 // Les ancres sont stockées en (time, price) ABSOLUS → stables au pan/zoom et au rechargement.
 //  - time  : secondes epoch (échelle UTCTimestamp de lightweight-charts), calé sur une bougie de la TF.
 //  - price : prix brut de l'axe.
-// Résolution en pixels via timeToCoordinate / priceToCoordinate (une ancre hors data → non résolue → masquée).
-import type { IChartApi, ISeriesApi, SeriesType, Time } from 'lightweight-charts';
+// La résolution time→x est fournie par Chart.tsx (TimeToX) : timeToCoordinate quand la bougie existe,
+// sinon EXTRAPOLATION linéaire au-delà de la dernière/première bougie (sinon un dessin tiré à droite
+// du prix courant « disparaîtrait »). priceToCoordinate reste porté par la série.
+import type { ISeriesApi, SeriesType } from 'lightweight-charts';
 
 export type DrawKind = 'trend' | 'hline' | 'rect' | 'text';
 export type Anchor = { time: number; price: number };
@@ -16,15 +18,18 @@ export type Drawing = {
   text?: string; // libellé (kind === 'text')
 };
 
+/** Résout un temps (secondes) en coordonnée x, avec extrapolation hors data. null = irrésoluble. */
+export type TimeToX = (timeSec: number) => number | null;
+
 const TOL = 6; // tolérance de sélection (px) autour d'un trait
 const HANDLE = 8; // rayon de préhension d'une poignée d'extrémité (px)
 
-/** Coordonnées pixel d'une ancre, ou null si hors échelle (data non chargée / hors écran vertical). */
-export function anchorXY(chart: IChartApi, series: ISeriesApi<SeriesType>, a: Anchor): { x: number; y: number } | null {
-  const x = chart.timeScale().timeToCoordinate(a.time as Time);
+/** Coordonnées pixel d'une ancre, ou null si irrésoluble. */
+export function anchorXY(timeToX: TimeToX, series: ISeriesApi<SeriesType>, a: Anchor): { x: number; y: number } | null {
+  const x = timeToX(a.time);
   const y = series.priceToCoordinate(a.price);
   if (x == null || y == null) return null;
-  return { x: x as number, y: y as number };
+  return { x, y: y as number };
 }
 
 function distToSeg(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
@@ -41,7 +46,7 @@ export type HitHandle = 'a' | 'b' | 'body' | null;
 
 /** Teste si (px,py) touche le dessin ; renvoie la poignée touchée ('a'/'b' = extrémité, 'body' = corps), sinon null. */
 export function hitTest(
-  chart: IChartApi,
+  timeToX: TimeToX,
   series: ISeriesApi<SeriesType>,
   d: Drawing,
   px: number,
@@ -53,13 +58,13 @@ export function hitTest(
     if (y == null) return null;
     return Math.abs(py - (y as number)) <= TOL && px >= 0 && px <= width ? 'a' : null;
   }
-  const A = anchorXY(chart, series, d.a);
+  const A = anchorXY(timeToX, series, d.a);
   if (!A) return null;
   if (d.kind === 'text') {
     const w = Math.max(24, (d.text?.length ?? 4) * 7 + 8);
     return px >= A.x - 3 && px <= A.x + w && py >= A.y - 15 && py <= A.y + 5 ? 'body' : null;
   }
-  const B = d.b ? anchorXY(chart, series, d.b) : null;
+  const B = d.b ? anchorXY(timeToX, series, d.b) : null;
   if (!B) return null;
   if (Math.hypot(px - A.x, py - A.y) <= HANDLE) return 'a';
   if (Math.hypot(px - B.x, py - B.y) <= HANDLE) return 'b';
@@ -78,7 +83,7 @@ export function hitTest(
 
 /** Le dessin le plus haut (dernier dessiné) touché en (px,py). */
 export function topHit(
-  chart: IChartApi,
+  timeToX: TimeToX,
   series: ISeriesApi<SeriesType>,
   drawings: Drawing[],
   px: number,
@@ -86,7 +91,7 @@ export function topHit(
   width: number,
 ): { d: Drawing; handle: HitHandle } | null {
   for (let i = drawings.length - 1; i >= 0; i--) {
-    const handle = hitTest(chart, series, drawings[i], px, py, width);
+    const handle = hitTest(timeToX, series, drawings[i], px, py, width);
     if (handle) return { d: drawings[i], handle };
   }
   return null;

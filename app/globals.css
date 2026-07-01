@@ -69,6 +69,10 @@ body {
 }
 .glow { box-shadow: 0 0 12px rgba(43, 227, 245, 0.35); }
 
+/* boutons d'outils de dessin : retour visuel au survol */
+.drawtool { transition: background 0.12s ease, color 0.12s ease; }
+.drawtool:hover:not(:disabled) { background: rgba(43, 227, 245, 0.1); color: var(--text); }
+
 @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .pulse { animation: pulseDot 1.2s ease-in-out infinite; }
 @keyframes blinkCur { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
