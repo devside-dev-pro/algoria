@@ -53,6 +53,28 @@ export function Cockpit() {
       }
     : null;
 
+  // Stats desk (track record) depuis les trades clôturés. On exclut les micro-scalps BEAST (spam) repérés via les signaux.
+  const rafaleTickets = new Set(
+    signals.filter((s: any) => Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')).map((s: any) => String(s.ticket)),
+  );
+  const closedT = trades.filter((t: any) => t.closed_at != null && t.pnl != null && !rafaleTickets.has(String(t.ticket)));
+  const stats = (() => {
+    const n = closedT.length;
+    if (n < 5) return { n, ready: false as const };
+    const wins = closedT.filter((t: any) => Number(t.pnl) > 0).length;
+    const gp = closedT.reduce((s: number, t: any) => s + Math.max(0, Number(t.pnl)), 0);
+    const gl = closedT.reduce((s: number, t: any) => s + Math.min(0, Number(t.pnl)), 0); // ≤ 0
+    const rs = closedT.map((t: any) => Number(t.r)).filter((x: number) => Number.isFinite(x));
+    return {
+      n,
+      ready: true as const,
+      winPct: wins / n,
+      pf: gl < 0 ? gp / Math.abs(gl) : gp > 0 ? Infinity : 0,
+      avgR: rs.length ? rs.reduce((a: number, b: number) => a + b, 0) / rs.length : null,
+      exp: closedT.reduce((s: number, t: any) => s + Number(t.pnl), 0) / n,
+    };
+  })();
+
   function fire(kind: string, fn: () => void) {
     setLastFire(kind);
     fn();
@@ -208,9 +230,9 @@ export function Cockpit() {
         <Metric label="Balance" value={st ? fmt(st.balance, 0) : '—'} accent="var(--cyan)" />
         <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} accent="var(--blue)" />
         <Metric label="Day P&L" value={dayPnl == null ? '—' : (dayPnl >= 0 ? '+' : '') + dayPnl.toFixed(0)} color={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} accent={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} />
-        <Metric label="Positions" value={st ? String(st.open_positions ?? 0) : '—'} accent="var(--muted)" />
-        <Metric label="Risk exposure" value={st ? pct(st.open_risk_pct) : '—'} accent="var(--gold)" />
-        <Metric label="Kill switch" value={killed ? 'ON' : 'off'} color={killed ? 'var(--down)' : 'var(--dim)'} accent={killed ? 'var(--down)' : 'var(--dim)'} />
+        <Metric label={`Win rate · ${stats.n}`} value={stats.ready ? (stats.winPct * 100).toFixed(0) + '%' : `${stats.n}/5`} color={stats.ready ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
+        <Metric label="Profit factor" value={stats.ready ? (stats.pf === Infinity ? '∞' : stats.pf.toFixed(2)) : '—'} color={stats.ready ? (stats.pf >= 1 ? 'var(--up)' : 'var(--down)') : 'var(--dim)'} accent="var(--cyan)" />
+        <Metric label="Avg R" value={stats.ready && stats.avgR != null ? (stats.avgR >= 0 ? '+' : '') + stats.avgR.toFixed(2) : '—'} color={stats.ready && (stats.avgR ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} accent="var(--gold)" />
       </section>
     </main>
   );
