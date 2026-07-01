@@ -53,7 +53,11 @@ async function main() {
 
   const seed = await loadHistory(account, BROKER, TF, 300);
   let state: EngineState = readState(terminal, BROKER, { dayStartBalance: terminal.accountInformation?.balance });
-  let mode: Mode = 'normal';
+  // Défaut = SCALP : la stratégie scalp est validée par backtest (~9-12 trades/jour, PF 1.44, win 88%) et
+  // c'est le VRAI edge "trade souvent". NORMAL (seuil 0.38) ne dégageait quasi aucun trade en live (14 j → 0
+  // entrée de confluence réelle) → l'account restait inactif sauf en mode show. Le cockpit peut toujours
+  // repasser en NORMAL manuellement ; ce défaut survit aussi aux redémarrages du runner (Railway).
+  let mode: Mode = 'scalp';
 
   /** Chemin d'exécution PARTAGÉ (auto + manuel + action). Retourne le ticket, ou undefined si échec. */
   const executeSignal = async (signal: Signal): Promise<string | undefined> => {
