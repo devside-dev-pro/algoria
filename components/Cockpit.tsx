@@ -42,7 +42,13 @@ export function Cockpit() {
     return t && !t.closed_at;
   }) as any;
   const activeTrade = openSig
-    ? { direction: String(openSig.direction), entry: Number(openSig.entry), sl: Number(openSig.stop_loss) || null, tp: Number(openSig.take_profits?.[0]) || null }
+    ? {
+        direction: String(openSig.direction),
+        entry: Number(openSig.entry),
+        sl: Number(openSig.stop_loss) || null,
+        tp: Number(openSig.take_profits?.[0]) || null,
+        tps: (Array.isArray(openSig.take_profits) ? openSig.take_profits : []).map(Number).filter((x: number) => Number.isFinite(x) && x > 0),
+      }
     : null;
 
   function fire(kind: string, fn: () => void) {
