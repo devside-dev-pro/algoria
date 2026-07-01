@@ -8,6 +8,8 @@ import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDaySta
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
+const CONTRACT = 100; // XAUUSD : 100 oz / lot (cf. lib/engine/config.ts)
+const PIP = 0.1; // XAUUSD : 1 pip = 0.1
 
 export function Cockpit() {
   const signals = useSignals(40);
@@ -162,7 +164,18 @@ export function Cockpit() {
       {/* ===== MAIN (fills, fixed) : chart | desk + mission control ===== */}
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: 10 }}>
         <section className="panel" style={{ minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ fontSize: 11.5, marginBottom: 6, color: 'var(--muted)', flex: 'none' }}>XAU/USD</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6, flex: 'none', minHeight: 20, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>XAU/USD</span>
+            {activeTrade && (
+              <LivePositionHud
+                direction={activeTrade.direction}
+                entry={activeTrade.entry}
+                sl={activeTrade.sl}
+                tp={activeTrade.tp}
+                lot={Number(openSig?.lot) || 0.1}
+              />
+            )}
+          </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <Chart signals={signals} activeTrade={activeTrade} />
           </div>
@@ -260,6 +273,61 @@ function PriceTicker() {
       <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>spr {(px.ask - px.bid).toFixed(2)}</span>
     </span>
   );
+}
+
+// HUD position OUVERTE : P&L flottant / R / pips en direct (tick par tick), + mini-barre SL·entrée·TP.
+// S'abonne au prix lui-même → seul ce composant se re-rend à chaque tick (pas tout le cockpit).
+function LivePositionHud({ direction, entry, sl, tp, lot }: { direction: string; entry: number; sl: number | null; tp: number | null; lot: number }) {
+  const px = usePrice();
+  const long = direction === 'long';
+  const dir = long ? 1 : -1;
+  const exit = px ? (long ? px.bid : px.ask) : entry; // on clôturerait au bid (long) / ask (short)
+  const move = (exit - entry) * dir; // distance en notre faveur (prix)
+  const pnl = move * lot * CONTRACT;
+  const pips = move / PIP;
+  const rr = sl != null && Math.abs(entry - sl) > 1e-9 ? move / Math.abs(entry - sl) : null;
+  const col = pnl > 0 ? 'var(--up)' : pnl < 0 ? 'var(--down)' : 'var(--muted)';
+  return (
+    <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: long ? 'rgba(31,216,176,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>
+        {long ? '▲ LONG' : '▼ SHORT'}
+      </span>
+      <span style={{ fontSize: 11, color: 'var(--muted)' }}>{lot.toFixed(2)} @ {entry.toFixed(2)}</span>
+      <span style={{ fontSize: 11, color: 'var(--dim)' }}>→</span>
+      <span style={{ fontSize: 12, color: 'var(--text)' }}>{px ? exit.toFixed(2) : '—'}</span>
+      <PosBar entry={entry} sl={sl} tp={tp} cur={exit} col={col} />
+      <span className="popVal" key={px ? Math.round(pnl) : 'x'} style={{ fontSize: 16, fontWeight: 700, color: col, minWidth: 72, textAlign: 'right' }}>
+        {px ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '$' : '—'}
+      </span>
+      <span style={{ fontSize: 11.5, color: col, minWidth: 44, textAlign: 'right' }}>{rr != null && px ? (rr >= 0 ? '+' : '') + rr.toFixed(2) + 'R' : '·'}</span>
+      <span style={{ fontSize: 11, color: 'var(--dim)', minWidth: 40, textAlign: 'right' }}>{px ? (pips >= 0 ? '+' : '') + pips.toFixed(0) + 'p' : ''}</span>
+    </div>
+  );
+}
+
+// Mini-barre : piste SL↔TP, segment rempli entrée→prix courant (couleur du P&L), point courant.
+function PosBar({ entry, sl, tp, cur, col }: { entry: number; sl: number | null; tp: number | null; cur: number; col: string }) {
+  if (sl == null || tp == null) return null;
+  const lo = Math.min(sl, tp);
+  const hi = Math.max(sl, tp);
+  const span = hi - lo;
+  if (span <= 0) return null;
+  const pos = (x: number) => Math.max(0, Math.min(1, (x - lo) / span)) * 100;
+  const eX = pos(entry);
+  const cX = pos(cur);
+  const a = Math.min(eX, cX);
+  const b = Math.max(eX, cX);
+  return (
+    <span style={{ position: 'relative', width: 104, height: 6, borderRadius: 3, background: 'rgba(130,152,190,.18)', display: 'inline-block' }} title="SL · entry · TP">
+      <span style={{ position: 'absolute', left: `${a}%`, width: `${b - a}%`, top: 0, bottom: 0, background: col, opacity: 0.7, borderRadius: 3 }} />
+      <Tick x={pos(sl)} color="var(--down)" />
+      <Tick x={pos(tp)} color="var(--up)" />
+      <span style={{ position: 'absolute', left: `${cX}%`, top: '50%', width: 7, height: 7, marginLeft: -3.5, marginTop: -3.5, borderRadius: '50%', background: col, boxShadow: `0 0 6px ${col}` }} />
+    </span>
+  );
+}
+function Tick({ x, color }: { x: number; color: string }) {
+  return <span style={{ position: 'absolute', left: `${x}%`, top: -1, bottom: -1, width: 2, marginLeft: -1, background: color, borderRadius: 1 }} />;
 }
 
 function goldReopenMs(): number | null {
