@@ -40,7 +40,7 @@ export function Cockpit() {
       }
       return n;
     });
-  const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'normal';
+  const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'scalp'; // défaut SCALP (edge validé, cf. runner)
   const strategy = activeMode === 'scalp' ? 'scalp' : 'normal'; // 2 stratégies seulement
   const killed = optKilled ?? !!st?.killed;
   const openPos = Number(st?.open_positions ?? 0);
