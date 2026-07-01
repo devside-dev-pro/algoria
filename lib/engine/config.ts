@@ -23,6 +23,7 @@ export interface EngineConfig {
   targetRR: number; // R:R cible avant clamp structure
   contractSize: number; // XAUUSD ≈ 100 oz (préférer la spec broker)
   priceStep?: number; // pas d'arrondi des PRIX (entrée/SL/TP). Défaut 0.01 (or). EURUSD 0.00001, USDJPY 0.001, indices 0.1…
+  fixedLot?: number; // si défini (>0) : TOUT trade auto utilise ce lot FIXE (ignore le sizing par risque). Sinon lot = risque%/stop.
   lotStep: number;
   minLot: number;
   minStopAtr: number;

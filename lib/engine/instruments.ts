@@ -17,7 +17,8 @@ export interface InstrumentSpec {
 const SCALP_CTX: Partial<ContextOptions> = { tradeAsia: true, volMinPct: 0.05, volMaxPct: 0.995 };
 
 // OR — config scalp actuelle (backtest M5 réel : ~17 trades/j, PF 1.21, robuste sur 2 moitiés).
-const XAUUSD_SCALP: EngineConfig = SCALP_CONFIG;
+// fixedLot 1 : chaque trade auto part à 1 lot fixe (choix produit — lisible en live ; le risque $ varie avec le stop).
+const XAUUSD_SCALP: EngineConfig = { ...SCALP_CONFIG, fixedLot: 1 };
 
 // NAS100 — l'indice laisse courir les gagnants → R:R plus élevé (0.8 vs 0.4), SL serré (0.6×ATR), seuil 0.28.
 // maxSpread relevé (spread indice en POINTS ; 0.95 est petit vs un range M5 ~40 pts).
@@ -31,6 +32,7 @@ const NAS100_SCALP: EngineConfig = {
   minStopAtr: 0.3,
   maxStopAtr: 3,
   beTrigger: 0.15,
+  fixedLot: 10, // 10 lots fixes par trade auto (choix produit — le risque $ varie avec le stop)
   threshold: { soft: 0.28, normal: 0.28, turbo: 0.28, scalp: 0.28 },
   risk: { ...SCALP_CONFIG.risk, maxSpread: 5 },
 };
