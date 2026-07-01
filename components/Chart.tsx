@@ -22,6 +22,9 @@ import type { Bar } from '@/lib/engine/types';
 /** Position ouverte à matérialiser sur le chart (entrée/SL/TP). tps = échelle de TP (TP1, TP2…). null = aucune. */
 export type ActiveTrade = { direction: string; entry: number; sl: number | null; tp: number | null; tps?: number[]; entryTime?: number | null } | null;
 
+type Ind = { ema9: number; ema21: number; vwap: number; bbU: number; bbL: number };
+type Hud = { o: number; h: number; l: number; c: number; prevC: number | null; ind: Partial<Ind> } | null;
+
 const SYMBOL = 'XAUUSD';
 const TFS = ['M1', 'M5', 'M15', 'H1', 'D1'] as const;
 type TF = (typeof TFS)[number];
@@ -60,6 +63,10 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   const [vis, setVis] = useState({ ema: true, bb: true, vwap: true, sr: true, marks: true });
   const visRef = useRef(vis);
   visRef.current = vis;
+  // HUD crosshair (O/H/L/C + indicateurs de la bougie survolée, sinon la dernière)
+  const [hud, setHud] = useState<Hud>(null);
+  const lastIndRef = useRef<Partial<Ind>>({}); // dernières valeurs EMA/VWAP/BB (pour le HUD hors survol)
+  const hudRafRef = useRef<number | null>(null);
 
   // EMA 9/21 (ruban de tendance) + Bandes de Bollinger (20, 2σ) — recalculés en direct → l'impression qu'Algoria « travaille ».
   function drawIndicators() {
@@ -106,6 +113,8 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     bbMidRef.current?.setData(mid);
     bbLoRef.current?.setData(lo);
     vwapRef.current?.setData(vwap);
+    const n = bars.length - 1; // dernières valeurs → HUD hors survol
+    lastIndRef.current = { ema9: ef[n], ema21: es[n], vwap: vwap[n]?.value, bbU: up[n]?.value, bbL: lo[n]?.value };
   }
 
   // Support / résistance les plus proches (swings) — lignes discrètes.
@@ -184,7 +193,15 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     drawLevels();
     drawMarkers();
     drawTrade();
+    seedHud(); // légende visible dès le chargement (dernière bougie), avant tout survol
     chartRef.current?.timeScale().fitContent();
+  }
+
+  // HUD = dernière bougie (état par défaut hors survol).
+  function seedHud() {
+    const bars = barsRef.current;
+    const b = bars[bars.length - 1];
+    if (b) setHud({ o: b.open, h: b.high, l: b.low, c: b.close, prevC: bars.length > 1 ? bars[bars.length - 2].close : null, ind: lastIndRef.current });
   }
 
   async function loadOlder() {
@@ -242,6 +259,26 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     series.attachPrimitive(zone as Parameters<typeof series.attachPrimitive>[0]);
     zoneRef.current = zone;
 
+    // HUD crosshair (O/H/L/C + indicateurs) — coalescé en 1 flush par frame (subscribeCrosshairMove tire à chaque mousemove)
+    chart.subscribeCrosshairMove((param) => {
+      if (hudRafRef.current != null) return;
+      hudRafRef.current = requestAnimationFrame(() => {
+        hudRafRef.current = null;
+        const s = seriesRef.current;
+        const bars = barsRef.current;
+        if (!s || !bars.length) return setHud(null);
+        const cd = (param.time != null ? param.seriesData.get(s) : undefined) as { open: number; high: number; low: number; close: number } | undefined;
+        if (cd && typeof cd.close === 'number') {
+          const val = (r: typeof emaFastRef) => (param.seriesData.get(r.current!) as { value?: number } | undefined)?.value;
+          const idx = bars.findIndex((b) => toSec(b.time) === param.time);
+          setHud({ o: cd.open, h: cd.high, l: cd.low, c: cd.close, prevC: idx > 0 ? bars[idx - 1].close : null, ind: { ema9: val(emaFastRef), ema21: val(emaSlowRef), vwap: val(vwapRef), bbU: val(bbUpRef), bbL: val(bbLoRef) } });
+        } else {
+          const b = bars[bars.length - 1]; // hors survol → dernière bougie
+          setHud({ o: b.open, h: b.high, l: b.low, c: b.close, prevC: bars.length > 1 ? bars[bars.length - 2].close : null, ind: lastIndRef.current });
+        }
+      });
+    });
+
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (range && range.from < 12) void loadOlder();
     });
@@ -289,6 +326,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     return () => {
       supabase.removeChannel(live);
       unsubTicks();
+      if (hudRafRef.current != null) cancelAnimationFrame(hudRafRef.current);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -344,7 +382,40 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
         <button onClick={() => setVis((v) => ({ ...v, sr: !v.sr }))} style={indBtn(vis.sr, 'rgba(245,194,74,.95)')}>S/R</button>
         <button onClick={() => setVis((v) => ({ ...v, marks: !v.marks }))} style={indBtn(vis.marks, 'rgba(220,233,255,.9)')}>MARKS</button>
       </div>
-      <div ref={ref} style={{ flex: 1, minHeight: 240 }} />
+      <div style={{ position: 'relative', flex: 1, minHeight: 240 }}>
+        <div ref={ref} style={{ position: 'absolute', inset: 0 }} />
+        {hud && <ChartHud hud={hud} />}
+      </div>
+    </div>
+  );
+}
+
+// Bandeau O/H/L/C + indicateurs (style TradingView), en surimpression haut-gauche du chart.
+function ChartHud({ hud }: { hud: NonNullable<Hud> }) {
+  const up = hud.c >= hud.o;
+  const col = up ? 'var(--up)' : 'var(--down)';
+  const chg = hud.prevC ? ((hud.c - hud.prevC) / hud.prevC) * 100 : null;
+  const n1 = (v: number | undefined) => (v == null || !Number.isFinite(v) ? '—' : v.toFixed(1));
+  const cell = (k: string, v: string, c?: string) => (
+    <span style={{ display: 'inline-flex', gap: 3 }}>
+      <span style={{ color: 'var(--dim)' }}>{k}</span>
+      <span className="mono" style={{ color: c ?? 'var(--muted)' }}>{v}</span>
+    </span>
+  );
+  return (
+    <div className="mono" style={{ position: 'absolute', top: 8, left: 10, display: 'flex', gap: 12, fontSize: 11.5, pointerEvents: 'none', textShadow: '0 1px 4px rgba(0,0,0,.6)', zIndex: 3, flexWrap: 'wrap' }}>
+      <span style={{ display: 'inline-flex', gap: 10 }}>
+        {cell('O', n1(hud.o), col)}
+        {cell('H', n1(hud.h), col)}
+        {cell('L', n1(hud.l), col)}
+        {cell('C', n1(hud.c), col)}
+        {chg != null && <span className="mono" style={{ color: col }}>{chg >= 0 ? '+' : ''}{chg.toFixed(2)}%</span>}
+      </span>
+      <span style={{ display: 'inline-flex', gap: 10 }}>
+        {cell('EMA9', n1(hud.ind.ema9), 'rgba(43,227,245,.95)')}
+        {cell('EMA21', n1(hud.ind.ema21), 'rgba(245,194,74,.95)')}
+        {cell('VWAP', n1(hud.ind.vwap), 'rgba(190,120,245,.95)')}
+      </span>
     </div>
   );
 }
