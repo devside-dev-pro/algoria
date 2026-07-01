@@ -1,5 +1,4 @@
 'use client';
-import { useDesk } from '@/lib/cockpit/useRealtime';
 
 // Desk ALGORIA AI — surface stream-first : un HERO fixe (« ce que fait le bot MAINTENANT ») + des cartes
 // à structure fixe (spine · clause · rail/R-bar · chips). Les CHIFFRES viennent des champs structurés
@@ -152,8 +151,7 @@ function Card({ e, latest }: { e: any; latest: boolean }) {
   );
 }
 
-export function Desk() {
-  const items = useDesk(14);
+export function Desk({ items = [] }: { items?: any[] }) {
   // dédup structurel : on effondre les lectures consécutives identiques (état·niveau·direction) — anti-flood marché plat.
   const key = (e: any) => {
     const m = e?.data ?? {};

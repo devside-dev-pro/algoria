@@ -27,7 +27,6 @@ export type ActiveTrade = { direction: string; entry: number; sl: number | null;
 type Ind = { ema9: number; ema21: number; vwap: number; bbU: number; bbL: number };
 type Hud = { o: number; h: number; l: number; c: number; prevC: number | null; ind: Partial<Ind> } | null;
 
-const SYMBOL = 'XAUUSD';
 const TFS = ['M1', 'M5', 'M15', 'H1', 'D1'] as const;
 type TF = (typeof TFS)[number];
 const PAGE = 1500;
@@ -40,7 +39,8 @@ const toBar = (c: Record<string, unknown>): Bar => ({
   time: Number(c.time), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
 });
 
-export function Chart({ signals, activeTrade = null }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade }) {
+export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD' }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string }) {
+  const SYMBOL = symbol; // le parent remonte le Chart (key={symbol}) au changement → réinit propre du chart impératif
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);

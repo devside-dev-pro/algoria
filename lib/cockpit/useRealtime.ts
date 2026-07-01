@@ -84,43 +84,50 @@ export function useLatestState() {
   return state;
 }
 
-/** Desk ALGORIA AI : commentaires/opportunités/trades (events level='ai'), du plus récent au plus ancien. */
-export function useDesk(limit = 10) {
+/** Desk ALGORIA AI : commentaires/opportunités/trades (events level='ai'), du plus récent au plus ancien.
+ * `symbol` (affichage, ex. 'XAUUSD') filtre le desk du marché choisi ; les vieux events sans symbole
+ * sont rattachés à l'or (comportement historique). */
+export function useDesk(limit = 10, symbol = 'XAUUSD') {
   const [items, setItems] = useState<Row[]>([]);
   useEffect(() => {
     let alive = true;
+    const match = (e: Row) => {
+      const s = (e as any)?.data?.symbol as string | undefined;
+      return s ? s === symbol : symbol === 'XAUUSD'; // legacy (sans symbole) → or
+    };
     supabase
       .from('events')
       .select('*')
       .eq('level', 'ai')
       .order('ts', { ascending: false })
-      .limit(limit)
+      .limit(limit * 4) // on récupère large puis on filtre par symbole côté client
       .then(({ data }) => {
-        if (alive && data) setItems(data);
+        if (alive && data) setItems((data as Row[]).filter(match).slice(0, limit));
       });
     const ch = supabase
       .channel('rt-desk')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events', filter: 'level=eq.ai' }, ({ new: e }) =>
-        setItems((p) => [e as Row, ...p].slice(0, limit)),
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events', filter: 'level=eq.ai' }, ({ new: e }) => {
+        if (match(e as Row)) setItems((p) => [e as Row, ...p].slice(0, limit));
+      })
       .subscribe();
     return () => {
       alive = false;
       supabase.removeChannel(ch);
     };
-  }, [limit]);
+  }, [limit, symbol]);
   return items;
 }
 
-/** Prix live (broadcast runner) pour le ticker du header. `dir` = sens du dernier mouvement. */
-export function usePrice() {
+/** Prix live (broadcast runner) d'UN symbole pour le ticker/HUD. `dir` = sens du dernier mouvement. */
+export function usePrice(symbol = 'XAUUSD') {
   const [px, setPx] = useState<{ bid: number; ask: number; mid: number; dir: -1 | 0 | 1 } | null>(null);
   useEffect(() => {
+    setPx(null); // reset au changement de symbole
     let prev = 0;
     supabase
       .from('candles')
       .select('close')
-      .eq('symbol', 'XAUUSD')
+      .eq('symbol', symbol)
       .eq('timeframe', 'M5')
       .order('time', { ascending: false })
       .limit(1)
@@ -136,8 +143,8 @@ export function usePrice() {
       const dir = mid > prev ? 1 : mid < prev ? -1 : 0;
       prev = mid;
       setPx({ bid: t.bid, ask: t.ask, mid, dir });
-    });
-  }, []);
+    }, symbol);
+  }, [symbol]);
   return px;
 }
 

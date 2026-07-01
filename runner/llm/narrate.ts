@@ -132,11 +132,12 @@ const tone = (score: number): 'bull' | 'bear' | 'neutral' => (score > 0.05 ? 'bu
 
 export interface DeskMeta {
   kind: DeskKind;
+  symbol: string; // symbole d'affichage complet (ex. 'XAUUSD', 'NAS100') — clé de filtrage du cockpit multi-symbole
   direction: Direction;
   state: 'in_long' | 'in_short' | 'stalking_long' | 'stalking_short' | 'aside';
   confidence: number | null;
   threshold: number;
-  instrument: string;
+  instrument: string; // symbole court affiché dans le hero (ex. 'XAU', 'NAS')
   level: number;
   levelKind: 'entry' | 'trigger' | 'support' | 'resistance' | 'price';
   trigger?: { level: number; cond: string; op: string };
@@ -198,6 +199,7 @@ export function deskMeta(kind: DeskKind, ctx: MarketContext, opts: { signal?: Si
 
   return {
     kind,
+    symbol: ctx.symbol,
     direction,
     state,
     confidence,

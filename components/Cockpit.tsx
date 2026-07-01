@@ -4,17 +4,27 @@ import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
-import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth } from '@/lib/cockpit/useRealtime';
+import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk } from '@/lib/cockpit/useRealtime';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
-const CONTRACT = 100; // XAUUSD : 100 oz / lot (cf. lib/engine/config.ts)
-const PIP = 0.1; // XAUUSD : 1 pip = 0.1
+
+// Marchés tradés par Algoria (le cockpit suit le symbole sélectionné). contract/pip/dp servent au HUD live.
+interface SymSpec { key: string; label: string; short: string; contract: number; pip: number; dp: number }
+const SYMS: SymSpec[] = [
+  { key: 'XAUUSD', label: 'XAU/USD', short: 'XAU', contract: 100, pip: 0.1, dp: 2 },
+  { key: 'NAS100', label: 'NAS100', short: 'NAS', contract: 1, pip: 1, dp: 1 },
+];
+const symSpec = (k: string) => SYMS.find((s) => s.key === k) ?? SYMS[0];
 
 export function Cockpit() {
-  const signals = useSignals(40);
+  const [symbol, setSymbol] = useState('XAUUSD'); // marché affiché/piloté par le cockpit
+  const spec = symSpec(symbol);
+  const signals = useSignals(60);
   const st = useLatestState() as any;
-  const trades = useTrades(80);
+  const trades = useTrades(120);
+  const deskItems = useDesk(14, symbol); // desk du marché sélectionné (levé ici pour aussi nourrir le header)
+  const symCtx = (deskItems[0] as any)?.data; // dernier contexte structuré du symbole (session/regime/state…)
   const dayStartEq = useDayStartEquity();
   const equityCurve = useEquityCurve();
   const [optMode, setOptMode] = useState<string | null>(null);
@@ -54,9 +64,17 @@ export function Cockpit() {
     if (!prev || (t.closed_at && !prev.closed_at)) tradeByTicket.set(k, t);
   }
 
-  // open position to draw on the chart (entry/SL/TP); null if none
+  // Positions ouvertes PAR symbole (pour la barre marchés : point + sens sur chaque marché en position).
+  const openBySym: Record<string, { dir: string }> = {};
+  for (const s of signals as any[]) {
+    if (s.ticket == null || !s.symbol) continue;
+    const t = tradeByTicket.get(String(s.ticket));
+    if (t && !t.closed_at) openBySym[s.symbol] ??= { dir: String(s.direction) };
+  }
+
+  // open position à dessiner sur le chart (entry/SL/TP) — DU SYMBOLE SÉLECTIONNÉ ; null sinon
   const openSig = signals.find((s: any) => {
-    if (s.ticket == null) return false;
+    if (s.ticket == null || s.symbol !== symbol) return false;
     const t = tradeByTicket.get(String(s.ticket));
     return t && !t.closed_at;
   }) as any;
@@ -75,7 +93,7 @@ export function Cockpit() {
   // Signal servant de base au panneau « WHY THIS TRADE » : la position ouverte si elle porte une confluence,
   // sinon le dernier signal réel (les entrées manuelles/BEAST ont des contributions vides → naturellement exclues).
   const hasConf = (s: any) => Array.isArray(s?.confluence?.contributions) && s.confluence.contributions.length > 0;
-  const whySig = openSig && hasConf(openSig) ? openSig : (signals.find(hasConf) ?? null);
+  const whySig = openSig && hasConf(openSig) ? openSig : (signals.find((s: any) => s.symbol === symbol && hasConf(s)) ?? null);
 
   // Stats desk (track record) depuis les trades clôturés. On exclut les micro-scalps BEAST (spam) repérés via les signaux.
   const rafaleTickets = new Set(
@@ -130,8 +148,8 @@ export function Cockpit() {
           <span className="glow" style={{ width: 20, height: 20, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
           <strong style={{ fontSize: 15, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
           <FeedStatus />
-          <PriceTicker />
-          <MarketStatus session={st?.session as string | undefined} regime={st?.regime as string | undefined} tradable={!!st?.tradable} />
+          <MarketRail selected={symbol} onSelect={setSymbol} openBySym={openBySym} />
+          <MarketStatus session={(symCtx?.session as string | undefined) ?? (st?.session as string | undefined)} regime={(symCtx?.regime as string | undefined) ?? (st?.regime as string | undefined)} tradable={st?.tradable !== false} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!broadcast && (
@@ -195,9 +213,10 @@ export function Cockpit() {
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: 10 }}>
         <section className="panel" style={{ minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column', position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6, flex: 'none', minHeight: 20, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>XAU/USD</span>
+            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{spec.label}</span>
             {activeTrade && (
               <LivePositionHud
+                symbol={symbol}
                 direction={activeTrade.direction}
                 entry={activeTrade.entry}
                 sl={activeTrade.sl}
@@ -207,12 +226,12 @@ export function Cockpit() {
             )}
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Chart signals={signals} activeTrade={activeTrade} />
+            <Chart key={symbol} symbol={symbol} signals={signals.filter((s: any) => s.symbol === symbol)} activeTrade={activeTrade} />
           </div>
           {whySig && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} live={!!openSig} />}
         </section>
         <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
-          <Desk />
+          <Desk items={deskItems} />
           <Telemetry state={st} signals={signals} />
         </div>
       </div>
@@ -315,25 +334,39 @@ function Sparkline({ data }: { data: number[] }) {
   );
 }
 
-function PriceTicker() {
-  const px = usePrice();
-  const { stale } = useFeedHealth();
-  if (!px) return <span className="mono" style={{ color: 'var(--dim)', fontSize: 13 }}>XAU/USD —</span>;
-  const col = stale ? 'var(--dim)' : px.dir > 0 ? 'var(--up)' : px.dir < 0 ? 'var(--down)' : 'var(--text)';
-  const arrow = px.dir > 0 ? '▲' : px.dir < 0 ? '▼' : '·';
+// Barre MARCHÉS : un chip cliquable par symbole (prix live + sens + point si en position). Sert à la fois de
+// switcher (le chip sélectionné pilote tout le cockpit) et d'aperçu multi-marché pour le live.
+function MarketRail({ selected, onSelect, openBySym }: { selected: string; onSelect: (s: string) => void; openBySym: Record<string, { dir: string }> }) {
   return (
-    <span style={{ display: 'flex', alignItems: 'baseline', gap: 7, opacity: stale ? 0.6 : 1 }}>
-      <span style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: 0.5 }}>XAU/USD</span>
-      <span className="mono" style={{ fontSize: 20, fontWeight: 600, color: col, lineHeight: 1 }}>{px.mid.toFixed(2)}</span>
-      {stale ? (
-        <span className="mono" style={{ fontSize: 10, color: 'var(--gold)' }}>· stale</span>
-      ) : (
-        <>
-          <span className="mono" style={{ fontSize: 11, color: col }}>{arrow}</span>
-          <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>spr {(px.ask - px.bid).toFixed(2)}</span>
-        </>
-      )}
-    </span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {SYMS.map((s) => (
+        <MarketChip key={s.key} spec={s} active={s.key === selected} pos={openBySym[s.key]} onClick={() => onSelect(s.key)} />
+      ))}
+    </div>
+  );
+}
+
+function MarketChip({ spec, active, pos, onClick }: { spec: SymSpec; active: boolean; pos?: { dir: string }; onClick: () => void }) {
+  const px = usePrice(spec.key);
+  const { stale } = useFeedHealth();
+  const col = stale ? 'var(--dim)' : px && px.dir > 0 ? 'var(--up)' : px && px.dir < 0 ? 'var(--down)' : 'var(--text)';
+  const arrow = px && px.dir > 0 ? '▲' : px && px.dir < 0 ? '▼' : '·';
+  return (
+    <button
+      onClick={onClick}
+      title={`${spec.label}${pos ? ` · in ${pos.dir}` : ''}`}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 7, padding: '4px 10px', borderRadius: 8, cursor: 'pointer',
+        border: `1px solid ${active ? 'rgba(43,227,245,.5)' : 'var(--border)'}`,
+        background: active ? 'rgba(43,227,245,.08)' : 'transparent',
+        opacity: stale && !active ? 0.6 : 1,
+      }}
+    >
+      {pos && <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: pos.dir === 'long' ? 'var(--up)' : 'var(--down)' }} />}
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, color: active ? 'var(--text)' : 'var(--muted)' }}>{spec.short}</span>
+      <span className="mono" style={{ fontSize: active ? 18 : 13, fontWeight: 600, color: col, lineHeight: 1 }}>{px ? px.mid.toFixed(spec.dp) : '—'}</span>
+      {active && !stale && px && <span className="mono" style={{ fontSize: 11, color: col }}>{arrow}</span>}
+    </button>
   );
 }
 
@@ -367,14 +400,15 @@ function FeedStatus() {
 
 // HUD position OUVERTE : P&L flottant / R / pips en direct (tick par tick), + mini-barre SL·entrée·TP.
 // S'abonne au prix lui-même → seul ce composant se re-rend à chaque tick (pas tout le cockpit).
-function LivePositionHud({ direction, entry, sl, tp, lot }: { direction: string; entry: number; sl: number | null; tp: number | null; lot: number }) {
-  const px = usePrice();
+function LivePositionHud({ symbol, direction, entry, sl, tp, lot }: { symbol: string; direction: string; entry: number; sl: number | null; tp: number | null; lot: number }) {
+  const px = usePrice(symbol);
+  const spec = symSpec(symbol);
   const long = direction === 'long';
   const dir = long ? 1 : -1;
   const exit = px ? (long ? px.bid : px.ask) : entry; // on clôturerait au bid (long) / ask (short)
   const move = (exit - entry) * dir; // distance en notre faveur (prix)
-  const pnl = move * lot * CONTRACT;
-  const pips = move / PIP;
+  const pnl = move * lot * spec.contract;
+  const pips = move / spec.pip;
   const rr = sl != null && Math.abs(entry - sl) > 1e-9 ? move / Math.abs(entry - sl) : null;
   const col = pnl > 0 ? 'var(--up)' : pnl < 0 ? 'var(--down)' : 'var(--muted)';
   return (
@@ -382,9 +416,9 @@ function LivePositionHud({ direction, entry, sl, tp, lot }: { direction: string;
       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: long ? 'rgba(31,216,176,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>
         {long ? '▲ LONG' : '▼ SHORT'}
       </span>
-      <span style={{ fontSize: 11, color: 'var(--muted)' }}>{lot.toFixed(2)} @ {entry.toFixed(2)}</span>
+      <span style={{ fontSize: 11, color: 'var(--muted)' }}>{lot.toFixed(2)} @ {entry.toFixed(spec.dp)}</span>
       <span style={{ fontSize: 11, color: 'var(--dim)' }}>→</span>
-      <span style={{ fontSize: 12, color: 'var(--text)' }}>{px ? exit.toFixed(2) : '—'}</span>
+      <span style={{ fontSize: 12, color: 'var(--text)' }}>{px ? exit.toFixed(spec.dp) : '—'}</span>
       <PosBar entry={entry} sl={sl} tp={tp} cur={exit} col={col} />
       <span className="popVal" key={px ? Math.round(pnl) : 'x'} style={{ fontSize: 16, fontWeight: 700, color: col, minWidth: 72, textAlign: 'right' }}>
         {px ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '$' : '—'}
