@@ -46,10 +46,11 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
   if (riskReward < cfg.minRR) return null; // not enough room → discard
   const tp2 = entry + dir * Math.max(cfg.targetRR * 1.6, riskReward + 0.8) * riskDist;
 
-  // Sizing: fixed risk amount, derived from the stop
+  // Sizing : soit un LOT FIXE par instrument (cfg.fixedLot, ex. or 1 / NAS 10 — le risque $ varie alors avec le stop),
+  // soit le sizing par RISQUE (montant fixe = risque% du solde, dérivé du stop → lot plus petit si stop plus large).
   const riskAmount = balance * cfg.riskPct[mode];
   const perLot = riskDist * cfg.contractSize;
-  const lot = Math.floor(riskAmount / perLot / cfg.lotStep) * cfg.lotStep;
+  const lot = cfg.fixedLot && cfg.fixedLot > 0 ? cfg.fixedLot : Math.floor(riskAmount / perLot / cfg.lotStep) * cfg.lotStep;
   if (lot < cfg.minLot) return null;
 
   return {
