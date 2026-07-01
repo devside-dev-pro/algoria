@@ -20,7 +20,7 @@ const EVENT_TAG: Record<string, { tag: string; color: string; glow?: boolean }> 
   scan: { tag: 'ENGINE', color: '#4fb8ff' },
 };
 
-export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
+export function Telemetry({ state, signals, symbol = 'XAUUSD' }: { state: any; signals: any[]; symbol?: string }) {
   const events = useEvents(50);
   const [lines, setLines] = useState<Line[]>([]);
   const [live, setLive] = useState(false);
@@ -45,12 +45,12 @@ export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
     setLines((p) => (p.length >= BUFFER ? [...p.slice(p.length - BUFFER + 1), ln] : [...p, ln]));
   };
 
-  // seed du prix depuis la dernière bougie (réaliste même sans runner)
+  // seed du prix depuis la dernière bougie du SYMBOLE affiché (réaliste même sans runner)
   useEffect(() => {
     supabase
       .from('candles')
       .select('close')
-      .eq('symbol', 'XAUUSD')
+      .eq('symbol', symbol)
       .eq('timeframe', 'M5')
       .order('time', { ascending: false })
       .limit(1)
@@ -61,24 +61,26 @@ export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
           f.mid = c; f.bid = c - f.spread / 2; f.ask = c + f.spread / 2; f.vwap = c;
         }
       });
-  }, []);
+  }, [symbol]);
 
-  // prix LIVE réel (broadcast depuis le runner, via le store partagé) → ancre le flux
-  useEffect(
-    () =>
-      subscribeTicks((p) => {
-        const f = feed.current;
-        const mid = (p.bid + p.ask) / 2;
-        const prev = f.mid;
-        f.bid = p.bid; f.ask = p.ask; f.spread = Math.max(0, p.ask - p.bid);
-        f.dPx = mid - prev; f.dPct = prev ? ((mid - prev) / prev) * 100 : 0; f.up = mid >= prev;
-        f.mid = mid; f.ticks++; f.velocity = f.dPx;
-        const s = seen.current; s.sum += mid; s.n++; f.vwap = s.sum / s.n;
-        f.feedLagMs = Math.max(8, Date.now() - p.t);
-        lastRealAt.current = Date.now();
-      }),
-    [],
-  );
+  // prix LIVE réel DU SYMBOLE affiché (broadcast runner, filtré) → ancre le flux. On réinitialise vwap + baseline
+  // au changement de symbole (sinon un premier delta or→NAS ferait exploser dPct/momentum).
+  useEffect(() => {
+    seen.current = { sum: 0, n: 0 };
+    let fresh = true;
+    return subscribeTicks((p) => {
+      const f = feed.current;
+      const mid = (p.bid + p.ask) / 2;
+      const prev = fresh ? mid : f.mid;
+      fresh = false;
+      f.bid = p.bid; f.ask = p.ask; f.spread = Math.max(0, p.ask - p.bid);
+      f.dPx = mid - prev; f.dPct = prev ? ((mid - prev) / prev) * 100 : 0; f.up = mid >= prev;
+      f.mid = mid; f.ticks++; f.velocity = f.dPx;
+      const s = seen.current; s.sum += mid; s.n++; f.vwap = s.sum / s.n;
+      f.feedLagMs = Math.max(8, Date.now() - p.t);
+      lastRealAt.current = Date.now();
+    }, symbol);
+  }, [symbol]);
 
   // dernier snapshot moteur → modèle de flux
   useEffect(() => {

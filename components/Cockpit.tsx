@@ -232,7 +232,7 @@ export function Cockpit() {
         </section>
         <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
           <Desk items={deskItems} />
-          <Telemetry state={st} signals={signals} />
+          <Telemetry state={st} signals={signals} symbol={symbol} />
         </div>
       </div>
 

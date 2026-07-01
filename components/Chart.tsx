@@ -574,7 +574,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD' }: { sign
       })
       .subscribe();
 
-    // Flux tick temps réel → bougie EN FORMATION + indicateurs recalculés à chaque tick (le chart « respire »).
+    // Flux tick temps réel DU SYMBOLE AFFICHÉ → bougie EN FORMATION (sans filtre, un tick NAS ferait spiker l'or).
     const unsubTicks = subscribeTicks((tick) => {
       const series = seriesRef.current;
       const bars = barsRef.current;
@@ -594,7 +594,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD' }: { sign
         series.update(toCandle(last));
       } else return;
       scheduleIndUpdate();
-    });
+    }, SYMBOL);
 
     return () => {
       supabase.removeChannel(live);
