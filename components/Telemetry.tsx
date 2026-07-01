@@ -38,6 +38,7 @@ export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
   const seen = useRef({ sum: 0, n: 0 });
   const lastEventId = useRef(-1);
   const lastSignalKey = useRef('');
+  const lastAi = useRef({ text: '', at: 0 });
 
   const push = (tag: string, text: string, color: string, glow?: boolean) => {
     const ln: Line = { id: idRef.current++, tag, text, color, glow, t: Date.now() };
@@ -105,9 +106,14 @@ export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
       if (!Number.isFinite(id) || id <= lastEventId.current) continue;
       lastEventId.current = Math.max(lastEventId.current, id);
       if (e.level === 'ai') {
-        // la matière complète vit dans le desk ALGORIA — ici juste un "ping" lumineux dans le flux
+        // la matière complète vit dans le desk ALGORIA — ici juste un "ping" lumineux dans le flux.
+        // Dédup des pings identiques en rafale (narrations livrées groupées) → plus de lignes répétées.
         const kind = (e.data?.kind as string) ?? 'note';
-        push('AI', `◆ ALGORIA desk · ${kind} ↗`, TAG_COLOR.AI, true);
+        const text = `◆ ALGORIA desk · ${kind} ↗`;
+        const now = Date.now();
+        if (text === lastAi.current.text && now - lastAi.current.at < 4000) continue;
+        lastAi.current = { text, at: now };
+        push('AI', text, TAG_COLOR.AI, true);
         continue;
       }
       const map = EVENT_TAG[e.level as string] ?? { tag: 'ENGINE', color: TAG_COLOR.ENGINE };
