@@ -55,7 +55,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   activeRef.current = activeTrade;
   const [tf, setTf] = useState<TF>('M5');
   // Visibilité des indicateurs (toggles cliquables). On garde le calcul, on masque juste l'affichage.
-  const [vis, setVis] = useState({ ema: true, bb: true, vwap: true, sr: true });
+  const [vis, setVis] = useState({ ema: true, bb: true, vwap: true, sr: true, marks: true });
   const visRef = useRef(vis);
   visRef.current = vis;
 
@@ -123,17 +123,26 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     if (sup) linesRef.current.push(series.createPriceLine({ price: sup.price, color: 'rgba(43,227,245,.5)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'S' }));
   }
 
+  // Marqueurs d'entrée PROPRES (style TradingView) : petits triangles, AUCUN texte, un seul par bougie (pas d'empilement).
+  // On ignore les micro-scalps BEAST/rafale (sinon le chart est noyé) — ils restent dans la bande TRADES.
   function drawMarkers() {
     const markers = markersRef.current;
     const bars = barsRef.current;
     if (!markers || !bars.length) return;
+    if (!visRef.current.marks) { markers.setMarkers([]); return; } // toggle MARKS désactivé → chart sans marqueurs
+    const seen = new Set<string>();
     const mk: SeriesMarker<Time>[] = [];
     for (const s of signalsRef.current) {
+      const rationale = Array.isArray(s.rationale) ? (s.rationale as string[]).join(' ') : '';
+      if (/RAFALE/i.test(rationale)) continue; // spam show → pas sur le chart
       const t = parseRefTime(s.ref as string | undefined);
       if (!t) continue;
       const nearest = bars.reduce((p, b) => (Math.abs(b.time - t) < Math.abs(p.time - t) ? b : p), bars[0]);
       const long = s.direction === 'long';
-      mk.push({ time: toSec(nearest.time), position: long ? 'belowBar' : 'aboveBar', color: long ? '#1fd8b0' : '#ff6b8a', shape: long ? 'arrowUp' : 'arrowDown', text: long ? 'LONG' : 'SHORT' });
+      const key = `${nearest.time}${long ? 'L' : 'S'}`;
+      if (seen.has(key)) continue; // un seul triangle par bougie+sens
+      seen.add(key);
+      mk.push({ time: toSec(nearest.time), position: long ? 'belowBar' : 'aboveBar', color: long ? 'rgba(31,216,176,.9)' : 'rgba(255,107,138,.9)', shape: long ? 'arrowUp' : 'arrowDown' });
     }
     mk.sort((a, b) => (a.time as number) - (b.time as number));
     markers.setMarkers(mk);
@@ -303,6 +312,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     bbLoRef.current?.applyOptions({ visible: vis.bb });
     vwapRef.current?.applyOptions({ visible: vis.vwap });
     drawLevels();
+    drawMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vis]);
 
@@ -319,6 +329,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
         <button onClick={() => setVis((v) => ({ ...v, bb: !v.bb }))} style={indBtn(vis.bb, 'rgba(150,170,205,.95)')}>Bollinger</button>
         <button onClick={() => setVis((v) => ({ ...v, vwap: !v.vwap }))} style={indBtn(vis.vwap, 'rgba(190,120,245,.95)')}>VWAP</button>
         <button onClick={() => setVis((v) => ({ ...v, sr: !v.sr }))} style={indBtn(vis.sr, 'rgba(245,194,74,.95)')}>S/R</button>
+        <button onClick={() => setVis((v) => ({ ...v, marks: !v.marks }))} style={indBtn(vis.marks, 'rgba(220,233,255,.9)')}>MARKS</button>
       </div>
       <div ref={ref} style={{ flex: 1, minHeight: 240 }} />
     </div>
