@@ -55,6 +55,11 @@ export function Cockpit() {
       }
     : null;
 
+  // Signal servant de base au panneau « WHY THIS TRADE » : la position ouverte si elle porte une confluence,
+  // sinon le dernier signal réel (les entrées manuelles/BEAST ont des contributions vides → naturellement exclues).
+  const hasConf = (s: any) => Array.isArray(s?.confluence?.contributions) && s.confluence.contributions.length > 0;
+  const whySig = openSig && hasConf(openSig) ? openSig : (signals.find(hasConf) ?? null);
+
   // Stats desk (track record) depuis les trades clôturés. On exclut les micro-scalps BEAST (spam) repérés via les signaux.
   const rafaleTickets = new Set(
     signals.filter((s: any) => Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')).map((s: any) => String(s.ticket)),
@@ -163,7 +168,7 @@ export function Cockpit() {
 
       {/* ===== MAIN (fills, fixed) : chart | desk + mission control ===== */}
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: 10 }}>
-        <section className="panel" style={{ minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column' }}>
+        <section className="panel" style={{ minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column', position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6, flex: 'none', minHeight: 20, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>XAU/USD</span>
             {activeTrade && (
@@ -179,6 +184,7 @@ export function Cockpit() {
           <div style={{ flex: 1, minHeight: 0 }}>
             <Chart signals={signals} activeTrade={activeTrade} />
           </div>
+          {whySig && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} live={!!openSig} />}
         </section>
         <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
           <Desk />
@@ -328,6 +334,75 @@ function PosBar({ entry, sl, tp, cur, col }: { entry: number; sl: number | null;
 }
 function Tick({ x, color }: { x: number; color: string }) {
   return <span style={{ position: 'absolute', left: `${x}%`, top: -1, bottom: -1, width: 2, marginLeft: -1, background: color, borderRadius: 1 }} />;
+}
+
+// Libellés features — miroir de lib/engine/trade.ts (LABELS) pour nommer les contributions de confluence.
+const FEATURE_LABELS: Record<string, string> = {
+  emaStack: 'EMA trend',
+  macd: 'MACD momentum',
+  rsiPullback: 'RSI pullback',
+  srZone: 'S/R zone',
+  divergence: 'divergence',
+  liquiditySweep: 'liquidity sweep',
+  roundLevel: 'round level',
+};
+
+const whyOverlay: CSSProperties = {
+  position: 'absolute',
+  left: 14,
+  bottom: 34,
+  zIndex: 6,
+  width: 238,
+  padding: '9px 11px',
+  borderRadius: 10,
+  background: 'rgba(8,16,31,.82)',
+  border: '1px solid var(--border)',
+  boxShadow: '0 8px 24px rgba(3,8,18,.5)',
+  backdropFilter: 'blur(6px)',
+  pointerEvents: 'none',
+};
+
+// Panneau « WHY THIS TRADE » : décompose la confluence du signal en barres pondérées par feature
+// (vert = haussier, rouge = baissier, longueur ∝ |poids|) + jauge de confiance. Data-driven, pas de texte parsé.
+function WhyPanel({ direction, conf, live }: { direction: string; conf: any; live: boolean }) {
+  const contribs: any[] = Array.isArray(conf?.contributions) ? conf.contributions : [];
+  if (!contribs.length) return null;
+  const top = [...contribs].sort((a, b) => Math.abs(b.weighted) - Math.abs(a.weighted)).slice(0, 6);
+  const maxW = Math.max(0.01, ...top.map((c) => Math.abs(Number(c.weighted) || 0)));
+  const confidence = Math.max(0, Math.min(1, Number(conf?.confidence) || 0));
+  const long = direction === 'long';
+  return (
+    <div className="mono" style={whyOverlay}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+        <span style={{ fontSize: 9.5, letterSpacing: 1, color: 'var(--cyan)', opacity: 0.9 }}>{live ? 'WHY THIS TRADE' : 'LAST SETUP'}</span>
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: long ? 'var(--up)' : 'var(--down)' }}>{long ? '▲ LONG' : '▼ SHORT'}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontSize: 9, color: 'var(--dim)' }}>conf</span>
+        <span style={{ position: 'relative', flex: 1, height: 5, borderRadius: 3, background: 'rgba(130,152,190,.18)' }}>
+          <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round(confidence * 100)}%`, borderRadius: 3, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }} />
+        </span>
+        <span style={{ fontSize: 9.5, color: 'var(--text)' }}>{Math.round(confidence * 100)}%</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {top.map((c, i) => {
+          const w = Number(c.weighted) || 0;
+          const bull = w >= 0;
+          const frac = Math.min(1, Math.abs(w) / maxW);
+          return (
+            <div key={c.key ?? i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 9.5, color: 'var(--muted)', width: 82, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{FEATURE_LABELS[c.key] ?? c.key}</span>
+              <span style={{ position: 'relative', flex: 1, height: 5, background: 'rgba(130,152,190,.12)', borderRadius: 3 }}>
+                <span style={{ position: 'absolute', left: '50%', top: -1, bottom: -1, width: 1, background: 'rgba(130,152,190,.35)' }} />
+                <span style={{ position: 'absolute', top: 0, bottom: 0, borderRadius: 2, background: bull ? 'var(--up)' : 'var(--down)', left: bull ? '50%' : `${50 - frac * 50}%`, width: `${frac * 50}%` }} />
+              </span>
+              <span style={{ fontSize: 9, color: bull ? 'var(--up)' : 'var(--down)', width: 30, textAlign: 'right' }}>{bull ? '+' : ''}{w.toFixed(2)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function goldReopenMs(): number | null {
