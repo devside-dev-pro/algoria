@@ -60,19 +60,24 @@ async function main() {
   let killed = false; // kill switch global : coupe l'auto + les modes show sur TOUS les instruments.
   const startedAt = Date.now();
 
-  // ===== Backfill optionnel d'un symbole SUPPLÉMENTAIRE (pour backtester un indice pas encore au registre) =====
-  // Piloté par env, one-shot au démarrage. Ex: BACKFILL_EXTRA=US500 → ~2 semaines de M1/M5 dans Supabase.
-  const extra = process.env.BACKFILL_EXTRA?.trim();
-  if (extra && !instruments.some((i) => i.broker === extra)) {
+  // ===== Backfill optionnel de symboles SUPPLÉMENTAIRES (pour backtester un instrument pas encore au registre) =====
+  // Piloté par env, one-shot au démarrage. Accepte une LISTE (séparée par virgule/espace) → un seul redeploy suffit
+  // pour préparer plusieurs paires. Ex: BACKFILL_EXTRA=EURUSD,GBPUSD,USDJPY,DJ30 → ~2 semaines de M1/M5 chacun.
+  const extras = (process.env.BACKFILL_EXTRA ?? '')
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((s) => !instruments.some((i) => i.broker === s)); // ceux déjà au registre sont déjà backfillés
+  for (const sym of extras) {
     try {
-      await stream.subscribeToMarketData(extra);
+      await stream.subscribeToMarketData(sym);
       for (const tf of ['M1', 'M5', 'M15', 'H1', 'D1']) {
-        const hist = await backfill(account, extra, tf, BACKFILL_PAGES[tf] ?? 5);
-        if (hist.length) await logCandles(extra, hist, tf);
-        console.log(`[algoria] backfill EXTRA ${extra} ${tf}: ${hist.length} bougies`);
+        const hist = await backfill(account, sym, tf, BACKFILL_PAGES[tf] ?? 5);
+        if (hist.length) await logCandles(sym, hist, tf);
+        console.log(`[algoria] backfill EXTRA ${sym} ${tf}: ${hist.length} bougies`);
       }
     } catch (e) {
-      console.error(`[algoria] backfill EXTRA ${extra} échoué (symbole introuvable chez le broker ?):`, e);
+      console.error(`[algoria] backfill EXTRA ${sym} échoué (symbole introuvable chez le broker ?):`, e);
     }
   }
 
