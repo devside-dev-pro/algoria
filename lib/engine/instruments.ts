@@ -19,13 +19,14 @@ const SCALP_CTX: Partial<ContextOptions> = { tradeAsia: true, volMinPct: 0.05, v
 // OR — config scalp actuelle (backtest M5 réel : ~17 trades/j, PF 1.21, robuste sur 2 moitiés).
 const XAUUSD_SCALP: EngineConfig = SCALP_CONFIG;
 
-// NAS100 — l'indice laisse courir les gagnants → R:R plus élevé (0.8 vs 0.4), SL plus serré (0.9×ATR), seuil 0.28.
+// NAS100 — l'indice laisse courir les gagnants → R:R plus élevé (0.8 vs 0.4), SL serré (0.6×ATR), seuil 0.28.
 // maxSpread relevé (spread indice en POINTS ; 0.95 est petit vs un range M5 ~40 pts).
-// Backtest M5 réel (26 j) : ~12 trades/j, 86% win, PF 1.40, robuste (H1 1.36 / H2 1.42), tient à spread 1.5.
+// Backtest M5 réel (26 j, harness backtest/validate.ts) : ~15 trades/j, 84% win, PF 1.44, DD 5.8%,
+// robuste (H1 +$1844 / H2 +$1297). SL 0.6×ATR bat 0.9×ATR (PF 1.44 vs 1.30) — sortie plus rapide, moins de bruit encaissé.
 const NAS100_SCALP: EngineConfig = {
   ...SCALP_CONFIG,
   targetRR: 0.8,
-  slAtrMult: 0.9,
+  slAtrMult: 0.6,
   minRR: 0.2,
   minStopAtr: 0.3,
   maxStopAtr: 3,
