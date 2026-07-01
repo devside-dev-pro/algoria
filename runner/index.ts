@@ -51,6 +51,22 @@ async function main() {
     }
   }
 
+  // Backfill optionnel d'un symbole SUPPLÉMENTAIRE (ex. un indice à backtester), piloté par env, one-shot au
+  // démarrage. Ex: BACKFILL_EXTRA=NAS100 → écrit ~2 semaines de M1/M5 NAS100 dans Supabase, puis on peut retirer l'env.
+  const extra = process.env.BACKFILL_EXTRA?.trim();
+  if (extra && extra !== BROKER) {
+    try {
+      await stream.subscribeToMarketData(extra);
+      for (const tf of ['M1', 'M5', 'M15', 'H1', 'D1']) {
+        const hist = await backfill(account, extra, tf, BACKFILL_PAGES[tf] ?? 5);
+        if (hist.length) await logCandles(extra, hist, tf);
+        console.log(`[algoria] backfill EXTRA ${extra} ${tf}: ${hist.length} bougies`);
+      }
+    } catch (e) {
+      console.error(`[algoria] backfill EXTRA ${extra} échoué (symbole introuvable chez le broker ?):`, e);
+    }
+  }
+
   const seed = await loadHistory(account, BROKER, TF, 300);
   let state: EngineState = readState(terminal, BROKER, { dayStartBalance: terminal.accountInformation?.balance });
   // Défaut = SCALP : la stratégie scalp est validée par backtest (~9-12 trades/jour, PF 1.44, win 88%) et
