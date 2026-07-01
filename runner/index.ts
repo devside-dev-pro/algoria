@@ -10,6 +10,7 @@ import { narrate, narrationReady } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
+import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, reconcileOpenTrades, broadcastTick, watchCommands } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
@@ -50,6 +51,7 @@ async function main() {
   if (!instruments.length) throw new Error('[algoria] aucun instrument actif dans le registre (lib/engine/instruments.ts)');
   console.log(`[algoria] instruments actifs : ${instruments.map((i) => `${i.display}(${i.broker})`).join(', ')} · TF ${TF}`);
   console.log(`[algoria] narration ${narrationReady() ? 'ON (Claude)' : 'OFF — ajoute ANTHROPIC_API_KEY dans .env'}`);
+  console.log(`[algoria] risque portefeuille · max ${PORTFOLIO.maxOpenPositions} positions (total) · ${PORTFOLIO.maxPositionsPerInstrument} par instrument`);
 
   // ===== État PARTAGÉ à tous les instruments =====
   // mode + kill switch sont globaux (un seul cockpit les pilote). Chaque instrument a en revanche son
@@ -256,7 +258,17 @@ async function main() {
         const ctxOpts = mode === 'scalp' ? { spread: state.spread, ...inst.ctx } : { spread: state.spread };
         const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts }, FEATURES, cfg);
         await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
-        if (signal) await executeSignal(signal);
+        if (signal) {
+          // Garde-fou PORTEFEUILLE (global) au-dessus des limites par-symbole : on ne laisse pas l'or + le Nasdaq
+          // (+ Forex à venir) empiler des positions corrélées. N'affecte que l'auto (manuel/show restent libres).
+          const veto = portfolioVeto({ positions: (terminal.positions ?? []) as any[], symbol: BROKER });
+          if (veto) {
+            await logSignal(signal, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' });
+            if (isPrimary) await logNote(`${DISPLAY}: trade bloqué — ${veto}`, 'veto');
+          } else {
+            await executeSignal(signal);
+          }
+        }
 
         // Canaux UI mono-symbole (état global, feed d'events, narration) → PRIMAIRE uniquement, pour ne pas
         // écraser le cockpit de l'or. Les secondaires tradent et s'enregistrent (trades/signals/candles par symbole).
