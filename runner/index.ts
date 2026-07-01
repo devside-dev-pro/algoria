@@ -275,27 +275,27 @@ async function main() {
           }
         }
 
-        // Canaux UI mono-symbole (état global, feed d'events, narration) → PRIMAIRE uniquement, pour ne pas
-        // écraser le cockpit de l'or. Les secondaires tradent et s'enregistrent (trades/signals/candles par symbole).
+        // Feed d'events + état COMPTE (balance/equity global) → PRIMAIRE uniquement (canaux mono-symbole partagés).
         if (isPrimary) {
           await logEvents(events);
           await pushState(context, state, mode);
-          // Desk : on émet TOUJOURS le meta structuré (le hero « ce que fait le bot maintenant » reste vivant même sans LLM).
-          // La clause de prose (msg) est ajoutée par-dessus quand la narration est active.
-          const kind: DeskKind = signal ? 'trade' : confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.7 ? 'opportunity' : 'analysis';
-          const meta = deskMeta(kind, context, { signal, confluence, threshold });
-          let clause: string | null = null;
-          if (narrationReady()) {
-            clause = await narrate(
-              kind === 'trade'
-                ? { kind, ctx: context, signal, confluence, threshold }
-                : kind === 'opportunity'
-                  ? { kind, ctx: context, confluence, threshold }
-                  : { kind, ctx: context, logLines: events.map((e) => e.msg) },
-            );
-          }
-          await logNarration(clause ?? '', signal ? signal.time : context.time, meta as unknown as Record<string, unknown>);
         }
+
+        // Desk : émis PAR instrument, tagué symbole (meta.instrument). Le cockpit multi-symbole filtre dessus →
+        // chaque marché a son propre hero/état/narration. On émet TOUJOURS le meta structuré (hero vivant même sans LLM).
+        const kind: DeskKind = signal ? 'trade' : confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.7 ? 'opportunity' : 'analysis';
+        const meta = deskMeta(kind, context, { signal, confluence, threshold });
+        let clause: string | null = null;
+        if (narrationReady()) {
+          clause = await narrate(
+            kind === 'trade'
+              ? { kind, ctx: context, signal, confluence, threshold }
+              : kind === 'opportunity'
+                ? { kind, ctx: context, confluence, threshold }
+                : { kind, ctx: context, logLines: events.map((e) => e.msg) },
+          );
+        }
+        await logNarration(clause ?? '', signal ? signal.time : context.time, meta as unknown as Record<string, unknown>);
       } catch (e) {
         console.error(`[algoria] onClosed ${DISPLAY} échoué:`, e);
       }
@@ -329,7 +329,7 @@ async function main() {
         if (!stale) {
           agg(p.bid, p.ask, Date.now());
           feedM1((p.bid + p.ask) / 2, Date.now());
-          if (isPrimary) broadcastTick(p.bid, p.ask); // le chart cockpit suit l'or (le multi-symbole viendra après)
+          broadcastTick(DISPLAY, p.bid, p.ask); // tick tagué symbole → le cockpit multi-symbole suit le marché choisi
         }
       }
       void manageBreakeven(stream, terminal, BROKER); // no-op sur les ordres nus (sans SL)

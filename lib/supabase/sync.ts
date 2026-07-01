@@ -16,10 +16,10 @@ tickCh.subscribe((status) => {
   if (status === 'SUBSCRIBED') tickReady = true;
 });
 
-/** Diffuse un tick de prix au cockpit (mission control). No-op tant que le canal n'est pas prêt. */
-export function broadcastTick(bid: number, ask: number) {
+/** Diffuse un tick de prix au cockpit, TAGUÉ par symbole (le cockpit multi-symbole filtre dessus). No-op tant que le canal n'est pas prêt. */
+export function broadcastTick(symbol: string, bid: number, ask: number) {
   if (!tickReady) return;
-  void tickCh.send({ type: 'broadcast', event: 'tick', payload: { bid, ask, t: Date.now() } });
+  void tickCh.send({ type: 'broadcast', event: 'tick', payload: { symbol, bid, ask, t: Date.now() } });
 }
 
 export async function logEvents(events: EngineEvent[]) {

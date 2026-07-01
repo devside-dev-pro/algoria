@@ -1,15 +1,18 @@
 import { supabase } from '../supabase/client';
 
-// Store de prix live partagé : UNE seule souscription au broadcast runner, plusieurs consommateurs
-// (header price ticker + mission control). Évite d'ouvrir 2 canaux Supabase pour le même flux.
+// Store de prix live partagé : UNE seule souscription au broadcast runner, plusieurs consommateurs.
+// Les ticks sont TAGUÉS par symbole (cockpit multi-symbole) → on garde le dernier tick PAR symbole et
+// on route vers les listeners abonnés à ce symbole (ou à tous, pour le watchdog de flux).
 export interface Tick {
+  symbol: string;
   bid: number;
   ask: number;
   t: number;
 }
 
-let latest: Tick | null = null;
-const listeners = new Set<(t: Tick) => void>();
+const latest = new Map<string, Tick>();
+let latestAny: Tick | null = null;
+const listeners = new Set<{ symbol?: string; cb: (t: Tick) => void }>();
 let started = false;
 
 function ensureStarted() {
@@ -18,19 +21,25 @@ function ensureStarted() {
   supabase
     .channel('algoria-ticks')
     .on('broadcast', { event: 'tick' }, ({ payload }) => {
-      latest = payload as Tick;
-      for (const l of listeners) l(latest);
+      const raw = payload as Partial<Tick>;
+      if (typeof raw?.bid !== 'number' || typeof raw?.ask !== 'number') return;
+      const t: Tick = { symbol: raw.symbol ?? 'XAUUSD', bid: raw.bid, ask: raw.ask, t: raw.t ?? Date.now() }; // legacy (sans symbole) → or
+      latest.set(t.symbol, t);
+      latestAny = t;
+      for (const l of listeners) if (!l.symbol || l.symbol === t.symbol) l.cb(t);
     })
     .subscribe();
 }
 
-/** Abonne un listener au flux de prix. Renvoie la fonction de désabonnement. */
-export function subscribeTicks(cb: (t: Tick) => void): () => void {
+/** Abonne un listener au flux de prix. `symbol` optionnel : si omis, reçoit TOUS les symboles (watchdog). */
+export function subscribeTicks(cb: (t: Tick) => void, symbol?: string): () => void {
   ensureStarted();
-  listeners.add(cb);
+  const entry = { symbol, cb };
+  listeners.add(entry);
   return () => {
-    listeners.delete(cb);
+    listeners.delete(entry);
   };
 }
 
-export const getLatestTick = () => latest;
+/** Dernier tick d'un symbole, ou (sans argument) le dernier tick tous symboles confondus — pour le watchdog. */
+export const getLatestTick = (symbol?: string) => (symbol ? latest.get(symbol) ?? null : latestAny);
