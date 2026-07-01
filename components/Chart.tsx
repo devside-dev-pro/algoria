@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   createChart,
   CandlestickSeries,
@@ -304,20 +304,57 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     setTool(next);
   };
 
-  // pixel (px,py) → ancre { time (calé bougie), price }. Au-delà de la dernière bougie → calé sur elle.
-  const snapAnchor = (px: number, py: number): Anchor | null => {
+  // time(sec) → x px : timeToCoordinate si la bougie existe, sinon EXTRAPOLATION linéaire hors data
+  // (barSpacing px/bougie). Sans ça, un dessin tiré à droite du prix courant « disparaîtrait ».
+  const timeToX = (timeSec: number): number | null => {
     const chart = chartRef.current;
+    if (!chart) return null;
+    const ts = chart.timeScale();
+    const direct = ts.timeToCoordinate(timeSec as Time);
+    if (direct != null) return direct as number;
+    const bars = barsRef.current;
+    if (!bars.length) return null;
+    const stepSec = TF_MS[tfRef.current] / 1000;
+    const barSpacing = ts.options().barSpacing || 6;
+    const lastSec = Math.floor(bars[bars.length - 1].time / 1000);
+    const firstSec = Math.floor(bars[0].time / 1000);
+    if (timeSec > lastSec) {
+      const xLast = ts.timeToCoordinate(lastSec as Time);
+      return xLast == null ? null : (xLast as number) + ((timeSec - lastSec) / stepSec) * barSpacing;
+    }
+    if (timeSec < firstSec) {
+      const xFirst = ts.timeToCoordinate(firstSec as Time);
+      return xFirst == null ? null : (xFirst as number) - ((firstSec - timeSec) / stepSec) * barSpacing;
+    }
+    return null; // dans la plage mais hors bougie (rare : les ancres sont calées sur des bougies)
+  };
+
+  // x px → time(sec) : coordinateToTime si sur une bougie, sinon EXTRAPOLATION → on peut tracer/étirer
+  // dans le vide à droite de la dernière bougie (comme TradingView), sans « coller » au prix courant.
+  const xToTime = (px: number): number | null => {
+    const chart = chartRef.current;
+    if (!chart) return null;
+    const ts = chart.timeScale();
+    const t = ts.coordinateToTime(px);
+    if (t != null) return Number(t);
+    const bars = barsRef.current;
+    if (!bars.length) return null;
+    const stepSec = TF_MS[tfRef.current] / 1000;
+    const barSpacing = ts.options().barSpacing || 6;
+    const lastSec = Math.floor(bars[bars.length - 1].time / 1000);
+    const xLast = ts.timeToCoordinate(lastSec as Time);
+    if (xLast == null) return null;
+    return Math.round(lastSec + ((px - (xLast as number)) / barSpacing) * stepSec);
+  };
+
+  // pixel (px,py) → ancre { time, price } (extrapolée hors data).
+  const snapAnchor = (px: number, py: number): Anchor | null => {
     const series = seriesRef.current;
-    if (!chart || !series) return null;
+    if (!series) return null;
     const p = series.coordinateToPrice(py);
     if (p == null) return null;
-    const rawT = chart.timeScale().coordinateToTime(px);
-    let time: number;
-    if (rawT == null) {
-      const bars = barsRef.current;
-      if (!bars.length) return null;
-      time = Math.floor(bars[bars.length - 1].time / 1000);
-    } else time = Number(rawT);
+    const time = xToTime(px);
+    if (time == null) return null;
     return { time, price: Number(p) };
   };
 
@@ -351,17 +388,19 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     const r = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - r.left;
     const py = e.clientY - r.top;
-    e.currentTarget.setPointerCapture(e.pointerId);
     if (t === 'text') {
+      // PAS de pointer-capture ici → l'input texte peut prendre et garder le focus
+      e.preventDefault();
       const a = snapAnchor(px, py);
       if (a) setTextEdit({ x: px, y: py, anchor: a });
       return;
     }
+    e.currentTarget.setPointerCapture(e.pointerId);
     if (t === 'cursor') {
       const chart = chartRef.current;
       const series = seriesRef.current;
       if (!chart || !series) return;
-      const hit = topHit(chart, series, drawingsRef.current, px, py, chart.timeScale().width());
+      const hit = topHit(timeToX, series, drawingsRef.current, px, py, chart.timeScale().width());
       if (hit) {
         const start = snapAnchor(px, py);
         if (start) dragRef.current = { id: hit.d.id, handle: hit.handle, start, orig: JSON.parse(JSON.stringify(hit.d)) as Drawing };
@@ -406,10 +445,9 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     drawRef.current?.setDraft(null);
     if (!d) return;
     if (d.kind === 'trend' || d.kind === 'rect') {
-      const chart = chartRef.current;
       const series = seriesRef.current;
-      const A = chart && series ? anchorXY(chart, series, d.a) : null;
-      const B = chart && series && d.b ? anchorXY(chart, series, d.b) : null;
+      const A = series ? anchorXY(timeToX, series, d.a) : null;
+      const B = series && d.b ? anchorXY(timeToX, series, d.b) : null;
       if (A && B && Math.hypot(A.x - B.x, A.y - B.y) < 4) return; // tracé trop petit → ignoré
     }
     drawingsRef.current = [...drawingsRef.current, d];
@@ -490,6 +528,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     const draw = new DrawingsPrimitive();
     series.attachPrimitive(draw as Parameters<typeof series.attachPrimitive>[0]);
     drawRef.current = draw;
+    draw.setTimeToX(timeToX); // résolveur time→x avec extrapolation hors data
     drawingsRef.current = loadDrawings(SYMBOL, tfRef.current);
     draw.setDrawings(drawingsRef.current, null);
 
@@ -646,16 +685,20 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
         <button onClick={() => setVis((v) => ({ ...v, sr: !v.sr }))} style={indBtn(vis.sr, 'rgba(245,194,74,.95)')}>S/R</button>
         <button onClick={() => setVis((v) => ({ ...v, marks: !v.marks }))} style={indBtn(vis.marks, 'rgba(220,233,255,.9)')}>MARKS</button>
         <span style={{ width: 1, height: 16, background: 'var(--border)', margin: '0 5px' }} />
-        <button onClick={() => toggleTool('cursor')} style={toolBtn(tool === 'cursor')}>SELECT</button>
-        <button onClick={() => toggleTool('trend')} style={toolBtn(tool === 'trend')}>TREND</button>
-        <button onClick={() => toggleTool('hline')} style={toolBtn(tool === 'hline')}>H-LINE</button>
-        <button onClick={() => toggleTool('rect')} style={toolBtn(tool === 'rect')}>RECT</button>
-        <button onClick={() => toggleTool('text')} style={toolBtn(tool === 'text')}>TEXT</button>
-        {COLORS.map((c) => (
-          <button key={c} onClick={() => pickColor(c)} style={swatch(c, c === activeColor)} aria-label={`color ${c}`} />
-        ))}
-        <button onClick={deleteSelected} disabled={!selectedId} style={toolBtn(false, !selectedId)}>DEL</button>
-        <button onClick={clearDrawings} style={toolBtn(false)}>CLEAR</button>
+        <div style={drawGroup}>
+          <IconButton title="Select / move (Esc to deselect)" active={tool === 'cursor'} onClick={() => toggleTool('cursor')}><CursorIcon /></IconButton>
+          <IconButton title="Trend line" active={tool === 'trend'} onClick={() => toggleTool('trend')}><TrendIcon /></IconButton>
+          <IconButton title="Horizontal line" active={tool === 'hline'} onClick={() => toggleTool('hline')}><HLineIcon /></IconButton>
+          <IconButton title="Rectangle" active={tool === 'rect'} onClick={() => toggleTool('rect')}><RectIcon /></IconButton>
+          <IconButton title="Text" active={tool === 'text'} onClick={() => toggleTool('text')}><TextIcon /></IconButton>
+          <span style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 2px' }} />
+          {COLORS.map((c) => (
+            <button key={c} onClick={() => pickColor(c)} title="Color" style={swatch(c, c === activeColor)} aria-label={`color ${c}`} />
+          ))}
+          <span style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 2px' }} />
+          <IconButton title="Delete selected (Del)" active={false} disabled={!selectedId} onClick={deleteSelected}><TrashIcon /></IconButton>
+          <button onClick={clearDrawings} title="Remove all drawings" className="drawtool" style={clearBtn}>Clear</button>
+        </div>
       </div>
       <div style={{ position: 'relative', flex: 1, minHeight: 240 }}>
         <div ref={ref} style={{ position: 'absolute', inset: 0 }} />
@@ -714,7 +757,8 @@ function ChartHud({ hud }: { hud: NonNullable<Hud> }) {
   );
 }
 
-// Champ de saisie inline pour l'outil TEXTE : Entrée = valider, Échap/blur = fermer (une seule issue via `done`).
+// Champ de saisie inline pour l'outil TEXTE. Entrée = valider, Échap = annuler, clic ailleurs = valider.
+// `armed` ignore le blur PARASITE du tout premier focus (sinon l'éditeur se fermait aussitôt → « le texte ne marche pas »).
 function TextEditInput({
   textEdit,
   color,
@@ -728,6 +772,15 @@ function TextEditInput({
 }) {
   const [v, setV] = useState('');
   const done = useRef(false);
+  const armed = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+    const id = window.setTimeout(() => {
+      armed.current = true;
+    }, 90);
+    return () => window.clearTimeout(id);
+  }, []);
   const commit = () => {
     if (done.current) return;
     done.current = true;
@@ -740,10 +793,12 @@ function TextEditInput({
   };
   return (
     <input
-      autoFocus
+      ref={inputRef}
       value={v}
       onChange={(e) => setV(e.target.value)}
+      onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
+        e.stopPropagation();
         if (e.key === 'Enter') {
           e.preventDefault();
           commit();
@@ -752,38 +807,138 @@ function TextEditInput({
           cancel();
         }
       }}
-      onBlur={commit}
-      placeholder="text…"
+      onBlur={() => {
+        if (armed.current) commit();
+      }}
+      placeholder="type + Enter"
       className="mono"
-      style={{ position: 'absolute', left: textEdit.x, top: textEdit.y - 12, zIndex: 4, background: 'rgba(8,16,31,.92)', color, border: `1px solid ${color}`, borderRadius: 4, padding: '2px 6px', fontSize: 13, outline: 'none', minWidth: 90 }}
+      style={{
+        position: 'absolute',
+        left: textEdit.x,
+        top: textEdit.y - 13,
+        zIndex: 4,
+        background: 'rgba(8,16,31,.94)',
+        color,
+        caretColor: color,
+        border: `1px solid ${color}`,
+        borderRadius: 6,
+        padding: '3px 8px',
+        fontSize: 13,
+        outline: 'none',
+        minWidth: 120,
+        boxShadow: '0 6px 20px rgba(3,8,18,.55)',
+      }}
     />
   );
 }
 
-// Chip d'outil de dessin (SELECT/TREND/…) : allumé = cyan, désactivé = grisé.
-function toolBtn(active: boolean, disabled = false) {
-  return {
-    fontSize: 10.5,
-    padding: '2px 8px',
-    borderRadius: 6,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    background: active ? 'rgba(43,227,245,.16)' : 'transparent',
-    color: disabled ? 'var(--dim)' : active ? '#2be3f5' : 'var(--muted)',
-    border: `1px solid ${active ? 'rgba(43,227,245,.4)' : 'rgba(130,152,190,.22)'}`,
-    opacity: disabled ? 0.45 : 1,
-  } as const;
+// Conteneur groupé de la barre d'outils de dessin (aspect « toolbar » cohérent, pas des chips épars).
+const drawGroup = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 2,
+  padding: 2,
+  borderRadius: 8,
+  background: 'rgba(12,23,48,.6)',
+  border: '1px solid var(--border)',
+} as const;
+
+const clearBtn = {
+  fontSize: 10.5,
+  padding: '3px 8px',
+  borderRadius: 6,
+  cursor: 'pointer',
+  background: 'transparent',
+  color: 'var(--muted)',
+  border: '1px solid transparent',
+} as const;
+
+// Bouton d'outil (icône). Allumé = cyan ; hover subtil via la classe .drawtool.
+function IconButton({ active, disabled = false, onClick, title, children }: { active: boolean; disabled?: boolean; onClick: () => void; title: string; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className="drawtool"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 26,
+        height: 24,
+        padding: 0,
+        borderRadius: 6,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        background: active ? 'rgba(43,227,245,.16)' : 'transparent',
+        color: disabled ? 'var(--dim)' : active ? '#2be3f5' : 'var(--muted)',
+        border: `1px solid ${active ? 'rgba(43,227,245,.4)' : 'transparent'}`,
+        opacity: disabled ? 0.4 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
 }
 
-// Pastille de couleur : anneau blanc si couleur active.
+const ICON = { width: 14, height: 14, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+function CursorIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+      <path d="M5 3l0 13 3.2-3.3 2 4.2 1.9-.9-2-4.1 4.6 0z" />
+    </svg>
+  );
+}
+function TrendIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <path d="M4 16 L16 4" />
+      <circle cx="4" cy="16" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="16" cy="4" r="1.7" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+function HLineIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <path d="M3 10 H17" />
+    </svg>
+  );
+}
+function RectIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <rect x="3.5" y="5.5" width="13" height="9" rx="1.5" />
+    </svg>
+  );
+}
+function TextIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <path d="M5 5 H15 M10 5 V16" />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <path d="M4 6 H16 M8.5 6 V4.5 H11.5 V6 M6.4 6 L7.2 16 H12.8 L13.6 6" />
+    </svg>
+  );
+}
+
+// Pastille de couleur (ronde) : anneau blanc + halo si couleur active.
 function swatch(color: string, active: boolean) {
   return {
-    width: 16,
-    height: 16,
+    width: 15,
+    height: 15,
     padding: 0,
-    borderRadius: 4,
+    borderRadius: '50%',
     cursor: 'pointer',
     background: color,
-    border: active ? '2px solid #fff' : '1px solid rgba(255,255,255,.25)',
+    border: active ? '2px solid #fff' : '1px solid rgba(255,255,255,.3)',
+    boxShadow: active ? `0 0 6px ${color}` : 'none',
   } as const;
 }
 

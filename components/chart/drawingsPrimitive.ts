@@ -1,9 +1,10 @@
 // Primitive lightweight-charts v5 (ISeriesPrimitive) : rend les DESSINS utilisateur (trendline / ligne
 // horizontale / rectangle / texte) SUR les bougies (zOrder 'top'). L'INTERACTION (souris) est gérée à part
 // dans Chart.tsx via un overlay ; ici on ne fait QUE dessiner l'état courant (drawings + brouillon + sélection).
+// La résolution time→x est injectée (this.timeToX) pour extrapoler hors data (pas de dessin qui « disparaît »).
 import type { ISeriesApi, SeriesType, Time, SeriesAttachedParameter, IPrimitivePaneView } from 'lightweight-charts';
 import { withAlpha } from '@/lib/cockpit/chartTheme';
-import { anchorXY, type Drawing } from './drawings';
+import { anchorXY, type Drawing, type TimeToX } from './drawings';
 
 // Sous-ensemble structurel de CanvasRenderingTarget2D (fancy-canvas) → évite une dépendance d'import.
 interface MediaScope {
@@ -14,24 +15,55 @@ interface RenderTarget {
   useMediaCoordinateSpace: <T>(f: (scope: MediaScope) => T) => T;
 }
 
-type Chart = SeriesAttachedParameter<Time>['chart'];
+type Ctx = CanvasRenderingContext2D & { roundRect?: (x: number, y: number, w: number, h: number, r: number) => void };
 
-function handle(ctx: CanvasRenderingContext2D, x: number, y: number, color: string) {
+function roundRectPath(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(x, y, w, h, r);
+    return;
+  }
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Poignée de préhension (extrémité) : petit disque à liseré, style « grip » moderne.
+function grip(ctx: Ctx, x: number, y: number, color: string) {
   ctx.save();
   ctx.setLineDash([]);
-  ctx.fillStyle = '#08101f';
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
   ctx.beginPath();
-  ctx.rect(x - 3, y - 3, 6, 6);
+  ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+  ctx.fillStyle = '#0b1730';
   ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
   ctx.stroke();
   ctx.restore();
 }
 
+// Style de trait commun : bouts arrondis, plus épais + halo quand sélectionné.
+function strokeStyle(ctx: Ctx, color: string, sel: boolean) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = sel ? 2.5 : 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = sel ? withAlpha(color, 0.55) : 'transparent';
+  ctx.shadowBlur = sel ? 7 : 0;
+}
+function clearShadow(ctx: Ctx) {
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+}
+
 function drawOne(
-  ctx: CanvasRenderingContext2D,
-  chart: Chart,
+  ctx: Ctx,
+  timeToX: TimeToX,
   series: ISeriesApi<SeriesType>,
   d: Drawing,
   w: number,
@@ -40,82 +72,98 @@ function drawOne(
   font: string,
 ) {
   ctx.save();
-  ctx.strokeStyle = d.color;
-  ctx.fillStyle = d.color;
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash(draft ? [5, 4] : []);
+  ctx.setLineDash(draft ? [6, 4] : []);
 
   if (d.kind === 'hline') {
     const y = series.priceToCoordinate(d.a.price);
     if (y != null) {
       const yy = (y as number) + 0.5;
+      strokeStyle(ctx, d.color, sel);
       ctx.beginPath();
       ctx.moveTo(0, yy);
       ctx.lineTo(w, yy);
       ctx.stroke();
-      // étiquette de prix à gauche
+      // étiquette de prix en pastille (gauche)
+      clearShadow(ctx);
       ctx.setLineDash([]);
-      ctx.font = `11px ${font}`;
-      const label = d.a.price.toFixed(1);
+      ctx.font = `600 11px ${font}`;
+      const label = d.a.price.toFixed(2);
       const tw = ctx.measureText(label).width;
-      ctx.fillStyle = 'rgba(8,16,31,.85)';
-      ctx.fillRect(2, (y as number) - 8, tw + 8, 16);
+      const pad = 7;
+      const h = 17;
+      roundRectPath(ctx, 3, (y as number) - h / 2, tw + pad * 2, h, 5);
+      ctx.fillStyle = withAlpha(d.color, 0.16);
+      ctx.fill();
+      ctx.strokeStyle = withAlpha(d.color, 0.5);
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.fillStyle = d.color;
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, 6, y as number);
-      if (sel) handle(ctx, w / 2, y as number, d.color);
+      ctx.fillText(label, 3 + pad, y as number);
+      if (sel) grip(ctx, Math.min(w - 12, tw + pad * 2 + 24), y as number, d.color);
     }
     ctx.restore();
     return;
   }
 
-  const A = anchorXY(chart, series, d.a);
+  const A = anchorXY(timeToX, series, d.a);
   if (!A) {
     ctx.restore();
     return;
   }
 
   if (d.kind === 'text') {
+    clearShadow(ctx);
     ctx.setLineDash([]);
     ctx.font = `13px ${font}`;
     ctx.textBaseline = 'alphabetic';
+    ctx.shadowColor = 'rgba(0,0,0,.55)';
+    ctx.shadowBlur = 3;
     ctx.fillStyle = d.color;
     ctx.fillText(d.text ?? '', A.x, A.y);
+    clearShadow(ctx);
     if (sel) {
       const tw = ctx.measureText(d.text ?? '').width;
       ctx.strokeStyle = withAlpha(d.color, 0.6);
       ctx.setLineDash([3, 3]);
-      ctx.strokeRect(A.x - 3, A.y - 14, tw + 6, 18);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(A.x - 4, A.y - 15, tw + 8, 20);
     }
     ctx.restore();
     return;
   }
 
-  const B = d.b ? anchorXY(chart, series, d.b) : null;
+  const B = d.b ? anchorXY(timeToX, series, d.b) : null;
   if (!B) {
     ctx.restore();
     return;
   }
 
   if (d.kind === 'trend') {
+    strokeStyle(ctx, d.color, sel);
     ctx.beginPath();
     ctx.moveTo(A.x, A.y);
     ctx.lineTo(B.x, B.y);
     ctx.stroke();
   } else {
-    // rect
+    // rect : coins arrondis, remplissage léger, contour net
     const x = Math.min(A.x, B.x);
     const y = Math.min(A.y, B.y);
     const rw = Math.abs(B.x - A.x);
     const rh = Math.abs(B.y - A.y);
-    ctx.fillStyle = withAlpha(d.color, 0.08);
-    ctx.fillRect(x, y, rw, rh);
-    ctx.strokeStyle = d.color;
-    ctx.strokeRect(x, y, rw, rh);
+    const r = Math.max(0, Math.min(5, rw / 2, rh / 2));
+    clearShadow(ctx);
+    roundRectPath(ctx, x, y, rw, rh, r);
+    ctx.fillStyle = withAlpha(d.color, 0.1);
+    ctx.fill();
+    strokeStyle(ctx, d.color, sel);
+    roundRectPath(ctx, x, y, rw, rh, r);
+    ctx.stroke();
   }
   if (sel) {
-    handle(ctx, A.x, A.y, d.color);
-    handle(ctx, B.x, B.y, d.color);
+    clearShadow(ctx);
+    grip(ctx, A.x, A.y, d.color);
+    grip(ctx, B.x, B.y, d.color);
   }
   ctx.restore();
 }
@@ -123,15 +171,16 @@ function drawOne(
 class DrawingsRenderer {
   constructor(private readonly p: DrawingsPrimitive) {}
   draw(target: RenderTarget) {
-    const { series, chart } = this.p;
-    if (!series || !chart) return;
+    const { series, timeToX } = this.p;
+    if (!series || !timeToX) return;
     try {
-      target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+      target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+        const ctx = context as Ctx;
         const w = mediaSize.width;
         for (const d of this.p.drawings) {
-          drawOne(ctx, chart, series, d, w, d.id === this.p.selectedId, false, this.p.font);
+          drawOne(ctx, timeToX, series, d, w, d.id === this.p.selectedId, false, this.p.font);
         }
-        if (this.p.draft) drawOne(ctx, chart, series, this.p.draft, w, false, true, this.p.font);
+        if (this.p.draft) drawOne(ctx, timeToX, series, this.p.draft, w, false, true, this.p.font);
       });
     } catch {
       /* un throw dans draw() blanchit le chart → on avale, la frame suivante réessaiera */
@@ -154,7 +203,7 @@ class DrawingsPaneView implements IPrimitivePaneView {
 
 export class DrawingsPrimitive {
   series: ISeriesApi<SeriesType> | null = null;
-  chart: Chart | null = null;
+  timeToX: TimeToX | null = null; // injecté par Chart.tsx (extrapolation hors data)
   drawings: Drawing[] = [];
   draft: Drawing | null = null;
   selectedId: string | null = null;
@@ -167,7 +216,6 @@ export class DrawingsPrimitive {
   }
   attached(param: SeriesAttachedParameter<Time>) {
     this.series = param.series;
-    this.chart = param.chart;
     this.requestUpdate_ = param.requestUpdate;
     if (typeof document !== 'undefined') {
       this.font = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || this.font;
@@ -175,12 +223,17 @@ export class DrawingsPrimitive {
   }
   detached() {
     this.series = null;
-    this.chart = null;
+    this.timeToX = null;
     this.requestUpdate_ = null;
   }
   updateAllViews() {}
   paneViews(): readonly IPrimitivePaneView[] {
     return this.views;
+  }
+  /** Injecte le résolveur time→x (avec extrapolation). */
+  setTimeToX(fn: TimeToX) {
+    this.timeToX = fn;
+    this.requestUpdate_?.();
   }
   /** Remplace la liste des dessins + la sélection, puis redemande un rendu. */
   setDrawings(drawings: Drawing[], selectedId: string | null) {
