@@ -1,3 +1,4 @@
+import 'dotenv/config'; // charge le .env AVANT que le client MetaApi lise process.env (no-op sur Railway)
 // Backfill d'un symbole ARBITRAIRE (ex. un indice : US500, US30, USTEC/NAS100, GER40…) dans Supabase,
 // pour pouvoir le BACKTESTER comme l'or. Réutilise le flux de backfill déjà éprouvé du runner
 // (connectMaster → subscribeToMarketData → getHistoricalCandles) puis écrit via logCandles.
