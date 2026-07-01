@@ -173,7 +173,7 @@ export function Telemetry({ state, signals }: { state: any; signals: any[] }) {
         <span style={{ color: 'var(--cyan)' }}>ALGORIA&nbsp;AI · mission&nbsp;control</span>
         <span className={live ? 'pulse' : ''} style={{ color: live ? 'var(--up)' : 'var(--dim)', fontSize: 10.5, letterSpacing: 0.5 }}>{live ? '● LIVE FEED' : '◌ SIM FEED'}</span>
       </div>
-      <div ref={scroller} style={{ padding: '6px 10px', fontSize: 11, lineHeight: 1.5, flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+      <div ref={scroller} className="deskscroll" style={{ padding: '6px 10px', fontSize: 11, lineHeight: 1.5, flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
         {lines.map((l) => (
           <div key={l.id} style={{ display: 'flex', gap: 6, textShadow: l.glow ? `0 0 8px ${l.color}` : undefined }}>
             <span style={{ color: 'var(--dim)', flex: '0 0 84px' }}>

@@ -95,7 +95,7 @@ body {
 .mono::-webkit-scrollbar-thumb { background: rgba(43, 227, 245, 0.25); border-radius: 4px; }
 .mono::-webkit-scrollbar-track { background: transparent; }
 
-/* scrollbar fine et sombre pour le desk (plus de barre blanche par défaut) */
+/* scrollbar fine et sombre (desk + terminal mission control) — plus de barre blanche par défaut */
 .deskscroll { scrollbar-width: thin; scrollbar-color: rgba(43, 227, 245, 0.22) transparent; }
 .deskscroll::-webkit-scrollbar { width: 6px; }
 .deskscroll::-webkit-scrollbar-thumb { background: rgba(43, 227, 245, 0.22); border-radius: 4px; }
