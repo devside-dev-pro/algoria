@@ -67,6 +67,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
   const [hud, setHud] = useState<Hud>(null);
   const lastIndRef = useRef<Partial<Ind>>({}); // dernières valeurs EMA/VWAP/BB (pour le HUD hors survol)
   const hudRafRef = useRef<number | null>(null);
+  const indRafRef = useRef<number | null>(null); // coalesce des updates d'indicateurs par frame
 
   // EMA 9/21 (ruban de tendance) + Bandes de Bollinger (20, 2σ) — recalculés en direct → l'impression qu'Algoria « travaille ».
   function drawIndicators() {
@@ -115,6 +116,50 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     vwapRef.current?.setData(vwap);
     const n = bars.length - 1; // dernières valeurs → HUD hors survol
     lastIndRef.current = { ema9: ef[n], ema21: es[n], vwap: vwap[n]?.value, bbU: up[n]?.value, bbL: lo[n]?.value };
+  }
+
+  // PERF : sur un tick, ne met à jour que le DERNIER point (series.update) au lieu de setData(1500)×6.
+  // Recompute léger de la dernière bougie uniquement (les précédentes sont figées).
+  function updateLastIndicators() {
+    const bars = barsRef.current;
+    const N = bars.length;
+    if (N < BB_PERIOD) return;
+    const closes = bars.map((b) => b.close);
+    const t = toSec(bars[N - 1].time);
+    const ef = ema(closes, 9)[N - 1];
+    const es = ema(closes, 21)[N - 1];
+    const win = closes.slice(N - BB_PERIOD, N);
+    const m = win.reduce((a, b) => a + b, 0) / win.length;
+    const sd = Math.sqrt(win.reduce((a, b) => a + (b - m) * (b - m), 0) / win.length);
+    const bbU = m + 2 * sd;
+    const bbL = m - 2 * sd;
+    // VWAP de la dernière bougie : cumul sur le jour UTC courant (remonte jusqu'à la frontière de jour).
+    const day = Math.floor(bars[N - 1].time / 86_400_000);
+    let cumPV = 0;
+    let cumV = 0;
+    for (let i = N - 1; i >= 0 && Math.floor(bars[i].time / 86_400_000) === day; i--) {
+      const b = bars[i];
+      const v = b.volume || 1;
+      cumPV += ((b.high + b.low + b.close) / 3) * v;
+      cumV += v;
+    }
+    const vwapLast = cumV ? cumPV / cumV : bars[N - 1].close;
+    emaFastRef.current?.update({ time: t, value: ef });
+    emaSlowRef.current?.update({ time: t, value: es });
+    bbUpRef.current?.update({ time: t, value: bbU });
+    bbMidRef.current?.update({ time: t, value: m });
+    bbLoRef.current?.update({ time: t, value: bbL });
+    vwapRef.current?.update({ time: t, value: vwapLast });
+    lastIndRef.current = { ema9: ef, ema21: es, vwap: vwapLast, bbU, bbL };
+  }
+
+  // Coalesce les mises à jour d'indicateurs à 1 flush par frame (les ticks peuvent arriver en rafale).
+  function scheduleIndUpdate() {
+    if (indRafRef.current != null) return;
+    indRafRef.current = requestAnimationFrame(() => {
+      indRafRef.current = null;
+      updateLastIndicators();
+    });
   }
 
   // Support / résistance les plus proches (swings) — lignes discrètes.
@@ -297,7 +342,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
         else if (!last || bar.time > last.time) bars.push(bar);
         else return;
         seriesRef.current?.update(toCandle(bar));
-        drawIndicators();
+        scheduleIndUpdate();
       })
       .subscribe();
 
@@ -320,13 +365,14 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
         last.close = mid;
         series.update(toCandle(last));
       } else return;
-      drawIndicators();
+      scheduleIndUpdate();
     });
 
     return () => {
       supabase.removeChannel(live);
       unsubTicks();
       if (hudRafRef.current != null) cancelAnimationFrame(hudRafRef.current);
+      if (indRafRef.current != null) cancelAnimationFrame(indRafRef.current);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
