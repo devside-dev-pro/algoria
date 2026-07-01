@@ -32,6 +32,7 @@ function Meter({ conf, threshold, color, seg = 5 }: { conf: number; threshold: n
   );
 }
 
+// Bande d'état COMPACTE : une seule ligne (état · niveau) + un mince liseré de conviction dessous.
 function StateHero({ m }: { m: any }) {
   const color = kindColor(m);
   const conf = typeof m?.confidence === 'number' ? m.confidence : null;
@@ -39,25 +40,18 @@ function StateHero({ m }: { m: any }) {
   const aside = m?.state === 'aside';
   const heroColor = aside ? 'var(--muted)' : color;
   return (
-    <div style={{ padding: '11px 14px', borderBottom: '1px solid var(--border)', background: `radial-gradient(120% 140% at 0% 0%, ${aside ? 'rgba(255,255,255,.03)' : 'color-mix(in srgb,' + heroColor + ' 9%, transparent)'} 0%, transparent 70%)` }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-        <span style={{ fontSize: 21, fontWeight: 800, letterSpacing: 0.3, color: heroColor, lineHeight: 1 }}>
-          <span style={{ marginRight: 7 }}>{glyph(m)}</span>{STATE_WORD[m?.state] ?? 'STANDING ASIDE'}
-        </span>
-        <span style={{ textAlign: 'right', lineHeight: 1.1 }}>
-          <span style={{ display: 'block', fontSize: 9, letterSpacing: 0.6, color: 'var(--dim)' }}>{aside ? 'PRICE' : m?.anchorLabel ?? 'PRICE'}</span>
-          <span style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{num(aside ? m?.price : m?.anchorPrice)}</span>
-        </span>
+    <div style={{ padding: '7px 12px 0', borderBottom: '1px solid var(--border)', background: aside ? 'transparent' : `color-mix(in srgb, ${heroColor} 6%, transparent)` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 13, color: heroColor }}>{glyph(m)}</span>
+        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.4, color: heroColor }}>{STATE_WORD[m?.state] ?? 'STANDING ASIDE'}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 9, letterSpacing: 0.5, color: 'var(--dim)' }}>{aside ? 'PRICE' : m?.anchorLabel ?? 'PRICE'}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{num(aside ? m?.price : m?.anchorPrice)}</span>
+        {conf != null && <span style={{ fontSize: 10, fontFamily: MONO, color: aside ? 'var(--dim)' : 'var(--muted)' }}>{Math.round(conf * 100)}%</span>}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <span style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}>
-          {conf != null && (
-            <span style={{ display: 'block', height: '100%', width: `${Math.round(conf * 100)}%`, background: heroColor, opacity: armed ? 1 : 0.5, boxShadow: armed ? `0 0 10px ${heroColor}` : 'none', transition: 'width .6s ease' }} />
-          )}
-        </span>
-        <span style={{ fontSize: 10, fontFamily: MONO, color: aside ? 'var(--dim)' : 'var(--muted)', minWidth: 62, textAlign: 'right' }}>
-          {aside ? 'NO EDGE' : conf != null ? `CONV ${Math.round(conf * 100)}%` : '—'}
-        </span>
+      {/* mince liseré de conviction, collé au bord bas de la bande */}
+      <div style={{ height: 2, borderRadius: 2, background: 'rgba(255,255,255,.05)', overflow: 'hidden', marginTop: 6 }}>
+        {conf != null && <div style={{ height: '100%', width: `${Math.round(conf * 100)}%`, background: heroColor, opacity: armed ? 1 : 0.5, boxShadow: armed ? `0 0 8px ${heroColor}` : 'none', transition: 'width .6s ease' }} />}
       </div>
     </div>
   );
@@ -180,7 +174,7 @@ export function Desk() {
 
       {hero && <StateHero m={hero} />}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <div className="deskscroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
         {shown.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 12 }}>ALGORIA is reading the tape… state, calls and levels appear here.</span>}
         {shown.map((e: any, i: number) => (
           <Card key={e.id ?? i} e={e} latest={i === 0} />
