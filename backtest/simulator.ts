@@ -17,6 +17,7 @@ export interface SimParams {
   trailActivate?: number; // active le trailing quand le profit ≥ trailActivate × riskDist
   trailDist?: number; // distance du trailing en × riskDist (le SL suit à peak − trailDist)
   ignoreTp?: boolean; // ignore le TP fixe → on ne sort que sur le stop (trailing) ou en fin de données
+  ctxOpts?: Partial<import('../lib/engine/context').ContextOptions>; // options de contexte (session/vol) pour l'exploration
 }
 
 export interface SimTrade {
@@ -154,7 +155,7 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       killed: dayKilled,
     };
     const lo = p.window && p.window > 0 ? Math.max(0, i + 1 - p.window) : 0;
-    const { signal } = runTick({ symbol: p.symbol, bars: bars.slice(lo, i + 1), mode: p.mode, state, ctxOpts: { spread: p.spread } }, features, cfg);
+    const { signal } = runTick({ symbol: p.symbol, bars: bars.slice(lo, i + 1), mode: p.mode, state, ctxOpts: { spread: p.spread, ...(p.ctxOpts ?? {}) } }, features, cfg);
 
     // 5) entrée à l'OUVERTURE de i+1 (jamais sur la bougie qu'on vient de lire → pas de lookahead)
     if (signal) {
