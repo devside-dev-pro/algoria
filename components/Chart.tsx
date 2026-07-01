@@ -20,7 +20,7 @@ import { TradeZonePrimitive } from '@/components/chart/tradeZonePrimitive';
 import type { Bar } from '@/lib/engine/types';
 
 /** Position ouverte à matérialiser sur le chart (entrée/SL/TP). tps = échelle de TP (TP1, TP2…). null = aucune. */
-export type ActiveTrade = { direction: string; entry: number; sl: number | null; tp: number | null; tps?: number[] } | null;
+export type ActiveTrade = { direction: string; entry: number; sl: number | null; tp: number | null; tps?: number[]; entryTime?: number | null } | null;
 
 const SYMBOL = 'XAUUSD';
 const TFS = ['M1', 'M5', 'M15', 'H1', 'D1'] as const;
@@ -160,7 +160,7 @@ export function Chart({ signals, activeTrade = null }: { signals: Array<Record<s
     // ZONES remplies TP (vert) / SL (rouge) via la primitive — sous les bougies
     zoneRef.current?.setTrade(
       a && Number.isFinite(a.entry)
-        ? { direction: a.direction === 'long' ? 'long' : 'short', entry: a.entry, sl: a.sl, tps: a.tps && a.tps.length ? a.tps : a.tp != null ? [a.tp] : [] }
+        ? { direction: a.direction === 'long' ? 'long' : 'short', entry: a.entry, entryTime: a.entryTime ?? null, sl: a.sl, tps: a.tps && a.tps.length ? a.tps : a.tp != null ? [a.tp] : [] }
         : null,
     );
     if (!a) return;

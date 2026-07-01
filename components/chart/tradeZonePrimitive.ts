@@ -4,7 +4,7 @@
 import type { ISeriesApi, SeriesType, Time, SeriesAttachedParameter, IPrimitivePaneView } from 'lightweight-charts';
 import { readChartTheme, withAlpha, type ChartTheme } from '@/lib/cockpit/chartTheme';
 
-export type ZoneTrade = { direction: 'long' | 'short'; entry: number; sl: number | null; tps: number[] } | null;
+export type ZoneTrade = { direction: 'long' | 'short'; entry: number; entryTime: number | null; sl: number | null; tps: number[] } | null;
 
 // Sous-ensemble structurel de CanvasRenderingTarget2D (fancy-canvas) → évite une dépendance d'import.
 interface MediaScope {
@@ -29,6 +29,16 @@ class ZoneRenderer {
         const yEntry = series.priceToCoordinate(trade.entry);
         if (yEntry == null) return; // hors échelle → on ne dessine rien (jamais throw)
 
+        // ANCRAGE À L'ENTRÉE (comme l'outil position TradingView) : la zone démarre au temps d'entrée
+        // et s'étend vers la droite. Si l'entrée est hors-écran à gauche (null), on part du bord gauche.
+        let x0 = 0;
+        if (trade.entryTime != null) {
+          const cx = this.p.chart?.timeScale().timeToCoordinate(Math.floor(trade.entryTime / 1000) as Time) ?? null;
+          if (cx != null) x0 = Math.max(0, cx);
+        }
+        const bw = w - x0; // largeur des bandes (entrée → bord droit)
+        if (bw <= 0) return;
+
         const dir = trade.direction === 'long' ? 1 : -1;
 
         // Escalier de zones TP (vert), alpha décroissant par palier, du plus proche au plus lointain.
@@ -41,7 +51,7 @@ class ZoneRenderer {
           const y1 = series.priceToCoordinate(tp);
           if (y0 != null && y1 != null) {
             ctx.fillStyle = withAlpha(th.up, Math.max(0.05, 0.16 - i * 0.045));
-            ctx.fillRect(0, Math.min(y0, y1), w, Math.abs(y1 - y0));
+            ctx.fillRect(x0, Math.min(y0, y1), bw, Math.abs(y1 - y0));
           }
           prev = tp;
         });
@@ -51,17 +61,17 @@ class ZoneRenderer {
           const ySl = series.priceToCoordinate(trade.sl);
           if (ySl != null) {
             ctx.fillStyle = withAlpha(th.down, 0.15);
-            ctx.fillRect(0, Math.min(yEntry, ySl), w, Math.abs(ySl - yEntry));
+            ctx.fillRect(x0, Math.min(yEntry, ySl), bw, Math.abs(ySl - yEntry));
           }
         }
 
-        // Ligne d'entrée pointillée.
+        // Ligne d'entrée pointillée (depuis l'entrée vers la droite).
         ctx.save();
         ctx.strokeStyle = withAlpha(th.text, 0.8);
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 3]);
         ctx.beginPath();
-        ctx.moveTo(0, yEntry + 0.5);
+        ctx.moveTo(x0, yEntry + 0.5);
         ctx.lineTo(w, yEntry + 0.5);
         ctx.stroke();
         ctx.restore();
@@ -87,6 +97,7 @@ class ZonePaneView implements IPrimitivePaneView {
 
 export class TradeZonePrimitive {
   series: ISeriesApi<SeriesType> | null = null;
+  chart: SeriesAttachedParameter<Time>['chart'] | null = null;
   trade: ZoneTrade = null;
   theme: ChartTheme = readChartTheme();
   private requestUpdate_: (() => void) | null = null;
@@ -97,11 +108,13 @@ export class TradeZonePrimitive {
   }
   attached(param: SeriesAttachedParameter<Time>) {
     this.series = param.series;
+    this.chart = param.chart;
     this.requestUpdate_ = param.requestUpdate;
     this.theme = readChartTheme();
   }
   detached() {
     this.series = null;
+    this.chart = null;
     this.requestUpdate_ = null;
   }
   updateAllViews() {}

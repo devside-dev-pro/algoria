@@ -41,10 +41,12 @@ export function Cockpit() {
     const t = tradeByTicket.get(String(s.ticket));
     return t && !t.closed_at;
   }) as any;
+  const openRefMs = openSig ? Number(String(openSig.ref ?? '').split('-')[1]) : NaN; // temps d'entrée (comme le marqueur)
   const activeTrade = openSig
     ? {
         direction: String(openSig.direction),
         entry: Number(openSig.entry),
+        entryTime: Number.isFinite(openRefMs) && openRefMs > 1e12 ? openRefMs : openSig.created_at ? Date.parse(openSig.created_at) : null,
         sl: Number(openSig.stop_loss) || null,
         tp: Number(openSig.take_profits?.[0]) || null,
         tps: (Array.isArray(openSig.take_profits) ? openSig.take_profits : []).map(Number).filter((x: number) => Number.isFinite(x) && x > 0),
