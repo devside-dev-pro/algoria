@@ -265,7 +265,10 @@ async function main() {
   const onClosed = async (bars: Bar[]) => {
     state = readState(terminal, BROKER, state);
     const cfg = mode === 'scalp' ? SCALP_CONFIG : DEFAULT_CONFIG; // mode scalp = stratégie scalp validée (TP rapide, seuil bas, breakeven précoce)
-    const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts: { spread: state.spread } }, FEATURES, cfg);
+    // SCALP : session asia tradable + gate de volatilité élargi → ~2× la fréquence (17/j), edge conservé
+    // (backtest robuste sur 2 moitiés, PF 1.21 @ spread 0.30). NORMAL reste conservateur (défauts stricts).
+    const ctxOpts = mode === 'scalp' ? { spread: state.spread, tradeAsia: true, volMinPct: 0.05, volMaxPct: 0.995 } : { spread: state.spread };
+    const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts }, FEATURES, cfg);
     await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
     await logEvents(events);
     await pushState(context, state, mode);

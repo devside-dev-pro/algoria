@@ -20,6 +20,7 @@ export interface ContextOptions {
   rangeAdx?: number;
   volMinPct?: number;
   volMaxPct?: number;
+  tradeAsia?: boolean; // rend la session asia tradable (nuit) — activé en mode SCALP
   zoneAtrTol?: number;
   roundStep?: number;
   sessions?: SessionConfig;
@@ -49,6 +50,7 @@ function withDefaults(o: ContextOptions) {
     rangeAdx: o.rangeAdx ?? 18,
     volMinPct: o.volMinPct ?? 0.15,
     volMaxPct: o.volMaxPct ?? 0.97,
+    tradeAsia: o.tradeAsia ?? false, // asia tradable ? (activé en SCALP uniquement → +fréquence, cf. runner)
     zoneAtrTol: o.zoneAtrTol ?? 0.6,
     roundStep: o.roundStep ?? 10,
     sessions: { ...DEFAULT_SESSIONS, ...(o.sessions ?? {}) },
@@ -127,7 +129,10 @@ export function buildContext(symbol: string, bars: Bar[], htfBars?: Bar[], opts:
   const session = classifySession(time, o.sessions);
   const zones = buildZones(bars, atrNow, o);
 
-  const sessionOk = session === 'london' || session === 'overlap' || session === 'newyork';
+  // asia optionnellement tradable (l'or bouge la nuit) → ~2× la fréquence en SCALP, edge conservé
+  // (backtest : 8.6→17/j, PF 1.21 @ spread 0.30, robuste sur 2 moitiés). Le week-end ('closed') reste exclu.
+  const sessionOk =
+    session === 'london' || session === 'overlap' || session === 'newyork' || (o.tradeAsia && session === 'asia');
   const volOk = atrPercentile >= o.volMinPct && atrPercentile <= o.volMaxPct;
 
   return {
