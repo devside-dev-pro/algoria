@@ -22,6 +22,7 @@ export interface EngineConfig {
   slAtrMult: number; // buffer ATR au-delà de la structure
   targetRR: number; // R:R cible avant clamp structure
   contractSize: number; // XAUUSD ≈ 100 oz (préférer la spec broker)
+  priceStep?: number; // pas d'arrondi des PRIX (entrée/SL/TP). Défaut 0.01 (or). EURUSD 0.00001, USDJPY 0.001, indices 0.1…
   lotStep: number;
   minLot: number;
   minStopAtr: number;
