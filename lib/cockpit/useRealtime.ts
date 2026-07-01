@@ -191,6 +191,39 @@ export function useDayStartEquity() {
   return eq;
 }
 
+/** Courbe d'équity du JOUR (points equity, ordre chronologique) → sparkline. Seed depuis minuit + live. */
+export function useEquityCurve(maxPoints = 160) {
+  const [curve, setCurve] = useState<number[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const midnight = new Date();
+    midnight.setUTCHours(0, 0, 0, 0);
+    supabase
+      .from('state_snapshots')
+      .select('equity, ts')
+      .gte('ts', midnight.toISOString())
+      .order('ts', { ascending: true })
+      .limit(1000)
+      .then(({ data }) => {
+        if (!alive || !data) return;
+        const pts = data.map((d) => Number((d as { equity: number }).equity)).filter(Number.isFinite);
+        setCurve(pts.slice(-maxPoints));
+      });
+    const ch = supabase
+      .channel('rt-equity')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'state_snapshots' }, ({ new: s }) => {
+        const e = Number((s as { equity?: number }).equity);
+        if (Number.isFinite(e)) setCurve((c) => [...c, e].slice(-maxPoints));
+      })
+      .subscribe();
+    return () => {
+      alive = false;
+      supabase.removeChannel(ch);
+    };
+  }, [maxPoints]);
+  return curve;
+}
+
 /** Cockpit → runner (mode pills, kill switch). On AWAIT : sinon supabase-js n'envoie jamais la requête. */
 export async function sendCommand(type: string, payload?: unknown) {
   const { error } = await supabase.from('commands').insert({ type, payload: (payload ?? null) as never });

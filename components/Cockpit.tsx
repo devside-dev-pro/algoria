@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
-import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity } from '@/lib/cockpit/useRealtime';
+import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve } from '@/lib/cockpit/useRealtime';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
@@ -16,6 +16,7 @@ export function Cockpit() {
   const st = useLatestState() as any;
   const trades = useTrades(80);
   const dayStartEq = useDayStartEquity();
+  const equityCurve = useEquityCurve();
   const [optMode, setOptMode] = useState<string | null>(null);
   const [optKilled, setOptKilled] = useState<boolean | null>(null);
   const [show, setShow] = useState(false); // SHOW = générateur d'activité (ex action + rafale fusionnés → set_rafale)
@@ -248,7 +249,7 @@ export function Cockpit() {
       {/* ===== METRICS (compact, fixed) ===== */}
       <section style={{ flex: 'none', display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
         <Metric label="Balance" value={st ? fmt(st.balance, 0) : '—'} accent="var(--cyan)" />
-        <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} accent="var(--blue)" />
+        <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} accent="var(--blue)" spark={equityCurve} />
         <Metric label="Day P&L" value={dayPnl == null ? '—' : (dayPnl >= 0 ? '+' : '') + dayPnl.toFixed(0)} color={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} accent={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} />
         <Metric label={`Win rate · ${stats.n}`} value={stats.ready ? (stats.winPct * 100).toFixed(0) + '%' : `${stats.n}/5`} color={stats.ready ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
         <Metric label="Profit factor" value={stats.ready ? (stats.pf === Infinity ? '∞' : stats.pf.toFixed(2)) : '—'} color={stats.ready ? (stats.pf >= 1 ? 'var(--up)' : 'var(--down)') : 'var(--dim)'} accent="var(--cyan)" />
@@ -258,12 +259,34 @@ export function Cockpit() {
   );
 }
 
-function Metric({ label, value, color, accent }: { label: string; value: string; color?: string; accent?: string }) {
+function Metric({ label, value, color, accent, spark }: { label: string; value: string; color?: string; accent?: string; spark?: number[] }) {
   return (
-    <div style={{ background: 'var(--panel-2)', borderRadius: 8, padding: '6px 11px', borderLeft: `2px solid ${accent ?? 'var(--border)'}` }}>
-      <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</div>
-      <div style={{ fontSize: 17, fontWeight: 600, color: color ?? 'var(--text)', lineHeight: 1.2 }}>{value}</div>
+    <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--panel-2)', borderRadius: 8, padding: '6px 11px', borderLeft: `2px solid ${accent ?? 'var(--border)'}` }}>
+      {spark && <Sparkline data={spark} />}
+      <div style={{ position: 'relative', fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</div>
+      <div style={{ position: 'relative', fontSize: 17, fontWeight: 600, color: color ?? 'var(--text)', lineHeight: 1.2 }}>{value}</div>
     </div>
+  );
+}
+
+// Sparkline d'équity du jour : ligne + aire, en fond de carte. Couleur = tendance (vert monte / rouge descend).
+function Sparkline({ data }: { data: number[] }) {
+  if (data.length < 2) return null;
+  const w = 100;
+  const h = 32;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const span = max - min || 1;
+  const x = (i: number) => (i / (data.length - 1)) * w;
+  const y = (v: number) => h - ((v - min) / span) * h;
+  const line = data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const up = data[data.length - 1] >= data[0];
+  const col = up ? 'var(--up)' : 'var(--down)';
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+      <polygon points={`0,${h} ${line} ${w},${h}`} fill={col} opacity={0.08} />
+      <polyline points={line} fill="none" stroke={col} strokeWidth={1.4} opacity={0.55} vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }
 
