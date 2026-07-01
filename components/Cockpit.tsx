@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
@@ -105,6 +105,7 @@ export function Cockpit() {
     <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', gap: 8, padding: 10, overflow: 'hidden' }}>
       {lastFire === 'long' && <div className="flashbar" style={{ background: 'linear-gradient(90deg,transparent,#1fd8b0,transparent)' }} />}
       {lastFire === 'short' && <div className="flashbar" style={{ background: 'linear-gradient(90deg,transparent,#ff6b8a,transparent)' }} />}
+      <TradeAlerts signals={signals} trades={trades} rafaleTickets={rafaleTickets} />
 
       {/* ===== HEADER ===== */}
       <header className="panel" style={{ flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '8px 12px' }}>
@@ -436,6 +437,85 @@ function MarketStatus({ session, regime, tradable }: { session?: string; regime?
     <span style={{ fontSize: 12, color: tradable ? 'var(--up)' : 'var(--dim)' }}>
       {session ?? '—'} · {regime ?? '—'}
     </span>
+  );
+}
+
+// Toasts d'alerte trade : pop animé à chaque ENTRÉE (signal rempli) / SORTIE (trade clôturé), hors BEAST.
+// Seed sur le premier lot non vide → pas de spam du backlog au chargement ; auto-dismiss ~4.8s ; cap 4 à l'écran.
+type Toast = { id: string; accent: string; icon: string; title: string; sub: string; big?: string };
+function TradeAlerts({ signals, trades, rafaleTickets }: { signals: any[]; trades: any[]; rafaleTickets: Set<string> }) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const seenSig = useRef<Set<string>>(new Set());
+  const seenClose = useRef<Set<string>>(new Set());
+  const initSig = useRef(false);
+  const initClose = useRef(false);
+  const timers = useRef<number[]>([]);
+
+  const push = (t: Omit<Toast, 'id'>) => {
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    setToasts((l) => [...l, { ...t, id }].slice(-4));
+    timers.current.push(window.setTimeout(() => setToasts((l) => l.filter((x) => x.id !== id)), 4800));
+  };
+  useEffect(() => () => timers.current.forEach((h) => window.clearTimeout(h)), []);
+
+  // ENTRÉES : nouveaux signaux remplis (ticket présent), hors BEAST/rafale.
+  useEffect(() => {
+    if (!signals.length) return;
+    if (!initSig.current) {
+      signals.forEach((s) => seenSig.current.add(String(s.id)));
+      initSig.current = true;
+      return;
+    }
+    for (const s of [...signals].reverse()) {
+      const key = String(s.id);
+      if (seenSig.current.has(key)) continue;
+      seenSig.current.add(key);
+      if (s.ticket == null || rafaleTickets.has(String(s.ticket))) continue;
+      if (/RAFALE/i.test(Array.isArray(s.rationale) ? s.rationale.join(' ') : '')) continue;
+      const long = s.direction === 'long';
+      push({ accent: long ? 'var(--up)' : 'var(--down)', icon: long ? '▲' : '▼', title: long ? 'LONG FILLED' : 'SHORT FILLED', sub: `${fmt(s.lot)} @ ${fmt(s.entry, 1)}` });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signals]);
+
+  // SORTIES : trades clôturés, hors BEAST/rafale.
+  useEffect(() => {
+    if (!trades.length) return;
+    const closed = trades.filter((t) => t.closed_at != null);
+    if (!initClose.current) {
+      closed.forEach((t) => seenClose.current.add(String(t.ticket)));
+      initClose.current = true;
+      return;
+    }
+    for (const t of [...closed].reverse()) {
+      const key = String(t.ticket);
+      if (seenClose.current.has(key)) continue;
+      seenClose.current.add(key);
+      if (rafaleTickets.has(key)) continue;
+      const pnl = t.pnl != null ? Number(t.pnl) : 0;
+      const good = pnl >= 0;
+      const r = t.r != null && Number.isFinite(Number(t.r)) ? Number(t.r) : null;
+      const reason = String(t.reason ?? '').toLowerCase();
+      const title = /tp|take/.test(reason) ? 'TAKE PROFIT' : /sl|stop/.test(reason) ? 'STOP LOSS' : 'CLOSED';
+      push({ accent: good ? 'var(--up)' : 'var(--down)', icon: good ? '✓' : '✕', title, sub: r != null ? `${r >= 0 ? '+' : ''}${r.toFixed(2)}R` : String(t.direction ?? '').toUpperCase(), big: `${pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}$` });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trades]);
+
+  if (!toasts.length) return null;
+  return (
+    <div style={{ position: 'fixed', top: 66, right: 16, zIndex: 120, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none' }}>
+      {toasts.map((t) => (
+        <div key={t.id} className="toastIn panel" style={{ width: 248, padding: '9px 12px', borderLeft: `3px solid ${t.accent}`, display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(14,27,51,.97)' }}>
+          <span style={{ fontSize: 16, color: t.accent }}>{t.icon}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: t.accent, letterSpacing: 0.3 }}>{t.title}</span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{t.sub}</span>
+          </div>
+          {t.big && <span className="mono" style={{ fontSize: 16, fontWeight: 700, color: t.accent }}>{t.big}</span>}
+        </div>
+      ))}
+    </div>
   );
 }
 

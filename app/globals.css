@@ -87,6 +87,8 @@ body {
 .liveGlow { animation: liveGlow 2.2s ease-in-out infinite; }
 @keyframes popVal { from { transform: scale(1.18); } to { transform: scale(1); } }
 .popVal { animation: popVal 0.3s ease-out; }
+@keyframes toastIn { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+.toastIn { animation: toastIn 0.35s cubic-bezier(0.2, 0.9, 0.25, 1); }
 
 /* scrollbar fine cyan pour le terminal mission control */
 .mono::-webkit-scrollbar { width: 8px; height: 8px; }
