@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase/client';
-import { subscribeTicks } from './tickStore';
+import { subscribeTicks, getLatestTick } from './tickStore';
 
 type Row = Record<string, unknown>;
 
@@ -222,6 +222,26 @@ export function useEquityCurve(maxPoints = 160) {
     };
   }, [maxPoints]);
   return curve;
+}
+
+/** Watchdog du flux de prix : temps écoulé depuis le DERNIER tick reçu (horloge CLIENT → insensible au
+ * décalage serveur). Re-render chaque seconde pour rafraîchir l'âge. `stale` = flux muet trop longtemps. */
+export function useFeedHealth(staleMs = 12000) {
+  const lastRecv = useRef<number>(getLatestTick() ? Date.now() : 0);
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const unsub = subscribeTicks(() => {
+      lastRecv.current = Date.now();
+    });
+    const iv = setInterval(() => bump((x) => (x + 1) % 1_000_000), 1000);
+    return () => {
+      unsub();
+      clearInterval(iv);
+    };
+  }, []);
+  const last = lastRecv.current;
+  const ageMs = last > 0 ? Date.now() - last : Infinity;
+  return { hasData: last > 0, ageMs, stale: last > 0 && ageMs > staleMs };
 }
 
 /** Cockpit → runner (mode pills, kill switch). On AWAIT : sinon supabase-js n'envoie jamais la requête. */

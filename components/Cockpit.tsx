@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
-import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve } from '@/lib/cockpit/useRealtime';
+import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth } from '@/lib/cockpit/useRealtime';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
@@ -113,9 +113,7 @@ export function Cockpit() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="glow" style={{ width: 20, height: 20, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
           <strong style={{ fontSize: 15, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: 'var(--up)', letterSpacing: 1 }}>
-            <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--up)' }} /> LIVE
-          </span>
+          <FeedStatus />
           <PriceTicker />
           <MarketStatus session={st?.session as string | undefined} regime={st?.regime as string | undefined} tradable={!!st?.tradable} />
         </div>
@@ -292,15 +290,50 @@ function Sparkline({ data }: { data: number[] }) {
 
 function PriceTicker() {
   const px = usePrice();
+  const { stale } = useFeedHealth();
   if (!px) return <span className="mono" style={{ color: 'var(--dim)', fontSize: 13 }}>XAU/USD —</span>;
-  const col = px.dir > 0 ? 'var(--up)' : px.dir < 0 ? 'var(--down)' : 'var(--text)';
+  const col = stale ? 'var(--dim)' : px.dir > 0 ? 'var(--up)' : px.dir < 0 ? 'var(--down)' : 'var(--text)';
   const arrow = px.dir > 0 ? '▲' : px.dir < 0 ? '▼' : '·';
   return (
-    <span style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+    <span style={{ display: 'flex', alignItems: 'baseline', gap: 7, opacity: stale ? 0.6 : 1 }}>
       <span style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: 0.5 }}>XAU/USD</span>
       <span className="mono" style={{ fontSize: 20, fontWeight: 600, color: col, lineHeight: 1 }}>{px.mid.toFixed(2)}</span>
-      <span className="mono" style={{ fontSize: 11, color: col }}>{arrow}</span>
-      <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>spr {(px.ask - px.bid).toFixed(2)}</span>
+      {stale ? (
+        <span className="mono" style={{ fontSize: 10, color: 'var(--gold)' }}>· stale</span>
+      ) : (
+        <>
+          <span className="mono" style={{ fontSize: 11, color: col }}>{arrow}</span>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>spr {(px.ask - px.bid).toFixed(2)}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+// Watchdog du flux : LIVE (vert, pulse) tant que les ticks arrivent ; STALE Ns (ambre) si le flux se tait
+// alors que le marché est ouvert ; OFFLINE (gris) pendant le gap week-end de l'or ; CONNECTING avant le 1er tick.
+function FeedStatus() {
+  const { hasData, ageMs, stale } = useFeedHealth();
+  const closed = goldReopenMs() != null;
+  let color = 'var(--up)';
+  let label = 'LIVE';
+  let pulse = true;
+  if (closed) {
+    color = 'var(--dim)';
+    label = 'OFFLINE';
+    pulse = false;
+  } else if (!hasData) {
+    color = 'var(--gold)';
+    label = 'CONNECTING';
+    pulse = false;
+  } else if (stale) {
+    color = 'var(--gold)';
+    label = `STALE ${Math.min(999, Math.floor(ageMs / 1000))}s`;
+    pulse = false;
+  }
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color, letterSpacing: 1 }}>
+      <span className={pulse ? 'pulse' : undefined} style={{ width: 6, height: 6, borderRadius: '50%', background: color }} /> {label}
     </span>
   );
 }
