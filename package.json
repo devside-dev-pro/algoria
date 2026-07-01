@@ -9,6 +9,7 @@
     "start": "next start",
     "runner": "tsx runner/index.ts",
     "backtest": "tsx backtest/run.ts",
+    "backfill-index": "tsx scripts/backfill-index.ts",
     "demo": "tsx scripts/demo.ts",
     "typecheck": "tsc --noEmit"
   },
