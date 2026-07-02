@@ -1,4 +1,5 @@
 'use client';
+import { useEffect, useState } from 'react';
 
 // Desk ALGORIA AI — surface stream-first : un HERO fixe (« ce que fait le bot MAINTENANT ») + des cartes
 // à structure fixe (spine · clause · rail/R-bar · chips). Les CHIFFRES viennent des champs structurés
@@ -35,18 +36,28 @@ function Meter({ conf, threshold, color, seg = 5 }: { conf: number; threshold: n
 function StateHero({ m }: { m: any }) {
   const color = kindColor(m);
   const conf = typeof m?.confidence === 'number' ? m.confidence : null;
-  const armed = conf != null && conf >= (m?.threshold ?? 0.72);
+  const armed = conf != null && conf >= (m?.threshold ?? 0.72) && !m?.gated;
   const aside = m?.state === 'aside';
   const heroColor = aside ? 'var(--muted)' : color;
+  // compte à rebours vers la prochaine clôture M5 = la prochaine DÉCISION du moteur (le desk vit entre deux bougies)
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const iv = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const left = 300_000 - (clock % 300_000);
+  const scan = `${Math.floor(left / 60_000)}:${String(Math.floor((left % 60_000) / 1000)).padStart(2, '0')}`;
   return (
     <div style={{ padding: '7px 12px 0', borderBottom: '1px solid var(--border)', background: aside ? 'transparent' : `color-mix(in srgb, ${heroColor} 6%, transparent)` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 13, color: heroColor }}>{glyph(m)}</span>
         <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.4, color: heroColor }}>{STATE_WORD[m?.state] ?? 'STANDING ASIDE'}</span>
+        {m?.gated && <span style={{ fontSize: 8.5, fontWeight: 700, padding: '1px 6px', borderRadius: 4, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.08)' }} title="setup vu mais bloqué par le filtre de tendance EMA">⛔ trend gate</span>}
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 9, letterSpacing: 0.5, color: 'var(--dim)' }}>{aside ? 'PRICE' : m?.anchorLabel ?? 'PRICE'}</span>
         <span style={{ fontSize: 13, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{num(aside ? m?.price : m?.anchorPrice)}</span>
         {conf != null && <span style={{ fontSize: 10, fontFamily: MONO, color: aside ? 'var(--dim)' : 'var(--muted)' }}>{Math.round(conf * 100)}%</span>}
+        <span style={{ fontSize: 9.5, fontFamily: MONO, color: 'var(--dim)', borderLeft: '1px solid var(--border)', paddingLeft: 8 }} title="prochaine décision du moteur (clôture M5)">scan {scan}</span>
       </div>
       {/* mince liseré de conviction, collé au bord bas de la bande */}
       <div style={{ height: 2, borderRadius: 2, background: 'rgba(255,255,255,.05)', overflow: 'hidden', marginTop: 6 }}>
@@ -97,7 +108,8 @@ function Chips({ m }: { m: any }) {
           {c.label}
         </span>
       ))}
-      {vsEma && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap', color: 'var(--dim)', border: '1px solid var(--border)' }}>⚠ vs EMA</span>}
+      {m?.gated && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap', color: 'var(--gold)', border: '1px solid rgba(245,194,74,.3)' }}>⛔ trend gate</span>}
+      {vsEma && !m?.gated && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap', color: 'var(--dim)', border: '1px solid var(--border)' }}>⚠ vs EMA</span>}
     </div>
   );
 }
@@ -152,10 +164,12 @@ function Card({ e, latest }: { e: any; latest: boolean }) {
 }
 
 export function Desk({ items = [] }: { items?: any[] }) {
-  // dédup structurel : on effondre les lectures consécutives identiques (état·niveau·direction) — anti-flood marché plat.
+  // dédup structurel ASSOUPLI : on effondre les lectures consécutives identiques (état·niveau·direction)
+  // MAIS au plus par tranche de 15 min — un marché plat re-parle quand même (le desk doit rester bavard en live).
   const key = (e: any) => {
     const m = e?.data ?? {};
-    return `${m.state}|${m.levelKind}|${Math.round(Number(m.level) || 0)}|${m.direction}`;
+    const bucket = Math.floor((e?.ts ? Date.parse(e.ts) : 0) / 900_000);
+    return `${m.state}|${m.levelKind}|${Math.round(Number(m.level) || 0)}|${m.direction}|${bucket}`;
   };
   const shown: any[] = items.filter((e: any, i: number) => i === 0 || key(e) !== key(items[i - 1]));
   const hero: any = items[0]?.data;

@@ -284,15 +284,26 @@ async function main() {
         // Desk : émis PAR instrument, tagué symbole (meta.instrument). Le cockpit multi-symbole filtre dessus →
         // chaque marché a son propre hero/état/narration. On émet TOUJOURS le meta structuré (hero vivant même sans LLM).
         const kind: DeskKind = signal ? 'trade' : confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.7 ? 'opportunity' : 'analysis';
-        const meta = deskMeta(kind, context, { signal, confluence, threshold });
+        // Setup vu mais BLOQUÉ par le filtre de tendance EMA → le desk l'assume ("discipline") au lieu de
+        // promettre des setups jamais exécutés (l'incohérence visible en live).
+        const emaGate = cfg.emaGate ?? 'off';
+        const gated = !!confluence && confluence.direction !== 'flat' && (
+          (emaGate === 'align' && context.emaBias !== confluence.direction) ||
+          (emaGate === 'notOpposed' && ((confluence.direction === 'long' && context.emaBias === 'short') || (confluence.direction === 'short' && context.emaBias === 'long')))
+        );
+        // Micro-résumé de la tape (3 dernières bougies) → clauses qui réagissent au marché, pas génériques.
+        const last3 = bars.slice(-3);
+        const rng3 = last3.length ? Math.max(...last3.map((b) => b.high)) - Math.min(...last3.map((b) => b.low)) : 0;
+        const priceAction = `last 3 bars ${last3.map((b) => (b.close >= b.open ? 'green' : 'red')).join(',')} · 3-bar range ${(rng3 / (context.atr || 1)).toFixed(1)}×ATR · close ${bars[bars.length - 1].close >= last3[0].open ? 'above' : 'below'} 15m open`;
+        const meta = deskMeta(kind, context, { signal, confluence, threshold, gated });
         let clause: string | null = null;
         if (narrationReady()) {
           clause = await narrate(
             kind === 'trade'
               ? { kind, ctx: context, signal, confluence, threshold }
               : kind === 'opportunity'
-                ? { kind, ctx: context, confluence, threshold }
-                : { kind, ctx: context, logLines: events.map((e) => e.msg) },
+                ? { kind, ctx: context, confluence, threshold, gated }
+                : { kind, ctx: context, logLines: events.map((e) => e.msg), priceAction },
           );
         }
         await logNarration(clause ?? '', signal ? signal.time : context.time, meta as unknown as Record<string, unknown>);
