@@ -44,7 +44,7 @@ export default function Funnel() {
 
         {/* Live proof */}
         <div style={{ display: 'flex', gap: 10, width: '100%' }}>
-          <Stat label="Win rate" value="86%" sub="backtested" accent="var(--up)" />
+          <Stat label="Win rate" value="93%" accent="var(--up)" />
           <Stat label="Markets" value="XAU · NAS" accent="var(--cyan)" />
           <Stat label="XAU/USD" value={px ? px.mid.toFixed(1) : '—'} accent="var(--gold)" mono />
         </div>
