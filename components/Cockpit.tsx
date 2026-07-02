@@ -317,18 +317,33 @@ export function Cockpit() {
         <Metric label="Day P&L" value={dayPnl == null || dayPnl < 0 ? '—' : '+' + dayPnl.toFixed(0)} color={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--dim)'} accent={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--border)'} />
         <Metric label={`Win rate · ${stats.n}`} value={stats.ready && stats.winPct >= 0.75 ? (stats.winPct * 100).toFixed(0) + '%' : '—'} color={stats.ready && stats.winPct >= 0.75 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
         <Metric label="Wins today" value={winsToday > 0 ? '✓ ' + winsToday : '—'} color={winsToday > 0 ? 'var(--up)' : 'var(--dim)'} accent="var(--cyan)" />
-        <Metric label="Best trade" value={bestToday > 0 ? '+' + bestToday.toFixed(0) + '$' : '—'} color={bestToday > 0 ? 'var(--gold)' : 'var(--dim)'} accent="var(--gold)" />
+        <Metric label="Best trade" value={bestToday > 0 ? '+' + bestToday.toFixed(0) + '$' : '—'} gold={bestToday > 0} color="var(--dim)" accent="var(--gold)" />
       </section>
     </main>
   );
 }
 
-function Metric({ label, value, color, accent, spark }: { label: string; value: string; color?: string; accent?: string; spark?: number[] }) {
+// Tuile métrique PREMIUM : surface en dégradé + liseré lumineux + halo d'accent dans le coin (matière, pas d'aplat).
+// gold=true → valeur en OR MÉTALLIQUE (.goldText) pour le moment "Best trade".
+function Metric({ label, value, color, accent, spark, gold }: { label: string; value: string; color?: string; accent?: string; spark?: number[]; gold?: boolean }) {
+  const a = accent ?? 'var(--border)';
   return (
-    <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--panel-2)', borderRadius: 8, padding: '6px 11px', borderLeft: `2px solid ${accent ?? 'var(--border)'}` }}>
+    <div
+      style={{
+        position: 'relative', overflow: 'hidden', borderRadius: 12, padding: '8px 13px',
+        background: 'linear-gradient(180deg, rgba(26,41,72,.92) 0%, rgba(10,17,31,.96) 100%)',
+        border: '1px solid rgba(130,152,190,.16)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.07), 0 6px 18px rgba(2,6,16,.35)',
+      }}
+    >
+      {/* halo d'accent, coin haut-droit */}
+      <span aria-hidden style={{ position: 'absolute', right: -30, top: -34, width: 120, height: 120, borderRadius: '50%', background: `radial-gradient(circle, color-mix(in srgb, ${a} 18%, transparent) 0%, transparent 68%)`, pointerEvents: 'none' }} />
       {spark && <Sparkline data={spark} />}
-      <div style={{ position: 'relative', fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</div>
-      <div style={{ position: 'relative', fontSize: 17, fontWeight: 600, color: color ?? 'var(--text)', lineHeight: 1.2 }}>{value}</div>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: a, boxShadow: `0 0 6px ${a}` }} />
+        <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1 }}>{label}</span>
+      </div>
+      <div className={gold ? 'goldText' : undefined} style={{ position: 'relative', fontSize: 19, fontWeight: 700, letterSpacing: 0.2, lineHeight: 1.25, marginTop: 1, ...(gold ? {} : { color: color ?? 'var(--text)' }) }}>{value}</div>
     </div>
   );
 }
