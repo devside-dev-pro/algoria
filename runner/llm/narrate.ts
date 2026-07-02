@@ -10,7 +10,7 @@ const client = KEY ? new Anthropic({ apiKey: KEY }) : null;
 
 export const narrationReady = () => client != null;
 
-export type DeskKind = 'trade' | 'opportunity' | 'analysis';
+export type DeskKind = 'trade' | 'opportunity' | 'analysis' | 'recap';
 
 // Le LLM ne réécrit PLUS les nombres (l'UI les rend) — juste la clause que les chiffres ne montrent pas.
 const SYSTEM = `You are ALGORIA AI, an elite gold/Nasdaq trading desk narrating live for traders. The UI already renders — from structured fields — the direction, kind, every price/level, ADX, EMA, ATR, session, R:R, conviction and the trigger. Your ONLY job is the ONE short clause of interpretation those numbers cannot show: intent, tension, or what would change your mind.
@@ -123,6 +123,20 @@ export async function narrate(input: NarrateInput): Promise<string | null> {
     return clampClause(text, input.kind === 'analysis' ? 16 : 13) || null;
   } catch (e) {
     console.error('[algoria] narration failed:', (e as { message?: string })?.message ?? e);
+    return null;
+  }
+}
+
+/** Clause du RECAP horaire (stats du jour). L'UI affiche les chiffres — la clause donne l'ambiance de la session. */
+export async function narrateRecap(s: { trades: number; wins: number; net: number }): Promise<string | null> {
+  if (!client) return null;
+  const prompt = `Hourly stream recap. Today so far: ${s.trades} trades, ${s.wins} wins, net ${s.net >= 0 ? '+' : ''}${Math.round(s.net)}$. ONE clause (max 14 words) capturing the session's vibe for the audience — do NOT restate any number (the UI shows them), desk voice, no hype.`;
+  try {
+    const res = await client.messages.create({ model: MODEL, max_tokens: 60, system: SYSTEM, messages: [{ role: 'user', content: prompt }] });
+    const text = res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join(' ').trim();
+    return clampClause(text, 14) || null;
+  } catch (e) {
+    console.error('[algoria] recap narration failed:', (e as { message?: string })?.message ?? e);
     return null;
   }
 }

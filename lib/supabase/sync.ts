@@ -131,6 +131,23 @@ export async function reconcileOpenTrades(symbol: string, liveTickets: string[],
   return ghosts.length;
 }
 
+/** Stats des trades CLÔTURÉS aujourd'hui (UTC), hors micro-scalps RAFALE (spam show) — pour le RECAP horaire du desk. */
+export async function fetchDayTradeStats(): Promise<{ trades: number; wins: number; net: number } | null> {
+  const dayStart = new Date();
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const iso = dayStart.toISOString();
+  const [tr, sg] = await Promise.all([
+    db.from('trades').select('ticket,pnl').gte('closed_at', iso).not('pnl', 'is', null),
+    db.from('signals').select('ticket,rationale').gte('created_at', iso),
+  ]);
+  if (tr.error || !tr.data) return null;
+  const rafale = new Set((sg.data ?? []).filter((s) => JSON.stringify(s.rationale ?? '').includes('RAFALE')).map((s) => String(s.ticket)));
+  const rows = tr.data.filter((t) => !rafale.has(String(t.ticket)));
+  const wins = rows.filter((t) => Number(t.pnl) > 0).length;
+  const net = rows.reduce((a, t) => a + Number(t.pnl), 0);
+  return { trades: rows.length, wins, net };
+}
+
 export async function pushState(ctx: MarketContext, state: EngineState, mode: Mode = 'normal') {
   await db.from('state_snapshots').insert({
     session: ctx.session,

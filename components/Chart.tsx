@@ -39,7 +39,7 @@ const toBar = (c: Record<string, unknown>): Bar => ({
   time: Number(c.time), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
 });
 
-export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD' }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string }) {
+export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [] }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string; wins?: Array<{ time: number; pnl: number }> }) {
   const SYMBOL = symbol; // le parent remonte le Chart (key={symbol}) au changement → réinit propre du chart impératif
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -59,6 +59,8 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD' }: { sign
   const tfRef = useRef<TF>('M5');
   const signalsRef = useRef(signals);
   signalsRef.current = signals;
+  const winsRef = useRef(wins);
+  winsRef.current = wins;
   const activeRef = useRef<ActiveTrade>(activeTrade);
   activeRef.current = activeTrade;
   const [tf, setTf] = useState<TF>('M5');
@@ -218,6 +220,14 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD' }: { sign
       if (seen.has(key)) continue; // un seul triangle par bougie+sens
       seen.add(key);
       mk.push({ time: toSec(nearest.time), position: long ? 'belowBar' : 'aboveBar', color: long ? 'rgba(31,216,176,.9)' : 'rgba(255,107,138,.9)', shape: long ? 'arrowUp' : 'arrowDown' });
+    }
+    // Célébration des GAINS : pastille verte "+X$" à la bougie de sortie (le moment de win visible sur le chart).
+    const first = bars[0].time;
+    const last = bars[bars.length - 1].time;
+    for (const w of winsRef.current) {
+      if (!Number.isFinite(w.time) || w.time < first || w.time > last + TF_MS[tfRef.current]) continue;
+      const nearest = bars.reduce((p, b) => (Math.abs(b.time - w.time) < Math.abs(p.time - w.time) ? b : p), bars[0]);
+      mk.push({ time: toSec(nearest.time), position: 'aboveBar', color: 'rgba(34,224,166,.95)', shape: 'circle', text: `+${Math.round(w.pnl)}$`, size: 1 });
     }
     mk.sort((a, b) => (a.time as number) - (b.time as number));
     markers.setMarkers(mk);
@@ -656,7 +666,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD' }: { sign
     drawMarkers();
     drawTrade();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signals, activeTrade]);
+  }, [signals, activeTrade, wins]);
 
   // Toggles indicateurs : masque/affiche les séries (EMA/Bollinger/VWAP) et redessine les niveaux S/R.
   useEffect(() => {

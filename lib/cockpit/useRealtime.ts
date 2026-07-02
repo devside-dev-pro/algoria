@@ -84,37 +84,33 @@ export function useLatestState() {
   return state;
 }
 
-/** Desk ALGORIA AI : commentaires/opportunités/trades (events level='ai'), du plus récent au plus ancien.
- * `symbol` (affichage, ex. 'XAUUSD') filtre le desk du marché choisi ; les vieux events sans symbole
- * sont rattachés à l'or (comportement historique). */
-export function useDesk(limit = 10, symbol = 'XAUUSD') {
+/** Desk ALGORIA AI : commentaires/opportunités/trades/recaps (events level='ai'), du plus récent au plus ancien.
+ * TOUS les marchés entrelacés (chaque event porte data.symbol) — le composant Desk badge chaque carte
+ * et choisit le hero du marché sélectionné. */
+export function useDesk(limit = 10) {
   const [items, setItems] = useState<Row[]>([]);
   useEffect(() => {
     let alive = true;
-    const match = (e: Row) => {
-      const s = (e as any)?.data?.symbol as string | undefined;
-      return s ? s === symbol : symbol === 'XAUUSD'; // legacy (sans symbole) → or
-    };
     supabase
       .from('events')
       .select('*')
       .eq('level', 'ai')
       .order('ts', { ascending: false })
-      .limit(limit * 4) // on récupère large puis on filtre par symbole côté client
+      .limit(limit)
       .then(({ data }) => {
-        if (alive && data) setItems((data as Row[]).filter(match).slice(0, limit));
+        if (alive && data) setItems(data as Row[]);
       });
     const ch = supabase
       .channel('rt-desk')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events', filter: 'level=eq.ai' }, ({ new: e }) => {
-        if (match(e as Row)) setItems((p) => [e as Row, ...p].slice(0, limit));
+        setItems((p) => [e as Row, ...p].slice(0, limit));
       })
       .subscribe();
     return () => {
       alive = false;
       supabase.removeChannel(ch);
     };
-  }, [limit, symbol]);
+  }, [limit]);
   return items;
 }
 

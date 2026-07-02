@@ -6,13 +6,13 @@ import { readState } from './metaapi/state';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
 import { manageBreakeven } from './metaapi/manage';
 import { DealRecorder } from './metaapi/trades';
-import { narrate, narrationReady, deskMeta, type DeskKind } from './llm/narrate';
+import { narrate, narrateRecap, narrationReady, deskMeta, type DeskKind } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, reconcileOpenTrades, broadcastTick, watchCommands } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, reconcileOpenTrades, broadcastTick, watchCommands, fetchDayTradeStats } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -439,6 +439,27 @@ async function main() {
     for (const eng of engines) {
       try { eng.reconcile(); } catch (e) { console.error(`[algoria] reconcile ${eng.inst.display} échoué:`, e); }
     }
+  }, 60_000);
+
+  // ===== RECAP HORAIRE du desk : à chaque heure pleine, une carte "SESSION RECAP" (stats réelles du jour,
+  // hors BEAST) + une clause IA d'ambiance. Rythme le stream et rappelle le track record sans intervention. =====
+  let lastRecapHour = new Date().getUTCHours(); // pas de recap au démarrage — on attend la prochaine heure pleine
+  setInterval(() => {
+    void (async () => {
+      const h = new Date().getUTCHours();
+      if (h === lastRecapHour) return;
+      lastRecapHour = h;
+      try {
+        const stats = await fetchDayTradeStats();
+        if (!stats || stats.trades === 0) return; // rien à raconter
+        const meta = { kind: 'recap', trades: stats.trades, wins: stats.wins, winRate: stats.wins / stats.trades, net: Math.round(stats.net) };
+        const clause = narrationReady() ? await narrateRecap(stats) : null;
+        await logNarration(clause ?? '', Date.now(), meta);
+        console.log(`[algoria] recap ${h}h : ${stats.trades} trades · ${stats.wins} wins · ${Math.round(stats.net)}$`);
+      } catch (e) {
+        console.error('[algoria] recap échoué:', e);
+      }
+    })();
   }, 60_000);
 }
 
