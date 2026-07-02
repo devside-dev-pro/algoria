@@ -59,16 +59,19 @@ function tradePrompt(ctx: MarketContext, s: Signal): string {
   ].join(' ');
 }
 
-function opportunityPrompt(ctx: MarketContext, cf: Confluence): string {
+function opportunityPrompt(ctx: MarketContext, cf: Confluence, gated?: boolean): string {
   return [
-    `A ${cf.direction.toUpperCase()} setup is BUILDING but has NOT triggered. ONE clause (max 13 words): the tension, or precisely what you're waiting for. Do NOT name the trigger level (the UI shows it).`,
+    gated
+      ? `A ${cf.direction.toUpperCase()} setup is building BUT your EMA trend filter BLOCKS it (trend not aligned — you will NOT chase). ONE clause (max 13 words): own the discipline — what alignment you demand before touching it.`
+      : `A ${cf.direction.toUpperCase()} setup is BUILDING but has NOT triggered. ONE clause (max 13 words): the tension, or precisely what you're waiting for. Do NOT name the trigger level (the UI shows it).`,
     `Grounding (do NOT restate): ${marketBlock(ctx)}`,
   ].join(' ');
 }
 
-function analysisPrompt(ctx: MarketContext, logLines: string[]): string {
+function analysisPrompt(ctx: MarketContext, logLines: string[], priceAction?: string): string {
   return [
-    `No trade right now. ONE clause (max 16 words): the standoff, or the exact bias-flip you're watching, in plain trader language. No level names.`,
+    `No trade right now. ONE clause (max 16 words): the standoff, or the exact bias-flip you're watching, in plain trader language. No level names. React to the RECENT bars, not generic waiting.`,
+    priceAction ? `Recent tape: ${priceAction}.` : '',
     `Grounding (do NOT restate): ${marketBlock(ctx)}`,
     logLines.length ? `Engine internals (for your eyes, never quote): ${logLines.join(' | ')}.` : '',
   ]
@@ -92,6 +95,8 @@ export interface NarrateInput {
   confluence?: Confluence | null;
   threshold?: number;
   logLines?: string[];
+  gated?: boolean; // setup présent mais bloqué par le filtre de tendance EMA → la clause assume la discipline
+  priceAction?: string; // micro-résumé des dernières bougies → clauses qui réagissent à la tape, pas génériques
 }
 
 /** Produit UNE clause de desk (≤13-16 mots). Renvoie null si désactivé ou en cas d'échec. */
@@ -101,8 +106,8 @@ export async function narrate(input: NarrateInput): Promise<string | null> {
     input.kind === 'trade' && input.signal
       ? tradePrompt(input.ctx, input.signal)
       : input.kind === 'opportunity' && input.confluence
-        ? opportunityPrompt(input.ctx, input.confluence)
-        : analysisPrompt(input.ctx, input.logLines ?? []);
+        ? opportunityPrompt(input.ctx, input.confluence, input.gated)
+        : analysisPrompt(input.ctx, input.logLines ?? [], input.priceAction);
   try {
     const res = await client.messages.create({
       model: MODEL,
@@ -140,6 +145,7 @@ export interface DeskMeta {
   instrument: string; // symbole court affiché dans le hero (ex. 'XAU', 'NAS')
   level: number;
   levelKind: 'entry' | 'trigger' | 'support' | 'resistance' | 'price';
+  gated?: boolean; // setup vu mais bloqué par le filtre de tendance (le widget affiche "⛔ trend gate")
   trigger?: { level: number; cond: string; op: string };
   entry?: number;
   sl?: number;
@@ -158,7 +164,7 @@ export interface DeskMeta {
 }
 
 /** Construit le meta structuré émis dans events.data pour le desk. */
-export function deskMeta(kind: DeskKind, ctx: MarketContext, opts: { signal?: Signal | null; confluence?: Confluence | null; threshold?: number }): DeskMeta {
+export function deskMeta(kind: DeskKind, ctx: MarketContext, opts: { signal?: Signal | null; confluence?: Confluence | null; threshold?: number; gated?: boolean }): DeskMeta {
   const { signal, confluence } = opts;
   const threshold = opts.threshold ?? 0.72;
   const direction: Direction = signal ? signal.direction : confluence?.direction ?? 'flat';
@@ -207,6 +213,7 @@ export function deskMeta(kind: DeskKind, ctx: MarketContext, opts: { signal?: Si
     instrument: shortSym(ctx.symbol),
     level,
     levelKind,
+    ...(opts.gated ? { gated: true } : {}),
     ...(trigger ? { trigger } : {}),
     ...(signal ? { entry: signal.entry, sl: signal.stopLoss, tp: signal.takeProfits[0] ?? null, rr: signal.riskReward } : {}),
     drivers,
