@@ -7,11 +7,11 @@ const display = Space_Grotesk({ subsets: ['latin'], weight: ['400', '500', '700'
 const mono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500'], variable: '--font-mono', display: 'swap' });
 
 export const metadata = {
-  title: 'Algoria AI — l\'IA qui trade l\'or & le Nasdaq, en direct',
-  description: 'Trades réels exécutés en autonomie 24/5. Analyses, signaux et résultats gratuitement dans le canal Telegram. Rejoins gratuitement.',
+  title: 'Algoria AI — the AI that trades gold & the Nasdaq, live',
+  description: 'Real trades executed autonomously 24/5. Analysis, signals and results, free in the Telegram channel. Join for free.',
   openGraph: {
-    title: 'Algoria AI — trading IA en direct',
-    description: 'Or & Nasdaq tradés par une IA, en direct. Rejoins le canal Telegram gratuit.',
+    title: 'Algoria AI — live AI trading',
+    description: 'Gold & Nasdaq traded by an AI, live. Join the free Telegram channel.',
     type: 'website',
   },
 };

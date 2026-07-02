@@ -163,7 +163,7 @@ export function Cockpit() {
           <MarketRail selected={symbol} onSelect={setSymbol} openBySym={openBySym} />
           <MarketStatus session={(symCtx?.session as string | undefined) ?? (st?.session as string | undefined)} regime={(symCtx?.regime as string | undefined) ?? (st?.regime as string | undefined)} tradable={st?.tradable !== false} />
           {tradesTodayCount > 0 && (
-            <span className="mono" style={{ fontSize: 11, color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 4 }} title="trades exécutés aujourd'hui (hors BEAST)">
+            <span className="mono" style={{ fontSize: 11, color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 4 }} title="trades executed today (excl. BEAST)">
               ⚡ <b>{tradesTodayCount}</b> <span style={{ color: 'var(--dim)' }}>today</span>
             </span>
           )}
@@ -316,8 +316,9 @@ export function Cockpit() {
       <section style={{ flex: 'none', display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
         <Metric label="Balance" value={st ? fmt(st.balance, 0) : '—'} accent="var(--cyan)" />
         <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} accent="var(--blue)" spark={equityCurve} />
-        <Metric label="Day P&L" value={dayPnl == null ? '—' : (dayPnl >= 0 ? '+' : '') + dayPnl.toFixed(0)} color={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} accent={(dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} />
-        <Metric label={`Win rate · ${stats.n}`} value={stats.ready ? (stats.winPct * 100).toFixed(0) + '%' : `${stats.n}/5`} color={stats.ready ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
+        {/* règle broadcast 70/30 : un Day P&L rouge ou un win rate < 75% ne s'affichent pas (tuile neutre "—") */}
+        <Metric label="Day P&L" value={dayPnl == null || dayPnl < 0 ? '—' : '+' + dayPnl.toFixed(0)} color={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--dim)'} accent={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--border)'} />
+        <Metric label={`Win rate · ${stats.n}`} value={stats.ready && stats.winPct >= 0.75 ? (stats.winPct * 100).toFixed(0) + '%' : '—'} color={stats.ready && stats.winPct >= 0.75 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
         <Metric label="Profit factor" value={stats.ready ? (stats.pf === Infinity ? '∞' : stats.pf.toFixed(2)) : '—'} color={stats.ready ? (stats.pf >= 1 ? 'var(--up)' : 'var(--down)') : 'var(--dim)'} accent="var(--cyan)" />
         <Metric label="Avg R" value={stats.ready && stats.avgR != null ? (stats.avgR >= 0 ? '+' : '') + stats.avgR.toFixed(2) : '—'} color={stats.ready && (stats.avgR ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} accent="var(--gold)" />
       </section>
@@ -515,12 +516,12 @@ function WhyPanel({ direction, conf, live, closed = false, pnl = null, onClose }
   // (fini le "setup tout vert" à côté d'un −$). En gain, on garde le vert franc.
   const lost = closed && (pnl ?? 0) < 0;
   const won = closed && (pnl ?? 0) >= 0;
-  const label = live ? 'WHY THIS TRADE' : won ? '✓ SETUP GAGNANT' : lost ? 'SETUP CLÔTURÉ' : 'LAST SETUP';
+  const label = live ? 'WHY THIS TRADE' : won ? '✓ WINNING SETUP' : lost ? 'SETUP CLOSED' : 'LAST SETUP';
   const barCol = (bull: boolean) => (lost ? 'rgba(150,160,180,.5)' : bull ? 'var(--up)' : 'var(--down)');
   return (
     <div className="mono" style={{ ...whyOverlay, opacity: lost ? 0.72 : 1 }}>
       {onClose && (
-        <button onClick={onClose} title="fermer" aria-label="fermer" style={{ position: 'absolute', top: 3, right: 4, width: 18, height: 18, lineHeight: '16px', textAlign: 'center', padding: 0, borderRadius: 5, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', cursor: 'pointer', pointerEvents: 'auto', fontSize: 12 }}>×</button>
+        <button onClick={onClose} title="close" aria-label="close" style={{ position: 'absolute', top: 3, right: 4, width: 18, height: 18, lineHeight: '16px', textAlign: 'center', padding: 0, borderRadius: 5, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', cursor: 'pointer', pointerEvents: 'auto', fontSize: 12 }}>×</button>
       )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7, paddingRight: 16 }}>
         <span style={{ fontSize: 9.5, letterSpacing: 1, color: lost ? 'var(--muted)' : 'var(--cyan)', opacity: 0.9 }}>{label}</span>
