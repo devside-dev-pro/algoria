@@ -52,6 +52,17 @@ export function runTick(input: TickInput, features: Feature[], cfg: EngineConfig
     return { context: ctx, signal: null, events, confluence, threshold };
   }
 
+  // Stage 3b — filtre tendance EMA (optionnel) : ne pas chasser une poussée quand l'EMA ne soutient pas le sens.
+  const gate = cfg.emaGate ?? 'off';
+  if (gate !== 'off') {
+    const aligned = ctx.emaBias === cf.direction;
+    const opposed = (cf.direction === 'long' && ctx.emaBias === 'short') || (cf.direction === 'short' && ctx.emaBias === 'long');
+    if ((gate === 'align' && !aligned) || (gate === 'notOpposed' && opposed)) {
+      emit('veto', `ema gate (${gate}): ${cf.direction} vs EMA ${ctx.emaBias}`);
+      return { context: ctx, signal: null, events, confluence, threshold };
+    }
+  }
+
   // Stage 4 — trade construction
   const draft = constructTrade(cf, ctx, input.mode, input.state.balance, cfg);
   if (!draft) {
