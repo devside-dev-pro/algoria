@@ -23,8 +23,8 @@ export function Cockpit() {
   const signals = useSignals(60);
   const st = useLatestState() as any;
   const trades = useTrades(120);
-  const deskItems = useDesk(14, symbol); // desk du marché sélectionné (levé ici pour aussi nourrir le header)
-  const symCtx = (deskItems[0] as any)?.data; // dernier contexte structuré du symbole (session/regime/state…)
+  const deskItems = useDesk(24); // desk MULTI-MARCHÉ entrelacé (XAU + NAS) — levé ici pour aussi nourrir le header
+  const symCtx = (deskItems as any[]).find((e) => ((e?.data?.symbol as string | undefined) ?? 'XAUUSD') === symbol)?.data; // dernier contexte structuré du symbole sélectionné
   const dayStartEq = useDayStartEquity();
   const equityCurve = useEquityCurve();
   const [optMode, setOptMode] = useState<string | null>(null);
@@ -103,6 +103,14 @@ export function Cockpit() {
   const rafaleTickets = new Set(
     signals.filter((s: any) => Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')).map((s: any) => String(s.ticket)),
   );
+  // Compteur "trades today" (hors BEAST) — l'activité du jour visible d'un coup d'œil dans le header.
+  const dayStartMs = new Date().setUTCHours(0, 0, 0, 0);
+  const tradesTodayCount = (trades as any[]).filter((t) => t.opened_at && Date.parse(t.opened_at) >= dayStartMs && !rafaleTickets.has(String(t.ticket))).length;
+  // Gains clôturés du symbole affiché (hors BEAST) → pastilles "+X$" de célébration sur le chart.
+  const winsForChart = (trades as any[])
+    .filter((t) => t.symbol === symbol && t.closed_at && Number(t.pnl) > 0 && !rafaleTickets.has(String(t.ticket)))
+    .slice(0, 24)
+    .map((t) => ({ time: Date.parse(t.closed_at), pnl: Number(t.pnl) }));
   const closedT = trades.filter((t: any) => t.closed_at != null && t.pnl != null && !rafaleTickets.has(String(t.ticket)));
   const stats = (() => {
     const n = closedT.length;
@@ -154,6 +162,11 @@ export function Cockpit() {
           <FeedStatus />
           <MarketRail selected={symbol} onSelect={setSymbol} openBySym={openBySym} />
           <MarketStatus session={(symCtx?.session as string | undefined) ?? (st?.session as string | undefined)} regime={(symCtx?.regime as string | undefined) ?? (st?.regime as string | undefined)} tradable={st?.tradable !== false} />
+          {tradesTodayCount > 0 && (
+            <span className="mono" style={{ fontSize: 11, color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 4 }} title="trades exécutés aujourd'hui (hors BEAST)">
+              ⚡ <b>{tradesTodayCount}</b> <span style={{ color: 'var(--dim)' }}>today</span>
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!broadcast && (
@@ -230,12 +243,12 @@ export function Cockpit() {
             )}
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Chart key={symbol} symbol={symbol} signals={signals.filter((s: any) => s.symbol === symbol)} activeTrade={activeTrade} />
+            <Chart key={symbol} symbol={symbol} signals={signals.filter((s: any) => s.symbol === symbol)} activeTrade={activeTrade} wins={winsForChart} />
           </div>
           {whySig && String(whySig.id) !== whyDismissed && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} live={!!openSig} closed={whyClosed} pnl={whyPnl} onClose={() => setWhyDismissed(String(whySig.id))} />}
         </section>
         <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
-          <Desk items={deskItems} />
+          <Desk items={deskItems} heroSymbol={symbol} />
           <Telemetry state={st} signals={signals} symbol={symbol} />
         </div>
       </div>

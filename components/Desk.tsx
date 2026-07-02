@@ -10,12 +10,14 @@ const hhmm = (ts: any) => (ts ? new Date(ts).toLocaleTimeString('en-GB', { hour:
 const TONE: Record<string, string> = { bull: 'var(--up)', bear: 'var(--down)', neutral: 'var(--muted)', vol: 'var(--cyan)' };
 
 function kindColor(m: any): string {
+  if (m?.kind === 'recap') return 'var(--gold)';
   if (m?.kind === 'opportunity') return 'var(--gold)';
   if (m?.kind === 'analysis') return 'var(--cyan)';
   return m?.direction === 'short' ? 'var(--down)' : m?.direction === 'long' ? 'var(--up)' : 'var(--muted)';
 }
-const glyph = (m: any) => (m?.direction === 'long' ? '▲' : m?.direction === 'short' ? '▼' : m?.kind === 'opportunity' ? '◆' : '●');
-const tag = (m: any) => (m?.kind === 'trade' ? (m?.direction === 'long' ? 'LONG' : 'SHORT') : m?.kind === 'opportunity' ? 'WATCH' : 'READ');
+const glyph = (m: any) => (m?.kind === 'recap' ? '∑' : m?.direction === 'long' ? '▲' : m?.direction === 'short' ? '▼' : m?.kind === 'opportunity' ? '◆' : '●');
+const tag = (m: any) => (m?.kind === 'recap' ? 'RECAP' : m?.kind === 'trade' ? (m?.direction === 'long' ? 'LONG' : 'SHORT') : m?.kind === 'opportunity' ? 'WATCH' : 'READ');
+const symOf = (m: any) => (m?.symbol as string | undefined) ?? 'XAUUSD'; // legacy (sans symbole) → or
 const levelPrefix = (lk: string) => (lk === 'support' ? 'S' : lk === 'resistance' ? 'R' : '@');
 const STATE_WORD: Record<string, string> = { in_long: 'IN LONG', in_short: 'IN SHORT', stalking_long: 'STALKING LONG', stalking_short: 'STALKING SHORT', aside: 'STANDING ASIDE' };
 
@@ -129,14 +131,21 @@ function Card({ e, latest }: { e: any; latest: boolean }) {
         boxShadow: latest ? '0 0 0 1px rgba(43,227,245,.22), 0 0 18px rgba(43,227,245,.10)' : undefined,
       }}
     >
-      {/* ROW 1 — spine : glyph · tag · niveau · jauge · heure (l'œil retombe toujours au même endroit) */}
+      {/* ROW 1 — spine : glyph · tag · SYMBOLE · niveau · jauge · heure (l'œil retombe toujours au même endroit) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, height: 20 }}>
         <span style={{ fontSize: 13, fontWeight: 800, color, width: 12, textAlign: 'center' }}>{glyph(m)}</span>
         <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8, color }}>{tag(m)}</span>
-        <span style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
-          <span style={{ fontSize: 9, color: 'var(--dim)', marginRight: 1 }}>{levelPrefix(m?.levelKind)}</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{num(m?.level)}</span>
-        </span>
+        {m?.instrument && <span style={{ fontSize: 8.5, fontWeight: 700, fontFamily: MONO, letterSpacing: 0.5, color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{m.instrument}</span>}
+        {m?.kind === 'recap' ? (
+          <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+            {m?.trades} trades · {m?.winRate != null ? Math.round(Number(m.winRate) * 100) + '% win' : '—'} · <span style={{ color: Number(m?.net) >= 0 ? 'var(--up)' : 'rgba(210,150,165,.8)' }}>{Number(m?.net) >= 0 ? '+' : ''}{Math.round(Number(m?.net) || 0)}$</span>
+          </span>
+        ) : (
+          <span style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }}>
+            <span style={{ fontSize: 9, color: 'var(--dim)', marginRight: 1 }}>{levelPrefix(m?.levelKind)}</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{num(m?.level)}</span>
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         {conf != null && (
           <>
@@ -163,16 +172,27 @@ function Card({ e, latest }: { e: any; latest: boolean }) {
   );
 }
 
-export function Desk({ items = [] }: { items?: any[] }) {
-  // dédup structurel ASSOUPLI : on effondre les lectures consécutives identiques (état·niveau·direction)
+export function Desk({ items = [], heroSymbol = 'XAUUSD' }: { items?: any[]; heroSymbol?: string }) {
+  // dédup structurel ASSOUPLI : on effondre les lectures consécutives identiques (symbole·état·niveau·direction)
   // MAIS au plus par tranche de 15 min — un marché plat re-parle quand même (le desk doit rester bavard en live).
+  // Le flux est MULTI-MARCHÉ (XAU + NAS entrelacés) ; les recaps ne sont jamais fusionnés.
   const key = (e: any) => {
     const m = e?.data ?? {};
+    if (m.kind === 'recap') return `recap|${e?.id}`;
     const bucket = Math.floor((e?.ts ? Date.parse(e.ts) : 0) / 900_000);
-    return `${m.state}|${m.levelKind}|${Math.round(Number(m.level) || 0)}|${m.direction}|${bucket}`;
+    return `${symOf(m)}|${m.state}|${m.levelKind}|${Math.round(Number(m.level) || 0)}|${m.direction}|${bucket}`;
   };
-  const shown: any[] = items.filter((e: any, i: number) => i === 0 || key(e) !== key(items[i - 1]));
-  const hero: any = items[0]?.data;
+  // dédup PAR SYMBOLE (deux marchés entrelacés : on compare à la dernière carte du même marché)
+  const lastKey: Record<string, string> = {};
+  const shown: any[] = [];
+  for (const e of items) {
+    const s = symOf(e?.data ?? {});
+    const k = key(e);
+    if (lastKey[s] !== k) shown.push(e);
+    lastKey[s] = k;
+  }
+  // le HERO suit le marché sélectionné dans le cockpit (les recaps, sans état, sont ignorés ici)
+  const hero: any = items.find((e: any) => e?.data?.state && symOf(e.data) === heroSymbol)?.data ?? items.find((e: any) => e?.data?.state)?.data;
 
   return (
     <section className="panel" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0, borderColor: 'rgba(43,227,245,.3)' }}>
