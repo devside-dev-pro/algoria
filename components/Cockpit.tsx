@@ -35,6 +35,7 @@ export function Cockpit() {
   const [slIn, setSlIn] = useState('');
   const [tpIn, setTpIn] = useState('');
   const [broadcast, setBroadcast] = useState(false); // mode diffusion : vue épurée pour le live (masque les contrôles opérateur)
+  const [whyDismissed, setWhyDismissed] = useState<string | null>(null); // id du setup fermé manuellement (croix) → se réaffiche au prochain
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get('broadcast'); // ?broadcast=1 → source OBS dédiée
     if (p != null) setBroadcast(p === '1' || p === 'true');
@@ -94,6 +95,9 @@ export function Cockpit() {
   // sinon le dernier signal réel (les entrées manuelles/BEAST ont des contributions vides → naturellement exclues).
   const hasConf = (s: any) => Array.isArray(s?.confluence?.contributions) && s.confluence.contributions.length > 0;
   const whySig = openSig && hasConf(openSig) ? openSig : (signals.find((s: any) => s.symbol === symbol && hasConf(s)) ?? null);
+  const whyTrade = whySig?.ticket != null ? tradeByTicket.get(String(whySig.ticket)) : null;
+  const whyClosed = !!whyTrade?.closed_at;
+  const whyPnl = whyTrade?.pnl != null ? Number(whyTrade.pnl) : null;
 
   // Stats desk (track record) depuis les trades clôturés. On exclut les micro-scalps BEAST (spam) repérés via les signaux.
   const rafaleTickets = new Set(
@@ -228,7 +232,7 @@ export function Cockpit() {
           <div style={{ flex: 1, minHeight: 0 }}>
             <Chart key={symbol} symbol={symbol} signals={signals.filter((s: any) => s.symbol === symbol)} activeTrade={activeTrade} />
           </div>
-          {whySig && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} live={!!openSig} />}
+          {whySig && String(whySig.id) !== whyDismissed && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} live={!!openSig} closed={whyClosed} pnl={whyPnl} onClose={() => setWhyDismissed(String(whySig.id))} />}
         </section>
         <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
           <Desk items={deskItems} />
@@ -252,14 +256,18 @@ export function Cockpit() {
             const reason = (tr?.reason as string | undefined) ?? '';
             const num = signals.length - i;
             const time = s.created_at ? new Date(s.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
-            const edge = open ? (long ? 'rgba(34,224,166,.6)' : 'rgba(255,107,138,.6)') : 'var(--border)';
+            const win = closed && (pnl ?? 0) >= 0;
+            const loss = closed && (pnl ?? 0) < 0;
+            const edge = open ? (long ? 'rgba(34,224,166,.6)' : 'rgba(255,107,138,.6)') : win ? 'rgba(34,224,166,.4)' : 'var(--border)';
             const rationale = Array.isArray(s.rationale) ? (s.rationale as string[]).join(' · ') : '';
             const k = s.ticket != null ? String(s.ticket) : '';
             return (
               <div key={s.id} className="cardIn" title={rationale} style={{
                 flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
                 padding: '5px 10px', borderRadius: 8, border: `1px solid ${edge}`,
-                background: open ? (long ? 'rgba(34,224,166,.07)' : 'rgba(255,107,138,.07)') : 'rgba(255,255,255,.012)',
+                background: open ? (long ? 'rgba(34,224,166,.07)' : 'rgba(255,107,138,.07)') : win ? 'rgba(34,224,166,.06)' : 'rgba(255,255,255,.012)',
+                boxShadow: win ? '0 0 10px rgba(34,224,166,.12)' : undefined,
+                opacity: loss ? 0.5 : 1, // pertes atténuées visuellement (toujours lisibles — relevé honnête), gains mis en avant
               }}>
                 <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>#{num}</span>
                 <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{time}</span>
@@ -278,8 +286,9 @@ export function Cockpit() {
                   </>
                 ) : closed ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {reason && <span style={{ fontSize: 8.5, padding: '1px 5px', borderRadius: 4, background: 'rgba(130,152,190,.15)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{reason}</span>}
-                    <span style={{ fontSize: 12, fontWeight: 700, color: (pnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>{(pnl ?? 0) >= 0 ? '✓+' : '✗'}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
+                    {reason && win && <span style={{ fontSize: 8.5, padding: '1px 5px', borderRadius: 4, background: 'rgba(130,152,190,.15)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{reason}</span>}
+                    {/* gain : vert franc + ✓ ; perte : rose sourd, discret (présent mais pas agressif) */}
+                    <span style={{ fontSize: win ? 12 : 11, fontWeight: win ? 700 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ +' : ''}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
                   </span>
                 ) : (
                   <span style={{ fontSize: 10, color: 'var(--dim)' }}>placed</span>
@@ -482,18 +491,29 @@ const whyOverlay: CSSProperties = {
 
 // Panneau « WHY THIS TRADE » : décompose la confluence du signal en barres pondérées par feature
 // (vert = haussier, rouge = baissier, longueur ∝ |poids|) + jauge de confiance. Data-driven, pas de texte parsé.
-function WhyPanel({ direction, conf, live }: { direction: string; conf: any; live: boolean }) {
+function WhyPanel({ direction, conf, live, closed = false, pnl = null, onClose }: { direction: string; conf: any; live: boolean; closed?: boolean; pnl?: number | null; onClose?: () => void }) {
   const contribs: any[] = Array.isArray(conf?.contributions) ? conf.contributions : [];
   if (!contribs.length) return null;
   const top = [...contribs].sort((a, b) => Math.abs(b.weighted) - Math.abs(a.weighted)).slice(0, 6);
   const maxW = Math.max(0.01, ...top.map((c) => Math.abs(Number(c.weighted) || 0)));
   const confidence = Math.max(0, Math.min(1, Number(conf?.confidence) || 0));
   const long = direction === 'long';
+  // Cohérence live : si le setup est CLÔTURÉ, on affiche le résultat et — en cas de perte — on DÉSATURE les barres
+  // (fini le "setup tout vert" à côté d'un −$). En gain, on garde le vert franc.
+  const lost = closed && (pnl ?? 0) < 0;
+  const won = closed && (pnl ?? 0) >= 0;
+  const label = live ? 'WHY THIS TRADE' : won ? '✓ SETUP GAGNANT' : lost ? 'SETUP CLÔTURÉ' : 'LAST SETUP';
+  const barCol = (bull: boolean) => (lost ? 'rgba(150,160,180,.5)' : bull ? 'var(--up)' : 'var(--down)');
   return (
-    <div className="mono" style={whyOverlay}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
-        <span style={{ fontSize: 9.5, letterSpacing: 1, color: 'var(--cyan)', opacity: 0.9 }}>{live ? 'WHY THIS TRADE' : 'LAST SETUP'}</span>
-        <span style={{ fontSize: 9.5, fontWeight: 700, color: long ? 'var(--up)' : 'var(--down)' }}>{long ? '▲ LONG' : '▼ SHORT'}</span>
+    <div className="mono" style={{ ...whyOverlay, opacity: lost ? 0.72 : 1 }}>
+      {onClose && (
+        <button onClick={onClose} title="fermer" aria-label="fermer" style={{ position: 'absolute', top: 3, right: 4, width: 18, height: 18, lineHeight: '16px', textAlign: 'center', padding: 0, borderRadius: 5, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', cursor: 'pointer', pointerEvents: 'auto', fontSize: 12 }}>×</button>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7, paddingRight: 16 }}>
+        <span style={{ fontSize: 9.5, letterSpacing: 1, color: lost ? 'var(--muted)' : 'var(--cyan)', opacity: 0.9 }}>{label}</span>
+        {closed
+          ? <span style={{ fontSize: 9.5, fontWeight: 700, color: won ? 'var(--up)' : 'rgba(210,150,165,.8)' }}>{won ? '+' : ''}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
+          : <span style={{ fontSize: 9.5, fontWeight: 700, color: long ? 'var(--up)' : 'var(--down)' }}>{long ? '▲ LONG' : '▼ SHORT'}</span>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <span style={{ fontSize: 9, color: 'var(--dim)' }}>conf</span>
@@ -512,9 +532,9 @@ function WhyPanel({ direction, conf, live }: { direction: string; conf: any; liv
               <span style={{ fontSize: 9.5, color: 'var(--muted)', width: 82, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{FEATURE_LABELS[c.key] ?? c.key}</span>
               <span style={{ position: 'relative', flex: 1, height: 5, background: 'rgba(130,152,190,.12)', borderRadius: 3 }}>
                 <span style={{ position: 'absolute', left: '50%', top: -1, bottom: -1, width: 1, background: 'rgba(130,152,190,.35)' }} />
-                <span style={{ position: 'absolute', top: 0, bottom: 0, borderRadius: 2, background: bull ? 'var(--up)' : 'var(--down)', left: bull ? '50%' : `${50 - frac * 50}%`, width: `${frac * 50}%` }} />
+                <span style={{ position: 'absolute', top: 0, bottom: 0, borderRadius: 2, background: barCol(bull), left: bull ? '50%' : `${50 - frac * 50}%`, width: `${frac * 50}%` }} />
               </span>
-              <span style={{ fontSize: 9, color: bull ? 'var(--up)' : 'var(--down)', width: 30, textAlign: 'right' }}>{bull ? '+' : ''}{w.toFixed(2)}</span>
+              <span style={{ fontSize: 9, color: barCol(bull), width: 30, textAlign: 'right' }}>{bull ? '+' : ''}{w.toFixed(2)}</span>
             </div>
           );
         })}
@@ -610,11 +630,11 @@ function TradeAlerts({ signals, trades, rafaleTickets }: { signals: any[]; trade
       seenClose.current.add(key);
       if (rafaleTickets.has(key)) continue;
       const pnl = t.pnl != null ? Number(t.pnl) : 0;
-      const good = pnl >= 0;
+      if (pnl < 0) continue; // toasts = highlight reel : on ne POP pas les pertes (le relevé honnête reste dans le bandeau + les stats). Les gains, eux, sont célébrés.
       const r = t.r != null && Number.isFinite(Number(t.r)) ? Number(t.r) : null;
       const reason = String(t.reason ?? '').toLowerCase();
-      const title = /tp|take/.test(reason) ? 'TAKE PROFIT' : /sl|stop/.test(reason) ? 'STOP LOSS' : 'CLOSED';
-      push({ accent: good ? 'var(--up)' : 'var(--down)', icon: good ? '✓' : '✕', title, sub: r != null ? `${r >= 0 ? '+' : ''}${r.toFixed(2)}R` : String(t.direction ?? '').toUpperCase(), big: `${pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}$` });
+      const title = /tp|take/.test(reason) ? '🎯 TAKE PROFIT' : '✓ WIN';
+      push({ accent: 'var(--up)', icon: '✓', title, sub: r != null ? `${r >= 0 ? '+' : ''}${r.toFixed(2)}R` : String(t.direction ?? '').toUpperCase(), big: `+${pnl.toFixed(0)}$` });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trades]);
