@@ -11,8 +11,9 @@ import { createClient } from '@supabase/supabase-js';
 //   TELEGRAM_WEBHOOK_SECRET — chaîne aléatoire ; Telegram la renvoie en header X-Telegram-Bot-Api-Secret-Token
 //   TELEGRAM_BOT_TOKEN      — sert à récupérer la photo de profil du demandeur (getUserProfilePhotos)
 //   SUPABASE_SERVICE_KEY    — insert + upload Storage côté serveur (la table est en lecture seule pour anon)
-// Enregistrement du webhook (navigateur, TOKEN = celui du bot @BotFather) :
-//   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://www.algoria.tech/api/telegram&secret_token=<SECRET>&allowed_updates=%5B%22chat_join_request%22%5D
+// Enregistrement du webhook (navigateur, TOKEN = celui du bot @BotFather) — chat_member est indispensable
+// pour capter les ACCEPTATIONS (Telegram ne l'envoie que s'il est explicitement listé) :
+//   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://www.algoria.tech/api/telegram&secret_token=<SECRET>&allowed_updates=%5B%22chat_join_request%22%2C%22chat_member%22%5D
 
 /**
  * Photo de profil du demandeur → copiée dans Supabase Storage (bucket public tg-avatars).
@@ -56,23 +57,51 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
 
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const service = process.env.SUPABASE_SERVICE_KEY;
+  const db = url && service ? createClient(url, service, { auth: { persistSession: false } }) : null;
+  if (!db) console.error('[telegram] SUPABASE_SERVICE_KEY / NEXT_PUBLIC_SUPABASE_URL manquants');
+
+  // DEMANDE d'adhésion → entre en waitlist (status 'waiting').
+  // Pas de DM ici : un autre bot du canal envoie déjà les instructions aux demandeurs (éviter le double message).
   const jr = update?.chat_join_request;
-  if (jr?.from) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const service = process.env.SUPABASE_SERVICE_KEY;
-    if (url && service) {
-      const db = createClient(url, service, { auth: { persistSession: false } });
-      const photoUrl = jr.from.id ? await fetchAvatar(db, jr.from.id) : null; // avant l'insert → le spotlight arrive avec la photo
-      const { error } = await db.from('telegram_joins' as never).insert({
-        username: jr.from.username ?? null,
-        first_name: jr.from.first_name ?? null,
-        photo_url: photoUrl,
-      } as never);
-      if (error) console.error('[telegram] insert failed:', error.message);
-    } else {
-      console.error('[telegram] SUPABASE_SERVICE_KEY / NEXT_PUBLIC_SUPABASE_URL manquants');
+  if (db && jr?.from) {
+    const photoUrl = jr.from.id ? await fetchAvatar(db, jr.from.id) : null; // avant l'insert → le spotlight arrive avec la photo
+    const { error } = await (db as any).from('telegram_joins').insert({
+      user_id: jr.from.id ?? null,
+      username: jr.from.username ?? null,
+      first_name: jr.from.first_name ?? null,
+      photo_url: photoUrl,
+      status: 'waiting',
+    });
+    if (error) console.error('[telegram] insert failed:', error.message);
+  }
+
+  // ACCEPTATION (le streamer approuve en live) : chat_member left/kicked → member.
+  // On passe la ligne en 'accepted' (spotlight doré "GOT IN") ; si la demande date d'avant le webhook
+  // (backlog), on l'insère directement en 'accepted' — les drops du backlog s'affichent donc aussi.
+  const cm = update?.chat_member;
+  const becameMember = cm?.new_chat_member?.status === 'member' && ['left', 'kicked'].includes(cm?.old_chat_member?.status);
+  if (db && becameMember && cm.new_chat_member.user) {
+    const u = cm.new_chat_member.user;
+    const acceptedAt = new Date().toISOString();
+    try {
+      const filter = u.username ? `user_id.eq.${u.id},username.eq.${u.username}` : `user_id.eq.${u.id}`;
+      const { data: rows } = await (db as any)
+        .from('telegram_joins').select('id').or(filter).eq('status', 'waiting')
+        .order('joined_at', { ascending: false }).limit(1);
+      if (rows?.length) {
+        await (db as any).from('telegram_joins').update({ status: 'accepted', accepted_at: acceptedAt, user_id: u.id }).eq('id', rows[0].id);
+      } else {
+        const photoUrl = await fetchAvatar(db, u.id);
+        await (db as any).from('telegram_joins').insert({
+          user_id: u.id, username: u.username ?? null, first_name: u.first_name ?? null,
+          photo_url: photoUrl, status: 'accepted', accepted_at: acceptedAt,
+        });
+      }
+    } catch (e) {
+      console.error('[telegram] accept handling failed:', (e as { message?: string })?.message ?? e);
     }
-    // Pas de DM ici : un autre bot du canal envoie déjà les instructions aux demandeurs (éviter le double message).
   }
 
   // Toujours 200 : Telegram retente sinon, et on ne veut pas de boucle de retry sur un update qu'on ignore.

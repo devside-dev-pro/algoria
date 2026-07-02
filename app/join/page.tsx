@@ -8,7 +8,9 @@ import { supabase } from '@/lib/supabase/client';
 // Une barre "ROAD TO N" (prochain palier réel) donne un objectif collectif. Aucune fausse adhésion en mode réel :
 // la mécanique "tu rejoins → tu te vois à l'écran" n'a de sens que si c'est vrai.
 // URL : ?demo=1 (fausses adhésions pour caler la scène) · ?bg=transparent (fond transparent pour composer dans OBS)
-type Join = { id: number | string; username: string | null; first_name: string | null; joined_at?: string; photo_url?: string | null };
+type Join = { id: number | string; username: string | null; first_name: string | null; joined_at?: string; photo_url?: string | null; status?: string; accepted_at?: string | null };
+const isIn = (j: Join | null) => j?.status === 'accepted';
+const eventTime = (j: Join) => (isIn(j) ? j.accepted_at ?? j.joined_at : j.joined_at);
 
 const GRADS: [string, string][] = [
   ['#2be3f5', '#2e8bf0'], ['#f5c24a', '#ff8a3c'], ['#22e0a6', '#2be3f5'], ['#b78bff', '#5d5dff'],
@@ -58,35 +60,48 @@ export default function JoinWidget() {
     if (q.get('demo') === '1') {
       let i = 6, c = 1284; // i démarre après les seeds (slice 0-6) → pas de doublon immédiat
       setCount(c);
-      setList(DEMO_NAMES.slice(0, 6).map((n, k) => ({ id: 'seed' + k, username: n, first_name: null, joined_at: new Date(Date.now() - (k + 1) * 47_000).toISOString() })));
+      setList(DEMO_NAMES.slice(0, 6).map((n, k) => ({ id: 'seed' + k, username: n, first_name: null, joined_at: new Date(Date.now() - (k + 1) * 47_000).toISOString(), status: 'waiting' })));
       const iv = setInterval(() => {
-        const n = DEMO_NAMES[i++ % DEMO_NAMES.length];
-        setList((p) => [{ id: 'd' + Date.now(), username: n, first_name: null, joined_at: new Date().toISOString() }, ...p].slice(0, 8));
-        setCount((v) => (v ?? c) + 1);
+        const n = DEMO_NAMES[i % DEMO_NAMES.length];
+        const accepted = i % 4 === 3; // 1 événement sur 4 = acceptation → montre le spotlight doré "GOT IN"
+        i++;
+        const nowIso = new Date().toISOString();
+        setList((p) => [{ id: 'd' + Date.now(), username: n, first_name: null, joined_at: nowIso, status: accepted ? 'accepted' : 'waiting', accepted_at: accepted ? nowIso : null }, ...p].slice(0, 8));
+        setCount((v) => (v ?? c) + (accepted ? -1 : 1));
       }, 4200);
       return () => { clearInterval(iv); clearInterval(tick); };
     }
 
     let alive = true;
-    // table hors types générés → accès non typé (cast)
-    (supabase as any).from('telegram_joins').select('*', { count: 'exact' }).order('joined_at', { ascending: false }).limit(8).then(({ data, count }: { data: Join[] | null; count: number | null }) => {
-      if (!alive) return;
-      if (data) setList(data);
-      if (typeof count === 'number') setCount(count);
+    // table hors types générés → accès non typé (cast). Compteur = personnes EN ATTENTE uniquement.
+    (supabase as any).from('telegram_joins').select('*').order('joined_at', { ascending: false }).limit(8).then(({ data }: { data: Join[] | null }) => {
+      if (alive && data) setList(data);
+    });
+    (supabase as any).from('telegram_joins').select('id', { count: 'exact', head: true }).eq('status', 'waiting').then(({ count }: { count: number | null }) => {
+      if (alive && typeof count === 'number') setCount(count);
     });
     const ch = supabase
       .channel('rt-joins')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'telegram_joins' }, ({ new: j }) => {
-        setList((p) => [j as unknown as Join, ...p].slice(0, 8));
-        setCount((v) => (v ?? 0) + 1);
+        const row = j as unknown as Join;
+        setList((p) => [row, ...p].slice(0, 8));
+        if (!isIn(row)) setCount((v) => (v ?? 0) + 1); // une acceptation backlog n'ajoute personne à la file
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'telegram_joins' }, ({ new: j }) => {
+        const row = j as unknown as Join;
+        if (!isIn(row)) return;
+        // acceptation en direct → l'événement passe en tête (spotlight doré) et libère une place dans la file
+        setList((p) => [row, ...p.filter((x) => String(x.id) !== String(row.id))].slice(0, 8));
+        setCount((v) => Math.max(0, (v ?? 1) - 1));
       })
       .subscribe();
     return () => { alive = false; supabase.removeChannel(ch); clearInterval(tick); };
   }, []);
 
-  const star = list[0] ?? null; // la dernière adhésion = spotlight
+  const star = list[0] ?? null; // le dernier ÉVÉNEMENT (demande ou acceptation) = spotlight
+  const starIn = isIn(star); // acceptation → traitement DORÉ ("GOT IN")
   const rest = list.slice(1, 6);
-  const [g1, g2] = star ? gradOf(nameOf(star)) : ['#2be3f5', '#2e8bf0'];
+  const [g1, g2] = starIn ? ['#f5c24a', '#ff8a3c'] : star ? gradOf(nameOf(star)) : ['#2be3f5', '#2e8bf0'];
   const milestone = count != null ? nextMilestone(count) : null;
   const progress = count != null && milestone ? Math.min(1, count / milestone) : 0;
 
@@ -140,12 +155,12 @@ export default function JoinWidget() {
               {[...Array(12)].map((_, i) => (
                 <span key={i} aria-hidden style={{ position: 'absolute', left: '50%', top: '38%', width: 6, height: i % 3 ? 6 : 9, borderRadius: i % 2 ? '50%' : 2, background: i % 2 ? g1 : g2, ['--dx' as string]: `${Math.cos((i / 12) * 6.283) * (60 + (i % 4) * 26)}px`, ['--dy' as string]: `${Math.sin((i / 12) * 6.283) * (34 + (i % 3) * 22) - 26}px`, animation: `confetti ${0.9 + (i % 4) * 0.18}s ease-out forwards` }} />
               ))}
-              <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 2.4, color: '#9fc7e6', marginBottom: 7 }}>🎟 JOINED THE WAITLIST</div>
+              <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 2.4, color: starIn ? '#f5c24a' : '#9fc7e6', marginBottom: 7 }}>{starIn ? '🔓 ACCEPTED — GOT IN' : '🎟 JOINED THE WAITLIST'}</div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, maxWidth: '100%' }}>
                 <Avatar j={star} size={46} glow />
                 <span style={{ fontSize: 'clamp(24px, 5.4vw, 34px)', fontWeight: 800, letterSpacing: .2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: `linear-gradient(90deg,${g1},${g2})`, WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent', filter: `drop-shadow(0 0 14px ${g1}44)` }}>{nameOf(star)}</span>
               </div>
-              <div style={{ fontSize: 12, color: '#b9d4ec', marginTop: 7 }}>in line for approval · <b style={{ color: 'var(--up)' }}>{ago(star.joined_at, now) || 'now'}</b></div>
+              <div style={{ fontSize: 12, color: '#b9d4ec', marginTop: 7 }}>{starIn ? 'is IN the channel 🎉' : 'in line for approval'} · <b style={{ color: starIn ? '#f5c24a' : 'var(--up)' }}>{ago(eventTime(star), now) || 'now'}</b></div>
             </div>
           ) : (
             <div style={{ borderRadius: 16, padding: '22px 16px', textAlign: 'center', border: '1.5px dashed rgba(43,227,245,.4)', background: 'rgba(43,227,245,.04)' }}>
@@ -162,8 +177,10 @@ export default function JoinWidget() {
                   <div key={String(j.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(130,152,190,.12)', opacity: Math.max(.45, 1 - i * .14), animation: 'rowIn .3s ease' }}>
                     <Avatar j={j} size={26} />
                     <span style={{ fontSize: 14.5, fontWeight: 600, color: '#dbe9f8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nameOf(j)}</span>
-                    <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: '#7d95b5', flex: 'none' }}>{ago(j.joined_at, now)}</span>
-                    <span style={{ fontSize: 11, flex: 'none' }} title="waiting for approval">⏳</span>
+                    <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: '#7d95b5', flex: 'none' }}>{ago(eventTime(j), now)}</span>
+                    {isIn(j)
+                      ? <span style={{ fontSize: 10, fontWeight: 800, color: '#f5c24a', flex: 'none' }}>IN ✓</span>
+                      : <span style={{ fontSize: 11, flex: 'none' }} title="waiting for approval">⏳</span>}
                   </div>
                 );
               })}
