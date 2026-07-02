@@ -34,6 +34,8 @@ const NAS100_SCALP: EngineConfig = {
   maxStopAtr: 3,
   beTrigger: 0.15,
   fixedLot: 10, // 10 lots fixes par trade auto (choix produit — le risque $ varie avec le stop)
+  contractSize: 1, // CFD indice : 1 pt = 1$/lot. SANS cette surcharge, l'héritage or (100) gonflait l'exposition 100× → veto risk sur TOUS les trades NAS.
+  priceStep: 0.1, // tick de prix indice
   threshold: { soft: 0.28, normal: 0.28, turbo: 0.28, scalp: 0.28 },
   risk: { ...SCALP_CONFIG.risk, maxSpread: 5 },
 };
