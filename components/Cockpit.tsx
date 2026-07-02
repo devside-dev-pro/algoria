@@ -35,6 +35,7 @@ export function Cockpit() {
   const [slIn, setSlIn] = useState('');
   const [tpIn, setTpIn] = useState('');
   const [broadcast, setBroadcast] = useState(false); // mode diffusion : vue épurée pour le live (masque les contrôles opérateur)
+  const [whyDismissed, setWhyDismissed] = useState<string | null>(null); // id du setup fermé manuellement (croix) → se réaffiche au prochain
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get('broadcast'); // ?broadcast=1 → source OBS dédiée
     if (p != null) setBroadcast(p === '1' || p === 'true');
@@ -231,7 +232,7 @@ export function Cockpit() {
           <div style={{ flex: 1, minHeight: 0 }}>
             <Chart key={symbol} symbol={symbol} signals={signals.filter((s: any) => s.symbol === symbol)} activeTrade={activeTrade} />
           </div>
-          {whySig && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} live={!!openSig} closed={whyClosed} pnl={whyPnl} />}
+          {whySig && String(whySig.id) !== whyDismissed && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} live={!!openSig} closed={whyClosed} pnl={whyPnl} onClose={() => setWhyDismissed(String(whySig.id))} />}
         </section>
         <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
           <Desk items={deskItems} />
@@ -490,7 +491,7 @@ const whyOverlay: CSSProperties = {
 
 // Panneau « WHY THIS TRADE » : décompose la confluence du signal en barres pondérées par feature
 // (vert = haussier, rouge = baissier, longueur ∝ |poids|) + jauge de confiance. Data-driven, pas de texte parsé.
-function WhyPanel({ direction, conf, live, closed = false, pnl = null }: { direction: string; conf: any; live: boolean; closed?: boolean; pnl?: number | null }) {
+function WhyPanel({ direction, conf, live, closed = false, pnl = null, onClose }: { direction: string; conf: any; live: boolean; closed?: boolean; pnl?: number | null; onClose?: () => void }) {
   const contribs: any[] = Array.isArray(conf?.contributions) ? conf.contributions : [];
   if (!contribs.length) return null;
   const top = [...contribs].sort((a, b) => Math.abs(b.weighted) - Math.abs(a.weighted)).slice(0, 6);
@@ -505,7 +506,10 @@ function WhyPanel({ direction, conf, live, closed = false, pnl = null }: { direc
   const barCol = (bull: boolean) => (lost ? 'rgba(150,160,180,.5)' : bull ? 'var(--up)' : 'var(--down)');
   return (
     <div className="mono" style={{ ...whyOverlay, opacity: lost ? 0.72 : 1 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+      {onClose && (
+        <button onClick={onClose} title="fermer" aria-label="fermer" style={{ position: 'absolute', top: 3, right: 4, width: 18, height: 18, lineHeight: '16px', textAlign: 'center', padding: 0, borderRadius: 5, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', cursor: 'pointer', pointerEvents: 'auto', fontSize: 12 }}>×</button>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7, paddingRight: 16 }}>
         <span style={{ fontSize: 9.5, letterSpacing: 1, color: lost ? 'var(--muted)' : 'var(--cyan)', opacity: 0.9 }}>{label}</span>
         {closed
           ? <span style={{ fontSize: 9.5, fontWeight: 700, color: won ? 'var(--up)' : 'rgba(210,150,165,.8)' }}>{won ? '+' : ''}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
