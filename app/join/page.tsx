@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 // Une barre "ROAD TO N" (prochain palier réel) donne un objectif collectif. Aucune fausse adhésion en mode réel :
 // la mécanique "tu rejoins → tu te vois à l'écran" n'a de sens que si c'est vrai.
 // URL : ?demo=1 (fausses adhésions pour caler la scène) · ?bg=transparent (fond transparent pour composer dans OBS)
-type Join = { id: number | string; username: string | null; first_name: string | null; joined_at?: string };
+type Join = { id: number | string; username: string | null; first_name: string | null; joined_at?: string; photo_url?: string | null };
 
 const GRADS: [string, string][] = [
   ['#2be3f5', '#2e8bf0'], ['#f5c24a', '#ff8a3c'], ['#22e0a6', '#2be3f5'], ['#b78bff', '#5d5dff'],
@@ -30,6 +30,19 @@ const ago = (iso: string | undefined, now: number) => {
 const nextMilestone = (n: number) => { const step = n < 500 ? 100 : n < 2000 ? 250 : n < 10000 ? 500 : 1000; return Math.max(step, Math.ceil((n + 1) / step) * step); };
 
 const DEMO_NAMES = ['lucas_tr', 'sofia.k', 'mehdi92', 'emma_fx', 'yanis', 'clara.dv', 'ryan_b', 'nina_trades', 'samuel', 'aya.m', 'tomfx', 'lea_p', 'noah', 'ines', 'gabriel', 'driss'];
+
+// Avatar : vraie photo Telegram (copiée dans Storage par le webhook) si dispo, sinon initiale sur dégradé unique au pseudo.
+function Avatar({ j, size, glow }: { j: Join; size: number; glow?: boolean }) {
+  const [a, b] = gradOf(nameOf(j));
+  const base = { width: size, height: size, borderRadius: '50%', flex: 'none' as const, boxShadow: glow ? `0 0 26px ${a}66` : undefined };
+  if (j.photo_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={j.photo_url} alt="" style={{ ...base, objectFit: 'cover', border: `2px solid ${a}` }} />;
+  }
+  return (
+    <span style={{ ...base, background: `linear-gradient(135deg,${a},${b})`, color: '#06121f', fontWeight: 900, fontSize: size * 0.46, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialOf(j)}</span>
+  );
+}
 
 export default function JoinWidget() {
   const [list, setList] = useState<Join[]>([]);
@@ -129,7 +142,7 @@ export default function JoinWidget() {
               ))}
               <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 2.4, color: '#9fc7e6', marginBottom: 7 }}>🎟 JOINED THE WAITLIST</div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, maxWidth: '100%' }}>
-                <span style={{ width: 46, height: 46, borderRadius: '50%', flex: 'none', background: `linear-gradient(135deg,${g1},${g2})`, color: '#06121f', fontWeight: 900, fontSize: 21, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 26px ${g1}66` }}>{initialOf(star)}</span>
+                <Avatar j={star} size={46} glow />
                 <span style={{ fontSize: 'clamp(24px, 5.4vw, 34px)', fontWeight: 800, letterSpacing: .2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: `linear-gradient(90deg,${g1},${g2})`, WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent', filter: `drop-shadow(0 0 14px ${g1}44)` }}>{nameOf(star)}</span>
               </div>
               <div style={{ fontSize: 12, color: '#b9d4ec', marginTop: 7 }}>in line for approval · <b style={{ color: 'var(--up)' }}>{ago(star.joined_at, now) || 'now'}</b></div>
@@ -145,10 +158,9 @@ export default function JoinWidget() {
           {rest.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {rest.map((j, i) => {
-                const [a, b] = gradOf(nameOf(j));
                 return (
                   <div key={String(j.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(130,152,190,.12)', opacity: Math.max(.45, 1 - i * .14), animation: 'rowIn .3s ease' }}>
-                    <span style={{ width: 26, height: 26, borderRadius: '50%', flex: 'none', background: `linear-gradient(135deg,${a},${b})`, color: '#06121f', fontWeight: 800, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialOf(j)}</span>
+                    <Avatar j={j} size={26} />
                     <span style={{ fontSize: 14.5, fontWeight: 600, color: '#dbe9f8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nameOf(j)}</span>
                     <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: '#7d95b5', flex: 'none' }}>{ago(j.joined_at, now)}</span>
                     <span style={{ fontSize: 11, flex: 'none' }} title="waiting for approval">⏳</span>
