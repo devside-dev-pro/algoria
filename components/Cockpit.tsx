@@ -319,8 +319,8 @@ export function Cockpit() {
         {/* règle broadcast 70/30 : un Day P&L rouge ou un win rate < 75% ne s'affichent pas (tuile neutre "—") */}
         <Metric label="Day P&L" value={dayPnl == null || dayPnl < 0 ? '—' : '+' + dayPnl.toFixed(0)} color={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--dim)'} accent={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--border)'} />
         <Metric label={`Win rate · ${stats.n}`} value={stats.ready && stats.winPct >= 0.75 ? (stats.winPct * 100).toFixed(0) + '%' : '—'} color={stats.ready && stats.winPct >= 0.75 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
-        <Metric label="Profit factor" value={stats.ready ? (stats.pf === Infinity ? '∞' : stats.pf.toFixed(2)) : '—'} color={stats.ready ? (stats.pf >= 1 ? 'var(--up)' : 'var(--down)') : 'var(--dim)'} accent="var(--cyan)" />
-        <Metric label="Avg R" value={stats.ready && stats.avgR != null ? (stats.avgR >= 0 ? '+' : '') + stats.avgR.toFixed(2) : '—'} color={stats.ready && (stats.avgR ?? 0) >= 0 ? 'var(--up)' : 'var(--down)'} accent="var(--gold)" />
+        <Metric label="Profit factor" value={stats.ready && stats.pf >= 1 ? (stats.pf === Infinity ? '∞' : stats.pf.toFixed(2)) : '—'} color={stats.ready && stats.pf >= 1 ? 'var(--up)' : 'var(--dim)'} accent="var(--cyan)" />
+        <Metric label="Avg R" value={stats.ready && (stats.avgR ?? -1) >= 0 ? '+' + (stats.avgR as number).toFixed(2) : '—'} color={stats.ready && (stats.avgR ?? -1) >= 0 ? 'var(--up)' : 'var(--dim)'} accent="var(--gold)" />
       </section>
     </main>
   );
@@ -336,9 +336,11 @@ function Metric({ label, value, color, accent, spark }: { label: string; value: 
   );
 }
 
-// Sparkline d'équity du jour : ligne + aire, en fond de carte. Couleur = tendance (vert monte / rouge descend).
+// Sparkline d'équity du jour : ligne + aire, en fond de carte. Règle broadcast 70/30 : une courbe
+// DESCENDANTE ne se dessine pas (pas de rouge ni de pente négative à l'écran) — la tuile reste neutre.
 function Sparkline({ data }: { data: number[] }) {
   if (data.length < 2) return null;
+  if (data[data.length - 1] < data[0]) return null;
   const w = 100;
   const h = 32;
   const min = Math.min(...data);
