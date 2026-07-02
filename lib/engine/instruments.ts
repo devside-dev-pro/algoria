@@ -16,9 +16,10 @@ export interface InstrumentSpec {
 // (validé sur l'or : ~2× la fréquence, edge conservé). Le spread réel est injecté par la couche data.
 const SCALP_CTX: Partial<ContextOptions> = { tradeAsia: true, volMinPct: 0.05, volMaxPct: 0.995 };
 
-// OR — config scalp actuelle (backtest M5 réel : ~17 trades/j, PF 1.21, robuste sur 2 moitiés).
-// fixedLot 1 : chaque trade auto part à 1 lot fixe (choix produit — lisible en live ; le risque $ varie avec le stop).
-const XAUUSD_SCALP: EngineConfig = { ...SCALP_CONFIG, fixedLot: 1 };
+// OR — config scalp. fixedLot 1 (le copieur redimensionne par compte). emaGate 'align' : on ne prend un trade
+// QUE si la tendance EMA soutient le sens → ne chasse plus les poussées en EMA plate (la cause des gros perdants).
+// Backtest 30j : PF 1.32→1.51, maxDD 9.3%→6.0%, profit ~identique, robuste sur 2 moitiés.
+const XAUUSD_SCALP: EngineConfig = { ...SCALP_CONFIG, fixedLot: 1, emaGate: 'align' };
 
 // NAS100 — l'indice laisse courir les gagnants → R:R plus élevé (0.8 vs 0.4), SL serré (0.6×ATR), seuil 0.28.
 // maxSpread relevé (spread indice en POINTS ; 0.95 est petit vs un range M5 ~40 pts).

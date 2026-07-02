@@ -29,6 +29,7 @@ export interface EngineConfig {
   minStopAtr: number;
   maxStopAtr: number;
   minRR: number;
+  emaGate?: 'off' | 'align' | 'notOpposed'; // filtre d'entrée sur la tendance EMA : 'align' = EMA doit soutenir le sens ; 'notOpposed' = refuse seulement si l'EMA s'oppose (plat OK). Défaut off.
   beTrigger?: number; // breakeven : déplace le SL à ~entrée quand le profit ≥ beTrigger × riskDist (gestion post-entrée, appliquée par le runner & le backtest)
   risk: RiskLimits;
 }
