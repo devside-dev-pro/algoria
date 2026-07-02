@@ -240,7 +240,8 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD' }: { sign
     const long = a.direction === 'long';
     const lines = tradeLinesRef.current;
     if (Number.isFinite(a.entry)) lines.push(series.createPriceLine({ price: a.entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'LONG' : 'SHORT'} ${a.entry.toFixed(1)}` }));
-    if (a.sl != null && Number.isFinite(a.sl)) lines.push(series.createPriceLine({ price: a.sl, color: '#ff6b8a', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `SL ${a.sl.toFixed(1)}` }));
+    // SL en rose SOURD + pointillés (moins agressif à l'écran en live) ; TP en vert franc (positif).
+    if (a.sl != null && Number.isFinite(a.sl)) lines.push(series.createPriceLine({ price: a.sl, color: 'rgba(196,132,150,.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `SL ${a.sl.toFixed(1)}` }));
     if (a.tp != null && Number.isFinite(a.tp)) lines.push(series.createPriceLine({ price: a.tp, color: '#1fd8b0', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `TP ${a.tp.toFixed(1)}` }));
   }
 

@@ -56,11 +56,11 @@ class ZoneRenderer {
           prev = tp;
         });
 
-        // Zone SL (rouge) : entrée → SL.
+        // Zone SL (rouge) : entrée → SL. Alpha volontairement FAIBLE (0.06) → discrète en live, pas de "mur rouge".
         if (trade.sl != null && Number.isFinite(trade.sl)) {
           const ySl = series.priceToCoordinate(trade.sl);
           if (ySl != null) {
-            ctx.fillStyle = withAlpha(th.down, 0.15);
+            ctx.fillStyle = withAlpha(th.down, 0.06);
             ctx.fillRect(x0, Math.min(yEntry, ySl), bw, Math.abs(ySl - yEntry));
           }
         }
