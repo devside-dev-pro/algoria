@@ -84,6 +84,8 @@ export const SCALP_CONFIG: EngineConfig = {
     ...DEFAULT_CONFIG.risk,
     maxTradesPerDay: 200, // scalp : on ne veut pas brider la fréquence
     minSecondsBetweenTrades: 0, // une bougie M5 = au plus un signal, donc pas de bridage temporel
-    maxOpenPositions: 2,
+    // 1 position PAR SYMBOLE à la fois (readState compte par symbole) : empêche l'empilement de positions
+    // corrélées (2 longs au sommet stoppés ensemble). Backtest 30j : PF 1.26→1.32, net +$15.4k→+$16.3k, même DD.
+    maxOpenPositions: 1,
   },
 };
