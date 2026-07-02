@@ -30,17 +30,23 @@ const pf = (v: number) => (v === Infinity ? '∞' : v.toFixed(2));
 const r2 = (x: number) => x.toFixed(2);
 
 // base scalp + lot fixe 1 ; on fait varier R:R, SL, breakeven, trailing
-function cfg(o: { rr: number; sl: number; be: number; maxOpen?: number; emaGate?: 'off' | 'align' | 'notOpposed' }): EngineConfig {
-  return { ...SCALP_CONFIG, fixedLot: 1, priceStep: spec.priceStep, targetRR: o.rr, slAtrMult: o.sl, minRR: Math.min(0.2, o.rr * 0.8), minStopAtr: 0.3, maxStopAtr: Math.max(3, o.sl + 2), beTrigger: o.be, emaGate: o.emaGate ?? 'off', risk: { ...SCALP_CONFIG.risk, maxSpread: spec.maxSpread, maxOpenPositions: o.maxOpen ?? 1 } };
+function cfg(o: { rr: number; sl: number; be: number; maxOpen?: number; emaGate?: 'off' | 'align' | 'notOpposed'; thr?: number }): EngineConfig {
+  const thr = o.thr ?? SCALP_CONFIG.threshold.scalp;
+  return { ...SCALP_CONFIG, fixedLot: 1, priceStep: spec.priceStep, targetRR: o.rr, slAtrMult: o.sl, minRR: Math.min(0.2, o.rr * 0.8), minStopAtr: 0.3, maxStopAtr: Math.max(3, o.sl + 2), beTrigger: o.be, emaGate: o.emaGate ?? 'off', threshold: { soft: thr, normal: thr, turbo: thr, scalp: thr }, risk: { ...SCALP_CONFIG.risk, maxSpread: spec.maxSpread, maxOpenPositions: o.maxOpen ?? 1 } };
 }
 
-interface Variant { name: string; rr: number; sl: number; be: number; maxOpen?: number; emaGate?: 'off' | 'align' | 'notOpposed'; tm?: { trailActivate?: number; trailDist?: number; ignoreTp?: boolean } }
-// Paramètres de base = config live du symbole (or : RR0.4/sl1.2 ; NAS : RR0.8/sl0.6). On teste l'effet du gate EMA.
+interface Variant { name: string; rr: number; sl: number; be: number; maxOpen?: number; emaGate?: 'off' | 'align' | 'notOpposed'; thr?: number; tm?: { trailActivate?: number; trailDist?: number; ignoreTp?: boolean } }
+// Paramètres de base = config live du symbole (or : RR0.4/sl1.2 ; NAS : RR0.8/sl0.6). Leviers de FRÉQUENCE : gate EMA + seuil.
 const BASE = SYMBOL === 'NAS100' ? { rr: 0.8, sl: 0.6 } : { rr: 0.4, sl: 1.2 };
 const VARIANTS: Variant[] = [
-  { name: `BASELINE ${SYMBOL} 1pos (live)`, rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1 },
-  { name: 'EMA gate notOpposed', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, emaGate: 'notOpposed' },
-  { name: 'EMA gate align (strict)', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, emaGate: 'align' },
+  { name: 'LIVE gate align thr.25', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, emaGate: 'align' },
+  { name: 'gate notOpposed thr.25', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, emaGate: 'notOpposed' },
+  { name: 'gate OFF thr.25', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1 },
+  { name: 'gate align thr.22', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, emaGate: 'align', thr: 0.22 },
+  { name: 'gate align thr.20', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, emaGate: 'align', thr: 0.20 },
+  { name: 'gate align thr.18', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, emaGate: 'align', thr: 0.18 },
+  { name: 'gate notOpp thr.22', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, emaGate: 'notOpposed', thr: 0.22 },
+  { name: 'gate OFF thr.22', rr: BASE.rr, sl: BASE.sl, be: 0.15, maxOpen: 1, thr: 0.22 },
 ];
 
 const mid = Math.floor(bars.length / 2);
