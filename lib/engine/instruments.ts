@@ -16,10 +16,12 @@ export interface InstrumentSpec {
 // (validé sur l'or : ~2× la fréquence, edge conservé). Le spread réel est injecté par la couche data.
 const SCALP_CTX: Partial<ContextOptions> = { tradeAsia: true, volMinPct: 0.05, volMaxPct: 0.995 };
 
-// OR — config scalp. fixedLot 1 (le copieur redimensionne par compte). emaGate 'align' : on ne prend un trade
-// QUE si la tendance EMA soutient le sens → ne chasse plus les poussées en EMA plate (la cause des gros perdants).
-// Backtest 30j : PF 1.32→1.51, maxDD 9.3%→6.0%, profit ~identique, robuste sur 2 moitiés.
-const XAUUSD_SCALP: EngineConfig = { ...SCALP_CONFIG, fixedLot: 1, emaGate: 'align' };
+// OR — config scalp. fixedLot 1 (le copieur redimensionne par compte). emaGate 'notOpposed' : on refuse
+// UNIQUEMENT les trades contre-tendance (la cause des gros perdants — acheter un top contre l'EMA), mais on
+// autorise les setups en EMA plate → ~11 trades/j au lieu de 7 pour le MÊME net (~$13.4k/30j), robuste.
+// Backtest 30.5j : align 7/j PF 1.43 DD 7.4% · notOpposed 10.9/j PF 1.27 DD 10.3% · off 11.5/j PF 1.24.
+// Choix produit : fréquence pour le live, au prix d'un DD un peu plus haut — l'edge reste solide.
+const XAUUSD_SCALP: EngineConfig = { ...SCALP_CONFIG, fixedLot: 1, emaGate: 'notOpposed' };
 
 // NAS100 — l'indice laisse courir les gagnants → R:R plus élevé (0.8 vs 0.4), SL serré (0.6×ATR), seuil 0.28.
 // maxSpread relevé (spread indice en POINTS ; 0.95 est petit vs un range M5 ~40 pts).
