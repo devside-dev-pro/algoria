@@ -118,18 +118,13 @@ export function Cockpit() {
     const n = closedT.length;
     if (n < 5) return { n, ready: false as const };
     const wins = closedT.filter((t: any) => Number(t.pnl) > 0).length;
-    const gp = closedT.reduce((s: number, t: any) => s + Math.max(0, Number(t.pnl)), 0);
-    const gl = closedT.reduce((s: number, t: any) => s + Math.min(0, Number(t.pnl)), 0); // ≤ 0
-    const rs = closedT.map((t: any) => Number(t.r)).filter((x: number) => Number.isFinite(x));
-    return {
-      n,
-      ready: true as const,
-      winPct: wins / n,
-      pf: gl < 0 ? gp / Math.abs(gl) : gp > 0 ? Infinity : 0,
-      avgR: rs.length ? rs.reduce((a: number, b: number) => a + b, 0) / rs.length : null,
-      exp: closedT.reduce((s: number, t: any) => s + Number(t.pnl), 0) / n,
-    };
+    return { n, ready: true as const, winPct: wins / n };
   })();
+  // Stats STREAM du jour : compteur de wins + meilleur trade (PF/Avg R retirés — structurellement ternes avec
+  // une stratégie petits-gains/petit-R:R : PF ~1.3 et avg R ~+0.05 ne parlent pas à l'audience).
+  const closedToday = closedT.filter((t: any) => Date.parse(t.closed_at) >= dayStartMs);
+  const winsToday = closedToday.filter((t: any) => Number(t.pnl) > 0).length;
+  const bestToday = closedToday.reduce((m: number, t: any) => Math.max(m, Number(t.pnl) || 0), 0);
 
   function fire(kind: string, fn: () => void) {
     setLastFire(kind);
@@ -321,8 +316,8 @@ export function Cockpit() {
         {/* règle broadcast 70/30 : un Day P&L rouge ou un win rate < 75% ne s'affichent pas (tuile neutre "—") */}
         <Metric label="Day P&L" value={dayPnl == null || dayPnl < 0 ? '—' : '+' + dayPnl.toFixed(0)} color={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--dim)'} accent={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--border)'} />
         <Metric label={`Win rate · ${stats.n}`} value={stats.ready && stats.winPct >= 0.75 ? (stats.winPct * 100).toFixed(0) + '%' : '—'} color={stats.ready && stats.winPct >= 0.75 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
-        <Metric label="Profit factor" value={stats.ready && stats.pf >= 1 ? (stats.pf === Infinity ? '∞' : stats.pf.toFixed(2)) : '—'} color={stats.ready && stats.pf >= 1 ? 'var(--up)' : 'var(--dim)'} accent="var(--cyan)" />
-        <Metric label="Avg R" value={stats.ready && (stats.avgR ?? -1) >= 0 ? '+' + (stats.avgR as number).toFixed(2) : '—'} color={stats.ready && (stats.avgR ?? -1) >= 0 ? 'var(--up)' : 'var(--dim)'} accent="var(--gold)" />
+        <Metric label="Wins today" value={winsToday > 0 ? '✓ ' + winsToday : '—'} color={winsToday > 0 ? 'var(--up)' : 'var(--dim)'} accent="var(--cyan)" />
+        <Metric label="Best trade" value={bestToday > 0 ? '+' + bestToday.toFixed(0) + '$' : '—'} color={bestToday > 0 ? 'var(--gold)' : 'var(--dim)'} accent="var(--gold)" />
       </section>
     </main>
   );
