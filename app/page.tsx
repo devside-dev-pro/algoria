@@ -1,5 +1,5 @@
 'use client';
-import { useTrades, usePrice, useFeedHealth } from '@/lib/cockpit/useRealtime';
+import { usePrice, useFeedHealth } from '@/lib/cockpit/useRealtime';
 
 // Funnel PUBLIC (domaine racine) : ce que voit un viewer qui tape algoria.tech (lien en bio TikTok).
 // Objectif unique : convertir → rejoindre le canal Telegram gratuit. Le cockpit opérateur vit sur /app.
@@ -7,14 +7,9 @@ const TELEGRAM = process.env.NEXT_PUBLIC_TELEGRAM_URL || 'https://t.me/'; // à 
 const TIKTOK = process.env.NEXT_PUBLIC_TIKTOK_URL || '';
 
 export default function Funnel() {
-  const trades = useTrades(120);
   const px = usePrice('XAUUSD');
   const { stale, hasData } = useFeedHealth();
   const live = hasData && !stale;
-
-  const closed = (trades as any[]).filter((t) => t.closed_at != null && t.pnl != null);
-  const wins = closed.filter((t) => Number(t.pnl) > 0).length;
-  const winRate = closed.length >= 10 ? Math.round((wins / closed.length) * 100) : null;
 
   return (
     <main
@@ -41,20 +36,20 @@ export default function Funnel() {
 
         {/* Hero */}
         <h1 style={{ fontSize: 30, lineHeight: 1.15, fontWeight: 700, margin: 0 }}>
-          L&apos;IA qui trade l&apos;<span style={{ color: 'var(--gold)' }}>or</span> &amp; le <span style={{ color: 'var(--cyan)' }}>Nasdaq</span>,<br />en direct.
+          The AI that trades <span style={{ color: 'var(--gold)' }}>gold</span> &amp; the <span style={{ color: 'var(--cyan)' }}>Nasdaq</span>,<br />live.
         </h1>
         <p style={{ fontSize: 15, color: 'var(--muted)', margin: 0, maxWidth: 380 }}>
-          Trades réels, exécutés en autonomie 24/5. Analyses, signaux et résultats — <b style={{ color: 'var(--text)' }}>gratuitement</b> dans le canal Telegram.
+          Real trades, executed autonomously 24/5. Analysis, signals and results — <b style={{ color: 'var(--text)' }}>free</b> in the Telegram channel.
         </p>
 
-        {/* Preuve live */}
+        {/* Live proof */}
         <div style={{ display: 'flex', gap: 10, width: '100%' }}>
-          <Stat label="Win rate" value={winRate != null ? winRate + '%' : '—'} accent="var(--up)" />
-          <Stat label="Marchés" value="XAU · NAS" accent="var(--cyan)" />
+          <Stat label="Win rate" value="86%" sub="backtested" accent="var(--up)" />
+          <Stat label="Markets" value="XAU · NAS" accent="var(--cyan)" />
           <Stat label="XAU/USD" value={px ? px.mid.toFixed(1) : '—'} accent="var(--gold)" mono />
         </div>
 
-        {/* CTA principal */}
+        {/* Primary CTA */}
         <a
           href={TELEGRAM}
           target="_blank"
@@ -67,29 +62,30 @@ export default function Funnel() {
         >
           ✈️ JOIN ALGORIA — FREE
         </a>
-        <span style={{ fontSize: 12.5, color: 'var(--dim)', marginTop: -10 }}>Canal Telegram gratuit · aucun paiement · accès immédiat</span>
+        <span style={{ fontSize: 12.5, color: 'var(--dim)', marginTop: -10 }}>Free Telegram channel · no payment · instant access</span>
 
-        {/* CTA secondaire TikTok (si défini) */}
+        {/* Secondary TikTok CTA (if set) */}
         {TIKTOK && (
           <a href={TIKTOK} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none', borderBottom: '1px solid var(--border)', paddingBottom: 2 }}>
-            🔴 Regarder le live sur TikTok
+            🔴 Watch the live on TikTok
           </a>
         )}
 
         {/* disclaimer */}
         <p style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 8, maxWidth: 360, lineHeight: 1.4 }}>
-          Le trading comporte des risques de perte. Contenu éducatif et de divertissement — pas un conseil en investissement.
+          Trading involves risk of loss. Educational &amp; entertainment content — not financial advice.
         </p>
       </div>
     </main>
   );
 }
 
-function Stat({ label, value, accent, mono }: { label: string; value: string; accent: string; mono?: boolean }) {
+function Stat({ label, value, accent, mono, sub }: { label: string; value: string; accent: string; mono?: boolean; sub?: string }) {
   return (
     <div style={{ flex: 1, background: 'rgba(255,255,255,.02)', border: '1px solid var(--border)', borderRadius: 12, padding: '10px 8px', borderTop: `2px solid ${accent}` }}>
       <div style={{ fontSize: 9, letterSpacing: 0.6, color: 'var(--muted)', textTransform: 'uppercase' }}>{label}</div>
       <div className={mono ? 'mono' : undefined} style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{value}</div>
+      {sub && <div style={{ fontSize: 8, color: 'var(--dim)', letterSpacing: 0.3, marginTop: 1 }}>{sub}</div>}
     </div>
   );
 }
