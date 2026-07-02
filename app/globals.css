@@ -43,17 +43,41 @@
   /* dégradés de marque */
   --grad-brand: linear-gradient(90deg, #2be3f5, #2e8bf0);
   --grad-gold: linear-gradient(90deg, #ffd166, #f5a623);
+  /* OR MÉTALLIQUE (multi-tons, clair→profond) — pour le texte .goldText, pas un jaune plat */
+  --gold-metal: linear-gradient(180deg, #fff6cf 0%, #ffe084 30%, #f4b93a 55%, #cf8f14 78%, #a76f0a 100%);
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 html { background: var(--bg); } /* pas de flash blanc au chargement */
 body {
-  background: var(--bg);
+  /* ambiance en COUCHES (halos froids haut-gauche / bleu roi haut-droite) — un fond plat uni crie "généré" */
+  background:
+    radial-gradient(110% 70% at 18% -12%, #10203c 0%, transparent 55%),
+    radial-gradient(90% 60% at 88% -8%, rgba(30, 64, 229, 0.13) 0%, transparent 55%),
+    var(--bg);
   color: var(--text);
   font-family: var(--font-display), 'Space Grotesk', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+/* GRAIN photographique très fin par-dessus tout : casse l'aplat numérique, rend les dégradés organiques */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>");
+}
+/* texte OR métallique (reflet clair en haut → or profond en bas) + lueur chaude */
+.goldText {
+  background: var(--gold-metal);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 7px rgba(255, 196, 60, 0.38));
 }
 /* chiffres monospace TABULAIRES → les prix/P&L ne « dansent » plus tick par tick */
 .mono {
@@ -62,10 +86,11 @@ body {
   font-feature-settings: 'tnum', 'zero';
 }
 .panel {
-  background: var(--panel);
+  /* dégradé vertical (haut légèrement éclairé) + liseré lumineux → matière, pas un rectangle plat */
+  background: linear-gradient(180deg, #12213e 0%, var(--panel) 34%, #0a1425 100%);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh-1), inset 0 1px 0 rgba(255, 255, 255, 0.03); /* élévation + liseré haut → surface, pas wireframe */
+  box-shadow: var(--sh-1), inset 0 1px 0 rgba(255, 255, 255, 0.055);
 }
 .glow { box-shadow: 0 0 12px rgba(43, 227, 245, 0.35); }
 
