@@ -35,6 +35,7 @@ interface Engine {
   isPrimary: boolean;
   tick: () => void; // appelé chaque seconde par la boucle partagée
   reconcile: () => void; // appelé chaque 60 s par la boucle partagée
+  pushAccount: () => Promise<void>; // snapshot compte (balance/equity/day P&L) — 60 s, primaire uniquement
   executeSignal: (signal: Signal) => Promise<string | undefined>;
   buildManualSignal: (direction: 'long' | 'short', opts?: ManualOpts) => Signal | null;
   setAction: (on: boolean) => void;
@@ -252,6 +253,9 @@ async function main() {
       }
     };
 
+    // Dernier contexte marché vu (pour les snapshots compte 60 s entre deux clôtures M5)
+    let lastCtx: import('../lib/engine/types').MarketContext | null = null;
+
     // ===== Boucle MOTEUR : à chaque bougie M5 clôturée, on fait tourner la confluence sur CET instrument =====
     const onClosed = async (bars: Bar[]) => {
       try {
@@ -262,6 +266,7 @@ async function main() {
         // SCALP : on injecte le contexte propre à l'instrument (session asia, gate vol élargi, roundStep) + le spread live.
         const ctxOpts = mode === 'scalp' ? { spread: state.spread, ...inst.ctx } : { spread: state.spread };
         const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts }, FEATURES, cfg);
+        lastCtx = context;
         await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
         if (signal) {
           // Garde-fou PORTEFEUILLE (global) au-dessus des limites par-symbole : on ne laisse pas l'or + le Nasdaq
@@ -358,7 +363,16 @@ async function main() {
       });
     };
 
-    return { inst, isPrimary, tick, reconcile, executeSignal, buildManualSignal, setAction, setRafale };
+    // Snapshot COMPTE toutes les 60 s (balance/equity/day P&L frais entre deux clôtures M5) — sinon le
+    // cockpit attend jusqu'à 5 min après un TP pour refléter le gain. Primaire uniquement (état compte global).
+    const pushAccount = async () => {
+      if (!isPrimary || !lastCtx) return;
+      state = readState(terminal, BROKER, state);
+      state.killed = killed;
+      await pushState(lastCtx, state, mode);
+    };
+
+    return { inst, isPrimary, tick, reconcile, pushAccount, executeSignal, buildManualSignal, setAction, setRafale };
   };
 
   // ===== On initialise chaque instrument (le premier = primaire = l'or). Un échec d'init n'empêche pas les autres. =====
@@ -439,6 +453,7 @@ async function main() {
     for (const eng of engines) {
       try { eng.reconcile(); } catch (e) { console.error(`[algoria] reconcile ${eng.inst.display} échoué:`, e); }
     }
+    void primary.pushAccount().catch((e) => console.error('[algoria] pushAccount échoué:', e)); // compte frais toutes les 60 s
   }, 60_000);
 
   // ===== RECAP HORAIRE du desk : à chaque heure pleine, une carte "SESSION RECAP" (stats réelles du jour,
