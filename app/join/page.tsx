@@ -104,17 +104,17 @@ export default function JoinWidget() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
             <span style={{ width: 44, height: 44, borderRadius: 13, background: 'linear-gradient(135deg,#2aa8ea,#1e6fe0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flex: 'none', boxShadow: '0 6px 22px rgba(42,168,234,.45)' }}>✈️</span>
             <div style={{ lineHeight: 1.15 }}>
-              <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: .3, color: '#f2f8ff' }}>JOIN ALGORIA <span style={{ background: 'linear-gradient(90deg,#2be3f5,#f5c24a)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>FREE</span></div>
+              <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: .3, color: '#f2f8ff' }}>ALGORIA <span style={{ background: 'linear-gradient(90deg,#2be3f5,#f5c24a)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>WAITLIST</span></div>
               <div style={{ fontSize: 12.5, color: '#8fb8d9', display: 'flex', alignItems: 'center', gap: 6 }}>
-                link in bio 🔗 · your name shows up here
+                link in bio 🔗 · get in line, free
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#ff5a6e', fontWeight: 800, fontSize: 10, letterSpacing: .8 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ff5a6e', animation: 'pulseDot2 1.3s infinite' }} />LIVE</span>
               </div>
             </div>
             <div style={{ marginLeft: 'auto', textAlign: 'right', position: 'relative' }}>
-              {/* +1 flottant à chaque adhésion */}
+              {/* +1 flottant à chaque entrée en liste */}
               {count != null && <span key={count} aria-hidden className="mono" style={{ position: 'absolute', right: 0, top: -14, fontSize: 13, fontWeight: 800, color: 'var(--up)', animation: 'floatUp 1.6s ease forwards' }}>+1</span>}
               <div key={'c' + (count ?? 0)} className="mono" style={{ fontSize: 30, fontWeight: 800, color: '#f2f8ff', lineHeight: 1, animation: 'popIn .45s ease' }}>{count != null ? count.toLocaleString('en-US') : '—'}</div>
-              <div style={{ fontSize: 10, color: '#8fb8d9', letterSpacing: 1.2, textTransform: 'uppercase' }}>members</div>
+              <div style={{ fontSize: 10, color: '#8fb8d9', letterSpacing: 1.2, textTransform: 'uppercase' }}>in line</div>
             </div>
           </div>
 
@@ -127,17 +127,17 @@ export default function JoinWidget() {
               {[...Array(12)].map((_, i) => (
                 <span key={i} aria-hidden style={{ position: 'absolute', left: '50%', top: '38%', width: 6, height: i % 3 ? 6 : 9, borderRadius: i % 2 ? '50%' : 2, background: i % 2 ? g1 : g2, ['--dx' as string]: `${Math.cos((i / 12) * 6.283) * (60 + (i % 4) * 26)}px`, ['--dy' as string]: `${Math.sin((i / 12) * 6.283) * (34 + (i % 3) * 22) - 26}px`, animation: `confetti ${0.9 + (i % 4) * 0.18}s ease-out forwards` }} />
               ))}
-              <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 2.4, color: '#9fc7e6', marginBottom: 7 }}>🎉 WELCOME</div>
+              <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 2.4, color: '#9fc7e6', marginBottom: 7 }}>🎟 JOINED THE WAITLIST</div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, maxWidth: '100%' }}>
                 <span style={{ width: 46, height: 46, borderRadius: '50%', flex: 'none', background: `linear-gradient(135deg,${g1},${g2})`, color: '#06121f', fontWeight: 900, fontSize: 21, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 26px ${g1}66` }}>{initialOf(star)}</span>
                 <span style={{ fontSize: 'clamp(24px, 5.4vw, 34px)', fontWeight: 800, letterSpacing: .2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: `linear-gradient(90deg,${g1},${g2})`, WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent', filter: `drop-shadow(0 0 14px ${g1}44)` }}>{nameOf(star)}</span>
               </div>
-              <div style={{ fontSize: 12, color: '#b9d4ec', marginTop: 7 }}>just joined the desk · <b style={{ color: 'var(--up)' }}>{ago(star.joined_at, now) || 'now'}</b></div>
+              <div style={{ fontSize: 12, color: '#b9d4ec', marginTop: 7 }}>in line for approval · <b style={{ color: 'var(--up)' }}>{ago(star.joined_at, now) || 'now'}</b></div>
             </div>
           ) : (
             <div style={{ borderRadius: 16, padding: '22px 16px', textAlign: 'center', border: '1.5px dashed rgba(43,227,245,.4)', background: 'rgba(43,227,245,.04)' }}>
               <div style={{ fontSize: 'clamp(20px, 5vw, 28px)', fontWeight: 800, letterSpacing: .4, background: 'linear-gradient(90deg,#2be3f5,#f5c24a)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>YOUR NAME HERE</div>
-              <div style={{ fontSize: 12.5, color: '#8fb8d9', marginTop: 6 }}>be the first — join from the link in bio</div>
+              <div style={{ fontSize: 12.5, color: '#8fb8d9', marginTop: 6 }}>be first in line — join from the link in bio</div>
             </div>
           )}
 
@@ -151,7 +151,7 @@ export default function JoinWidget() {
                     <span style={{ width: 26, height: 26, borderRadius: '50%', flex: 'none', background: `linear-gradient(135deg,${a},${b})`, color: '#06121f', fontWeight: 800, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialOf(j)}</span>
                     <span style={{ fontSize: 14.5, fontWeight: 600, color: '#dbe9f8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nameOf(j)}</span>
                     <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: '#7d95b5', flex: 'none' }}>{ago(j.joined_at, now)}</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--up)', flex: 'none' }}>✓</span>
+                    <span style={{ fontSize: 11, flex: 'none' }} title="waiting for approval">⏳</span>
                   </div>
                 );
               })}
@@ -168,6 +168,11 @@ export default function JoinWidget() {
               <span className="mono" style={{ fontSize: 11, color: '#b9d4ec', flex: 'none' }}>{Math.max(0, milestone - count)} to go</span>
             </div>
           )}
+
+          {/* teaser des drops — l'approbation se joue EN LIVE (ex. « à 10k likes j'accepte 10 personnes ») */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 11.5, color: '#f5c24a', background: 'rgba(245,194,74,.07)', border: '1px solid rgba(245,194,74,.25)', borderRadius: 9, padding: '6px 10px' }}>
+            🔓 <b>batches accepted LIVE on stream</b> <span style={{ color: '#c8b07a' }}>— stay to get in</span>
+          </div>
         </section>
       </div>
     </main>
