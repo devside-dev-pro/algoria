@@ -87,7 +87,9 @@ export function Cockpit() {
         entryTime: Number.isFinite(openRefMs) && openRefMs > 1e12 ? openRefMs : openSig.created_at ? Date.parse(openSig.created_at) : null,
         sl: Number(openSig.stop_loss) || null,
         tp: Number(openSig.take_profits?.[0]) || null,
-        tps: (Array.isArray(openSig.take_profits) ? openSig.take_profits : []).map(Number).filter((x: number) => Number.isFinite(x) && x > 0),
+        // TP1 uniquement : c'est le SEUL ordre réel chez le broker (TP2 est une cible interne du moteur) —
+        // dessiner TP2 étirait la zone verte bien au-delà du vrai take profit (retour live).
+        tps: (Array.isArray(openSig.take_profits) ? openSig.take_profits : []).map(Number).filter((x: number) => Number.isFinite(x) && x > 0).slice(0, 1),
       }
     : null;
 

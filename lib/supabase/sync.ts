@@ -110,6 +110,32 @@ export async function recordTradeClose(ticket: string, symbol: string, c: TradeC
   }
 }
 
+/** Timestamp (ms) de la dernière bougie stockée pour symbol/timeframe — null si aucune. Sert au warm boot du runner. */
+export async function latestCandleTime(symbol: string, timeframe = 'M5'): Promise<number | null> {
+  const { data } = await db.from('candles').select('time').eq('symbol', symbol).eq('timeframe', timeframe).order('time', { ascending: false }).limit(1);
+  return data?.[0]?.time != null ? Number(data[0].time) : null;
+}
+
+/** Tickets des trades OUVERTS en base depuis > graceMs qui n'existent plus chez le broker (candidats fantômes). */
+export async function listGhostOpenTrades(symbol: string, liveTickets: string[], graceMs = 120_000): Promise<string[]> {
+  const { data, error } = await db.from('trades').select('ticket,opened_at').eq('symbol', symbol).is('closed_at', null);
+  if (error || !data?.length) return [];
+  const live = new Set(liveTickets.map(String));
+  const cutoff = Date.now() - graceMs;
+  return data.filter((t) => !live.has(String(t.ticket)) && new Date(t.opened_at as string).getTime() < cutoff).map((t) => String(t.ticket));
+}
+
+/** Fallback : ferme des fantômes SANS données de clôture (reason='reconcile', P&L inconnu). */
+export async function closeGhostTrades(tickets: string[]): Promise<number> {
+  if (!tickets.length) return 0;
+  const { error } = await db.from('trades').update({ closed_at: new Date().toISOString(), reason: 'reconcile' }).in('ticket', tickets).is('closed_at', null);
+  if (error) {
+    console.error('[sync] closeGhostTrades échoué:', error.message);
+    return 0;
+  }
+  return tickets.length;
+}
+
 /**
  * Réconciliation anti-fantômes : ferme en base les trades marqués OUVERTS qui n'existent plus chez le broker
  * (fermés à la main sur MT5, ou clôture ratée par le DealRecorder, ou runner redémarré). reason='reconcile', P&L inconnu.

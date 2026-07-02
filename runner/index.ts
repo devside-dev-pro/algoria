@@ -12,7 +12,7 @@ import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, reconcileOpenTrades, broadcastTick, watchCommands, fetchDayTradeStats } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -93,14 +93,24 @@ async function main() {
     const dealRecorder = new DealRecorder(BROKER, DISPLAY);
     stream.addSynchronizationListener(dealRecorder);
 
-    // Backfill d'historique profond (chart + backtest), tous les timeframes, pour CET instrument.
-    for (const tf of ['M1', 'M5', 'M15', 'H1', 'D1']) {
-      try {
-        const hist = await backfill(account, BROKER, tf, BACKFILL_PAGES[tf] ?? 5);
-        await logCandles(DISPLAY, hist, tf);
-        console.log(`[algoria] backfill ${DISPLAY} ${tf}: ${hist.length} bougies`);
-      } catch (e) {
-        console.error(`[algoria] backfill ${DISPLAY} ${tf} échoué (getHistoricalCandles non supporté ?):`, e);
+    // WARM BOOT : si les données M5 en base sont fraîches (< 15 min), on SAUTE le backfill profond —
+    // un redémarrage (redeploy) reprend le live en secondes au lieu de ~3 min par instrument. Sans ça,
+    // le prix restait figé au boot ET le DealRecorder du 2ᵉ instrument s'attachait trop tard pour
+    // rattraper les clôtures survenues pendant la coupure (fenêtre de replay 5 min dépassée).
+    const lastM5 = await latestCandleTime(DISPLAY, 'M5');
+    const freshMin = lastM5 != null ? (Date.now() - lastM5) / 60_000 : Infinity;
+    if (freshMin < 15) {
+      console.log(`[algoria] warm boot ${DISPLAY} — données fraîches (M5 il y a ${freshMin.toFixed(0)} min), backfill sauté`);
+    } else {
+      // Backfill d'historique profond (chart + backtest), tous les timeframes, pour CET instrument.
+      for (const tf of ['M1', 'M5', 'M15', 'H1', 'D1']) {
+        try {
+          const hist = await backfill(account, BROKER, tf, BACKFILL_PAGES[tf] ?? 5);
+          await logCandles(DISPLAY, hist, tf);
+          console.log(`[algoria] backfill ${DISPLAY} ${tf}: ${hist.length} bougies`);
+        } catch (e) {
+          console.error(`[algoria] backfill ${DISPLAY} ${tf} échoué (getHistoricalCandles non supporté ?):`, e);
+        }
       }
     }
 
@@ -351,16 +361,34 @@ async function main() {
       void manageBreakeven(stream, terminal, BROKER); // no-op sur les ordres nus (sans SL)
     };
 
-    // Réconciliation anti-fantômes (60 s) : ferme en base les trades "ouverts" qui n'existent plus chez le broker.
+    // Réconciliation anti-fantômes (60 s) : un trade "ouvert" en base qui n'existe plus chez le broker a été
+    // clôturé pendant une coupure (redeploy) ou à la main. On cherche d'abord la VRAIE clôture dans l'historique
+    // MetaApi synchronisé (exit + P&L réels → le win s'affiche correctement) ; fallback fermeture aveugle sinon.
     const reconcile = () => {
       if (!terminal.accountInformation || Date.now() - startedAt < 120_000) return; // pas synchronisé / trop tôt → on attend
       const live = ((terminal.positions ?? []) as any[]).filter((x) => x.symbol === BROKER).map((x) => String(x.id));
-      void reconcileOpenTrades(DISPLAY, live).then((n) => {
+      void (async () => {
+        const ghosts = await listGhostOpenTrades(DISPLAY, live);
+        if (!ghosts.length) return;
+        const orphans: string[] = [];
+        const allDeals: any[] = ((stream as any).historyStorage?.deals ?? []) as any[];
+        for (const ticket of ghosts) {
+          const outs = allDeals.filter((d) => String(d?.positionId) === ticket && d?.entryType === 'DEAL_ENTRY_OUT');
+          if (outs.length) {
+            const pnl = outs.reduce((s, d) => s + (Number(d.profit) || 0) + (Number(d.commission) || 0) + (Number(d.swap) || 0), 0);
+            const last = outs[outs.length - 1];
+            await recordTradeClose(ticket, DISPLAY, { exit: Number(last.price) || 0, pnl, r: null, reason: pnl >= 0 ? 'win' : 'loss', closedAt: last.time ? new Date(last.time).getTime() : Date.now() });
+            console.log(`[algoria] réconciliation ${DISPLAY} : clôture réelle récupérée pour ${ticket} (${pnl.toFixed(2)}$)`);
+          } else {
+            orphans.push(ticket);
+          }
+        }
+        const n = await closeGhostTrades(orphans);
         if (n > 0) {
-          console.log(`[algoria] réconciliation ${DISPLAY} : ${n} position(s) fantôme(s) fermée(s) en base`);
+          console.log(`[algoria] réconciliation ${DISPLAY} : ${n} fantôme(s) fermé(s) sans données de clôture`);
           void logNote(`${DISPLAY}: ${n} ghost position(s) cleaned up (closed on broker, not in DB)`, 'info');
         }
-      });
+      })();
     };
 
     // Snapshot COMPTE toutes les 60 s (balance/equity/day P&L frais entre deux clôtures M5) — sinon le
