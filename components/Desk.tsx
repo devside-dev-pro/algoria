@@ -54,12 +54,12 @@ function StateHero({ m }: { m: any }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 13, color: heroColor }}>{glyph(m)}</span>
         <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.4, color: heroColor }}>{STATE_WORD[m?.state] ?? 'STANDING ASIDE'}</span>
-        {m?.gated && <span style={{ fontSize: 8.5, fontWeight: 700, padding: '1px 6px', borderRadius: 4, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.08)' }} title="setup vu mais bloqué par le filtre de tendance EMA">⛔ trend gate</span>}
+        {m?.gated && <span style={{ fontSize: 8.5, fontWeight: 700, padding: '1px 6px', borderRadius: 4, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.08)' }} title="setup spotted but blocked by the EMA trend filter">⛔ trend gate</span>}
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 9, letterSpacing: 0.5, color: 'var(--dim)' }}>{aside ? 'PRICE' : m?.anchorLabel ?? 'PRICE'}</span>
         <span style={{ fontSize: 13, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{num(aside ? m?.price : m?.anchorPrice)}</span>
         {conf != null && <span style={{ fontSize: 10, fontFamily: MONO, color: aside ? 'var(--dim)' : 'var(--muted)' }}>{Math.round(conf * 100)}%</span>}
-        <span style={{ fontSize: 9.5, fontFamily: MONO, color: 'var(--dim)', borderLeft: '1px solid var(--border)', paddingLeft: 8 }} title="prochaine décision du moteur (clôture M5)">scan {scan}</span>
+        <span style={{ fontSize: 9.5, fontFamily: MONO, color: 'var(--dim)', borderLeft: '1px solid var(--border)', paddingLeft: 8 }} title="next engine decision (M5 close)">scan {scan}</span>
       </div>
       {/* mince liseré de conviction, collé au bord bas de la bande */}
       <div style={{ height: 2, borderRadius: 2, background: 'rgba(255,255,255,.05)', overflow: 'hidden', marginTop: 6 }}>
