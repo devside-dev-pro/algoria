@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: 'Your Algoria member dashboard — copying status, risk control, live AI feed.',
   manifest: '/member-manifest.webmanifest',
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Algoria' },
-  icons: { icon: '/icons/member-192.png', apple: '/icons/member-192.png' },
+  icons: { icon: '/icons/member-192.png', apple: '/icons/apple-touch.png' },
 };
 export const viewport: Viewport = { themeColor: '#08101f', width: 'device-width', initialScale: 1, maximumScale: 1, userScalable: false };
 
