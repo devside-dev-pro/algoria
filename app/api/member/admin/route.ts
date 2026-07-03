@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { verifySession, SESSION_COOKIE, sdb, isAdmin } from '@/lib/member/server';
+import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret } from '@/lib/member/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,8 +26,25 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const s = guard(req);
   if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-  const body = (await req.json().catch(() => ({}))) as { add?: string; remove?: string; done?: string };
+  const body = (await req.json().catch(() => ({}))) as { add?: string; remove?: string; done?: string; reveal?: string };
   const db = sdb();
+  if (body.reveal) {
+    // RÉVÉLATION des identifiants MT5 (admin uniquement) : nécessaire pour brancher le compte dans STH.
+    // Déchiffré à la volée côté serveur, jamais stocké en clair ; la révélation est HORODATÉE sur l'action (audit).
+    const { data: act } = await db.from('member_actions').select('id,tg_id,detail').eq('id', body.reveal).limit(1);
+    if (!act?.length) return NextResponse.json({ error: 'action not found' }, { status: 404 });
+    const { data: m } = await db.from('members').select('mt5_login,mt5_server,mt5_password_enc').eq('tg_id', act[0].tg_id).limit(1);
+    if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
+    let password: string;
+    try {
+      password = decryptSecret(m[0].mt5_password_enc as string);
+    } catch {
+      return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
+    }
+    const detail = { ...((act[0].detail as Record<string, unknown>) ?? {}), revealed_at: new Date().toISOString(), revealed_by: s.username ?? String(s.tgId) };
+    await db.from('member_actions').update({ detail: detail as never }).eq('id', body.reveal);
+    return NextResponse.json({ login: m[0].mt5_login, server: m[0].mt5_server, password });
+  }
   if (body.done) {
     // Le support a appliqué l'action dans Social Trade Hub → on la clôt ; un 'connect' fait passer le membre en LIVE.
     const { data: act } = await db.from('member_actions').select('id,tg_id,kind').eq('id', body.done).eq('status', 'pending').limit(1);
