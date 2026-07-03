@@ -104,6 +104,40 @@ export async function POST(req: Request) {
     }
   }
 
+  // CONNEXION NATIVE de l'app membre : /start lg_<code> (deep-link depuis app.algoria.tech/member/login).
+  // On confirme le code avec l'identité Telegram de l'expéditeur → la page de login (en polling) pose la session.
+  // Nécessite "message" dans allowed_updates du webhook.
+  const msg = update?.message;
+  const startPayload = typeof msg?.text === 'string' ? msg.text.match(/^\/start\s+lg_([A-Za-z0-9]{16,64})$/) : null;
+  if (db && startPayload && msg?.from?.id) {
+    const code = startPayload[1];
+    const u = msg.from;
+    try {
+      // code encore pendant et frais (< 10 min) uniquement — sinon on ignore (anti-rejeu)
+      const cutoff = new Date(Date.now() - 10 * 60_000).toISOString();
+      const { data: rows } = await (db as any)
+        .from('member_login_codes').select('code').eq('code', code).eq('status', 'pending').gte('created_at', cutoff).limit(1);
+      if (rows?.length) {
+        const photoUrl = await fetchAvatar(db, u.id);
+        await (db as any).from('member_login_codes').update({
+          status: 'confirmed', tg_id: u.id, tg_username: u.username ?? null,
+          tg_name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || String(u.id),
+          photo_url: photoUrl, confirmed_at: new Date().toISOString(),
+        }).eq('code', code).eq('status', 'pending');
+        // petit accusé dans Telegram (best effort) — l'utilisateur sait qu'il peut revenir sur l'app
+        const token = process.env.TELEGRAM_BOT_TOKEN;
+        if (token) {
+          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
+            body: JSON.stringify({ chat_id: u.id, text: '✅ Signed in — head back to the Algoria app.' }),
+          }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.error('[telegram] login code failed:', (e as { message?: string })?.message ?? e);
+    }
+  }
+
   // Toujours 200 : Telegram retente sinon, et on ne veut pas de boucle de retry sur un update qu'on ignore.
   return NextResponse.json({ ok: true });
 }
