@@ -242,7 +242,7 @@ export function Cockpit() {
           <div style={{ flex: 1, minHeight: 0 }}>
             <Chart key={symbol} symbol={symbol} signals={signals.filter((s: any) => s.symbol === symbol)} activeTrade={activeTrade} wins={winsForChart} />
           </div>
-          {whySig && String(whySig.id) !== whyDismissed && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} live={!!openSig} closed={whyClosed} pnl={whyPnl} onClose={() => setWhyDismissed(String(whySig.id))} />}
+          {whySig && String(whySig.id) !== whyDismissed && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} rationale={whySig.rationale} live={!!openSig} closed={whyClosed} pnl={whyPnl} onClose={() => setWhyDismissed(String(whySig.id))} />}
         </section>
         <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
           <Desk items={deskItems} heroSymbol={symbol} />
@@ -518,10 +518,21 @@ const whyOverlay: CSSProperties = {
 };
 
 // Panneau « WHY THIS TRADE » : décompose la confluence du signal en barres pondérées par feature
-// (vert = haussier, rouge = baissier, longueur ∝ |poids|) + jauge de confiance. Data-driven, pas de texte parsé.
-function WhyPanel({ direction, conf, live, closed = false, pnl = null, onClose }: { direction: string; conf: any; live: boolean; closed?: boolean; pnl?: number | null; onClose?: () => void }) {
+// (vert = haussier, rouge = baissier, longueur ∝ |poids|) + jauge de confiance. Data-driven, pas de texte parsé
+// (seule exception : session/régime relus depuis la dernière ligne du rationale, format contrôlé par buildRationale).
+function WhyPanel({ direction, conf, rationale, live, closed = false, pnl = null, onClose }: { direction: string; conf: any; rationale?: unknown; live: boolean; closed?: boolean; pnl?: number | null; onClose?: () => void }) {
   const contribs: any[] = Array.isArray(conf?.contributions) ? conf.contributions : [];
   if (!contribs.length) return null;
+  // Contexte marché AU MOMENT DU TIR — la décision ne repose pas que sur les votes : alignement des features
+  // et qualité du marché (ADX + vol) multiplient le score, session/régime cadrent le setup. Tout est déjà calculé.
+  const meta = Array.isArray(rationale) ? String(rationale[rationale.length - 1] ?? '') : '';
+  const sessRegime = meta.match(/Session (\w+) · (\w+)/);
+  const qualityChips: string[] = [];
+  if (sessRegime) qualityChips.push(sessRegime[1].toUpperCase(), sessRegime[2].toUpperCase());
+  const alignment = Number(conf?.alignment);
+  const quality = Number(conf?.quality);
+  if (Number.isFinite(alignment) && alignment > 0) qualityChips.push(`ALIGN ${Math.round(alignment * 100)}%`);
+  if (Number.isFinite(quality) && quality > 0) qualityChips.push(`ADX·VOL ${Math.round(quality * 100)}%`);
   const top = [...contribs].sort((a, b) => Math.abs(b.weighted) - Math.abs(a.weighted)).slice(0, 6);
   const maxW = Math.max(0.01, ...top.map((c) => Math.abs(Number(c.weighted) || 0)));
   const confidence = Math.max(0, Math.min(1, Number(conf?.confidence) || 0));
@@ -567,6 +578,14 @@ function WhyPanel({ direction, conf, live, closed = false, pnl = null, onClose }
           );
         })}
       </div>
+      {qualityChips.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 8, paddingTop: 7, borderTop: '1px solid rgba(130,152,190,.14)' }}>
+          <span style={{ fontSize: 8, color: 'var(--dim)', letterSpacing: 0.8 }}>MARKET</span>
+          {qualityChips.map((chip) => (
+            <span key={chip} style={{ fontSize: 8, letterSpacing: 0.6, color: lost ? 'var(--muted)' : 'rgba(160,215,235,.85)', padding: '2px 5px', borderRadius: 4, border: '1px solid rgba(130,152,190,.2)', background: 'rgba(43,227,245,.05)' }}>{chip}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
