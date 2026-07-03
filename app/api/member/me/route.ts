@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // Champs SÛRS renvoyés au client — jamais les identifiants MT5 (même chiffrés).
-const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,onboarding_step,created_at,mt5_login,mt5_server';
+const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,onboarding_step,created_at,mt5_login,mt5_server,referral_code';
 
 async function me(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -23,11 +23,25 @@ async function me(req: NextRequest) {
   return data?.[0] ? { session: s, member: data[0] as Record<string, unknown> } : null;
 }
 
-/** État du membre connecté (Home + wizard). */
+/** État du membre connecté (Home + wizard) + stats de PARRAINAGE (filleuls, gains). */
 export async function GET(req: NextRequest) {
   const ctx = await me(req);
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  return NextResponse.json({ member: ctx.member, admin: isAdmin(ctx.session.username) });
+  const db = sdb();
+  const [refs, rewards] = await Promise.all([
+    db.from('members').select('status').eq('referred_by', ctx.session.tgId),
+    db.from('member_actions').select('status,detail').eq('kind', 'referral_reward').eq('tg_id', ctx.session.tgId),
+  ]);
+  const sum = (st: string) => (rewards.data ?? []).filter((a) => a.status === st).reduce((acc, a) => acc + Number((a.detail as { amount?: number })?.amount ?? 0), 0);
+  const referral = {
+    code: (ctx.member as { referral_code?: string }).referral_code ?? null,
+    invited: refs.data?.length ?? 0,
+    activated: (refs.data ?? []).filter((r) => ['live', 'paused'].includes(String(r.status))).length,
+    earnedUsd: sum('done'), // récompenses PAYÉES (l'admin a marqué done)
+    pendingUsd: sum('pending'), // validées, paiement en cours
+    rewardUsd: Number(process.env.REFERRAL_REWARD_USD ?? 50),
+  };
+  return NextResponse.json({ member: ctx.member, admin: isAdmin(ctx.session.username), referral });
 }
 
 /** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'risk'|'pause'|'resume', ... } */

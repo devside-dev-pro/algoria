@@ -5,8 +5,9 @@ import { useState } from 'react';
 import { useMe, StatusPill, RiskPicker, type Member } from '../ui';
 
 export default function Profile() {
-  const { member, setMember, loading } = useMe({ requireOnboarded: true });
+  const { member, setMember, referral, loading } = useMe({ requireOnboarded: true });
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
 
   const act = (action: 'pause' | 'resume' | 'risk', tier?: string) => {
@@ -40,6 +41,38 @@ export default function Profile() {
         </div>
       </section>
 
+      {/* PARRAINAGE — le moteur de croissance : invite un ami, gagne du cash quand il active son compte */}
+      {referral?.code && (
+        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'rgba(245,194,74,.35)' }}>
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2 }} className="goldText">REFER & EARN</h2>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+            Invite a friend with your link. When their account is <strong style={{ color: 'var(--text)' }}>activated</strong> (min $500 deposit verified), you earn{' '}
+            <strong className="goldText">${referral.rewardUsd}</strong>. No limit — refer 10 friends, earn ${referral.rewardUsd * 10}.
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <span className="mono" style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', fontSize: 12.5, color: 'var(--cyan)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              app.algoria.tech/r/{referral.code}
+            </span>
+            <button
+              onClick={() => {
+                const link = `https://app.algoria.tech/r/${referral.code}`;
+                if (navigator.share) void navigator.share({ title: 'Join Algoria', text: 'The AI that trades gold & the Nasdaq — get in with my link:', url: link }).catch(() => {});
+                else { void navigator.clipboard?.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1600); }
+              }}
+              style={{ padding: '10px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 12, letterSpacing: 0.5, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)' }}
+            >
+              {copied ? '✓ COPIED' : 'SHARE'}
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <RefStat label="INVITED" value={String(referral.invited)} />
+            <RefStat label="ACTIVATED" value={String(referral.activated)} color="var(--up)" />
+            <RefStat label="EARNED" value={`$${referral.earnedUsd}`} gold />
+            {referral.pendingUsd > 0 && <RefStat label="ON THE WAY" value={`$${referral.pendingUsd}`} color="var(--cyan)" />}
+          </div>
+        </section>
+      )}
+
       {/* Risk Studio */}
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>RISK PROFILE</h2>
@@ -60,6 +93,15 @@ export default function Profile() {
         <button style={{ flex: 1, border: '1px solid rgba(255,107,138,.3)', background: 'rgba(255,107,138,.05)', color: 'rgba(210,150,165,.9)', borderRadius: 11, padding: '11px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>SIGN OUT</button>
       </form>
     </main>
+  );
+}
+
+function RefStat({ label, value, color, gold }: { label: string; value: string; color?: string; gold?: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{ fontSize: 9, letterSpacing: 1.2, color: 'var(--dim)' }}>{label}</span>
+      <span className={gold ? 'mono goldText' : 'mono'} style={{ fontSize: 17, fontWeight: 800, ...(gold ? {} : { color: color ?? 'var(--text)' }) }}>{value}</span>
+    </div>
   );
 }
 
