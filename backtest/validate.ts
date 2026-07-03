@@ -28,14 +28,20 @@ const SPECS: Record<string, Spec> = {
   USDJPY: { spread: 0.015, contractSize: 100_000, commissionPerLot: 7, maxSpread: 0.05, priceStep: 0.001 }, //   ~1.5 pips (pip=0.01)
   // Indices CFD : spread-only (commission 0), spread en POINTS, niveaux ronds ~100.
   DJ30: { spread: 2.0, contractSize: 1, commissionPerLot: 0, maxSpread: 8, priceStep: 0.1, roundStep: 100 },
+  // Crypto CFD 24/7 : 1 lot = 1 BTC, spread-only. Spread ESTIMÉ (retail ~20-40$) — à confronter au spread réel
+  // du broker via l'override CLI (arg 3), et à stresser ×2 : un edge qui meurt à spread double est trop fragile.
+  BTCUSD: { spread: 30, contractSize: 1, commissionPerLot: 0, maxSpread: 100, priceStep: 0.01, roundStep: 1000 },
 };
 
 const SYMBOL = (process.argv[2] ?? '').toUpperCase();
 const spec = SPECS[SYMBOL];
 if (!SYMBOL || !spec) {
-  console.error(`usage: npx tsx backtest/validate.ts <SYMBOLE>\n  connus: ${Object.keys(SPECS).join(', ')}`);
+  console.error(`usage: npx tsx backtest/validate.ts <SYMBOLE> [spread]\n  connus: ${Object.keys(SPECS).join(', ')}`);
   process.exit(1);
 }
+// Override CLI du spread (stress test / spread broker réel) : npx tsx backtest/validate.ts BTCUSD 60
+const spreadArg = parseFloat(process.argv[3] ?? '');
+if (Number.isFinite(spreadArg) && spreadArg > 0) spec.spread = spreadArg;
 const CACHE = `backtest/.cache/${SYMBOL}-M5-15.json`;
 if (!existsSync(CACHE)) {
   console.error(`cache absent: ${CACHE}\n  génère-le d'abord: node scripts/pull-cache.mjs ${SYMBOL} M5`);
@@ -128,4 +134,25 @@ const pick = robust.filter((r) => parseFloat(r.perDay) >= 4).sort((a, b) => (par
 console.log('\n>>> VERDICT:', pick
   ? `edge robuste — seuil ${pick.thr} · R:R ${pick.rr} · SL ${pick.sl}×ATR · BE ${pick.be} → ${pick.perDay} trades/j · win ${pick.win} · PF ${pick.PF} · ${pick.net}`
   : `PAS d'edge robuste sur ${SYMBOL} — on n'active pas.`);
+
+// ===== Split SEMAINE vs WEEK-END (config du verdict) — décisif pour les marchés 24/7 (crypto) : le week-end
+// est fin (peu de volume, mèches erratiques) et c'est PRÉCISÉMENT la fenêtre de stream visée. Un edge global
+// qui perd le week-end ⇒ activer en semaine seulement.
+if (pick) {
+  const run = backtest(bars, FEATURES, scalpCfg({ thr: pick.thr, targetRR: pick.rr, slAtr: pick.sl, be: pick.be }), { ...P, ctxOpts: CTX });
+  const isWknd = (t: number) => [0, 6].includes(new Date(t).getUTCDay());
+  const dayKeys = new Set(bars.map((b) => new Date(b.time).toISOString().slice(0, 10) + (isWknd(b.time) ? 'W' : 'D')));
+  const nDays = (w: boolean) => [...dayKeys].filter((k) => k.endsWith(w ? 'W' : 'D')).length;
+  const bucket = (label: string, ts: typeof run.trades, days: number) => {
+    if (!ts.length) return console.log(`${label}: aucun trade`);
+    const wins = ts.filter((t) => t.pnl > 0);
+    const gp = wins.reduce((a, t) => a + t.pnl, 0);
+    const gl = Math.abs(ts.filter((t) => t.pnl < 0).reduce((a, t) => a + t.pnl, 0));
+    const net = ts.reduce((a, t) => a + t.pnl, 0);
+    console.log(`${label}: ${ts.length} trades · ${(ts.length / Math.max(1, days)).toFixed(1)}/j · win ${pct(wins.length / ts.length)} · PF ${pf(gl > 0 ? gp / gl : Infinity)} · net $${net.toFixed(0)}`);
+  };
+  console.log('\n========== SEMAINE vs WEEK-END (config verdict, UTC) ==========');
+  bucket('SEMAINE ', run.trades.filter((t) => !isWknd(t.entryTime)), nDays(false));
+  bucket('WEEK-END', run.trades.filter((t) => isWknd(t.entryTime)), nDays(true));
+}
 process.exit(0);
