@@ -35,8 +35,10 @@ export function useMe(opts: { requireOnboarded?: boolean } = {}) {
       })
       .then((d) => {
         if (!alive || !d?.member) return;
-        if (opts.requireOnboarded && d.member.status === 'onboarding') { router.replace('/member/onboarding'); return; }
-        if (opts.requireOnboarded && d.member.status === 'pending_copier') { router.replace('/member/pending'); return; }
+        // Les ADMINS ne passent JAMAIS par le tunnel membre (onboarding/attente d'approbation) —
+        // sinon l'opérateur se retrouve coincé dans son propre wizard en allant sur admin.algoria.tech.
+        if (opts.requireOnboarded && !d.admin && d.member.status === 'onboarding') { router.replace('/member/onboarding'); return; }
+        if (opts.requireOnboarded && !d.admin && d.member.status === 'pending_copier') { router.replace('/member/pending'); return; }
         setMember(d.member);
         setAdmin(!!d.admin);
         setLoading(false);
