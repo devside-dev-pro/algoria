@@ -18,7 +18,9 @@ export interface Member {
   mt5_server: string | null;
 }
 
-/** Charge le membre connecté ; redirige vers /member/login si pas de session. */
+/** Charge le membre connecté ; redirige vers /member/login si pas de session.
+ *  requireOnboarded : bloque AUSSI les comptes en attente d'approbation admin (pending_copier) —
+ *  tant que l'accès n'a pas été validé (compte via notre lien + dépôt ≥ 500$ + copieur), AUCUN onglet n'est accessible. */
 export function useMe(opts: { requireOnboarded?: boolean } = {}) {
   const [member, setMember] = useState<Member | null>(null);
   const [admin, setAdmin] = useState(false);
@@ -34,6 +36,7 @@ export function useMe(opts: { requireOnboarded?: boolean } = {}) {
       .then((d) => {
         if (!alive || !d?.member) return;
         if (opts.requireOnboarded && d.member.status === 'onboarding') { router.replace('/member/onboarding'); return; }
+        if (opts.requireOnboarded && d.member.status === 'pending_copier') { router.replace('/member/pending'); return; }
         setMember(d.member);
         setAdmin(!!d.admin);
         setLoading(false);
@@ -45,50 +48,81 @@ export function useMe(opts: { requireOnboarded?: boolean } = {}) {
   return { member, setMember, admin, loading };
 }
 
-const TABS = [
-  { href: '/member', label: 'Home', icon: '⌂' },
-  { href: '/member/live', label: 'Live', icon: '▲' },
-  { href: '/member/history', label: 'History', icon: '≡' },
-  { href: '/member/academy', label: 'Academy', icon: '◆' },
-];
+// Icônes SVG de la nav (traits fins, style cockpit — fini les glyphes texte "basiques")
+const ic = (d: string) => (
+  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d={d} />
+  </svg>
+);
+const ICONS: Record<string, React.ReactNode> = {
+  home: ic('M3 10.5 12 3l9 7.5M5 9.5V21h5v-6h4v6h5V9.5'),
+  history: (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3.2 2" />
+    </svg>
+  ),
+  academy: ic('M12 3 2 8.5 12 14l10-5.5L12 3zM6 11v5c0 1.6 2.7 3 6 3s6-1.4 6-3v-5'),
+};
 
 export function MemberChrome({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
-  const bare = path?.includes('/login') || path?.includes('/denied'); // pas de nav avant connexion
+  // pas de nav avant connexion NI pendant l'onboarding / l'attente d'approbation (tous les onglets sont verrouillés)
+  const bare = ['/login', '/denied', '/onboarding', '/pending'].some((p) => path?.includes(p));
   useEffect(() => {
     if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/member-sw.js').catch(() => {});
   }, []);
+  const Tab = ({ href, label, icon }: { href: string; label: string; icon: React.ReactNode }) => {
+    const active = path === href || (href !== '/member' && path?.startsWith(href));
+    return (
+      <button
+        onClick={() => router.push(href)}
+        style={{
+          flex: 1, maxWidth: 110, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+          padding: '7px 4px', borderRadius: 10, border: 'none', cursor: 'pointer', background: 'transparent',
+          color: active ? 'var(--cyan)' : 'var(--dim)',
+        }}
+      >
+        {icon}
+        <span style={{ fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', fontWeight: active ? 700 : 500 }}>{label}</span>
+      </button>
+    );
+  };
+  const liveActive = path?.startsWith('/member/live');
   return (
-    <div style={{ minHeight: '100vh', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', paddingBottom: bare ? 0 : 76 }}>
+    <div style={{ minHeight: '100vh', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', paddingBottom: bare ? 0 : 86 }}>
       <div style={{ flex: 1, padding: '14px 14px 0' }}>{children}</div>
       {!bare && (
         <nav
           style={{
             position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
-            display: 'flex', justifyContent: 'center', gap: 2,
-            padding: 'max(8px, env(safe-area-inset-bottom)) 10px max(10px, env(safe-area-inset-bottom))',
-            background: 'rgba(8,16,31,.92)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 2,
+            padding: '6px 10px max(10px, env(safe-area-inset-bottom))',
+            background: 'rgba(8,16,31,.94)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border)',
           }}
         >
-          {TABS.map((t) => {
-            const active = path === t.href || (t.href !== '/member' && path?.startsWith(t.href));
-            return (
-              <button
-                key={t.href}
-                onClick={() => router.push(t.href)}
-                style={{
-                  flex: 1, maxWidth: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-                  padding: '7px 4px', borderRadius: 10, border: 'none', cursor: 'pointer',
-                  background: active ? 'rgba(43,227,245,.09)' : 'transparent',
-                  color: active ? 'var(--cyan)' : 'var(--dim)',
-                }}
-              >
-                <span style={{ fontSize: 15 }}>{t.icon}</span>
-                <span style={{ fontSize: 9.5, letterSpacing: 1, textTransform: 'uppercase', fontWeight: active ? 700 : 500 }}>{t.label}</span>
-              </button>
-            );
-          })}
+          <Tab href="/member" label="Home" icon={ICONS.home} />
+          <Tab href="/member/history" label="History" icon={ICONS.history} />
+          {/* ALGORIA AI — le bouton PRINCIPAL : central, surélevé, la marque au centre (le flux live de l'IA) */}
+          <button
+            onClick={() => router.push('/member/live')}
+            aria-label="Algoria AI — live feed"
+            style={{ flex: 1, maxWidth: 118, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, border: 'none', background: 'transparent', cursor: 'pointer', marginTop: -22 }}
+          >
+            <span
+              className={liveActive ? undefined : 'liveGlow'}
+              style={{
+                width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'linear-gradient(160deg, #12213e 0%, #0a1425 100%)',
+                border: `1.5px solid ${liveActive ? 'rgba(43,227,245,.8)' : 'rgba(43,227,245,.4)'}`,
+                boxShadow: liveActive ? '0 0 22px rgba(43,227,245,.4)' : '0 4px 16px rgba(2,6,16,.6)',
+              }}
+            >
+              <img src="/brand/algoria-mark.png" alt="" width={32} height={32} style={{ objectFit: 'contain' }} />
+            </span>
+            <span style={{ fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800, color: liveActive ? 'var(--cyan)' : 'var(--muted)' }}>Algoria AI</span>
+          </button>
+          <Tab href="/member/academy" label="Academy" icon={ICONS.academy} />
         </nav>
       )}
     </div>

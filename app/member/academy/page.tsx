@@ -5,11 +5,16 @@ import { useMe } from '../ui';
 
 const WELCOME = process.env.NEXT_PUBLIC_WELCOME_VIDEO_URL ?? '';
 
+const svg = (d: string) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d={d} />
+  </svg>
+);
 const SECTIONS = [
-  { icon: '▶', title: 'Welcome to Algoria', blurb: 'What you just joined, and what happens next.', ready: !!WELCOME },
-  { icon: '◆', title: 'How Algoria trades', blurb: 'Confluence, breakouts, and why the AI stands aside around news.', ready: false },
-  { icon: '⚖', title: 'Choosing your risk', blurb: 'What 0.01 / 0.05 / 0.10 really change on your account.', ready: false },
-  { icon: '▦', title: 'Reading your MT5', blurb: 'Follow your copies like a pro.', ready: false },
+  { icon: svg('M8 5.5v13l11-6.5L8 5.5z'), title: 'Welcome to Algoria', blurb: 'What you just joined, and what happens next.', ready: !!WELCOME },
+  { icon: svg('M4 17l4-6 3 3.5L16 8l4 5M4 21h16'), title: 'How Algoria trades', blurb: 'Confluence, breakouts, and why the AI stands aside around news.', ready: false },
+  { icon: svg('M12 3v18M12 6l6 2-2.5 6a4 4 0 0 1-7 0L6 8l6-2zM6 8l-2.5 6a4 4 0 0 0 7 0'), title: 'Choosing your risk', blurb: 'What 0.01 / 0.05 / 0.10 really change on your account.', ready: false },
+  { icon: svg('M4 4h16v14H4zM4 22h16M8 12l2.5-3 2 2.5L16 8'), title: 'Reading your MT5', blurb: 'Follow your copies like a pro.', ready: false },
 ];
 
 export default function Academy() {
