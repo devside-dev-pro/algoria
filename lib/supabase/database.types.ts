@@ -157,6 +157,7 @@ export type Database = {
           r: number | null;
           reason: string | null;
           signal_ref: string | null;
+          sl: number | null;
           symbol: string;
           ticket: string | null;
         };
@@ -172,6 +173,7 @@ export type Database = {
           r?: number | null;
           reason?: string | null;
           signal_ref?: string | null;
+          sl?: number | null;
           symbol?: string;
           ticket?: string | null;
         };
@@ -187,6 +189,7 @@ export type Database = {
           r?: number | null;
           reason?: string | null;
           signal_ref?: string | null;
+          sl?: number | null;
           symbol?: string;
           ticket?: string | null;
         };

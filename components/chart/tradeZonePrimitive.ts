@@ -56,8 +56,11 @@ class ZoneRenderer {
           prev = tp;
         });
 
-        // Zone SL (rouge) : entrée → SL. Alpha volontairement FAIBLE (0.06) → discrète en live, pas de "mur rouge".
-        if (trade.sl != null && Number.isFinite(trade.sl)) {
+        // Zone SL (rouge) : entrée → SL, UNIQUEMENT si le stop est encore du côté perdant. Dès que le runner
+        // le sécurise à BE (ou trailing en profit), la zone disparaît → lecture visuelle immédiate « ça ne peut
+        // plus perdre ». Alpha volontairement FAIBLE (0.06) → discrète en live, pas de "mur rouge".
+        const slLosing = trade.sl != null && Number.isFinite(trade.sl) && (trade.entry - trade.sl) * dir > 0;
+        if (slLosing && trade.sl != null) {
           const ySl = series.priceToCoordinate(trade.sl);
           if (ySl != null) {
             ctx.fillStyle = withAlpha(th.down, 0.06);
