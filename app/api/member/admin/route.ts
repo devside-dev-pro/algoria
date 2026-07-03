@@ -26,8 +26,15 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const s = guard(req);
   if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-  const body = (await req.json().catch(() => ({}))) as { add?: string; remove?: string; done?: string; reveal?: string };
+  const body = (await req.json().catch(() => ({}))) as { add?: string; remove?: string; done?: string; reveal?: string; liveAlert?: boolean };
   const db = sdb();
+  if (body.liveAlert) {
+    // 📣 ALERTE LIVE : push à tous les membres abonnés — renvoie l'audience vers le stream.
+    const { pushToAll } = await import('@/lib/push/send');
+    const url = process.env.NEXT_PUBLIC_TIKTOK_URL ?? process.env.NEXT_PUBLIC_TELEGRAM_URL ?? '/member/live';
+    const sent = await pushToAll({ title: '🔴 ALGORIA IS LIVE', body: 'The AI is trading live right now — come watch.', url, tag: 'algoria-live' });
+    return NextResponse.json({ sent });
+  }
   if (body.reveal) {
     // RÉVÉLATION des identifiants MT5 (admin uniquement) : nécessaire pour brancher le compte dans STH.
     // Déchiffré à la volée côté serveur, jamais stocké en clair ; la révélation est HORODATÉE sur l'action (audit).

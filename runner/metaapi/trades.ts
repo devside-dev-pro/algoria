@@ -1,6 +1,22 @@
 import * as Sdk from 'metaapi.cloud-sdk/esm-node';
 import { recordTradeClose } from '../../lib/supabase/sync';
+import { pushToAll } from '../../lib/push/send';
 import type { Signal } from '../../lib/engine/types';
+
+// Push "WIN" vers les membres (PWA) — 70/30 : jamais de push sur une perte. Anti-spam : seuil $ + cooldown.
+const WIN_PUSH_MIN = Number(process.env.PUSH_WIN_MIN_USD ?? 100); // en dessous, pas de notif (sinon ~20/jour)
+const WIN_PUSH_COOLDOWN_MS = 20 * 60_000;
+let lastWinPush = 0;
+function maybePushWin(displaySymbol: string, pnl: number) {
+  if (pnl < WIN_PUSH_MIN || Date.now() - lastWinPush < WIN_PUSH_COOLDOWN_MS) return;
+  lastWinPush = Date.now();
+  void pushToAll({
+    title: `✓ +$${Math.round(pnl)} on ${displaySymbol}`,
+    body: 'Algoria just cashed a win — copied to your account.',
+    url: '/member',
+    tag: 'algoria-win',
+  }).then((n) => n && console.log(`[algoria] push win +$${Math.round(pnl)} → ${n} appareil(s)`)).catch(() => {});
+}
 
 // La classe de base (toutes ses méthodes sont des no-op) est exposée en named export sur la build esm-node.
 const Base: any = (Sdk as any).SynchronizationListener ?? (Sdk as any).default?.SynchronizationListener;
@@ -55,6 +71,7 @@ export class DealRecorder extends Base {
     }
 
     await recordTradeClose(ticket, this.displaySymbol, { exit, pnl, r, reason, closedAt: when });
+    if (pnl > 0) maybePushWin(this.displaySymbol, pnl);
   }
 
   /** Raison de sortie par proximité : TP, SL, ou breakeven (sortie près de l'entrée). */

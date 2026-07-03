@@ -568,6 +568,16 @@ async function main() {
         const clause = narrationReady() ? await narrateRecap(stats) : null;
         await logNarration(clause ?? '', Date.now(), meta);
         console.log(`[algoria] recap ${h}h : ${stats.trades} trades · ${stats.wins} wins · ${Math.round(stats.net)}$`);
+        // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
+        if (h === 21 && stats.net > 0) {
+          const { pushToAll } = await import('../lib/push/send');
+          void pushToAll({
+            title: `Algoria today: +$${Math.round(stats.net)}`,
+            body: `${stats.trades} trades · ${Math.round((stats.wins / stats.trades) * 100)}% win rate — copied to your account.`,
+            url: '/member/history',
+            tag: 'algoria-recap',
+          }).catch(() => {});
+        }
       } catch (e) {
         console.error('[algoria] recap échoué:', e);
       }
