@@ -50,7 +50,22 @@ export async function POST(req: NextRequest) {
     const { data: act } = await db.from('member_actions').select('id,tg_id,kind').eq('id', body.done).eq('status', 'pending').limit(1);
     if (!act?.length) return NextResponse.json({ error: 'action not found' }, { status: 404 });
     await db.from('member_actions').update({ status: 'done', done_at: new Date().toISOString(), done_by: s.username ?? String(s.tgId) }).eq('id', body.done);
-    if (act[0].kind === 'connect') await db.from('members').update({ status: 'live', updated_at: new Date().toISOString() }).eq('tg_id', act[0].tg_id).eq('status', 'pending_copier');
+    if (act[0].kind === 'connect') {
+      await db.from('members').update({ status: 'live', updated_at: new Date().toISOString() }).eq('tg_id', act[0].tg_id).eq('status', 'pending_copier');
+      // PARRAINAGE : filleul approuvé = dépôt vérifié = commission broker gagnée → récompense du parrain
+      // dans la même file (💰 PAY REFERRAL REWARD). Montant : env REFERRAL_REWARD_USD (défaut 50).
+      const { data: mm } = await db.from('members').select('referred_by,member_no').eq('tg_id', act[0].tg_id).limit(1);
+      const refBy = mm?.[0]?.referred_by ? Number(mm[0].referred_by) : null;
+      if (refBy) {
+        const { data: rr } = await db.from('members').select('member_no,tg_username').eq('tg_id', refBy).limit(1);
+        await db.from('member_actions').insert({
+          tg_id: refBy,
+          member_no: rr?.[0]?.member_no ?? null,
+          kind: 'referral_reward',
+          detail: { amount: Number(process.env.REFERRAL_REWARD_USD ?? 50), referred_member_no: mm?.[0]?.member_no ?? null, referrer_username: rr?.[0]?.tg_username ?? null } as never,
+        });
+      }
+    }
     const { data: actions } = await db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100);
     return NextResponse.json({ actions: actions ?? [] });
   }

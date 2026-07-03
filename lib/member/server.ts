@@ -95,6 +95,9 @@ const credsKey = () => {
   return Buffer.from(hex, 'hex');
 };
 
+/** Code de parrainage court (8 hex) — généré à la création du membre. */
+export const newReferralCode = () => randomBytes(4).toString('hex');
+
 export function encryptSecret(plain: string): string {
   const iv = randomBytes(12);
   const c = createCipheriv('aes-256-gcm', credsKey(), iv);

@@ -16,6 +16,16 @@ export interface Member {
   created_at: string;
   mt5_login: string | null;
   mt5_server: string | null;
+  referral_code: string | null;
+}
+
+export interface Referral {
+  code: string | null;
+  invited: number;
+  activated: number;
+  earnedUsd: number;
+  pendingUsd: number;
+  rewardUsd: number;
 }
 
 /** Charge le membre connecté ; redirige vers /member/login si pas de session.
@@ -23,6 +33,7 @@ export interface Member {
  *  tant que l'accès n'a pas été validé (compte via notre lien + dépôt ≥ 500$ + copieur), AUCUN onglet n'est accessible. */
 export function useMe(opts: { requireOnboarded?: boolean } = {}) {
   const [member, setMember] = useState<Member | null>(null);
+  const [referral, setReferral] = useState<Referral | null>(null);
   const [admin, setAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -31,7 +42,7 @@ export function useMe(opts: { requireOnboarded?: boolean } = {}) {
     void fetch('/api/member/me')
       .then(async (r) => {
         if (r.status === 401) { router.replace('/member/login'); return null; }
-        return (await r.json()) as { member: Member; admin: boolean };
+        return (await r.json()) as { member: Member; admin: boolean; referral?: Referral };
       })
       .then((d) => {
         if (!alive || !d?.member) return;
@@ -40,6 +51,7 @@ export function useMe(opts: { requireOnboarded?: boolean } = {}) {
         if (opts.requireOnboarded && !d.admin && d.member.status === 'onboarding') { router.replace('/member/onboarding'); return; }
         if (opts.requireOnboarded && !d.admin && d.member.status === 'pending_copier') { router.replace('/member/pending'); return; }
         setMember(d.member);
+        setReferral(d.referral ?? null);
         setAdmin(!!d.admin);
         setLoading(false);
       })
@@ -47,7 +59,7 @@ export function useMe(opts: { requireOnboarded?: boolean } = {}) {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return { member, setMember, admin, loading };
+  return { member, setMember, referral, admin, loading };
 }
 
 // Icônes SVG de la nav (traits fins, style cockpit — fini les glyphes texte "basiques")
