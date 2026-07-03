@@ -64,6 +64,11 @@ const ICONS: Record<string, React.ReactNode> = {
     </svg>
   ),
   academy: ic('M12 3 2 8.5 12 14l10-5.5L12 3zM6 11v5c0 1.6 2.7 3 6 3s6-1.4 6-3v-5'),
+  profile: (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="8" r="4" /><path d="M4.5 20.5c1.3-3.4 4.1-5 7.5-5s6.2 1.6 7.5 5" />
+    </svg>
+  ),
 };
 
 export function MemberChrome({ children }: { children: React.ReactNode }) {
@@ -103,6 +108,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
             background: 'rgba(8,16,31,.94)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border)',
           }}
         >
+          {/* 5 onglets — ALGORIA AI parfaitement centré : Home·History | AI | Academy·Profile */}
           <Tab href="/member" label="Home" icon={ICONS.home} />
           <Tab href="/member/history" label="History" icon={ICONS.history} />
           {/* ALGORIA AI — le bouton PRINCIPAL : central, surélevé, la marque au centre (le flux live de l'IA) */}
@@ -125,6 +131,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
             <span style={{ fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800, color: liveActive ? 'var(--cyan)' : 'var(--muted)' }}>Algoria AI</span>
           </button>
           <Tab href="/member/academy" label="Academy" icon={ICONS.academy} />
+          <Tab href="/member/profile" label="Profile" icon={ICONS.profile} />
         </nav>
       )}
     </div>

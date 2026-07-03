@@ -1,7 +1,7 @@
 'use client';
 // HOME membre : statut de copie en tête (la réassurance n°1), badge Member #N, Risk Studio, derniers trades d'Algoria.
 import { useEffect, useState } from 'react';
-import { useMe, StatusPill, RiskPicker, type Member } from './ui';
+import { useMe, StatusPill, type Member } from './ui';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string }
 
@@ -9,7 +9,6 @@ export default function MemberHome() {
   const { member, setMember, loading } = useMe({ requireOnboarded: true });
   const [trades, setTrades] = useState<FeedTrade[]>([]);
   const [busy, setBusy] = useState(false);
-  const [riskOpen, setRiskOpen] = useState(false);
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => (r.ok ? setTrades(((await r.json()) as { trades: FeedTrade[] }).trades.slice(0, 8)) : null));
   }, []);
@@ -19,7 +18,7 @@ export default function MemberHome() {
     setBusy(true);
     void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...(tier ? { tier } : {}) }) })
       .then(async (r) => { const d = (await r.json()) as { member?: Member }; if (d.member) setMember(d.member); })
-      .finally(() => { setBusy(false); setRiskOpen(false); });
+      .finally(() => setBusy(false));
   };
 
   const wins = trades.filter((t) => Number(t.pnl) > 0);
@@ -36,7 +35,6 @@ export default function MemberHome() {
             <div style={{ fontWeight: 750, fontSize: 15.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{member.tg_name ?? member.tg_username}</div>
             <div className="mono goldText" style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: 1 }}>MEMBER #{member.member_no}</div>
           </div>
-          <form action="/api/member/logout" method="post"><button style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', borderRadius: 8, padding: '5px 9px', fontSize: 11, cursor: 'pointer' }}>sign out</button></form>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <StatusPill status={member.status} />
@@ -49,24 +47,7 @@ export default function MemberHome() {
         </div>
       </section>
 
-      {/* Risk Studio */}
-      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>RISK PROFILE</h2>
-          <button onClick={() => setRiskOpen((o) => !o)} style={{ border: 'none', background: 'transparent', color: 'var(--cyan)', fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>{riskOpen ? 'close' : 'change'}</button>
-        </div>
-        {!riskOpen ? (
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <span className="mono" style={{ fontSize: 24, fontWeight: 800, color: member.risk_tier === 'high' ? 'var(--gold)' : 'var(--cyan)' }}>
-              {member.risk_tier === 'low' ? '0.01' : member.risk_tier === 'high' ? '0.10' : '0.05'}
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>lot per Algoria trade · {member.risk_tier === 'low' ? 'cautious' : member.risk_tier === 'high' ? 'aggressive' : 'balanced'}</span>
-          </div>
-        ) : (
-          <RiskPicker value={member.risk_tier} busy={busy} onPick={(t) => act('risk', t)} />
-        )}
-      </section>
-
+      {/* Le Risk Studio et le compte vivent dans PROFILE — le Home reste focalisé statut + trades. */}
       {/* Derniers trades d'Algoria (le moteur que tu copies) */}
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
