@@ -80,11 +80,23 @@ function analysisPrompt(ctx: MarketContext, logLines: string[], priceAction?: st
 }
 
 // Filet de sécurité : borne dure la longueur + nettoie label/ponctuation même si le modèle déborde.
+// La coupe est INTELLIGENTE (retour live : « waiting for a » coupé net en plein élan fait amateur) :
+// on recule à la dernière frontière naturelle (virgule/tiret) puis on épluche les mots-outils pendouillants.
 function clampClause(raw: string, maxWords: number): string {
   let t = raw.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\s*[.]+\s*$/, '');
   t = t.replace(/^[A-Z][A-Z /]{2,}:\s*/, ''); // retire un label capitalisé en tête ("WATCH: ")
   const w = t.split(/\s+/).filter(Boolean);
-  if (w.length > maxWords) t = w.slice(0, maxWords).join(' ').replace(/[,;:]$/, '');
+  if (w.length > maxWords) {
+    t = w.slice(0, maxWords).join(' ');
+    // recule à la dernière virgule/point-virgule/tiret si ça préserve au moins la moitié de la clause
+    const cut = Math.max(t.lastIndexOf(','), t.lastIndexOf(';'), t.lastIndexOf(' — '), t.lastIndexOf(' – '));
+    if (cut > 0 && t.slice(0, cut).split(/\s+/).length >= Math.ceil(maxWords / 2)) t = t.slice(0, cut);
+    // épluche les mots-outils en fin de clause ("waiting for a" → coupe propre)
+    const dangling = /^(a|an|the|to|for|of|at|on|in|with|into|under|over|and|or|but|as|before|after|from|by|that|this|its|their|toward|towards|near|still|just|while|when|if|waiting)$/i;
+    const parts = t.split(/\s+/);
+    while (parts.length > 3 && dangling.test(parts[parts.length - 1])) parts.pop();
+    t = parts.join(' ').replace(/[,;:—–-]+$/, '');
+  }
   return t ? t.charAt(0).toLowerCase() + t.slice(1) : '';
 }
 
@@ -146,7 +158,7 @@ const CHIP_LABEL: Record<string, string> = {
   emaStack: 'EMA stack', macd: 'MACD', rsiPullback: 'RSI pull', srZone: 'S/R zone', divergence: 'divergence', liquiditySweep: 'liq sweep', roundLevel: 'round lvl',
 };
 const SESS: Record<Session, string> = { asia: 'ASIA', london: 'LDN', overlap: 'OVERLAP', newyork: 'NY', closed: 'CLOSED' };
-const shortSym = (s: string) => (s === 'XAUUSD' ? 'XAU' : s === 'NAS100' ? 'NAS' : s.slice(0, 4).toUpperCase());
+const shortSym = (s: string) => (s === 'XAUUSD' ? 'XAU' : s === 'NAS100' ? 'NAS' : s === 'BTCUSD' ? 'BTC' : s.slice(0, 3).toUpperCase());
 const tone = (score: number): 'bull' | 'bear' | 'neutral' => (score > 0.05 ? 'bull' : score < -0.05 ? 'bear' : 'neutral');
 
 export interface DeskMeta {
