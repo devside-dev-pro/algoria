@@ -14,6 +14,7 @@ interface SymSpec { key: string; label: string; short: string; contract: number;
 const SYMS: SymSpec[] = [
   { key: 'XAUUSD', label: 'XAU/USD', short: 'XAU', contract: 100, pip: 0.1, dp: 2 },
   { key: 'NAS100', label: 'NAS100', short: 'NAS', contract: 1, pip: 1, dp: 1 },
+  { key: 'BTCUSD', label: 'BTC/USD', short: 'BTC', contract: 1, pip: 10, dp: 1 }, // 24/7 — WATCH pour l'auto (pas d'edge validé), manuel OK
 ];
 const symSpec = (k: string) => SYMS.find((s) => s.key === k) ?? SYMS[0];
 
@@ -133,7 +134,7 @@ export function Cockpit() {
   }
 
   function manualTrade(direction: 'long' | 'short') {
-    const p: Record<string, unknown> = { direction };
+    const p: Record<string, unknown> = { direction, symbol }; // routé vers le MARCHÉ affiché (long/short BTC à la main, etc.)
     const l = parseFloat(lot); if (l > 0) p.lot = l;
     const s = parseFloat(slIn); if (s > 0) p.sl = s;
     const t = parseFloat(tpIn); if (t > 0) p.tp = t;
@@ -209,7 +210,7 @@ export function Cockpit() {
         <label style={lbl}>TP<input value={tpIn} onChange={(e) => setTpIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(64)} /></label>
         <button onClick={() => manualTrade('long')} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="open a LONG at market (SL/TP optional)">▲ LONG</button>
         <button onClick={() => manualTrade('short')} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="open a SHORT at market (SL/TP optional)">▼ SHORT</button>
-        <button onClick={() => fire('flat', () => sendCommand('close_all'))} style={deckBtn('flat', lastFire === 'flat', false)} title="close all open positions">✕ CLOSE ALL</button>
+        <button onClick={() => fire('flat', () => sendCommand('close_all', { symbol }))} style={deckBtn('flat', lastFire === 'flat', false)} title="close all open positions on the displayed market">✕ CLOSE ALL</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: openPos > 0 ? 'var(--up)' : 'var(--dim)' }}>
             {openPos > 0 && <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--up)' }} />}

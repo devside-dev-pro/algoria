@@ -282,15 +282,18 @@ async function main() {
         const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts }, FEATURES, cfg);
         lastCtx = context;
         await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
-        if (signal) {
+        // WATCH-ONLY (ex. BTC) : le desk lit et raconte le marché, mais l'auto ne tire JAMAIS — aucun edge
+        // validé. Le signal éventuel devient une simple « opportunity » à l'écran (le manuel reste possible).
+        const autoSignal = inst.watchOnly ? null : signal;
+        if (autoSignal) {
           // Garde-fou PORTEFEUILLE (global) au-dessus des limites par-symbole : on ne laisse pas l'or + le Nasdaq
           // (+ Forex à venir) empiler des positions corrélées. N'affecte que l'auto (manuel/show restent libres).
           const veto = portfolioVeto({ positions: (terminal.positions ?? []) as any[], symbol: BROKER });
           if (veto) {
-            await logSignal(signal, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' });
+            await logSignal(autoSignal, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' });
             if (isPrimary) await logNote(`${DISPLAY}: trade bloqué — ${veto}`, 'veto');
           } else {
-            await executeSignal(signal);
+            await executeSignal(autoSignal);
           }
         }
 
@@ -299,7 +302,7 @@ async function main() {
         // TOUS les garde-fous passent (risque par-symbole via checkRisk — 1 pos/symbole, spread, kill,
         // news lockout — puis veto portefeuille). Gestion post-entrée SPÉCIFIQUE : BE tardif + trailing.
         let bkSignal: Signal | null = null;
-        if (!signal && inst.breakout && mode === 'scalp' && !state.killed) {
+        if (!autoSignal && inst.breakout && !inst.watchOnly && mode === 'scalp' && !state.killed) {
           bkSignal = breakoutSignal(DISPLAY, bars, inst.breakout, mode, cfg.priceStep ?? 0.01);
           if (bkSignal) {
             const risk = checkRisk(bkSignal, state, cfg);
@@ -323,7 +326,7 @@ async function main() {
             }
           }
         }
-        const executed = signal ?? bkSignal; // ce que le desk raconte comme TRADE (scalp ou breakout)
+        const executed = autoSignal ?? bkSignal; // ce que le desk raconte comme TRADE (scalp ou breakout)
 
         // Feed d'events + état COMPTE (balance/equity global) → PRIMAIRE uniquement (canaux mono-symbole partagés).
         if (isPrimary) {
@@ -470,17 +473,21 @@ async function main() {
           const lot = typeof pl?.lot === 'number' && pl.lot > 0 ? pl.lot : undefined;
           const sl = typeof pl?.sl === 'number' && pl.sl > 0 ? pl.sl : undefined;
           const tp = typeof pl?.tp === 'number' && pl.tp > 0 ? pl.tp : undefined;
+          // Routé vers le MARCHÉ affiché dans le cockpit (payload.symbol) — permet long/short manuel sur BTC
+          // (watch-only pour l'auto, libre pour l'opérateur). Fallback primaire (or) pour les vieux payloads.
+          const eng = engines.find((x) => x.inst.display === pl?.symbol) ?? primary;
           if (killed) {
             await logNote(`manual trade ${dir} ignored — kill switch active`, 'veto');
           } else {
-            const sig = primary.buildManualSignal(dir, { lot, sl, tp });
-            if (sig) await primary.executeSignal(sig);
+            const sig = eng.buildManualSignal(dir, { lot, sl, tp });
+            if (sig) await eng.executeSignal(sig);
             else await logNote(`manual trade ${dir} ignored — no live price`, 'veto');
           }
         } else if (cmd.type === 'close_all') {
+          const eng = engines.find((x) => x.inst.display === (cmd.payload as any)?.symbol) ?? primary;
           try {
-            await closeAll(stream, primary.inst.broker);
-            await logNote('✕ close all — all positions closed manually', 'order');
+            await closeAll(stream, eng.inst.broker);
+            await logNote(`✕ close all — ${eng.inst.display} positions closed manually`, 'order');
           } catch (e) {
             await logNote(`close all failed · ${(e as { message?: string })?.message ?? String(e)}`, 'veto');
           }

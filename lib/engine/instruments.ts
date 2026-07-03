@@ -12,6 +12,9 @@ export interface InstrumentSpec {
   ctx: Partial<ContextOptions>; // options de contexte (roundStep, tradeAsia, gate vol) — le spread est injecté au runtime
   enabled: boolean; // trader cet instrument ?
   breakout?: BreakoutConfig; // 2ᵉ stratégie (cassures Donchian) EN PLUS du scalp — uniquement si validée par le labo
+  // WATCH-ONLY : chart + desk + bougies + trades MANUELS, mais JAMAIS d'exécution auto (aucun edge validé).
+  // Cas d'usage : BTC le week-end — le marché vit à l'écran, Algoria analyse, l'opérateur peut long/short à la main.
+  watchOnly?: boolean;
 }
 
 // Options de contexte communes au profil SCALP : session asia tradable + gate de volatilité élargi
@@ -44,6 +47,14 @@ const NAS100_SCALP: EngineConfig = {
   risk: { ...SCALP_CONFIG.risk, maxSpread: 5 },
 };
 
+// BTC — config de LECTURE seulement (seuils du desk, spread max) : l'auto ne tire jamais (watchOnly).
+const BTCUSD_WATCH: EngineConfig = {
+  ...SCALP_CONFIG,
+  contractSize: 1, // CFD crypto : 1 lot = 1 BTC
+  priceStep: 0.01,
+  risk: { ...SCALP_CONFIG.risk, maxSpread: 40 }, // spread réel mesuré ~10$ — marge pour les heures creuses
+};
+
 export const INSTRUMENTS: InstrumentSpec[] = [
   {
     display: 'XAUUSD',
@@ -61,6 +72,17 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     config: NAS100_SCALP,
     ctx: { ...SCALP_CTX, roundStep: 100 }, // niveaux ronds du Nasdaq ~100 pts (pas les $10 de l'or)
     enabled: process.env.TRADE_NAS100 === '1', // opt-in tant que le runner multi-symboles n'est pas en place
+  },
+  {
+    // BTC — seul marché 24/7 (les lives du week-end). AUCUN edge auto validé (scalp ET labo ont échoué —
+    // backtest/validate.ts + backtest/lab.ts, 17.4 j) → watchOnly : desk/chart/bougies vivent, l'auto ne tire
+    // JAMAIS, le manuel reste possible depuis le cockpit. Les bougies s'accumulent → re-validation dans 1 mois.
+    display: 'BTCUSD',
+    broker: process.env.BTCUSD_SYMBOL ?? 'BTCUSD',
+    config: BTCUSD_WATCH,
+    ctx: { ...SCALP_CTX, roundStep: 1000 }, // niveaux psychologiques BTC ~1000$
+    enabled: process.env.WATCH_BTCUSD !== '0', // ON par défaut (désactivable sans redeploy de code)
+    watchOnly: true,
   },
 ];
 
