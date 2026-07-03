@@ -21,7 +21,7 @@ export function Login() {
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 16 }}>
       <form onSubmit={submit} className="panel" style={{ width: 320, padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <span className="glow" style={{ width: 26, height: 26, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
+          <img src="/brand/algoria-mark.svg" alt="Algoria" width={26} height={26} style={{ filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
           <strong style={{ fontSize: 18, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
         </div>
         <input type="email" required placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />

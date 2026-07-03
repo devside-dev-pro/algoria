@@ -153,7 +153,7 @@ export function Cockpit() {
       {/* ===== HEADER ===== */}
       <header className="panel" style={{ flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '8px 12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span className="glow" style={{ width: 20, height: 20, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
+          <img src="/brand/algoria-mark.svg" alt="Algoria" width={22} height={22} style={{ filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
           <strong style={{ fontSize: 15, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
           <FeedStatus />
           <MarketRail selected={symbol} onSelect={setSymbol} openBySym={openBySym} />

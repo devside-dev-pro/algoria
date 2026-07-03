@@ -25,7 +25,7 @@ export default function Funnel() {
       <div style={{ position: 'relative', width: '100%', maxWidth: 440, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
         {/* LIVE / logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ width: 30, height: 30, background: 'linear-gradient(135deg,#2be3f5,#1e40e5)', clipPath: 'polygon(50% 8%,92% 92%,8% 92%)' }} />
+          <img src="/brand/algoria-mark.svg" alt="Algoria" width={30} height={30} style={{ filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
           <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</span>
           {live && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 800, letterSpacing: 1, color: '#fff', background: 'linear-gradient(90deg,#ff2d55,#ff5a3c)', padding: '3px 8px', borderRadius: 20 }}>
