@@ -104,7 +104,7 @@ function Chips({ m }: { m: any }) {
     : [{ label: `ADX ${m?.adx ?? '—'}`, tone: 'neutral' }]; // fallback si pas de drivers
   const vsEma = m?.emaBias && m.emaBias !== 'flat' && m?.direction && m.direction !== 'flat' && m.emaBias !== m.direction;
   return (
-    <div style={{ display: 'flex', gap: 5, marginTop: 4, flexWrap: 'nowrap', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
       {chips.map((c, i) => (
         <span key={i} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap', background: `color-mix(in srgb, ${TONE[c.tone] ?? TONE.neutral} 12%, transparent)`, color: TONE[c.tone] ?? TONE.neutral, border: `1px solid color-mix(in srgb, ${TONE[c.tone] ?? TONE.neutral} 24%, transparent)` }}>
           {c.label}
@@ -157,9 +157,10 @@ function Card({ e, latest }: { e: any; latest: boolean }) {
         <span style={{ fontSize: 9.5, color: 'var(--dim)', fontFamily: MONO }}>{hhmm(e?.ts)}</span>
       </div>
 
-      {/* ROW 2 — clause (seule prose) : jamais un pavé, tronquée à une ligne */}
+      {/* ROW 2 — clause (seule prose) : elle DOIT se lire en entier (retour live : la troncature "…" rendait
+          le desk illisible). Le LLM est déjà bridé à ~16 mots → 2 lignes max, pas de pavé. */}
       {clause && (
-        <div style={{ fontSize: 12, lineHeight: 1.35, marginTop: 3, color: latest ? 'var(--text)' : 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{clause}</div>
+        <div style={{ fontSize: 12, lineHeight: 1.35, marginTop: 3, color: latest ? 'var(--text)' : 'var(--muted)', overflowWrap: 'break-word' }}>{clause}</div>
       )}
 
       {/* ROW 3 — bande structurée selon le type */}

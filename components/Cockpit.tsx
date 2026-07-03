@@ -507,7 +507,7 @@ const whyOverlay: CSSProperties = {
   left: 14,
   bottom: 34,
   zIndex: 6,
-  width: 238,
+  width: 262, // assez large pour "liquidity sweep" en entier (retour live : les labels tronqués "…" font cheap)
   padding: '9px 11px',
   borderRadius: 10,
   background: 'rgba(8,16,31,.82)',
@@ -568,7 +568,7 @@ function WhyPanel({ direction, conf, rationale, live, closed = false, pnl = null
           const frac = Math.min(1, Math.abs(w) / maxW);
           return (
             <div key={c.key ?? i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 9.5, color: 'var(--muted)', width: 82, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{FEATURE_LABELS[c.key] ?? c.key}</span>
+              <span style={{ fontSize: 9.5, color: 'var(--muted)', width: 96, whiteSpace: 'nowrap' }}>{FEATURE_LABELS[c.key] ?? c.key}</span>
               <span style={{ position: 'relative', flex: 1, height: 5, background: 'rgba(130,152,190,.12)', borderRadius: 3 }}>
                 <span style={{ position: 'absolute', left: '50%', top: -1, bottom: -1, width: 1, background: 'rgba(130,152,190,.35)' }} />
                 <span style={{ position: 'absolute', top: 0, bottom: 0, borderRadius: 2, background: barCol(bull), left: bull ? '50%' : `${50 - frac * 50}%`, width: `${frac * 50}%` }} />
