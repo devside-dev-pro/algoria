@@ -21,7 +21,7 @@ function LoginInner() {
   }, []);
   return (
     <main style={{ minHeight: '92vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 22, textAlign: 'center', padding: '0 18px' }}>
-      <img src="/brand/algoria-mark.svg" alt="Algoria" width={60} height={60} style={{ filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
+      <img src="/brand/algoria-mark.png" alt="Algoria" width={60} height={60} style={{ objectFit: 'contain', filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
       <div>
         <h1 style={{ fontSize: 30, margin: 0, letterSpacing: 0.5 }}>
           ALGORIA <span className="goldText">MEMBERS</span>

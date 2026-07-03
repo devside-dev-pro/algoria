@@ -24,7 +24,7 @@ export default function Academy() {
           </div>
         ) : (
           <div style={{ aspectRatio: '16/9', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'radial-gradient(80% 90% at 50% 20%, #12213e 0%, #0a1425 100%)' }}>
-            <img src="/brand/algoria-mark.svg" alt="Algoria" width={48} height={48} style={{ filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
+            <img src="/brand/algoria-mark.png" alt="Algoria" width={48} height={48} style={{ objectFit: 'contain', filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
             <span style={{ fontWeight: 800, letterSpacing: 0.6 }}>WELCOME VIDEO — DROPPING SOON</span>
             <span style={{ fontSize: 12, color: 'var(--dim)' }}>your founder is filming it right now</span>
           </div>
