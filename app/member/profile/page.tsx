@@ -1,8 +1,77 @@
 'use client';
-// PROFIL — identité (Member #N), Risk Studio, compte broker/MT5, pause/reprise, déconnexion.
+// PROFIL — identité (Member #N), Risk Studio, parrainage, notifications push, compte, déconnexion.
 // Le Home reste focalisé sur le statut + les trades ; tout ce qui est "réglages du compte" vit ici.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMe, StatusPill, RiskPicker, type Member } from '../ui';
+
+const b64ToU8 = (s: string) => {
+  const pad = '='.repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+};
+
+// Alertes push : wins d'Algoria, recap du jour, annonce de live. Opt-in explicite (permission navigateur).
+function PushCard() {
+  const [state, setState] = useState<'unsupported' | 'off' | 'on' | 'denied' | 'busy'>('busy');
+  useEffect(() => {
+    void (async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY) return setState('unsupported');
+      if (Notification.permission === 'denied') return setState('denied');
+      const reg = await navigator.serviceWorker.ready;
+      setState((await reg.pushManager.getSubscription()) ? 'on' : 'off');
+    })();
+  }, []);
+  const enable = async () => {
+    setState('busy');
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!) });
+      const j = sub.toJSON();
+      await fetch('/api/member/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint, keys: j.keys }) });
+      setState('on');
+    } catch {
+      setState(Notification.permission === 'denied' ? 'denied' : 'off');
+    }
+  };
+  const disable = async () => {
+    setState('busy');
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await fetch('/api/member/push', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+        await sub.unsubscribe();
+      }
+    } finally {
+      setState('off');
+    }
+  };
+  if (state === 'unsupported') return null;
+  return (
+    <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>NOTIFICATIONS</h2>
+      <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+        Get pinged when <strong style={{ color: 'var(--text)' }}>Algoria cashes a win</strong>, the daily recap drops, and when the live starts.
+      </p>
+      {state === 'denied' ? (
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Notifications are blocked in your browser settings — allow them for this site to enable alerts.</p>
+      ) : (
+        <button
+          disabled={state === 'busy'}
+          onClick={() => void (state === 'on' ? disable() : enable())}
+          style={{
+            padding: '11px 16px', borderRadius: 11, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 12.5,
+            color: state === 'on' ? 'var(--up)' : '#0b0e14',
+            background: state === 'on' ? 'rgba(31,216,176,.12)' : 'linear-gradient(90deg,#2be3f5,#2e8bf0)',
+            outline: state === 'on' ? '1px solid rgba(31,216,176,.45)' : 'none',
+          }}
+        >
+          {state === 'busy' ? '…' : state === 'on' ? '🔔 ALERTS ON — tap to disable' : '🔔 ENABLE PUSH ALERTS'}
+        </button>
+      )}
+    </section>
+  );
+}
 
 export default function Profile() {
   const { member, setMember, referral, loading } = useMe({ requireOnboarded: true });
@@ -79,6 +148,8 @@ export default function Profile() {
         <RiskPicker value={member.risk_tier} busy={busy} onPick={(t) => act('risk', t)} />
         <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Changes are applied by the team within a few hours — you&apos;ll see it reflected on your MT5.</p>
       </section>
+
+      <PushCard />
 
       {/* compte */}
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>

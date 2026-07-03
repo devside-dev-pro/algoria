@@ -49,8 +49,19 @@ export default function MemberAdmin() {
       .finally(() => setBusy(false));
   };
   const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', referral_reward: '💰 PAY REFERRAL REWARD' };
+  const liveAlert = () => {
+    if (!window.confirm('Send "🔴 ALGORIA IS LIVE" to every subscribed member?')) return;
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ liveAlert: true }) })
+      .then(async (r) => { const d = (await r.json()) as { sent?: number }; window.alert(`Live alert sent to ${d.sent ?? 0} device(s).`); })
+      .finally(() => setBusy(false));
+  };
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
+      {/* 📣 avant de lancer le stream : un tap → tous les téléphones membres vibrent → audience sur le live */}
+      <button disabled={busy} onClick={liveAlert} style={{ padding: '13px 16px', borderRadius: 12, border: '1px solid rgba(255,90,60,.55)', background: 'rgba(255,90,60,.1)', color: '#ff8a5c', fontWeight: 800, letterSpacing: 0.8, fontSize: 13, cursor: 'pointer' }}>
+        📣 SEND “ALGORIA IS LIVE” ALERT
+      </button>
       {/* File STH : les intentions des membres à appliquer dans Social Trade Hub, dans l'ordre.
           Un 'connect' marqué done passe automatiquement le membre en ● LIVE. */}
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, borderColor: actions.length ? 'rgba(245,194,74,.4)' : undefined }}>
