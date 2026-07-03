@@ -36,7 +36,15 @@ export default function MemberAdmin() {
   const doneAction = (id: string) => {
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: id }) })
-      .then(async (r) => { const d = (await r.json()) as { actions?: Action[] }; if (d.actions) setActions(d.actions); })
+      .then(async (r) => { const d = (await r.json()) as { actions?: Action[] }; if (d.actions) setActions(d.actions); setCreds((c) => { const n = { ...c }; delete n[id]; return n; }); })
+      .finally(() => setBusy(false));
+  };
+  // identifiants révélés (par action, en mémoire uniquement — disparaissent au DONE / rechargement)
+  const [creds, setCreds] = useState<Record<string, { login: string; server: string; password: string }>>({});
+  const reveal = (id: string) => {
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reveal: id }) })
+      .then(async (r) => { const d = (await r.json()) as { login?: string; server?: string; password?: string; error?: string }; if (d.password) setCreds((c) => ({ ...c, [id]: { login: d.login ?? '', server: d.server ?? '', password: d.password! } })); })
       .finally(() => setBusy(false));
   };
   const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY' };
@@ -50,17 +58,30 @@ export default function MemberAdmin() {
         </h2>
         {actions.length === 0 && <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Queue clear — nothing to apply.</p>}
         {actions.map((a) => (
-          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
-            <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{a.member_no ?? '—'}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
-              <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')}`}
-                {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')})`}
-                {(a.kind === 'pause' || a.kind === 'resume') && new Date(a.created_at).toLocaleString('en-GB')}
+          <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '9px 11px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{a.member_no ?? '—'}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
+                <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')}`}
+                  {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')})`}
+                  {(a.kind === 'pause' || a.kind === 'resume') && new Date(a.created_at).toLocaleString('en-GB')}
+                </div>
               </div>
+              {a.kind === 'connect' && !creds[a.id] && (
+                <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password to add the account in STH (timestamped)" style={{ border: '1px solid rgba(245,194,74,.45)', background: 'rgba(245,194,74,.08)', color: 'var(--gold)', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>🔑 REVEAL</button>
+              )}
+              <button disabled={busy} onClick={() => doneAction(a.id)} style={{ border: '1px solid rgba(31,216,176,.45)', background: 'rgba(31,216,176,.1)', color: 'var(--up)', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>✓ DONE</button>
             </div>
-            <button disabled={busy} onClick={() => doneAction(a.id)} style={{ border: '1px solid rgba(31,216,176,.45)', background: 'rgba(31,216,176,.1)', color: 'var(--up)', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>✓ DONE</button>
+            {creds[a.id] && (
+              <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 12, padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.06)' }}>
+                <span>login <b style={{ color: 'var(--text)' }}>{creds[a.id].login}</b></span>
+                <span>server <b style={{ color: 'var(--text)' }}>{creds[a.id].server}</b></span>
+                <span>password <b style={{ color: 'var(--gold)' }}>{creds[a.id].password}</b></span>
+                <button onClick={() => void navigator.clipboard?.writeText(creds[a.id].password)} style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', borderRadius: 6, padding: '2px 8px', fontSize: 10.5, cursor: 'pointer' }}>copy</button>
+              </div>
+            )}
           </div>
         ))}
       </section>
