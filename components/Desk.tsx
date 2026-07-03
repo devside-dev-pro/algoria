@@ -11,12 +11,13 @@ const TONE: Record<string, string> = { bull: 'var(--up)', bear: 'var(--down)', n
 
 function kindColor(m: any): string {
   if (m?.kind === 'recap') return 'var(--gold)';
+  if (m?.kind === 'news') return 'var(--gold)';
   if (m?.kind === 'opportunity') return 'var(--gold)';
   if (m?.kind === 'analysis') return 'var(--cyan)';
   return m?.direction === 'short' ? 'var(--down)' : m?.direction === 'long' ? 'var(--up)' : 'var(--muted)';
 }
-const glyph = (m: any) => (m?.kind === 'recap' ? '∑' : m?.direction === 'long' ? '▲' : m?.direction === 'short' ? '▼' : m?.kind === 'opportunity' ? '◆' : '●');
-const tag = (m: any) => (m?.kind === 'recap' ? 'RECAP' : m?.kind === 'trade' ? (m?.direction === 'long' ? 'LONG' : 'SHORT') : m?.kind === 'opportunity' ? 'WATCH' : 'READ');
+const glyph = (m: any) => (m?.kind === 'recap' ? '∑' : m?.kind === 'news' ? '⚠' : m?.direction === 'long' ? '▲' : m?.direction === 'short' ? '▼' : m?.kind === 'opportunity' ? '◆' : '●');
+const tag = (m: any) => (m?.kind === 'recap' ? 'RECAP' : m?.kind === 'news' ? 'ECO NEWS' : m?.kind === 'trade' ? (m?.direction === 'long' ? 'LONG' : 'SHORT') : m?.kind === 'opportunity' ? 'WATCH' : 'READ');
 const symOf = (m: any) => (m?.symbol as string | undefined) ?? 'XAUUSD'; // legacy (sans symbole) → or
 const levelPrefix = (lk: string) => (lk === 'support' ? 'S' : lk === 'resistance' ? 'R' : '@');
 const STATE_WORD: Record<string, string> = { in_long: 'IN LONG', in_short: 'IN SHORT', stalking_long: 'STALKING LONG', stalking_short: 'STALKING SHORT', aside: 'STANDING ASIDE' };
@@ -136,7 +137,11 @@ function Card({ e, latest }: { e: any; latest: boolean }) {
         <span style={{ fontSize: 13, fontWeight: 800, color, width: 12, textAlign: 'center' }}>{glyph(m)}</span>
         <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8, color }}>{tag(m)}</span>
         {m?.instrument && <span style={{ fontSize: 8.5, fontWeight: 700, fontFamily: MONO, letterSpacing: 0.5, color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{m.instrument}</span>}
-        {m?.kind === 'recap' ? (
+        {m?.kind === 'news' ? (
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {m?.title} <span style={{ color: 'var(--gold)', fontFamily: MONO }}>in {m?.minutes}m</span>
+          </span>
+        ) : m?.kind === 'recap' ? (
           <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
             {m?.trades} trades · {m?.winRate != null ? Math.round(Number(m.winRate) * 100) + '% win' : '—'} · <span style={{ color: Number(m?.net) >= 0 ? 'var(--up)' : 'rgba(210,150,165,.8)' }}>{Number(m?.net) >= 0 ? '+' : ''}{Math.round(Number(m?.net) || 0)}$</span>
           </span>
@@ -179,7 +184,7 @@ export function Desk({ items = [], heroSymbol = 'XAUUSD' }: { items?: any[]; her
   // Le flux est MULTI-MARCHÉ (XAU + NAS entrelacés) ; les recaps ne sont jamais fusionnés.
   const key = (e: any) => {
     const m = e?.data ?? {};
-    if (m.kind === 'recap') return `recap|${e?.id}`;
+    if (m.kind === 'recap' || m.kind === 'news') return `${m.kind}|${e?.id}`; // jamais fusionnés
     const bucket = Math.floor((e?.ts ? Date.parse(e.ts) : 0) / 900_000);
     return `${symOf(m)}|${m.state}|${m.levelKind}|${Math.round(Number(m.level) || 0)}|${m.direction}|${bucket}`;
   };

@@ -14,6 +14,7 @@ import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
+import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from './news';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
 
@@ -273,6 +274,7 @@ async function main() {
       try {
         state = readState(terminal, BROKER, state);
         state.killed = killed; // le kill switch global gèle l'auto sur tous les instruments
+        state.newsWindows = newsWindows(); // annonces éco USD fort impact → checkRisk refuse les entrées autour
         // mode scalp = config scalp VALIDÉE de l'instrument (l'or et le Nasdaq n'ont pas la même). NORMAL → DEFAULT strict.
         const cfg = mode === 'scalp' ? inst.config : DEFAULT_CONFIG;
         // SCALP : on injecte le contexte propre à l'instrument (session asia, gate vol élargi, roundStep) + le spread live.
@@ -517,6 +519,30 @@ async function main() {
       try { eng.reconcile(); } catch (e) { console.error(`[algoria] reconcile ${eng.inst.display} échoué:`, e); }
     }
     void primary.pushAccount().catch((e) => console.error('[algoria] pushAccount échoué:', e)); // compte frais toutes les 60 s
+  }, 60_000);
+
+  // ===== CALENDRIER ÉCO : fetch au boot + toutes les 6 h, et chaque minute on émet les rappels desk
+  // (T−30 et T−5 min avant chaque annonce USD fort impact). Le lockout moteur, lui, est déjà servi par
+  // state.newsWindows dans onClosed — même si le desk se tait, l'auto ne rentre pas autour d'une annonce. =====
+  void refreshCalendar().then((n) => console.log(`[algoria] calendrier éco : ${n >= 0 ? n + ' événements chargés' : 'échec initial (retry auto)'}`));
+  setInterval(() => void refreshCalendar(), 6 * 3600_000);
+  setInterval(() => {
+    void (async () => {
+      try {
+        if (!calendarFresh()) return;
+        for (const { event, minutes, slot } of dueAnnouncements()) {
+          const when = new Date(event.time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+          const nums = [event.forecast ? `forecast ${event.forecast}` : '', event.previous ? `prev ${event.previous}` : ''].filter(Boolean).join(' · ');
+          const msg = slot === 30
+            ? `${event.title} drops in ${minutes} min (${when} UTC)${nums ? ' — ' + nums : ''}. High-impact USD — auto entries pause around the release.`
+            : `${event.title} in ${minutes} min — Algoria stands aside until the dust settles.`;
+          await logNarration(msg, Date.now(), { kind: 'news', title: event.title, impact: event.impact, country: event.country, minutes, at: event.time, forecast: event.forecast ?? null, previous: event.previous ?? null });
+          console.log(`[algoria] éco news T−${slot} : ${event.title} dans ${minutes} min`);
+        }
+      } catch (e) {
+        console.error('[algoria] annonce éco échouée:', e);
+      }
+    })();
   }, 60_000);
 
   // ===== RECAP HORAIRE du desk : à chaque heure pleine, une carte "SESSION RECAP" (stats réelles du jour,
