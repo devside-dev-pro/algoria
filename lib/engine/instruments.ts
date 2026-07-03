@@ -2,6 +2,7 @@
 // Fondation du mode multi-instruments : le runner multi-symboles et le risque portefeuille consomment ceci.
 // Chaque instrument a sa PROPRE config (l'or et le Nasdaq n'ont pas le même profil : R:R, SL, seuil, maxSpread…).
 import { SCALP_CONFIG, type EngineConfig } from './config';
+import { GOLD_BREAKOUT, type BreakoutConfig } from './breakout';
 import type { ContextOptions } from './context';
 
 export interface InstrumentSpec {
@@ -10,6 +11,7 @@ export interface InstrumentSpec {
   config: EngineConfig; // config scalp validée pour CET instrument
   ctx: Partial<ContextOptions>; // options de contexte (roundStep, tradeAsia, gate vol) — le spread est injecté au runtime
   enabled: boolean; // trader cet instrument ?
+  breakout?: BreakoutConfig; // 2ᵉ stratégie (cassures Donchian) EN PLUS du scalp — uniquement si validée par le labo
 }
 
 // Options de contexte communes au profil SCALP : session asia tradable + gate de volatilité élargi
@@ -49,6 +51,9 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     config: XAUUSD_SCALP,
     ctx: SCALP_CTX,
     enabled: true, // toujours actif (comportement live actuel)
+    // 2ᵉ cerveau : cassures Donchian 8h — EN PLUS du scalp (labo 30.5j : PF 1.50, +$2248, ~3.6 setups/j,
+    // tiers ✅✅✅). Le scalp joue les rejets, le breakout joue les cassures. Cap 1 position/symbole partagé.
+    breakout: GOLD_BREAKOUT,
   },
   {
     display: 'NAS100',
