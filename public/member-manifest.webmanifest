@@ -1,0 +1,14 @@
+{
+  "name": "Algoria Members",
+  "short_name": "Algoria",
+  "description": "Your Algoria member dashboard — copying status, risk control, live AI feed.",
+  "start_url": "/member",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#08101f",
+  "theme_color": "#08101f",
+  "icons": [
+    { "src": "/icons/member-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/member-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
