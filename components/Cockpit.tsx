@@ -28,7 +28,6 @@ export function Cockpit() {
   const symCtx = (deskItems as any[]).find((e) => ((e?.data?.symbol as string | undefined) ?? 'XAUUSD') === symbol)?.data; // dernier contexte structuré du symbole sélectionné
   const dayStartEq = useDayStartEquity();
   const equityCurve = useEquityCurve();
-  const [optMode, setOptMode] = useState<string | null>(null);
   const [optKilled, setOptKilled] = useState<boolean | null>(null);
   const [show, setShow] = useState(false); // SHOW = générateur d'activité (ex action + rafale fusionnés → set_rafale)
   const [lastFire, setLastFire] = useState<string | null>(null);
@@ -52,8 +51,8 @@ export function Cockpit() {
       }
       return n;
     });
-  const activeMode = optMode ?? (st?.mode as string | undefined) ?? 'scalp'; // défaut SCALP (edge validé, cf. runner)
-  const strategy = activeMode === 'scalp' ? 'scalp' : 'normal'; // 2 stratégies seulement
+  // Une SEULE stratégie exposée : le scalp validé tourne 24/24 (le sélecteur NORMAL/SCALP était un bouton
+  // qu'on ne touchait jamais — retiré). Le vrai interrupteur, c'est AUTO ON/OFF (kill switch du moteur).
   const killed = optKilled ?? !!st?.killed;
   const openPos = Number(st?.open_positions ?? 0);
   const dayPnl =
@@ -141,10 +140,6 @@ export function Cockpit() {
     fire(direction, () => sendCommand('manual_trade', p));
   }
 
-  function setStrategy(mode: 'normal' | 'scalp') {
-    setOptMode(mode);
-    void sendCommand('set_mode', { mode });
-  }
 
   return (
     <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', gap: 8, padding: 10, overflow: 'hidden' }}>
@@ -169,14 +164,20 @@ export function Cockpit() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!broadcast && (
             <>
-              {/* STRATEGY : 2 stratégies seulement */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={grpLabel}>STRATEGY</span>
-                <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
-                  <button onClick={() => setStrategy('normal')} style={seg(strategy === 'normal', false)} title="Normal — selective real edge">NORMAL</button>
-                  <button onClick={() => setStrategy('scalp')} style={seg(strategy === 'scalp', true)} title="Scalp — validated scalp strategy (trades often, fast TP)">⚡ SCALP</button>
-                </div>
-              </div>
+              {/* AUTO ON/OFF — l'interrupteur du moteur (remplace l'ex-sélecteur NORMAL/SCALP jamais utilisé
+                  + l'ancien bouton KILL : même commande kill/resume, lecture instantanée ON=vert / OFF=rouge). */}
+              <button
+                onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
+                style={{
+                  ...pill(false), padding: '5px 14px', fontWeight: 700, letterSpacing: 0.5,
+                  color: killed ? '#ff8aa2' : 'var(--up)',
+                  borderColor: killed ? 'rgba(255,107,138,.5)' : 'rgba(31,216,176,.45)',
+                  background: killed ? 'rgba(255,107,138,.14)' : 'rgba(31,216,176,.08)',
+                }}
+                title={killed ? 'auto-trading is OFF — click to resume' : 'auto-trading is ON (validated scalp + breakout, 24/24) — click to stop new entries'}
+              >
+                {killed ? '⏸ AUTO OFF' : '⚡ AUTO ON'}
+              </button>
               {/* SHOW : générateur d'activité (action + rafale fusionnés) */}
               <button
                 onClick={() => { const n = !show; setShow(n); void sendCommand('set_rafale', { on: n }); }}
@@ -184,13 +185,6 @@ export function Cockpit() {
                 title="BEAST MODE — rapid-fire micro-scalps for the stream (3-5/min). Pure show, not an edge: small lot, burns fees. Best on demo."
               >
                 {show ? '🔥 BEAST ON' : '🔥 BEAST MODE'}
-              </button>
-              <button
-                onClick={() => { const next = !killed; setOptKilled(next); void sendCommand(next ? 'kill' : 'resume'); }}
-                style={{ ...pill(killed), padding: '5px 12px', color: killed ? '#ff8aa2' : 'var(--muted)', borderColor: 'rgba(255,107,138,.45)', background: killed ? 'rgba(255,107,138,.15)' : 'transparent' }}
-                title={killed ? 'resume trading' : 'kill switch — stops any new position'}
-              >
-                {killed ? '● KILLED' : 'KILL'}
               </button>
               <button onClick={() => supabase.auth.signOut()} style={{ ...pill(false), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 9px' }} title="sign out" aria-label="sign out"><LogoutIcon /></button>
             </>
@@ -717,20 +711,6 @@ function inp(width: number): CSSProperties {
     background: 'var(--panel-2)',
     border: '1px solid rgba(130,152,190,.3)',
     outline: 'none',
-  };
-}
-
-// Segmented strategy button (NORMAL | SCALP). scalp = gold accent.
-function seg(active: boolean, gold: boolean): CSSProperties {
-  return {
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: 0.4,
-    padding: '5px 12px',
-    cursor: 'pointer',
-    border: 'none',
-    color: active ? (gold ? '#0b0e14' : '#7fc4ff') : 'var(--muted)',
-    background: active ? (gold ? '#ffd166' : 'rgba(46,139,240,.22)') : 'transparent',
   };
 }
 
