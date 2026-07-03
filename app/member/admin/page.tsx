@@ -16,6 +16,9 @@ export default function MemberAdmin() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  // identifiants révélés (par action, en mémoire uniquement — disparaissent au DONE / rechargement).
+  // IMPORTANT : déclaré AVANT les returns conditionnels (ordre des hooks stable, sinon crash client).
+  const [creds, setCreds] = useState<Record<string, { login: string; server: string; password: string }>>({});
   const load = () =>
     void fetch('/api/member/admin').then(async (r) => {
       if (r.status === 403) return setForbidden(true);
@@ -39,8 +42,6 @@ export default function MemberAdmin() {
       .then(async (r) => { const d = (await r.json()) as { actions?: Action[] }; if (d.actions) setActions(d.actions); setCreds((c) => { const n = { ...c }; delete n[id]; return n; }); })
       .finally(() => setBusy(false));
   };
-  // identifiants révélés (par action, en mémoire uniquement — disparaissent au DONE / rechargement)
-  const [creds, setCreds] = useState<Record<string, { login: string; server: string; password: string }>>({});
   const reveal = (id: string) => {
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reveal: id }) })
