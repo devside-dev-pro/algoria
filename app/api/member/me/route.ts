@@ -1,6 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin } from '@/lib/member/server';
 
+const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
+
+/** Pousse une action dans la file copieur (appliquée dans STH par le support, puis par l'API quand elle arrivera). */
+async function queueAction(tgId: number, kind: string, detail: Record<string, unknown>) {
+  const db = sdb();
+  const { data } = await db.from('members').select('member_no').eq('tg_id', tgId).limit(1);
+  await db.from('member_actions').insert({ tg_id: tgId, member_no: data?.[0]?.member_no ?? null, kind, detail: detail as never });
+}
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -50,15 +59,19 @@ export async function POST(req: NextRequest) {
     const tier = String(body.tier ?? '');
     if (!['low', 'balanced', 'high'].includes(tier)) return NextResponse.json({ error: 'invalid tier' }, { status: 400 });
     patch.risk_tier = tier;
-    // TODO(copieur) : répercuter le lot du tier via l'API Smart Trade Hub dès la doc reçue.
     if (cur.status === 'onboarding') {
-      // fin du wizard : la copie doit être branchée côté copieur → pending_copier (un membre déjà live ne régresse pas)
+      // fin du wizard : la copie doit être branchée côté copieur → pending_copier (un membre déjà live ne régresse pas).
+      // UNE action 'connect' complète (compte + lot initial) part dans la file — PAS de mot de passe dedans.
       patch.onboarding_step = 3;
       patch.status = 'pending_copier';
+      const { data: mrow } = await db.from('members').select('mt5_login,mt5_server').eq('tg_id', s.tgId).limit(1);
+      await queueAction(s.tgId, 'connect', { login: mrow?.[0]?.mt5_login ?? null, server: mrow?.[0]?.mt5_server ?? null, tier, lot: TIER_LOT[tier] });
+    } else {
+      await queueAction(s.tgId, 'risk_change', { to: tier, lot: TIER_LOT[tier] }); // → le support règle le lot dans STH
     }
   } else if (body.action === 'pause' || body.action === 'resume') {
-    // TODO(copieur) : répercuter pause/reprise via l'API du copieur. En attendant : statut local (visible par l'admin).
     patch.status = body.action === 'pause' ? 'paused' : 'live';
+    await queueAction(s.tgId, body.action, {}); // → le support (dés)active la copie dans STH
   } else {
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
   }

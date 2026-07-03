@@ -6,20 +6,23 @@ import { useMe } from '../ui';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row { member_no: number; tg_username: string | null; tg_name: string | null; status: string; broker: string | null; risk_tier: string; created_at: string }
+interface Action { id: string; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }
 
 export default function MemberAdmin() {
   const { member, admin, loading } = useMe();
   const [wl, setWl] = useState<WL[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  const [actions, setActions] = useState<Action[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const load = () =>
     void fetch('/api/member/admin').then(async (r) => {
       if (r.status === 403) return setForbidden(true);
-      const d = (await r.json()) as { whitelist: WL[]; members: Row[] };
+      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[] };
       setWl(d.whitelist);
       setRows(d.members);
+      setActions(d.actions ?? []);
     });
   useEffect(() => { load(); }, []);
   if (loading || !member) return <Center>loading…</Center>;
@@ -30,8 +33,37 @@ export default function MemberAdmin() {
       .then(async (r) => { const d = (await r.json()) as { whitelist?: WL[] }; if (d.whitelist) setWl(d.whitelist); setInput(''); })
       .finally(() => setBusy(false));
   };
+  const doneAction = (id: string) => {
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: id }) })
+      .then(async (r) => { const d = (await r.json()) as { actions?: Action[] }; if (d.actions) setActions(d.actions); })
+      .finally(() => setBusy(false));
+  };
+  const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY' };
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
+      {/* File STH : les intentions des membres à appliquer dans Social Trade Hub, dans l'ordre.
+          Un 'connect' marqué done passe automatiquement le membre en ● LIVE. */}
+      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, borderColor: actions.length ? 'rgba(245,194,74,.4)' : undefined }}>
+        <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: actions.length ? 'var(--gold)' : 'var(--muted)' }}>
+          TO APPLY IN SOCIAL TRADE HUB {actions.length > 0 && `· ${actions.length}`}
+        </h2>
+        {actions.length === 0 && <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Queue clear — nothing to apply.</p>}
+        {actions.map((a) => (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+            <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{a.member_no ?? '—'}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
+              <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')}`}
+                {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')})`}
+                {(a.kind === 'pause' || a.kind === 'resume') && new Date(a.created_at).toLocaleString('en-GB')}
+              </div>
+            </div>
+            <button disabled={busy} onClick={() => doneAction(a.id)} style={{ border: '1px solid rgba(31,216,176,.45)', background: 'rgba(31,216,176,.1)', color: 'var(--up)', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>✓ DONE</button>
+          </div>
+        ))}
+      </section>
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11 }}>
         <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>VIP WHITELIST</h2>
         <div style={{ display: 'flex', gap: 8 }}>
