@@ -4,10 +4,12 @@ import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
-import { manageBreakeven } from './metaapi/manage';
+import { manageBreakeven, rememberManagement } from './metaapi/manage';
 import { DealRecorder } from './metaapi/trades';
 import { narrate, narrateRecap, narrationReady, deskMeta, type DeskKind } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
+import { checkRisk } from '../lib/engine/risk';
+import { breakoutSignal } from '../lib/engine/breakout';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
@@ -290,6 +292,37 @@ async function main() {
           }
         }
 
+        // ===== 2ᵉ STRATÉGIE : BREAKOUT Donchian (instruments qui l'ont validée au labo — l'or). ADDITIVE :
+        // le scalp garde la priorité sur la bougie ; le breakout ne tire que si le scalp n'a rien pris ET que
+        // TOUS les garde-fous passent (risque par-symbole via checkRisk — 1 pos/symbole, spread, kill,
+        // news lockout — puis veto portefeuille). Gestion post-entrée SPÉCIFIQUE : BE tardif + trailing.
+        let bkSignal: Signal | null = null;
+        if (!signal && inst.breakout && mode === 'scalp' && !state.killed) {
+          bkSignal = breakoutSignal(DISPLAY, bars, inst.breakout, mode, cfg.priceStep ?? 0.01);
+          if (bkSignal) {
+            const risk = checkRisk(bkSignal, state, cfg);
+            const veto = risk.ok ? portfolioVeto({ positions: (terminal.positions ?? []) as any[], symbol: BROKER }) : null;
+            if (!risk.ok) {
+              await logSignal(bkSignal, { code: `risk: ${risk.reasons.join(' · ')}`.slice(0, 250), status: 'rejected' });
+              bkSignal = null;
+            } else if (veto) {
+              await logSignal(bkSignal, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' });
+              bkSignal = null;
+            } else {
+              const ticket = await executeSignal(bkSignal);
+              if (ticket) {
+                rememberManagement(ticket, {
+                  beTrigger: inst.breakout.beTrigger,
+                  trailActivate: inst.breakout.trailActivate,
+                  trailDist: inst.breakout.trailDist,
+                  riskDist: Math.abs(bkSignal.entry - bkSignal.stopLoss),
+                });
+              } else bkSignal = null; // échec d'envoi → le desk ne le raconte pas comme un trade
+            }
+          }
+        }
+        const executed = signal ?? bkSignal; // ce que le desk raconte comme TRADE (scalp ou breakout)
+
         // Feed d'events + état COMPTE (balance/equity global) → PRIMAIRE uniquement (canaux mono-symbole partagés).
         if (isPrimary) {
           await logEvents(events);
@@ -298,7 +331,7 @@ async function main() {
 
         // Desk : émis PAR instrument, tagué symbole (meta.instrument). Le cockpit multi-symbole filtre dessus →
         // chaque marché a son propre hero/état/narration. On émet TOUJOURS le meta structuré (hero vivant même sans LLM).
-        const kind: DeskKind = signal ? 'trade' : confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.7 ? 'opportunity' : 'analysis';
+        const kind: DeskKind = executed ? 'trade' : confluence && confluence.direction !== 'flat' && confluence.confidence >= threshold * 0.7 ? 'opportunity' : 'analysis';
         // Setup vu mais BLOQUÉ par le filtre de tendance EMA → le desk l'assume ("discipline") au lieu de
         // promettre des setups jamais exécutés (l'incohérence visible en live).
         const emaGate = cfg.emaGate ?? 'off';
@@ -310,18 +343,20 @@ async function main() {
         const last3 = bars.slice(-3);
         const rng3 = last3.length ? Math.max(...last3.map((b) => b.high)) - Math.min(...last3.map((b) => b.low)) : 0;
         const priceAction = `last 3 bars ${last3.map((b) => (b.close >= b.open ? 'green' : 'red')).join(',')} · 3-bar range ${(rng3 / (context.atr || 1)).toFixed(1)}×ATR · close ${bars[bars.length - 1].close >= last3[0].open ? 'above' : 'below'} 15m open`;
-        const meta = deskMeta(kind, context, { signal, confluence, threshold, gated });
+        // Trade breakout → la confluence du desk est celle DU SIGNAL (barre "breakout"), pas celle du scalp.
+        const deskConf = bkSignal ? bkSignal.confluence : confluence;
+        const meta = deskMeta(kind, context, { signal: executed, confluence: deskConf, threshold, gated });
         let clause: string | null = null;
         if (narrationReady()) {
           clause = await narrate(
             kind === 'trade'
-              ? { kind, ctx: context, signal, confluence, threshold }
+              ? { kind, ctx: context, signal: executed, confluence: deskConf, threshold }
               : kind === 'opportunity'
                 ? { kind, ctx: context, confluence, threshold, gated }
                 : { kind, ctx: context, logLines: events.map((e) => e.msg), priceAction },
           );
         }
-        await logNarration(clause ?? '', signal ? signal.time : context.time, meta as unknown as Record<string, unknown>);
+        await logNarration(clause ?? '', executed ? executed.time : context.time, meta as unknown as Record<string, unknown>);
       } catch (e) {
         console.error(`[algoria] onClosed ${DISPLAY} échoué:`, e);
       }
