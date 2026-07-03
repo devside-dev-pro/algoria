@@ -69,6 +69,7 @@ export interface TradeOpen {
   entry: number;
   lot: number;
   openedAt: number; // ms epoch
+  sl?: number; // SL initial (deviendra le SL COURANT — mis à jour au breakeven/trailing)
 }
 
 /** Trade ouvert → ligne dans `trades` (clôture renseignée plus tard par recordTradeClose). */
@@ -81,8 +82,15 @@ export async function recordTradeOpen(t: TradeOpen) {
     entry: t.entry,
     lot: t.lot,
     opened_at: new Date(t.openedAt).toISOString(),
+    ...(t.sl && t.sl > 0 ? { sl: t.sl } : {}),
   });
   if (error) console.error('[sync] recordTradeOpen échoué:', error.message);
+}
+
+/** SL COURANT d'une position ouverte (breakeven/trailing) → le cockpit redessine la zone SL en direct. */
+export async function updateTradeStop(ticket: string, sl: number) {
+  const { error } = await db.from('trades').update({ sl }).eq('ticket', ticket).is('closed_at', null);
+  if (error) console.error('[sync] updateTradeStop échoué:', error.message);
 }
 
 export interface TradeClose {

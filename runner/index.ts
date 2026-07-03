@@ -137,6 +137,7 @@ async function main() {
             entry: signal.entry,
             lot: signal.lot,
             openedAt: signal.time,
+            sl: signal.stopLoss > 0 ? signal.stopLoss : undefined, // SL initial → suivi live (BE/trailing)
           });
         }
         console.log('[algoria] ORDRE', signal.direction, BROKER, signal.lot, '→', res.ticket);

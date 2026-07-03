@@ -251,7 +251,17 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     const lines = tradeLinesRef.current;
     if (Number.isFinite(a.entry)) lines.push(series.createPriceLine({ price: a.entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'LONG' : 'SHORT'} ${a.entry.toFixed(1)}` }));
     // SL en rose SOURD + pointillés (moins agressif à l'écran en live) ; TP en vert franc (positif).
-    if (a.sl != null && Number.isFinite(a.sl)) lines.push(series.createPriceLine({ price: a.sl, color: 'rgba(196,132,150,.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `SL ${a.sl.toFixed(1)}` }));
+    // SL SÉCURISÉ (à/au-delà de l'entrée = breakeven ou trailing en profit) → ligne VERTE « 🔒 BE » :
+    // le viewer voit d'un coup d'œil que ce trade ne peut plus perdre.
+    if (a.sl != null && Number.isFinite(a.sl)) {
+      const secured = (a.entry - a.sl) * (long ? 1 : -1) <= 0;
+      lines.push(series.createPriceLine({
+        price: a.sl,
+        color: secured ? 'rgba(31,216,176,.75)' : 'rgba(196,132,150,.6)',
+        lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+        title: secured ? `🔒 BE ${a.sl.toFixed(1)}` : `SL ${a.sl.toFixed(1)}`,
+      }));
+    }
     if (a.tp != null && Number.isFinite(a.tp)) lines.push(series.createPriceLine({ price: a.tp, color: '#1fd8b0', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: `TP ${a.tp.toFixed(1)}` }));
   }
 

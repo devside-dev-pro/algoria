@@ -1,5 +1,5 @@
 import { DEFAULT_CONFIG } from '../../lib/engine/config';
-import { logNote } from '../../lib/supabase/sync';
+import { logNote, updateTradeStop } from '../../lib/supabase/sync';
 
 // Gestion LIVE post-entrée, par position :
 // - défaut (scalp/manuel) : breakeven précoce (beTrigger 0.15) — win rate 86% → 93% au backtest.
@@ -45,6 +45,7 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
           try {
             await stream.modifyPosition(id, trail, p.takeProfit);
             console.log(`[algoria] trailing → pos ${id} SL=${trail}`);
+            void updateTradeStop(id, trail); // le cockpit fait suivre la zone SL en direct
           } catch (e) {
             console.error('[algoria] trailing échec:', (e as { message?: string })?.message ?? e);
           }
@@ -68,6 +69,7 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     try {
       await stream.modifyPosition(id, beSL, p.takeProfit);
       console.log(`[algoria] breakeven → pos ${id} SL=${beSL}`);
+      void updateTradeStop(id, beSL); // la zone rouge du chart disparaît (SL sécurisé au-dessus de l'entrée)
       void logNote(`breakeven secured · ${long ? 'long' : 'short'} · SL → ${beSL} · trade can't lose now`, 'order');
     } catch (e) {
       done.delete(id); // échec → on réessaiera au prochain tick
