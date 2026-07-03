@@ -4,8 +4,10 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, RiskPicker } from '../ui';
+import { BROKERS } from '@/lib/member/brokers';
 
-const RAISE_URL = process.env.NEXT_PUBLIC_RAISE_URL ?? '#';
+const FEATURED = BROKERS.find((b) => b.featured) ?? BROKERS[0];
+const OTHERS = BROKERS.filter((b) => !b.featured);
 
 async function post(body: Record<string, unknown>) {
   const r = await fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -23,6 +25,8 @@ export default function Onboarding() {
   const [server, setServer] = useState('');
   const [password, setPassword] = useState('');
   const [tier, setTier] = useState<'low' | 'balanced' | 'high'>('balanced');
+  const [brokerPick, setBrokerPick] = useState<string | null>(null); // broker cliqué (le lien ouvre un onglet, on retient le choix)
+  const [showOthers, setShowOthers] = useState(false);
 
   if (loading || !member) return <Center>loading…</Center>;
   if (member.status !== 'onboarding') { router.replace('/member'); return <Center>redirecting…</Center>; }
@@ -52,15 +56,28 @@ export default function Onboarding() {
       {cur === 0 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h2 style={{ fontSize: 15, margin: 0 }}>1 · Open your broker account</h2>
-          <p style={pMuted}>Algoria trades on Raise — same broker means <strong style={{ color: 'var(--text)' }}>the exact same spreads and conditions</strong> as the AI you watch live.</p>
-          <a href={RAISE_URL} target="_blank" rel="noreferrer" style={ctaGold}>▲ CREATE MY RAISE ACCOUNT</a>
+          <p style={pMuted}>{FEATURED.note ?? 'Open your account with one of our partner brokers.'}</p>
+          <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(FEATURED.key)} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
           <div style={{ borderLeft: '3px solid var(--gold)', background: 'rgba(245,194,74,.06)', borderRadius: 8, padding: '11px 13px' }}>
             <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
               <strong style={{ color: 'var(--gold)' }}>Minimum deposit: $500.</strong> Below that, position sizing doesn&apos;t work even at the lowest risk — trades simply won&apos;t run. Don&apos;t fund less.
             </p>
           </div>
-          <button disabled={busy} onClick={() => run({ action: 'broker', broker: 'raise' }, 1)} style={ctaMain}>MY ACCOUNT IS READY →</button>
-          <button disabled={busy} onClick={() => run({ action: 'broker', broker: 'other' }, 1)} style={linkBtn}>I already trade with another broker</button>
+          {!showOthers ? (
+            <button onClick={() => setShowOthers(true)} style={linkBtn}>I&apos;d rather use another broker</button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>OTHER PARTNER BROKERS — SAME $500 MINIMUM</span>
+              {OTHERS.map((b) => (
+                <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(b.key)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${brokerPick === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: brokerPick === b.key ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)' }}>
+                  <span style={{ fontWeight: 750, fontSize: 13.5 }}>{b.name}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--dim)' }}>open account ↗</span>
+                </a>
+              ))}
+            </div>
+          )}
+          <button disabled={busy} onClick={() => run({ action: 'broker', broker: brokerPick ?? FEATURED.key }, 1)} style={ctaMain}>MY ACCOUNT IS READY →</button>
         </section>
       )}
 
