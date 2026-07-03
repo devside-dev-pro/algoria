@@ -445,7 +445,9 @@ function LivePositionHud({ symbol, direction, entry, sl, tp, lot }: { symbol: st
   const pnl = move * lot * spec.contract;
   const pips = move / spec.pip;
   const rr = sl != null && Math.abs(entry - sl) > 1e-9 ? move / Math.abs(entry - sl) : null;
-  const col = pnl > 0 ? 'var(--up)' : pnl < 0 ? 'var(--down)' : 'var(--muted)';
+  // Règle broadcast 70/30 : un drawdown FLOTTANT (temporaire par nature) s'affiche en rose SOURD, pas en
+  // rouge vif — même traitement discret que les pertes clôturées. Le vert des gains reste franc.
+  const col = pnl > 0 ? 'var(--up)' : pnl < 0 ? 'rgba(210,150,165,.75)' : 'var(--muted)';
   return (
     <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: long ? 'rgba(31,216,176,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>
