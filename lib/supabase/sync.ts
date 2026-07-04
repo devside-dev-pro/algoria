@@ -118,6 +118,36 @@ export async function recordTradeClose(ticket: string, symbol: string, c: TradeC
   }
 }
 
+/** Bougies stockées depuis sinceMs (ordre chronologique) — nourrit la SENTINELLE (re-validation hebdo des edges). */
+export async function fetchCandles(symbol: string, timeframe: string, sinceMs: number): Promise<Bar[]> {
+  const out: Bar[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db
+      .from('candles').select('time,open,high,low,close,volume')
+      .eq('symbol', symbol).eq('timeframe', timeframe).gte('time', sinceMs)
+      .order('time', { ascending: true }).range(from, from + 999);
+    if (error || !data?.length) break;
+    for (const c of data) out.push({ time: Number(c.time), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume ?? 0) });
+    if (data.length < 1000) break;
+  }
+  return out;
+}
+
+/** Bulletin de santé d'un edge (sentinelle hebdo) → table edge_health. */
+export async function recordEdgeHealth(row: { strategy: string; windowDays: number; trades: number; winRate: number | null; profitFactor: number | null; net: number; status: string }) {
+  const { error } = await (db as any).from('edge_health').insert({
+    strategy: row.strategy, window_days: row.windowDays, trades: row.trades,
+    win_rate: row.winRate, profit_factor: row.profitFactor, net: row.net, status: row.status,
+  });
+  if (error) console.error('[sync] recordEdgeHealth échoué:', error.message);
+}
+
+/** Date du dernier passage de la sentinelle (null si jamais) — pour rattraper un check manqué au boot. */
+export async function lastEdgeHealthCheck(): Promise<number | null> {
+  const { data } = await (db as any).from('edge_health').select('checked_at').order('checked_at', { ascending: false }).limit(1);
+  return data?.[0]?.checked_at ? Date.parse(data[0].checked_at as string) : null;
+}
+
 /** Une position SWING est-elle déjà ouverte sur ce symbole ? (slot swing = 1 position de fond max, survit aux reboots). */
 export async function hasOpenSwingTrade(symbol: string): Promise<boolean> {
   const { data } = await db.from('trades').select('id').eq('symbol', symbol).is('closed_at', null).ilike('signal_ref', '%-swing-%').limit(1);

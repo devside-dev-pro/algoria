@@ -38,6 +38,25 @@ export async function pushToAll(payload: PushPayload): Promise<number> {
   const db = pdb();
   const { data: subs } = await db.from('member_push_subs').select('endpoint,p256dh,auth');
   if (!subs?.length) return 0;
+  return send(subs, payload);
+}
+
+/** Envoie UNIQUEMENT aux admins (ADMIN_TG_USERNAMES) — alertes opérateur (santé des edges, incidents). */
+export async function pushToAdmins(payload: PushPayload): Promise<number> {
+  if (!configure()) return 0;
+  const admins = (process.env.ADMIN_TG_USERNAMES ?? '').split(/[\s,@]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (!admins.length) return 0;
+  const db = pdb();
+  const { data: members } = await db.from('members').select('tg_id,tg_username');
+  const ids = (members ?? []).filter((m) => m.tg_username && admins.includes(String(m.tg_username).toLowerCase())).map((m) => m.tg_id);
+  if (!ids.length) return 0;
+  const { data: subs } = await db.from('member_push_subs').select('endpoint,p256dh,auth').in('tg_id', ids);
+  if (!subs?.length) return 0;
+  return send(subs, payload);
+}
+
+async function send(subs: Array<{ endpoint: string; p256dh: string; auth: string }>, payload: PushPayload): Promise<number> {
+  const db = pdb();
   const body = JSON.stringify(payload);
   const gone: string[] = [];
   let sent = 0;
