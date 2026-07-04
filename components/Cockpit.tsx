@@ -10,11 +10,11 @@ const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
 
 // Marchés tradés par Algoria (le cockpit suit le symbole sélectionné). contract/pip/dp servent au HUD live.
-interface SymSpec { key: string; label: string; short: string; contract: number; pip: number; dp: number }
+interface SymSpec { key: string; label: string; short: string; contract: number; pip: number; dp: number; h24?: boolean }
 const SYMS: SymSpec[] = [
   { key: 'XAUUSD', label: 'XAU/USD', short: 'XAU', contract: 100, pip: 0.1, dp: 2 },
   { key: 'NAS100', label: 'NAS100', short: 'NAS', contract: 1, pip: 1, dp: 1 },
-  { key: 'BTCUSD', label: 'BTC/USD', short: 'BTC', contract: 1, pip: 10, dp: 1 }, // 24/7 — WATCH pour l'auto (pas d'edge validé), manuel OK
+  { key: 'BTCUSD', label: 'BTC/USD', short: 'BTC', contract: 1, pip: 10, dp: 1, h24: true }, // 24/7 — WATCH pour l'auto (pas d'edge validé), manuel OK
 ];
 const symSpec = (k: string) => SYMS.find((s) => s.key === k) ?? SYMS[0];
 
@@ -155,9 +155,9 @@ export function Cockpit() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <img src="/brand/algoria-mark.png" alt="Algoria" width={22} height={22} style={{ objectFit: 'contain', filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
           <strong style={{ fontSize: 15, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
-          <FeedStatus />
+          <FeedStatus symbol={symbol} />
           <MarketRail selected={symbol} onSelect={setSymbol} openBySym={openBySym} />
-          <MarketStatus session={(symCtx?.session as string | undefined) ?? (st?.session as string | undefined)} regime={(symCtx?.regime as string | undefined) ?? (st?.regime as string | undefined)} tradable={st?.tradable !== false} />
+          <MarketStatus symbol={symbol} session={(symCtx?.session as string | undefined) ?? (st?.session as string | undefined)} regime={(symCtx?.regime as string | undefined) ?? (st?.regime as string | undefined)} tradable={st?.tradable !== false} />
           {tradesTodayCount > 0 && (
             <span className="mono" style={{ fontSize: 11, color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 4 }} title="trades executed today (excl. BEAST)">
               ⚡ <b>{tradesTodayCount}</b> <span style={{ color: 'var(--dim)' }}>today</span>
@@ -384,17 +384,20 @@ function MarketRail({ selected, onSelect, openBySym }: { selected: string; onSel
 function MarketChip({ spec, active, pos, onClick }: { spec: SymSpec; active: boolean; pos?: { dir: string }; onClick: () => void }) {
   const px = usePrice(spec.key);
   const { stale } = useFeedHealth();
-  const col = stale ? 'var(--dim)' : px && px.dir > 0 ? 'var(--up)' : px && px.dir < 0 ? 'var(--down)' : 'var(--text)';
+  // Le week-end, BTC (24/7) garde le flux global vivant → un marché FERMÉ se grise individuellement,
+  // sinon son prix figé aurait l'air vivant à côté du BTC qui tique.
+  const closed = marketReopenMs(spec.key) != null;
+  const col = stale || closed ? 'var(--dim)' : px && px.dir > 0 ? 'var(--up)' : px && px.dir < 0 ? 'var(--down)' : 'var(--text)';
   const arrow = px && px.dir > 0 ? '▲' : px && px.dir < 0 ? '▼' : '·';
   return (
     <button
       onClick={onClick}
-      title={`${spec.label}${pos ? ` · in ${pos.dir}` : ''}`}
+      title={`${spec.label}${closed ? ' · closed' : ''}${pos ? ` · in ${pos.dir}` : ''}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 7, padding: '4px 10px', borderRadius: 8, cursor: 'pointer',
         border: `1px solid ${active ? 'rgba(43,227,245,.5)' : 'var(--border)'}`,
         background: active ? 'rgba(43,227,245,.08)' : 'transparent',
-        opacity: stale && !active ? 0.6 : 1,
+        opacity: (stale || closed) && !active ? 0.6 : 1,
       }}
     >
       {pos && <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: pos.dir === 'long' ? 'var(--up)' : 'var(--down)' }} />}
@@ -406,10 +409,11 @@ function MarketChip({ spec, active, pos, onClick }: { spec: SymSpec; active: boo
 }
 
 // Watchdog du flux : LIVE (vert, pulse) tant que les ticks arrivent ; STALE Ns (ambre) si le flux se tait
-// alors que le marché est ouvert ; OFFLINE (gris) pendant le gap week-end de l'or ; CONNECTING avant le 1er tick.
-function FeedStatus() {
+// alors que le marché est ouvert ; OFFLINE (gris) pendant le gap week-end DU MARCHÉ AFFICHÉ (BTC 24/7 → jamais) ;
+// CONNECTING avant le 1er tick.
+function FeedStatus({ symbol }: { symbol: string }) {
   const { hasData, ageMs, stale } = useFeedHealth();
-  const closed = goldReopenMs() != null;
+  const closed = marketReopenMs(symbol) != null;
   let color = 'var(--up)';
   let label = 'LIVE';
   let pulse = true;
@@ -590,7 +594,10 @@ function WhyPanel({ direction, conf, rationale, live, closed = false, pnl = null
   );
 }
 
-function goldReopenMs(): number | null {
+// Gap week-end (or/indices : vendredi 21h UTC → dimanche 22h UTC). Les marchés 24/7 (BTC) ne ferment JAMAIS
+// → null en permanence : le statut est calculé PAR MARCHÉ, pas globalement.
+function marketReopenMs(symbol: string): number | null {
+  if (symSpec(symbol).h24) return null;
   const now = new Date();
   const day = now.getUTCDay();
   const h = now.getUTCHours();
@@ -605,13 +612,13 @@ function goldReopenMs(): number | null {
   return Math.max(0, reopen.getTime() - now.getTime());
 }
 
-function MarketStatus({ session, regime, tradable }: { session?: string; regime?: string; tradable: boolean }) {
+function MarketStatus({ symbol, session, regime, tradable }: { symbol: string; session?: string; regime?: string; tradable: boolean }) {
   const [, force] = useState(0);
   useEffect(() => {
     const i = setInterval(() => force((x) => x + 1), 20000);
     return () => clearInterval(i);
   }, []);
-  const reopen = goldReopenMs();
+  const reopen = marketReopenMs(symbol);
   if (reopen != null) {
     const hh = Math.floor(reopen / 3_600_000);
     const mm = Math.floor((reopen % 3_600_000) / 60_000);
