@@ -4,9 +4,11 @@
 // Objectif : trouver l'arme qui correspond au CARACTÈRE de chaque marché (le BTC est momentum, l'or respecte
 // ses niveaux…) au lieu de forcer partout la même stratégie.
 //
-// USAGE : npx tsx backtest/lab.ts BTCUSD        (un symbole)
+// USAGE : npx tsx backtest/lab.ts BTCUSD        (un symbole, M5 = familles intraday)
 //         npx tsx backtest/lab.ts all           (tous les caches disponibles)
-// Prérequis : cache M5 présent (backtest/.cache/<SYM>-M5-15.json — voir scripts/pull-cache.mjs).
+//         npx tsx backtest/lab.ts BTCUSD H1     (H1 = familles SWING : positions tenues des jours,
+//                                                SL serré, objectif loin, trailing par paliers)
+// Prérequis : cache présent (backtest/.cache/<SYM>-<TF>-15.json — voir scripts/pull-cache.mjs).
 import { existsSync, readFileSync } from 'node:fs';
 import { metrics } from './metrics';
 import type { BacktestRun, SimTrade, EquityPoint } from './simulator';
@@ -162,6 +164,53 @@ function buildStrategies(): StrategyDef[] {
   return S;
 }
 
+// ===== Familles SWING (H1) — la "couche de fond" : on attend un VRAI setup, SL structurel, objectif à
+// plusieurs R, et le stop REMONTE par paliers (breakeven puis trailing) → les gagnants courent des jours,
+// les positions vivent le week-end (crypto). Grilles volontairement petites. =====
+function buildSwingStrategies(): StrategyDef[] {
+  const S: StrategyDef[] = [];
+
+  // 1) BREAKOUT DONCHIAN H1 — cassure du plus haut/bas de N heures (24h/72h/168h). L'entrée "bon setup" :
+  //    le marché sort d'un range multi-jours. Sortie : objectif loin (8R) mais surtout TRAILING par paliers.
+  for (const N of [24, 72, 168])
+    for (const trail of [1.5, 2.5])
+      S.push({
+        family: 'sw-breakout', params: `N${N} trail${trail}`, minBars: 700,
+        exits: { be: 1, trailActivate: trail, trailDist: trail },
+        onClose(i, ind) {
+          const { bars, atr } = ind;
+          if (i < N + 1) return null;
+          let hi = -Infinity, lo = Infinity;
+          for (let k = i - N; k < i; k++) { hi = Math.max(hi, bars[k].high); lo = Math.min(lo, bars[k].low); }
+          const b = bars[i], a = atr[i];
+          if (b.close > hi + 0.15 * a) return { direction: 'long', stopLoss: b.close - 2 * a, takeProfit: b.close + 16 * a };
+          if (b.close < lo - 0.15 * a) return { direction: 'short', stopLoss: b.close + 2 * a, takeProfit: b.close - 16 * a };
+          return null;
+        },
+      });
+
+  // 2) TENDANCE DE FOND + PULLBACK H1 — biais par EMA longues (≈10j/25j), entrée sur reprise après repli.
+  //    Le classique du swing-following : on rejoint la tendance au meilleur prix, et on la laisse courir.
+  for (const trail of [1.5, 2.5])
+    S.push({
+      family: 'sw-trend', params: `trail${trail}`, minBars: 700,
+      exits: { be: 1, trailActivate: trail, trailDist: trail },
+      onClose(i, ind) {
+        const { bars, atr, emaF, emaS, ema21 } = ind;
+        if (i < 601) return null;
+        const b = bars[i], a = atr[i];
+        const bull = emaF[i] > emaS[i] * 1.001, bear = emaF[i] < emaS[i] * 0.999;
+        const dipped = bars[i - 1].low < ema21[i - 1] || bars[i - 2].low < ema21[i - 2];
+        const popped = bars[i - 1].high > ema21[i - 1] || bars[i - 2].high > ema21[i - 2];
+        if (bull && dipped && b.close > b.open && b.close > ema21[i]) return { direction: 'long', stopLoss: b.close - 2 * a, takeProfit: b.close + 16 * a };
+        if (bear && popped && b.close < b.open && b.close < ema21[i]) return { direction: 'short', stopLoss: b.close + 2 * a, takeProfit: b.close - 16 * a };
+        return null;
+      },
+    });
+
+  return S;
+}
+
 // ===== Simulateur du labo — MÊMES règles d'exécution que backtest/simulator.ts (pessimiste, causal) =====
 const RISK_PCT = 0.01, MAX_DAILY_LOSS = 0.04, START = 10_000;
 const dayOf = (t: number) => Math.floor(t / 86_400_000);
@@ -235,8 +284,9 @@ const pct = (x: number) => (x * 100).toFixed(1) + '%';
 const pf = (v: number) => (v === Infinity ? '∞' : v.toFixed(2));
 const isWknd = (t: number) => [0, 6].includes(new Date(t).getUTCDay());
 
-function runSymbol(sym: string) {
-  const cache = `backtest/.cache/${sym}-M5-15.json`;
+function runSymbol(sym: string, tf: 'M5' | 'H1' = 'M5') {
+  const cache = `backtest/.cache/${sym}-${tf}-15.json`;
+  const strategies = tf === 'H1' ? buildSwingStrategies() : buildStrategies();
   if (!existsSync(cache)) { console.log(`(pas de cache pour ${sym} — skip)`); return; }
   const bars = JSON.parse(readFileSync(cache, 'utf8')) as Bar[];
   const spec = SPECS[sym];
@@ -247,11 +297,11 @@ function runSymbol(sym: string) {
   const indH1 = computeIndicators(bars.slice(0, mid));
   const indH2 = computeIndicators(bars.slice(mid));
 
-  console.log(`\n================ LAB ${sym} · ${bars.length} bougies M5 · ${DAYS.toFixed(1)} jours · spread ${spec.spread} ================`);
+  console.log(`\n================ LAB ${sym} · ${bars.length} bougies ${tf} · ${DAYS.toFixed(1)} jours · spread ${spec.spread} ================`);
   type Row = { strat: string; trades: number; perDay: string; win: string; PF: string; net: string; DD: string; h1: string; h2: string; robuste: string };
   const rows: Row[] = [];
   const robustRuns: Array<{ label: string; run: BacktestRun; pfVal: number }> = [];
-  for (const s of buildStrategies()) {
+  for (const s of strategies) {
     const run = labBacktest(ind, s, spec);
     const m = metrics(run, START);
     if (m.trades < 20) continue;
@@ -274,9 +324,18 @@ function runSymbol(sym: string) {
   const third = Math.floor(bars.length / 3);
   const slices = [bars.slice(0, third), bars.slice(third, 2 * third), bars.slice(2 * third)].map(computeIndicators);
   for (const rr of robustRuns.sort((a, b) => b.pfVal - a.pfVal)) {
-    const def = buildStrategies().find((s) => `${s.family} ${s.params}` === rr.label)!;
+    const def = strategies.find((s) => `${s.family} ${s.params}` === rr.label)!;
     const nets = slices.map((sl) => metrics(labBacktest(sl, def, spec), START).netPnl);
     console.log(`   TIERS ${rr.label}: $${nets[0].toFixed(0)} / $${nets[1].toFixed(0)} / $${nets[2].toFixed(0)} ${nets.every((x) => x > 0) ? '✅' : '⚠️'}`);
+  }
+  // TENUE des positions (config verdict) : durée moyenne/médiane + part du temps passé en position —
+  // la métrique clé du swing ("des trades toujours ouverts, qui vivent le week-end").
+  {
+    const hold = best.run.trades.map((t) => (t.exitTime - t.entryTime) / 3_600_000).sort((a, b) => a - b);
+    const avg = hold.reduce((a, x) => a + x, 0) / Math.max(1, hold.length);
+    const med = hold[Math.floor(hold.length / 2)] ?? 0;
+    const inPos = best.run.trades.reduce((a, t) => a + (t.exitTime - t.entryTime), 0) / (bars[bars.length - 1].time - bars[0].time);
+    console.log(`   TENUE: moy ${avg.toFixed(1)}h (${(avg / 24).toFixed(1)}j) · méd ${med.toFixed(1)}h · en position ${(inPos * 100).toFixed(0)}% du temps`);
   }
   const wk = best.run.trades.filter((t) => !isWknd(t.entryTime));
   const we = best.run.trades.filter((t) => isWknd(t.entryTime));
@@ -290,6 +349,7 @@ function runSymbol(sym: string) {
 }
 
 const arg = (process.argv[2] ?? 'all').toUpperCase();
+const tfArg = (process.argv[3] ?? 'M5').toUpperCase() as 'M5' | 'H1';
 const targets = arg === 'ALL' ? Object.keys(SPECS) : [arg];
-for (const sym of targets) runSymbol(sym);
+for (const sym of targets) runSymbol(sym, tfArg);
 process.exit(0);
