@@ -22,6 +22,8 @@ export interface SwingConfig {
 export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 0.5, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 /** OR — suivi de tendance EMA longues + reprise après repli (labo : PF 2.21 sur 1.75 an, 3.5 j de tenue moyenne). */
 export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 2, tpAtr: 16, lot: 0.25, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
+/** NAS100 — cassure du range 72h (labo 2.2 ans : PF 1.94, +$3086, DD 6.9%, tiers ✅ · tenue moy 8.5 j). */
+export const NAS_SWING: SwingConfig = { kind: 'breakout', N: 72, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 3, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 
 const ema = (src: number[], n: number): number[] => {
   const k = 2 / (n + 1);

@@ -3,7 +3,7 @@
 // Chaque instrument a sa PROPRE config (l'or et le Nasdaq n'ont pas le même profil : R:R, SL, seuil, maxSpread…).
 import { SCALP_CONFIG, type EngineConfig } from './config';
 import { GOLD_BREAKOUT, type BreakoutConfig } from './breakout';
-import { BTC_SWING, GOLD_SWING, type SwingConfig } from './swing';
+import { BTC_SWING, GOLD_SWING, NAS_SWING, type SwingConfig } from './swing';
 import type { ContextOptions } from './context';
 
 export interface InstrumentSpec {
@@ -78,6 +78,8 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     config: NAS100_SCALP,
     ctx: { ...SCALP_CTX, roundStep: 100 }, // niveaux ronds du Nasdaq ~100 pts (pas les $10 de l'or)
     enabled: process.env.TRADE_NAS100 === '1', // opt-in tant que le runner multi-symboles n'est pas en place
+    // Couche SWING de fond H1 (labo 2.2 ans : cassure 72h, PF 1.94, +$3086, DD 6.9%, tiers ✅✅✅).
+    swing: NAS_SWING,
   },
   {
     // BTC — seul marché 24/7 (les lives du week-end). AUCUN edge auto validé (scalp ET labo ont échoué —
