@@ -120,6 +120,36 @@ body::after {
 .mono::-webkit-scrollbar-thumb { background: rgba(43, 227, 245, 0.25); border-radius: 4px; }
 .mono::-webkit-scrollbar-track { background: transparent; }
 
+/* ===== PWA MEMBRE : sensation NATIVE ===== */
+/* Le DOCUMENT est verrouillé (plus de rubber-band qui révèle du vide en haut, plus de pull-to-refresh) ;
+   seul .appScroll défile, comme la scroll view d'une app native. Scopé au shell membre via :has —
+   le cockpit et le funnel ne sont pas touchés. */
+html:has(.appShell) {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html:has(.appShell) body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent; /* pas de flash gris au tap — le détail qui trahit le web */
+}
+.appShell {
+  height: 100dvh; /* hauteur dynamique : suit la barre Safari qui se rétracte */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.appShell nav, .appShell button { user-select: none; -webkit-user-select: none; }
+.appScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain; /* le scroll ne se propage jamais au document */
+}
+
 /* scrollbar fine et sombre (desk + terminal mission control) — plus de barre blanche par défaut */
 .deskscroll { scrollbar-width: thin; scrollbar-color: rgba(43, 227, 245, 0.22) transparent; }
 .deskscroll::-webkit-scrollbar { width: 6px; }
