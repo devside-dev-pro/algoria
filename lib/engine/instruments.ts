@@ -88,7 +88,7 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     display: 'BTCUSD',
     broker: process.env.BTCUSD_SYMBOL ?? 'BTCUSD',
     config: BTCUSD_WATCH,
-    ctx: { ...SCALP_CTX, roundStep: 1000 }, // niveaux psychologiques BTC ~1000$
+    ctx: { ...SCALP_CTX, roundStep: 1000, h24: true }, // niveaux psychologiques BTC ~1000$ · 24/7 : jamais de session 'closed'
     enabled: process.env.WATCH_BTCUSD !== '0', // ON par défaut (désactivable sans redeploy de code)
     watchOnly: true, // pas de scalp intraday (aucun edge validé) — mais la couche SWING ci-dessous tourne
     // SWING de fond 24/7 (labo 2.7 ans : PF 2.02, +39% à 1% de risque, week-end PF 2.7) — le compte vit le week-end.
