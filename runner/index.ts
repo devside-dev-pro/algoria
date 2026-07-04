@@ -16,6 +16,8 @@ import { activeInstruments, type InstrumentSpec } from '../lib/engine/instrument
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
 import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from './news';
+import { runSentinel } from './sentinel';
+import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
 
@@ -591,6 +593,28 @@ async function main() {
       }
     })();
   }, 60_000);
+
+  // ===== SENTINELLE DES EDGES : re-validation HEBDO de chaque stratégie live sur les données fraîches
+  // (dimanche 12h UTC, rattrapée au boot si > 8 jours sans check). Bulletin en base + alerte push admin
+  // si un edge dégrade — le moteur qui se surveille lui-même. =====
+  let sentinelRunning = false;
+  const maybeSentinel = async (force = false) => {
+    if (sentinelRunning) return;
+    const last = await lastEdgeHealthCheck();
+    const due = force || last == null || Date.now() - last > 8 * 86_400_000;
+    const now = new Date();
+    if (!due && !(now.getUTCDay() === 0 && now.getUTCHours() === 12 && (last == null || Date.now() - last > 2 * 86_400_000))) return;
+    sentinelRunning = true;
+    try {
+      await runSentinel();
+    } catch (e) {
+      console.error('[algoria] sentinelle échouée:', e);
+    } finally {
+      sentinelRunning = false;
+    }
+  };
+  setTimeout(() => void maybeSentinel(), 3 * 60_000); // au boot (après la synchro), rattrape un check manqué
+  setInterval(() => void maybeSentinel(), 3600_000); // check horaire → ne déclenche que dimanche 12h UTC
 
   // ===== RECAP HORAIRE du desk : à chaque heure pleine, une carte "SESSION RECAP" (stats réelles du jour,
   // hors BEAST) + une clause IA d'ambiance. Rythme le stream et rappelle le track record sans intervention. =====
