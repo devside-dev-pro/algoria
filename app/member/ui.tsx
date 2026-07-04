@@ -1,7 +1,7 @@
 'use client';
 // Coque CLIENT de l'espace membre : enregistrement du service worker, nav basse (onglets), hook useMe.
 // Réutilise le langage visuel du cockpit (globals.css : .panel, .goldText, .mono) — même ADN, mobile-first.
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 export interface Member {
@@ -83,6 +83,59 @@ const ICONS: Record<string, React.ReactNode> = {
   ),
 };
 
+// PROMPT D'INSTALLATION PWA — personne n'a le réflexe "ajouter à l'écran d'accueil" : on le provoque.
+// Android/Chrome : bouton natif (beforeinstallprompt). iOS : pas d'API → mini-guide Partager → Sur l'écran d'accueil.
+// Réapparaît à CHAQUE ouverture (dismiss = session seulement) ; disparaît définitivement une fois installée.
+function InstallPrompt() {
+  const [mode, setMode] = useState<'hidden' | 'android' | 'ios'>('hidden');
+  const deferred = useRef<{ prompt: () => Promise<void> } | null>(null);
+  useEffect(() => {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
+    if (standalone || sessionStorage.getItem('alg_install_hide')) return;
+    if (/iphone|ipad|ipod/i.test(navigator.userAgent)) { setMode('ios'); return; }
+    const onBip = (e: Event) => { e.preventDefault(); deferred.current = e as unknown as { prompt: () => Promise<void> }; setMode('android'); };
+    window.addEventListener('beforeinstallprompt', onBip);
+    return () => window.removeEventListener('beforeinstallprompt', onBip);
+  }, []);
+  if (mode === 'hidden') return null;
+  const dismiss = () => { sessionStorage.setItem('alg_install_hide', '1'); setMode('hidden'); };
+  return (
+    <div style={{ position: 'fixed', left: 10, right: 10, bottom: 88, zIndex: 45, maxWidth: 540, margin: '0 auto' }}>
+      <div className="panel cardIn" style={{ padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'rgba(43,227,245,.4)', boxShadow: '0 10px 34px rgba(2,6,16,.7), 0 0 24px rgba(43,227,245,.12)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+          <img src="/brand/algoria-mark.png" alt="" width={34} height={34} style={{ objectFit: 'contain' }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 14 }}>Install the Algoria app</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>Full-screen, on your home screen, with win alerts — this is meant to live on your phone.</div>
+          </div>
+          <button onClick={dismiss} aria-label="close" style={{ border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', borderRadius: 7, width: 24, height: 24, cursor: 'pointer', fontSize: 13, lineHeight: '20px' }}>×</button>
+        </div>
+        {mode === 'android' ? (
+          <button
+            onClick={() => { void deferred.current?.prompt(); dismiss(); }}
+            style={{ padding: '11px 14px', borderRadius: 11, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 13, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}
+          >
+            ⬇ INSTALL — ONE TAP
+          </button>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {[
+              <>Tap the <strong style={{ color: 'var(--text)' }}>Share</strong> button <span style={{ color: 'var(--cyan)' }}>⎋</span> in Safari</>,
+              <>Choose <strong style={{ color: 'var(--text)' }}>&ldquo;Add to Home Screen&rdquo;</strong> <span style={{ color: 'var(--cyan)' }}>⊞</span></>,
+              <>Open <strong style={{ color: 'var(--text)' }}>Algoria</strong> from your home screen</>,
+            ].map((step, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
+                <span className="mono" style={{ fontSize: 11, fontWeight: 800, color: 'var(--cyan)' }}>{i + 1}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{step}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MemberChrome({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
@@ -108,9 +161,12 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
     );
   };
   const liveActive = path?.startsWith('/member/live');
+  // le prompt d'installation vit sur les pages connectées (y compris l'attente d'approbation — le bon moment pour installer)
+  const preAuth = ['/login', '/denied', '/invite'].some((p) => path?.includes(p));
   return (
     <div style={{ minHeight: '100vh', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', paddingBottom: bare ? 0 : 86 }}>
       <div style={{ flex: 1, padding: '14px 14px 0' }}>{children}</div>
+      {!preAuth && <InstallPrompt />}
       {!bare && (
         <nav
           style={{
