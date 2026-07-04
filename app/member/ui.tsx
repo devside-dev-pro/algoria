@@ -164,8 +164,9 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
   // le prompt d'installation vit sur les pages connectées (y compris l'attente d'approbation — le bon moment pour installer)
   const preAuth = ['/login', '/denied', '/invite'].some((p) => path?.includes(p));
   return (
-    <div style={{ minHeight: '100vh', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', paddingBottom: bare ? 0 : 86 }}>
-      <div style={{ flex: 1, padding: '14px 14px 0' }}>{children}</div>
+    // .appShell : document VERROUILLÉ (zéro rebond/vide), .appScroll = la seule scroll view — sensation native
+    <div className="appShell" style={{ maxWidth: 560, margin: '0 auto', width: '100%' }}>
+      <div className="appScroll" style={{ padding: bare ? '14px 14px 20px' : '14px 14px 96px' }}>{children}</div>
       {!preAuth && <InstallPrompt />}
       {!bare && (
         <nav
