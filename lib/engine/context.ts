@@ -21,6 +21,7 @@ export interface ContextOptions {
   volMinPct?: number;
   volMaxPct?: number;
   tradeAsia?: boolean; // rend la session asia tradable (nuit) — activé en mode SCALP
+  h24?: boolean; // marché 24/7 (crypto) : jamais 'closed' — le week-end garde ses sessions horaires
   zoneAtrTol?: number;
   roundStep?: number;
   sessions?: SessionConfig;
@@ -51,6 +52,7 @@ function withDefaults(o: ContextOptions) {
     volMinPct: o.volMinPct ?? 0.15,
     volMaxPct: o.volMaxPct ?? 0.97,
     tradeAsia: o.tradeAsia ?? false, // asia tradable ? (activé en SCALP uniquement → +fréquence, cf. runner)
+    h24: o.h24 ?? false,
     zoneAtrTol: o.zoneAtrTol ?? 0.6,
     roundStep: o.roundStep ?? 10,
     sessions: { ...DEFAULT_SESSIONS, ...(o.sessions ?? {}) },
@@ -58,13 +60,16 @@ function withDefaults(o: ContextOptions) {
 }
 
 /** ⚠️ Heures UTC approximatives — à ajuster pour le DST si besoin de précision. */
-function classifySession(time: number, s: typeof DEFAULT_SESSIONS): Session {
+function classifySession(time: number, s: typeof DEFAULT_SESSIONS, h24 = false): Session {
   const d = new Date(time);
   const day = d.getUTCDay();
   const h = d.getUTCHours() + d.getUTCMinutes() / 60;
-  if (day === 6) return 'closed';
-  if (day === 0 && h < s.sundayOpen) return 'closed';
-  if (day === 5 && h >= s.fridayClose) return 'closed';
+  if (!h24) {
+    // gap week-end des marchés CFD classiques — un marché 24/7 (crypto) ne ferme jamais
+    if (day === 6) return 'closed';
+    if (day === 0 && h < s.sundayOpen) return 'closed';
+    if (day === 5 && h >= s.fridayClose) return 'closed';
+  }
   if (h >= s.overlap[0] && h < s.overlap[1]) return 'overlap';
   if (h >= s.london[0] && h < s.london[1]) return 'london';
   if (h >= s.newyork[0] && h < s.newyork[1]) return 'newyork';
@@ -126,7 +131,7 @@ export function buildContext(symbol: string, bars: Bar[], htfBars?: Bar[], opts:
   const regime: Regime =
     adxNow >= o.trendAdx ? 'trend' : adxNow <= o.rangeAdx ? 'range' : emaBias === 'flat' ? 'range' : 'trend';
 
-  const session = classifySession(time, o.sessions);
+  const session = classifySession(time, o.sessions, o.h24);
   const zones = buildZones(bars, atrNow, o);
 
   // asia optionnellement tradable (l'or bouge la nuit) → ~2× la fréquence en SCALP, edge conservé
