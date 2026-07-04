@@ -409,16 +409,18 @@ export function Cockpit() {
             const time = s.created_at ? new Date(s.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
             const win = closed && (pnl ?? 0) >= 0;
             const loss = closed && (pnl ?? 0) < 0;
+            // signal émis mais JAMAIS exécuté (refus broker/risk) — afficher "placed" serait mensonger
+            const rejected = !tr && s.status === 'rejected';
             const edge = open ? (long ? 'rgba(34,224,166,.6)' : 'rgba(255,107,138,.6)') : win ? 'rgba(34,224,166,.4)' : 'var(--border)';
             const rationale = Array.isArray(s.rationale) ? (s.rationale as string[]).join(' · ') : '';
             const k = s.ticket != null ? String(s.ticket) : '';
             return (
-              <div key={s.id} className="cardIn" title={rationale} style={{
+              <div key={s.id} className="cardIn" title={rejected ? `not executed — ${String(s.result_code ?? 'rejected')}` : rationale} style={{
                 flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
                 padding: '5px 10px', borderRadius: 8, border: `1px solid ${edge}`,
                 background: open ? (long ? 'rgba(34,224,166,.07)' : 'rgba(255,107,138,.07)') : win ? 'rgba(34,224,166,.06)' : 'rgba(255,255,255,.012)',
                 boxShadow: win ? '0 0 10px rgba(34,224,166,.12)' : undefined,
-                opacity: loss ? 0.5 : 1, // pertes atténuées visuellement (toujours lisibles — relevé honnête), gains mis en avant
+                opacity: loss || rejected ? 0.5 : 1, // pertes/refus atténués visuellement (toujours lisibles — relevé honnête), gains mis en avant
               }}>
                 <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>#{num}</span>
                 <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{time}</span>
@@ -441,6 +443,8 @@ export function Cockpit() {
                     {/* gain : vert franc + ✓ ; perte : rose sourd, discret (présent mais pas agressif) */}
                     <span style={{ fontSize: win ? 12 : 11, fontWeight: win ? 700 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ +' : ''}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
                   </span>
+                ) : rejected ? (
+                  <span style={{ fontSize: 10, color: 'rgba(210,150,165,.8)' }}>✗ not executed</span>
                 ) : (
                   <span style={{ fontSize: 10, color: 'var(--dim)' }}>placed</span>
                 )}
