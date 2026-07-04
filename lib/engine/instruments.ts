@@ -3,6 +3,7 @@
 // Chaque instrument a sa PROPRE config (l'or et le Nasdaq n'ont pas le même profil : R:R, SL, seuil, maxSpread…).
 import { SCALP_CONFIG, type EngineConfig } from './config';
 import { GOLD_BREAKOUT, type BreakoutConfig } from './breakout';
+import { BTC_SWING, GOLD_SWING, type SwingConfig } from './swing';
 import type { ContextOptions } from './context';
 
 export interface InstrumentSpec {
@@ -12,8 +13,11 @@ export interface InstrumentSpec {
   ctx: Partial<ContextOptions>; // options de contexte (roundStep, tradeAsia, gate vol) — le spread est injecté au runtime
   enabled: boolean; // trader cet instrument ?
   breakout?: BreakoutConfig; // 2ᵉ stratégie (cassures Donchian) EN PLUS du scalp — uniquement si validée par le labo
-  // WATCH-ONLY : chart + desk + bougies + trades MANUELS, mais JAMAIS d'exécution auto (aucun edge validé).
-  // Cas d'usage : BTC le week-end — le marché vit à l'écran, Algoria analyse, l'opérateur peut long/short à la main.
+  // COUCHE SWING (H1) : position de FOND tenue des jours, slot séparé du scalp, lot dédié — validée au labo.
+  // S'exécute même sur un instrument watchOnly (le watch-only ne bloque que l'intraday, sans edge validé).
+  swing?: SwingConfig;
+  // WATCH-ONLY : chart + desk + bougies + trades MANUELS, mais JAMAIS d'exécution auto INTRADAY (aucun edge validé).
+  // Cas d'usage : BTC — le scalp y est interdit, mais la couche swing validée tourne.
   watchOnly?: boolean;
 }
 
@@ -65,6 +69,8 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     // 2ᵉ cerveau : cassures Donchian 8h — EN PLUS du scalp (labo 30.5j : PF 1.50, +$2248, ~3.6 setups/j,
     // tiers ✅✅✅). Le scalp joue les rejets, le breakout joue les cassures. Cap 1 position/symbole partagé.
     breakout: GOLD_BREAKOUT,
+    // 3ᵉ couche : SWING de fond H1 (labo 1.75 an : PF 2.21, +88%, tenue moy 3.5 j, en position 67% du temps).
+    swing: GOLD_SWING,
   },
   {
     display: 'NAS100',
@@ -82,7 +88,9 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     config: BTCUSD_WATCH,
     ctx: { ...SCALP_CTX, roundStep: 1000 }, // niveaux psychologiques BTC ~1000$
     enabled: process.env.WATCH_BTCUSD !== '0', // ON par défaut (désactivable sans redeploy de code)
-    watchOnly: true,
+    watchOnly: true, // pas de scalp intraday (aucun edge validé) — mais la couche SWING ci-dessous tourne
+    // SWING de fond 24/7 (labo 2.7 ans : PF 2.02, +39% à 1% de risque, week-end PF 2.7) — le compte vit le week-end.
+    swing: BTC_SWING,
   },
 ];
 

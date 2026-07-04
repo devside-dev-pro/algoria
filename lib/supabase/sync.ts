@@ -118,6 +118,12 @@ export async function recordTradeClose(ticket: string, symbol: string, c: TradeC
   }
 }
 
+/** Une position SWING est-elle déjà ouverte sur ce symbole ? (slot swing = 1 position de fond max, survit aux reboots). */
+export async function hasOpenSwingTrade(symbol: string): Promise<boolean> {
+  const { data } = await db.from('trades').select('id').eq('symbol', symbol).is('closed_at', null).ilike('signal_ref', '%-swing-%').limit(1);
+  return !!data?.length;
+}
+
 /** Timestamp (ms) de la dernière bougie stockée pour symbol/timeframe — null si aucune. Sert au warm boot du runner. */
 export async function latestCandleTime(symbol: string, timeframe = 'M5'): Promise<number | null> {
   const { data } = await db.from('candles').select('time').eq('symbol', symbol).eq('timeframe', timeframe).order('time', { ascending: false }).limit(1);

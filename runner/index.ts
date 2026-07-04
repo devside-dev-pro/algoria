@@ -10,12 +10,13 @@ import { narrate, narrateRecap, narrationReady, deskMeta, type DeskKind } from '
 import { runTick } from '../lib/engine/pipeline';
 import { checkRisk } from '../lib/engine/risk';
 import { breakoutSignal } from '../lib/engine/breakout';
+import { swingSignal, swingMinBars } from '../lib/engine/swing';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
 import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from './news';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -370,6 +371,43 @@ async function main() {
 
     const agg = makeAggregator(TF, seed, onClosed);
 
+    // ===== COUCHE SWING (H1) — la stratégie de FOND : slot séparé du scalp, lot dédié, tenue de plusieurs
+    // jours avec breakeven à 1R puis trailing par paliers (manage.ts). Le slot survit aux reboots : l'état
+    // "swing ouvert ?" est relu en base (signal_ref *-swing-*), jamais en mémoire seule.
+    let swingAgg: ((bid: number, ask: number, t: number) => void) | null = null;
+    if (inst.swing) {
+      const SW = inst.swing;
+      const onH1Closed = async (h1bars: Bar[]) => {
+        try {
+          await logCandle(DISPLAY, h1bars[h1bars.length - 1], 'H1'); // H1 frais en base (chart + futurs backtests)
+          if (killed) return;
+          if (h1bars.length < swingMinBars(SW)) return;
+          if (await hasOpenSwingTrade(DISPLAY)) return; // 1 position de fond max par marché
+          const sig = swingSignal(DISPLAY, h1bars, SW, mode, inst.config.priceStep ?? 0.01);
+          if (!sig) return;
+          // garde-fous : spread + lockout news (fenêtres du calendrier éco) + veto portefeuille global
+          st2: {
+            const freshState = readState(terminal, BROKER, state);
+            if (freshState.spread > inst.config.risk.maxSpread) { await logSignal(sig, { code: `risk: spread ${freshState.spread.toFixed(2)}`, status: 'rejected' }); break st2; }
+            const inNews = newsWindows().some((w) => sig.time >= w.start - inst.config.risk.newsLockoutBeforeSec * 1000 && sig.time <= w.end + inst.config.risk.newsLockoutAfterSec * 1000);
+            if (inNews) { await logSignal(sig, { code: 'risk: news lockout', status: 'rejected' }); break st2; }
+            const veto = portfolioVeto({ positions: (terminal.positions ?? []) as any[], symbol: BROKER });
+            if (veto) { await logSignal(sig, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' }); break st2; }
+            const ticket = await executeSignal(sig);
+            if (ticket) {
+              rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, riskDist: Math.abs(sig.entry - sig.stopLoss) });
+              await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at 1R, ${SW.trailDist}R trailing)`, 'order');
+            }
+          }
+        } catch (e) {
+          console.error(`[algoria] swing ${DISPLAY} échoué:`, e);
+        }
+      };
+      const h1seed = await loadHistory(account, BROKER, '1h', 700).catch(() => [] as Bar[]);
+      swingAgg = makeAggregator('1h', h1seed, (b) => void onH1Closed(b));
+      console.log(`[algoria] couche SWING active sur ${DISPLAY} (${SW.kind}, lot ${SW.lot}) · seed H1: ${h1seed.length} bougies`);
+    }
+
     // Agrégateur M1 LÉGER : log chaque bougie M1 clôturée (chart + data fraîche backtest), sans retenir l'historique.
     let m1cur: Bar | null = null;
     const feedM1 = (mid: number, t: number) => {
@@ -395,6 +433,7 @@ async function main() {
         const stale = Number.isFinite(quoteMs) && Date.now() - quoteMs > 90_000;
         if (!stale) {
           agg(p.bid, p.ask, Date.now());
+          swingAgg?.(p.bid, p.ask, Date.now()); // agrégateur H1 de la couche swing
           feedM1((p.bid + p.ask) / 2, Date.now());
           broadcastTick(DISPLAY, p.bid, p.ask); // tick tagué symbole → le cockpit multi-symbole suit le marché choisi
         }
