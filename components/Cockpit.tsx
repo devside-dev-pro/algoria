@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
-import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk } from '@/lib/cockpit/useRealtime';
+import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk, useWeekHistory } from '@/lib/cockpit/useRealtime';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
@@ -36,6 +36,23 @@ export function Cockpit() {
   const [tpIn, setTpIn] = useState('');
   const [broadcast, setBroadcast] = useState(false); // mode diffusion : vue épurée pour le live (masque les contrôles opérateur)
   const [whyDismissed, setWhyDismissed] = useState<string | null>(null); // id du setup fermé manuellement (croix) → se réaffiche au prochain
+  // === MODE RECAP — l'HISTOIRE de la semaine, racontée pour les lives du week-end : stats jour par jour,
+  // tape des trades passés, et REPLAY d'un setup sur le chart (le chart remonte le temps + WHY rejoué).
+  const [recap, setRecap] = useState(false);
+  const [recapDay, setRecapDay] = useState<string>('week'); // 'week' | jour UTC 'YYYY-MM-DD'
+  const [focus, setFocus] = useState<number | null>(null); // instant du chart à cadrer (clic sur un trade)
+  const [replayTicket, setReplayTicket] = useState<string | null>(null); // trade dont on rejoue le WHY
+  const hist = useWeekHistory(8, recap); // chargé uniquement quand le recap s'ouvre
+  const toggleRecap = () =>
+    setRecap((r) => {
+      const n = !r;
+      if (n) setRecapDay('week');
+      else {
+        setFocus(null); // retour au présent (le chart re-scroll au temps réel)
+        setReplayTicket(null);
+      }
+      return n;
+    });
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get('broadcast'); // ?broadcast=1 → source OBS dédiée
     if (p != null) setBroadcast(p === '1' || p === 'true');
@@ -108,14 +125,62 @@ export function Cockpit() {
   const rafaleTickets = new Set(
     signals.filter((s: any) => Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')).map((s: any) => String(s.ticket)),
   );
+  for (const s of hist.signals as any[]) {
+    if (Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')) rafaleTickets.add(String(s.ticket));
+  }
+
+  // === Données RECAP : trades clôturés de la semaine (hors BEAST), groupés par jour UTC ===
+  const histClosed = (hist.trades as any[]).filter((t) => t.pnl != null && t.closed_at && !rafaleTickets.has(String(t.ticket)));
+  const dayOf = (t: any) => new Date(Date.parse(t.closed_at)).toISOString().slice(0, 10);
+  const recapDays = (() => {
+    const out: { key: string; label: string; net: number; n: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setUTCHours(0, 0, 0, 0);
+      d.setUTCDate(d.getUTCDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const rows = histClosed.filter((t) => dayOf(t) === key);
+      out.push({
+        key,
+        label: d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', timeZone: 'UTC' }).toUpperCase(),
+        net: rows.reduce((a, t) => a + Number(t.pnl), 0),
+        n: rows.length,
+      });
+    }
+    return out;
+  })();
+  const recapRows = recapDay === 'week' ? histClosed : histClosed.filter((t) => dayOf(t) === recapDay);
+  const recapStats = (() => {
+    const n = recapRows.length;
+    const net = recapRows.reduce((a, t) => a + Number(t.pnl), 0);
+    const wins = recapRows.filter((t) => Number(t.pnl) > 0).length;
+    const best = recapRows.reduce((m, t) => Math.max(m, Number(t.pnl) || 0), 0);
+    return { n, net, wins, winPct: n ? wins / n : 0, best };
+  })();
+  const recapLabel = recapDay === 'week' ? 'WEEK' : (recapDays.find((d) => d.key === recapDay)?.label ?? recapDay);
+  // Setup REJOUÉ (clic sur un trade du recap) : son signal complet (confluence) + sa ligne trade (P&L réel)
+  const replaySig = recap && replayTicket ? ((hist.signals as any[]).find((s) => String(s.ticket) === replayTicket && Array.isArray(s?.confluence?.contributions) && s.confluence.contributions.length > 0) ?? null) : null;
+  const replayTrade = replayTicket ? (histClosed.find((t) => String(t.ticket) === replayTicket) ?? null) : null;
   // Compteur "trades today" (hors BEAST) — l'activité du jour visible d'un coup d'œil dans le header.
   const dayStartMs = new Date().setUTCHours(0, 0, 0, 0);
   const tradesTodayCount = (trades as any[]).filter((t) => t.opened_at && Date.parse(t.opened_at) >= dayStartMs && !rafaleTickets.has(String(t.ticket))).length;
   // Gains clôturés du symbole affiché (hors BEAST) → pastilles "+X$" de célébration sur le chart.
-  const winsForChart = (trades as any[])
-    .filter((t) => t.symbol === symbol && t.closed_at && Number(t.pnl) > 0 && !rafaleTickets.has(String(t.ticket)))
-    .slice(0, 24)
-    .map((t) => ({ time: Date.parse(t.closed_at), pnl: Number(t.pnl) }));
+  // En RECAP : TOUTE la semaine (le replay montre chaque win passé) ; sinon les 24 derniers.
+  const winsForChart = recap
+    ? histClosed.filter((t) => t.symbol === symbol && Number(t.pnl) > 0).map((t) => ({ time: Date.parse(t.closed_at), pnl: Number(t.pnl) }))
+    : (trades as any[])
+        .filter((t) => t.symbol === symbol && t.closed_at && Number(t.pnl) > 0 && !rafaleTickets.has(String(t.ticket)))
+        .slice(0, 24)
+        .map((t) => ({ time: Date.parse(t.closed_at), pnl: Number(t.pnl) }));
+
+  // Signaux fournis au chart (triangles d'entrée) : en RECAP on fusionne l'historique de la semaine
+  // (les 60 signaux "live" ne couvrent que les derniers jours) — dédupliqués par id.
+  const chartSigs = (() => {
+    const base = signals.filter((s: any) => s.symbol === symbol);
+    if (!recap) return base;
+    const seen = new Set(base.map((s: any) => String(s.id)));
+    return [...base, ...(hist.signals as any[]).filter((s) => s.symbol === symbol && !seen.has(String(s.id)))];
+  })();
   const closedT = trades.filter((t: any) => t.closed_at != null && t.pnl != null && !rafaleTickets.has(String(t.ticket)));
   const stats = (() => {
     const n = closedT.length;
@@ -192,6 +257,19 @@ export function Cockpit() {
               <button onClick={() => supabase.auth.signOut()} style={{ ...pill(false), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 9px' }} title="sign out" aria-label="sign out"><LogoutIcon /></button>
             </>
           )}
+          {/* RECAP — raconter la semaine en live week-end : stats par jour + replay des setups sur le chart */}
+          <button
+            onClick={toggleRecap}
+            style={{
+              ...pill(false), fontWeight: recap ? 700 : 500,
+              color: recap ? 'var(--gold)' : undefined,
+              borderColor: recap ? 'rgba(245,194,74,.55)' : undefined,
+              background: recap ? 'rgba(245,194,74,.1)' : undefined,
+            }}
+            title="RECAP — rewind the week: day-by-day stats, past trades, click any trade to replay its setup on the chart"
+          >
+            {recap ? '📼 RECAP ON' : '📼 Recap'}
+          </button>
           <button onClick={toggleBroadcast} style={broadcast ? onAirBtn : pill(false)} title="Broadcast mode — clean full-screen view for streaming (hides operator controls). Also via ?broadcast=1">
             {broadcast ? '● ON AIR' : 'Broadcast'}
           </button>
@@ -238,9 +316,14 @@ export function Cockpit() {
             )}
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Chart key={symbol} symbol={symbol} signals={signals.filter((s: any) => s.symbol === symbol)} activeTrade={activeTrade} wins={winsForChart} />
+            <Chart key={symbol} symbol={symbol} signals={chartSigs} activeTrade={activeTrade} wins={winsForChart} focusAt={recap ? focus : null} />
           </div>
-          {whySig && String(whySig.id) !== whyDismissed && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} rationale={whySig.rationale} live={!!openSig} closed={whyClosed} pnl={whyPnl} onClose={() => setWhyDismissed(String(whySig.id))} />}
+          {/* WHY : le setup REJOUÉ (recap) prime sur le setup courant — croix = sortir du replay */}
+          {replaySig ? (
+            <WhyPanel direction={String(replaySig.direction)} conf={replaySig.confluence} rationale={replaySig.rationale} live={false} closed={!!replayTrade} pnl={replayTrade?.pnl != null ? Number(replayTrade.pnl) : null} onClose={() => setReplayTicket(null)} />
+          ) : (
+            whySig && String(whySig.id) !== whyDismissed && <WhyPanel direction={String(whySig.direction)} conf={whySig.confluence} rationale={whySig.rationale} live={!!openSig} closed={whyClosed} pnl={whyPnl} onClose={() => setWhyDismissed(String(whySig.id))} />
+          )}
         </section>
         <div style={{ display: 'grid', gridTemplateRows: '1fr 1.4fr', gap: 10, minHeight: 0 }}>
           <Desk items={deskItems} heroSymbol={symbol} />
@@ -250,12 +333,72 @@ export function Cockpit() {
 
       {/* ===== TRADES — single-line chips, horizontal scroll (open positions first, with close) ===== */}
       <section className="panel" style={{ flex: 'none', padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0 }}>
-        <div style={{ fontSize: 9.5, color: 'var(--cyan)', letterSpacing: 1, opacity: 0.85, flex: 'none' }}>
-          TRADES <span style={{ color: 'var(--dim)' }}>— newest left → scroll ▸</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 9.5, color: recap ? 'var(--gold)' : 'var(--cyan)', letterSpacing: 1, opacity: 0.85 }}>
+            {recap ? <>📼 RECAP · {recapLabel} <span style={{ color: 'var(--dim)' }}>— click a trade to replay its setup ▸</span></> : <>TRADES <span style={{ color: 'var(--dim)' }}>— newest left → scroll ▸</span></>}
+          </div>
+          {/* Bandeau des JOURS : la semaine d'un coup d'œil — net + nb de trades par jour, WEEK = tout */}
+          {recap && (
+            <div className="mono" style={{ display: 'flex', gap: 5, overflowX: 'auto' }}>
+              {[{ key: 'week', label: 'WEEK', net: recapDays.reduce((a, d) => a + d.net, 0), n: recapDays.reduce((a, d) => a + d.n, 0) }, ...recapDays].map((d) => {
+                const sel = recapDay === d.key;
+                return (
+                  <button key={d.key} onClick={() => { setRecapDay(d.key); setReplayTicket(null); }} style={{
+                    display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+                    border: `1px solid ${sel ? 'rgba(245,194,74,.55)' : 'var(--border)'}`,
+                    background: sel ? 'rgba(245,194,74,.09)' : 'transparent',
+                    opacity: d.n === 0 && d.key !== 'week' ? 0.45 : 1,
+                  }}>
+                    <span style={{ fontSize: 9, letterSpacing: 0.6, color: sel ? 'var(--gold)' : 'var(--muted)', fontWeight: sel ? 700 : 500 }}>{d.label}</span>
+                    {/* jour vert : net franc ; jour rouge : rose sourd (honnête mais discret — même règle que la tape) */}
+                    <span style={{ fontSize: 10, fontWeight: 600, color: d.n === 0 ? 'var(--dim)' : d.net >= 0 ? 'var(--up)' : 'rgba(210,150,165,.8)' }}>
+                      {d.n === 0 ? '—' : (d.net >= 0 ? '+' : '') + Math.round(d.net) + '$'}
+                    </span>
+                    {d.n > 0 && <span style={{ fontSize: 8.5, color: 'var(--dim)' }}>{d.n}t</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         <div className="mono" style={{ display: 'flex', gap: 8, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 2 }}>
-          {signals.length === 0 && <span style={{ fontSize: 11, color: 'var(--dim)', padding: '6px 2px' }}>no trades yet</span>}
-          {signals.map((s: any, i: number) => {
+          {/* ===== TAPE RECAP : les trades clôturés de la période — cliquables → time-travel du chart + WHY rejoué ===== */}
+          {recap && recapRows.length === 0 && <span style={{ fontSize: 11, color: 'var(--dim)', padding: '6px 2px' }}>no trades in this period</span>}
+          {recap && recapRows.map((t: any, i: number) => {
+            const long = t.direction === 'long';
+            const pnl = Number(t.pnl);
+            const win = pnl >= 0;
+            const sel = replayTicket != null && String(t.ticket) === replayTicket;
+            const when = new Date(Date.parse(t.opened_at));
+            const time = when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+            const dayTag = recapDay === 'week' ? when.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' }).toUpperCase() + ' ' : '';
+            const sym = symSpec(String(t.symbol));
+            return (
+              <button key={t.id ?? i} className="cardIn" title={`replay this ${long ? 'long' : 'short'} on the chart`} onClick={() => {
+                if (t.symbol && t.symbol !== symbol) setSymbol(String(t.symbol));
+                const ms = Date.parse(t.opened_at);
+                if (Number.isFinite(ms)) setFocus(ms);
+                setReplayTicket(String(t.ticket));
+              }} style={{
+                flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', cursor: 'pointer',
+                padding: '5px 10px', borderRadius: 8, fontFamily: 'inherit',
+                border: `1px solid ${sel ? 'rgba(245,194,74,.6)' : win ? 'rgba(34,224,166,.4)' : 'var(--border)'}`,
+                background: sel ? 'rgba(245,194,74,.08)' : win ? 'rgba(34,224,166,.06)' : 'rgba(255,255,255,.012)',
+                boxShadow: win && !sel ? '0 0 10px rgba(34,224,166,.12)' : undefined,
+                opacity: !win && !sel ? 0.55 : 1,
+              }}>
+                <span style={{ fontSize: 9.5, color: 'var(--dim)' }}>#{recapRows.length - i}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{dayTag}{time}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--cyan)' }}>{sym.short}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 5, background: long ? 'rgba(34,224,166,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>{String(t.direction ?? '').toUpperCase()}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{fmt(t.lot)}@{fmt(t.entry, 1)}</span>
+                {t.reason && win && <span style={{ fontSize: 8.5, padding: '1px 5px', borderRadius: 4, background: 'rgba(130,152,190,.15)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{t.reason}</span>}
+                <span style={{ fontSize: win ? 12 : 11, fontWeight: win ? 700 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ +' : ''}{pnl.toFixed(0)}$</span>
+              </button>
+            );
+          })}
+          {!recap && signals.length === 0 && <span style={{ fontSize: 11, color: 'var(--dim)', padding: '6px 2px' }}>no trades yet</span>}
+          {!recap && signals.map((s: any, i: number) => {
             const long = s.direction === 'long';
             const tr = s.ticket != null ? tradeByTicket.get(String(s.ticket)) : null;
             const closed = !!tr?.closed_at;
@@ -311,11 +454,24 @@ export function Cockpit() {
       <section style={{ flex: 'none', display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
         <Metric label="Balance" value={st ? fmt(st.balance, 0) : '—'} accent="var(--cyan)" />
         <Metric label="Equity" value={st ? fmt(st.equity, 0) : '—'} accent="var(--blue)" spark={equityCurve} />
-        {/* règle broadcast 70/30 : un Day P&L rouge ou un win rate < 75% ne s'affichent pas (tuile neutre "—") */}
-        <Metric label="Day P&L" value={dayPnl == null || dayPnl < 0 ? '—' : '+' + dayPnl.toFixed(0)} color={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--dim)'} accent={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--border)'} />
-        <Metric label={`Win rate · ${stats.n}`} value={stats.ready && stats.winPct >= 0.75 ? (stats.winPct * 100).toFixed(0) + '%' : '—'} color={stats.ready && stats.winPct >= 0.75 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
-        <Metric label="Wins today" value={winsToday > 0 ? '✓ ' + winsToday : '—'} color={winsToday > 0 ? 'var(--up)' : 'var(--dim)'} accent="var(--cyan)" />
-        <Metric label="Best trade" value={bestToday > 0 ? '+' + bestToday.toFixed(0) + '$' : '—'} gold={bestToday > 0} color="var(--dim)" accent="var(--gold)" />
+        {recap ? (
+          <>
+            {/* RECAP = relevé HONNÊTE de la période : un net négatif s'affiche (rose sourd), pas de tuile vide —
+                c'est le track record qu'on raconte, il doit être crédible. Le vert des gains reste franc. */}
+            <Metric label={`P&L · ${recapLabel}`} value={recapStats.n === 0 ? '—' : (recapStats.net >= 0 ? '+' : '') + recapStats.net.toFixed(0) + '$'} color={recapStats.n === 0 ? 'var(--dim)' : recapStats.net >= 0 ? 'var(--up)' : 'rgba(210,150,165,.85)'} accent={recapStats.net > 0 ? 'var(--up)' : 'var(--border)'} />
+            <Metric label={`Win rate · ${recapStats.n}`} value={recapStats.n > 0 ? (recapStats.winPct * 100).toFixed(0) + '%' : '—'} color={recapStats.n > 0 && recapStats.winPct >= 0.5 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
+            <Metric label={`Wins · ${recapLabel}`} value={recapStats.wins > 0 ? '✓ ' + recapStats.wins : '—'} color={recapStats.wins > 0 ? 'var(--up)' : 'var(--dim)'} accent="var(--cyan)" />
+            <Metric label="Best trade" value={recapStats.best > 0 ? '+' + recapStats.best.toFixed(0) + '$' : '—'} gold={recapStats.best > 0} color="var(--dim)" accent="var(--gold)" />
+          </>
+        ) : (
+          <>
+            {/* règle broadcast 70/30 : un Day P&L rouge ou un win rate < 75% ne s'affichent pas (tuile neutre "—") */}
+            <Metric label="Day P&L" value={dayPnl == null || dayPnl < 0 ? '—' : '+' + dayPnl.toFixed(0)} color={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--dim)'} accent={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--border)'} />
+            <Metric label={`Win rate · ${stats.n}`} value={stats.ready && stats.winPct >= 0.75 ? (stats.winPct * 100).toFixed(0) + '%' : '—'} color={stats.ready && stats.winPct >= 0.75 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
+            <Metric label="Wins today" value={winsToday > 0 ? '✓ ' + winsToday : '—'} color={winsToday > 0 ? 'var(--up)' : 'var(--dim)'} accent="var(--cyan)" />
+            <Metric label="Best trade" value={bestToday > 0 ? '+' + bestToday.toFixed(0) + '$' : '—'} gold={bestToday > 0} color="var(--dim)" accent="var(--gold)" />
+          </>
+        )}
       </section>
     </main>
   );

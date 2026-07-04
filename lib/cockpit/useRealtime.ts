@@ -171,6 +171,41 @@ export function useTrades(limit = 60) {
   return trades;
 }
 
+/** MODE RECAP : l'HISTOIRE des N derniers jours — trades clôturés + signaux complets (confluence incluse).
+ * Chargé UNIQUEMENT quand le recap est ouvert (enabled) : volumes faibles (~40 lignes/semaine), une requête suffit. */
+export function useWeekHistory(days = 8, enabled = false) {
+  const [trades, setTrades] = useState<Row[]>([]);
+  const [signals, setSignals] = useState<Row[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    supabase
+      .from('trades')
+      .select('*')
+      .gte('opened_at', since)
+      .not('closed_at', 'is', null)
+      .order('closed_at', { ascending: false })
+      .limit(500)
+      .then(({ data }) => {
+        if (alive && data) setTrades(data);
+      });
+    supabase
+      .from('signals')
+      .select('*')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(500)
+      .then(({ data }) => {
+        if (alive && data) setSignals(data);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [days, enabled]);
+  return { trades, signals };
+}
+
 /** Équity au DÉBUT du jour UTC (1er snapshot du jour) → day P&L correct, insensible aux redémarrages du runner. */
 export function useDayStartEquity() {
   const [eq, setEq] = useState<number | null>(null);

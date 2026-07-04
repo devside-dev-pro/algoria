@@ -39,7 +39,7 @@ const toBar = (c: Record<string, unknown>): Bar => ({
   time: Number(c.time), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
 });
 
-export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [] }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string; wins?: Array<{ time: number; pnl: number }> }) {
+export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [], focusAt = null }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string; wins?: Array<{ time: number; pnl: number }>; focusAt?: number | null }) {
   const SYMBOL = symbol; // le parent remonte le Chart (key={symbol}) au changement → réinit propre du chart impératif
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -281,6 +281,31 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     seedHud(); // légende visible dès le chargement (dernière bougie), avant tout survol
     chartRef.current?.timeScale().fitContent();
   }
+
+  // === MODE RECAP : voyage dans le temps — centre la vue sur un instant passé (clic sur un trade de la semaine).
+  // Charge l'historique manquant page par page jusqu'à atteindre l'instant, puis cadre ±80 bougies autour.
+  async function focusOn(ms: number) {
+    for (let i = 0; i < 50 && (!barsRef.current.length || loadingRef.current); i++) await new Promise((r) => setTimeout(r, 120)); // attend le chargement initial
+    let guard = 0;
+    while (barsRef.current.length && barsRef.current[0].time > ms && guard++ < 12) {
+      const oldest = barsRef.current[0].time;
+      await loadOlder();
+      if (barsRef.current[0].time === oldest) break; // plus d'historique en base
+    }
+    const chart = chartRef.current;
+    if (!chart || !barsRef.current.length) return;
+    const tfMs = TF_MS[tfRef.current];
+    const lastT = barsRef.current[barsRef.current.length - 1].time;
+    const from = Math.max(barsRef.current[0].time, ms - 80 * tfMs);
+    const to = Math.min(lastT + tfMs, ms + 80 * tfMs);
+    chart.timeScale().setVisibleRange({ from: toSec(from), to: toSec(to) });
+    drawMarkers(); // les marqueurs de la zone (triangles + pastilles win) reflètent les données fraîchement chargées
+  }
+  useEffect(() => {
+    if (focusAt != null) void focusOn(focusAt);
+    else chartRef.current?.timeScale().scrollToRealTime(); // sortie du recap → retour au présent
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusAt]);
 
   // HUD = dernière bougie (état par défaut hors survol).
   function seedHud() {
