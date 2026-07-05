@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
 import { VoiceEngine, chime } from '@/lib/cockpit/voice';
+import { AlgoriaOrb, type OrbState } from './Orb';
 
 const EN_NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' };
 const symName = (s: string) => EN_NAME[s] ?? s;
@@ -225,58 +226,53 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   }, [trades, deskItems, on]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const active = mode !== 'idle' || speaking;
+  const orbState: OrbState = speaking ? 'speaking' : mode === 'thinking' ? 'thinking' : mode === 'listening' ? 'listening' : 'idle';
   return (
     <>
-      {/* ===== Bouton header ===== */}
+      {/* ===== L'ORBE permanent (header) — le cerveau d'Algoria, en vie tout le temps. C'est aussi le bouton. ===== */}
       <button
         onClick={() => setOn((v) => !v)}
         title={supported
-          ? 'ALGORIA VOICE — she announces trades & news out loud, and answers to “Hey Algoria …” (mic required)'
-          : 'Voice announcements ON — wake word needs Chrome (speech recognition unavailable here)'}
+          ? on
+            ? 'ALGORIA is live — say “Hey Algoria …” or wait for her trade calls. Click to turn her voice off.'
+            : 'Wake ALGORIA — she announces trades & news out loud and answers to “Hey Algoria …” (mic required)'
+          : 'Voice announcements only — the wake word needs Chrome (speech recognition unavailable here)'}
         style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
-          fontSize: 11, fontWeight: on ? 700 : 500, letterSpacing: 0.4,
-          border: `1px solid ${on ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
-          background: on ? 'rgba(43,227,245,.1)' : 'transparent',
-          color: on ? 'var(--cyan)' : 'var(--muted)',
+          display: 'inline-flex', alignItems: 'center', gap: 7, padding: '2px 12px 2px 4px', borderRadius: 999, cursor: 'pointer',
+          fontSize: 10.5, fontWeight: on ? 700 : 500, letterSpacing: 0.6,
+          border: `1px solid ${on ? (speaking ? 'rgba(245,194,74,.5)' : 'rgba(43,227,245,.5)') : 'var(--border)'}`,
+          background: on ? 'rgba(43,227,245,.07)' : 'transparent',
+          color: on ? (speaking ? 'var(--gold)' : 'var(--cyan)') : 'var(--muted)',
         }}
       >
-        {on && <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: speaking ? 'var(--gold)' : 'var(--cyan)' }} />}
-        🎙 {on ? 'VOICE ON' : 'Voice'}
+        <AlgoriaOrb size={30} state={on ? orbState : 'idle'} dim={!on} />
+        {on ? 'VOICE ON' : 'Voice'}
       </button>
 
-      {/* ===== Overlay stream : écoute / réflexion / sous-titres ===== */}
+      {/* ===== L'ÉVEIL — « Hey Algoria » : le grand orbe surgit au centre, façon Siri, sous-titres pour le stream ===== */}
       {on && active && (
         <div style={{
-          position: 'fixed', left: '50%', bottom: 110, transform: 'translateX(-50%)', zIndex: 60,
-          maxWidth: 720, width: 'max-content', pointerEvents: 'none',
+          position: 'fixed', left: '50%', bottom: 96, transform: 'translateX(-50%)', zIndex: 60,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+          maxWidth: 760, width: 'max-content', pointerEvents: 'none',
         }}>
+          <div className="cardIn" style={{ filter: 'drop-shadow(0 0 34px rgba(43,227,245,.22))' }}>
+            <AlgoriaOrb size={150} state={orbState} />
+          </div>
           <div className="cardIn" style={{
-            display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderRadius: 14,
-            background: 'linear-gradient(180deg, rgba(16,26,48,.97) 0%, rgba(8,14,28,.97) 100%)',
-            border: `1px solid ${speaking ? 'rgba(245,194,74,.55)' : 'rgba(43,227,245,.5)'}`,
-            boxShadow: `0 12px 40px rgba(2,6,16,.6), 0 0 24px ${speaking ? 'rgba(245,194,74,.18)' : 'rgba(43,227,245,.15)'}`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '10px 22px', borderRadius: 14,
+            maxWidth: 720, textAlign: 'center', marginTop: -14,
+            background: 'linear-gradient(180deg, rgba(14,23,44,.96) 0%, rgba(7,12,24,.96) 100%)',
+            border: `1px solid ${speaking ? 'rgba(245,194,74,.5)' : 'rgba(43,227,245,.45)'}`,
+            boxShadow: `0 12px 40px rgba(2,6,16,.6), 0 0 24px ${speaking ? 'rgba(245,194,74,.16)' : 'rgba(43,227,245,.13)'}`,
           }}>
-            {/* équaliseur — Algoria « vit » quand elle parle/écoute */}
-            <span aria-hidden style={{ display: 'flex', alignItems: 'flex-end', gap: 2.5, height: 18 }}>
-              {[0, 1, 2, 3, 4].map((i) => (
-                <span key={i} style={{
-                  width: 3, borderRadius: 2,
-                  background: speaking ? 'var(--gold)' : 'var(--cyan)',
-                  animation: `algoriaEq .9s ease-in-out ${i * 0.12}s infinite alternate`,
-                }} />
-              ))}
-            </span>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 9, letterSpacing: 1.4, color: speaking ? 'var(--gold)' : 'var(--cyan)', marginBottom: 3 }}>
-                {speaking ? '◆ ALGORIA' : mode === 'thinking' ? '◆ ALGORIA IS THINKING…' : '🎙 ALGORIA IS LISTENING — ask your question'}
-              </div>
-              <div style={{ fontSize: 14.5, lineHeight: 1.45, color: 'var(--text)' }}>
-                {speaking ? subtitle : question ? `“${question}”` : '…'}
-              </div>
+            <div style={{ fontSize: 9, letterSpacing: 1.6, color: speaking ? 'var(--gold)' : 'var(--cyan)' }}>
+              {speaking ? '◆ ALGORIA' : mode === 'thinking' ? '◆ ALGORIA IS THINKING…' : '● ALGORIA IS LISTENING'}
+            </div>
+            <div style={{ fontSize: 14.5, lineHeight: 1.45, color: 'var(--text)' }}>
+              {speaking ? subtitle : question ? `“${question}”` : 'ask your question…'}
             </div>
           </div>
-          <style>{`@keyframes algoriaEq { from { height: 4px; opacity: .55 } to { height: 18px; opacity: 1 } }`}</style>
         </div>
       )}
     </>
