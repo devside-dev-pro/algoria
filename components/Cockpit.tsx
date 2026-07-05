@@ -5,6 +5,7 @@ import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
 import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk, useWeekHistory } from '@/lib/cockpit/useRealtime';
+import { AlgoriaVoice } from './Voice';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
@@ -257,6 +258,8 @@ export function Cockpit() {
               <button onClick={() => supabase.auth.signOut()} style={{ ...pill(false), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 9px' }} title="sign out" aria-label="sign out"><LogoutIcon /></button>
             </>
           )}
+          {/* VOICE — Algoria parle : annonces trades/news + « Hey Algoria » (Q&R vocale avec le contexte live) */}
+          <AlgoriaVoice deskItems={deskItems} trades={trades} st={st} symbol={symbol} dayPnl={dayPnl} rafaleTickets={rafaleTickets} />
           {/* RECAP — raconter la semaine en live week-end : stats par jour + replay des setups sur le chart */}
           <button
             onClick={toggleRecap}
