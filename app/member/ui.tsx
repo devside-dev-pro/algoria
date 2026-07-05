@@ -84,16 +84,17 @@ const ICONS: Record<string, React.ReactNode> = {
 };
 
 // PROMPT D'INSTALLATION PWA — personne n'a le réflexe "ajouter à l'écran d'accueil" : on le provoque.
-// Android/Chrome : bouton natif (beforeinstallprompt). iOS : pas d'API → mini-guide Partager → Sur l'écran d'accueil.
+// Un SEUL bouton : Android/Chrome → prompt natif (un tap, imbattable) ; sinon → la page store /download
+// (fiche façon App Store : screenshots, avis, tuto iPhone détaillé — bien mieux qu'un mini-guide en popup).
 // Réapparaît à CHAQUE ouverture (dismiss = session seulement) ; disparaît définitivement une fois installée.
 function InstallPrompt() {
-  const [mode, setMode] = useState<'hidden' | 'android' | 'ios'>('hidden');
+  const [mode, setMode] = useState<'hidden' | 'native' | 'store'>('hidden');
   const deferred = useRef<{ prompt: () => Promise<void> } | null>(null);
   useEffect(() => {
     const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
     if (standalone || sessionStorage.getItem('alg_install_hide')) return;
-    if (/iphone|ipad|ipod/i.test(navigator.userAgent)) { setMode('ios'); return; }
-    const onBip = (e: Event) => { e.preventDefault(); deferred.current = e as unknown as { prompt: () => Promise<void> }; setMode('android'); };
+    setMode('store'); // par défaut : direction la fiche store (iOS, Firefox, navigateur intégré…)
+    const onBip = (e: Event) => { e.preventDefault(); deferred.current = e as unknown as { prompt: () => Promise<void> }; setMode('native'); };
     window.addEventListener('beforeinstallprompt', onBip);
     return () => window.removeEventListener('beforeinstallprompt', onBip);
   }, []);
@@ -105,31 +106,25 @@ function InstallPrompt() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
           <img src="/brand/algoria-mark.png" alt="" width={34} height={34} style={{ objectFit: 'contain' }} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: 14 }}>Install the Algoria app</div>
+            <div style={{ fontWeight: 800, fontSize: 14 }}>Get the Algoria app</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>Full-screen, on your home screen, with win alerts — this is meant to live on your phone.</div>
           </div>
           <button onClick={dismiss} aria-label="close" style={{ border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', borderRadius: 7, width: 24, height: 24, cursor: 'pointer', fontSize: 13, lineHeight: '20px' }}>×</button>
         </div>
-        {mode === 'android' ? (
+        {mode === 'native' ? (
           <button
             onClick={() => { void deferred.current?.prompt(); dismiss(); }}
-            style={{ padding: '11px 14px', borderRadius: 11, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 13, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}
+            style={{ padding: '11px 14px', borderRadius: 11, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 13, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', textAlign: 'center' }}
           >
             ⬇ INSTALL — ONE TAP
           </button>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {[
-              <>Tap the <strong style={{ color: 'var(--text)' }}>Share</strong> button <span style={{ color: 'var(--cyan)' }}>⎋</span> in Safari</>,
-              <>Choose <strong style={{ color: 'var(--text)' }}>&ldquo;Add to Home Screen&rdquo;</strong> <span style={{ color: 'var(--cyan)' }}>⊞</span></>,
-              <>Open <strong style={{ color: 'var(--text)' }}>Algoria</strong> from your home screen</>,
-            ].map((step, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
-                <span className="mono" style={{ fontSize: 11, fontWeight: 800, color: 'var(--cyan)' }}>{i + 1}</span>
-                <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{step}</span>
-              </div>
-            ))}
-          </div>
+          <a
+            href="/download"
+            style={{ padding: '11px 14px', borderRadius: 11, cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 13, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', textAlign: 'center', textDecoration: 'none' }}
+          >
+            ⬇ GET THE APP
+          </a>
         )}
       </div>
     </div>
