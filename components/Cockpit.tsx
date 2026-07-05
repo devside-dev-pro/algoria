@@ -286,8 +286,8 @@ export function Cockpit() {
           >
             {recap ? '📼 RECAP ON' : '📼 Recap'}
           </button>
-          {/* AUTOPILOT — Algoria tient le live seule : scène plein écran (orbe), chat TikTok lu et répondu à voix
-              haute, analyses parlées, trading auto inchangé. (l'ancien mode Broadcast reste via ?broadcast=1) */}
+          {/* AUTOPILOT — Algoria tient le live seule SUR CE MÊME ÉCRAN : orbe + sous-titres en calque flottant,
+              chat TikTok lu et répondu à voix haute, trading auto inchangé. (l'ancien Broadcast reste via ?broadcast=1) */}
           <button
             onClick={toggleAutopilot}
             style={{
@@ -296,7 +296,7 @@ export function Cockpit() {
               borderColor: autopilot ? 'rgba(255,107,138,.55)' : 'var(--border)',
               background: autopilot ? 'rgba(255,107,138,.12)' : 'transparent',
             }}
-            title="AUTOPILOT — Algoria runs the live alone: full-screen orb stage, reads & answers TikTok chat out loud, keeps narrating the market. Trading stays fully automatic."
+            title="AUTOPILOT — Algoria runs the live alone on this same screen: floating orb + subtitles, reads & answers TikTok chat out loud, keeps narrating the market. Trading stays fully automatic."
           >
             {autopilot ? '🤖 AUTOPILOT ON' : '🤖 Autopilot'}
           </button>
@@ -505,8 +505,8 @@ export function Cockpit() {
         )}
       </section>
 
-      {/* ===== SCÈNE AUTOPILOT — plein écran par-dessus tout (à capturer dans OBS à la place de la caméra) ===== */}
-      {autopilot && <Autopilot st={st} deskItems={deskItems} dayPnl={dayPnl} onExit={toggleAutopilot} />}
+      {/* ===== AUTOPILOT — calques flottants PAR-DESSUS le cockpit (rien n'est masqué : chart, stats, desk restent) ===== */}
+      {autopilot && <Autopilot st={st} deskItems={deskItems} dayPnl={dayPnl} />}
     </main>
   );
 }

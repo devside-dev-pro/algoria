@@ -308,16 +308,14 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   const orbState: OrbState = speaking ? 'speaking' : mode === 'thinking' ? 'thinking' : mode === 'listening' ? 'listening' : 'idle';
   return (
     <>
-      {/* ===== L'ORBE permanent (header) — le cerveau d'Algoria, en vie tout le temps. C'est aussi le bouton. ===== */}
+      {/* ===== L'ORBE permanent (header) — le cerveau d'Algoria, en vie tout le temps. C'est aussi le bouton.
+           Un clic = ON/OFF, point. (l'éveil manuel a son propre petit bouton ASK juste à côté : avant, le clic
+           déclenchait l'écoute et il devenait IMPOSSIBLE d'éteindre la voix — vécu en live) ===== */}
       <button
-        onClick={() => (on ? manualWake() : setOn(true))}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          if (on) setOn(false);
-        }}
+        onClick={() => setOn((v) => !v)}
         title={supported
           ? on
-            ? 'ALGORIA is live — CLICK the orb to make her listen right now, or say “Hey Algoria …”. Right-click to turn her off.'
+            ? 'ALGORIA is live — click to turn her off. Say “Hey Algoria …” (or hit ASK) to talk to her.'
             : 'Wake ALGORIA — she announces trades & news out loud and answers to “Hey Algoria …” (mic required)'
           : 'Voice announcements only — the wake word needs Chrome (speech recognition unavailable here)'}
         style={{
@@ -331,6 +329,23 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
         <AlgoriaOrb size={30} state={on ? orbState : 'idle'} dim={!on} />
         {on ? 'VOICE ON' : 'Voice'}
       </button>
+
+      {/* ===== ASK — l'éveil manuel : elle écoute IMMÉDIATEMENT, zéro dépendance au wake word (fluidité en live) ===== */}
+      {on && !autopilot && supported && (
+        <button
+          onClick={manualWake}
+          title="make ALGORIA listen right now — no wake word needed (interrupts her if she's talking)"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
+            fontSize: 10, fontWeight: 600, letterSpacing: 0.8,
+            border: `1px solid ${mode === 'listening' ? 'rgba(43,227,245,.6)' : 'var(--border)'}`,
+            background: mode === 'listening' ? 'rgba(43,227,245,.12)' : 'transparent',
+            color: mode === 'listening' ? 'var(--cyan)' : 'var(--muted)',
+          }}
+        >
+          🎙 ASK
+        </button>
+      )}
 
       {/* ===== Feedback micro : ce que la reco a entendu quand le wake word n'a PAS matché ===== */}
       {on && heard && !active && !autopilot && (
