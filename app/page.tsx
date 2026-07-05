@@ -36,16 +36,16 @@ export default function Funnel() {
 
         {/* Hero */}
         <h1 style={{ fontSize: 30, lineHeight: 1.15, fontWeight: 700, margin: 0 }}>
-          The AI that trades <span style={{ color: 'var(--gold)' }}>gold</span> &amp; the <span style={{ color: 'var(--cyan)' }}>Nasdaq</span>,<br />live.
+          The AI that trades <span style={{ color: 'var(--gold)' }}>gold</span>, the <span style={{ color: 'var(--cyan)' }}>Nasdaq</span><br />&amp; <span style={{ color: '#f7931a' }}>Bitcoin</span> — live.
         </h1>
         <p style={{ fontSize: 15, color: 'var(--muted)', margin: 0, maxWidth: 380 }}>
-          Real trades, executed autonomously 24/5. Analysis, signals and results — <b style={{ color: 'var(--text)' }}>free</b> in the Telegram channel.
+          Real trades, executed autonomously around the clock. Analysis, signals and results — <b style={{ color: 'var(--text)' }}>free</b> in the Telegram channel.
         </p>
 
         {/* Live proof */}
         <div style={{ display: 'flex', gap: 10, width: '100%' }}>
           <Stat label="Win rate" value="93%" accent="var(--up)" />
-          <Stat label="Markets" value="XAU · NAS" accent="var(--cyan)" />
+          <Stat label="Markets" value="XAU·NAS·BTC" accent="var(--cyan)" />
           <Stat label="XAU/USD" value={px ? px.mid.toFixed(1) : '—'} accent="var(--gold)" mono />
         </div>
 

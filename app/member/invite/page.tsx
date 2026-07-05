@@ -13,7 +13,7 @@ export default function Invite() {
           A friend got you into <span className="goldText">ALGORIA</span>
         </h1>
         <p style={{ color: 'var(--muted)', fontSize: 14.5, lineHeight: 1.65, maxWidth: 400, margin: '12px auto 0' }}>
-          Algoria is an AI that trades gold &amp; the Nasdaq, live. Start in the Telegram channel — watch it work in real time, see the results, and talk to the team.
+          Algoria is an AI that trades gold, the Nasdaq &amp; Bitcoin, live. Start in the Telegram channel — watch it work in real time, see the results, and talk to the team.
         </p>
       </div>
 
