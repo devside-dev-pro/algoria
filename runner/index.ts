@@ -19,7 +19,7 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from '.
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade } from '../lib/supabase/sync';
-import type { Bar, Confluence, EngineState, Mode, Signal } from '../lib/engine/types';
+import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
 const ACTION_MS = 20_000; // mode Action : un trade toutes les ~20s
@@ -475,11 +475,17 @@ async function main() {
 
     // Snapshot COMPTE toutes les 60 s (balance/equity/day P&L frais entre deux clôtures M5) — sinon le
     // cockpit attend jusqu'à 5 min après un TP pour refléter le gain. Primaire uniquement (état compte global).
+    // SANS bougie traitée (week-end : l'or ne tique pas → lastCtx reste vide après un boot), on pousse quand
+    // même un snapshot minimal — sinon la balance du cockpit reste FIGÉE sur vendredi soir tout le week-end.
     const pushAccount = async () => {
-      if (!isPrimary || !lastCtx) return;
+      if (!isPrimary) return;
       state = readState(terminal, BROKER, state);
       state.killed = killed;
-      await pushState(lastCtx, state, mode);
+      const ctx: MarketContext = lastCtx ?? {
+        symbol: DISPLAY, time: Date.now(), price: 0, session: 'closed', regime: 'range',
+        adx: 0, atr: 0, atrPercentile: 0, emaBias: 'flat', macroBias: 0, spread: state.spread, zones: [], tradable: false,
+      };
+      await pushState(ctx, state, mode);
     };
 
     return { inst, isPrimary, tick, reconcile, pushAccount, executeSignal, buildManualSignal, setAction, setRafale };
