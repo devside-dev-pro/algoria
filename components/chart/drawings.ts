@@ -16,6 +16,7 @@ export type Drawing = {
   a: Anchor; // ancre primaire (pour hline : seul a.price compte)
   b?: Anchor; // ancre secondaire (trend, rect)
   text?: string; // libellé (kind === 'text')
+  soft?: boolean; // rendu DISCRET (analyse d'Algoria) : traits fins pointillés, remplissage léger, labels réduits
 };
 
 /** Résout un temps (secondes) en coordonnée x, avec extrapolation hors data. null = irrésoluble. */
