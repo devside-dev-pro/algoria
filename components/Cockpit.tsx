@@ -6,6 +6,7 @@ import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
 import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk, useWeekHistory } from '@/lib/cockpit/useRealtime';
 import { AlgoriaVoice } from './Voice';
+import { Autopilot } from './Autopilot';
 
 const fmt = (n: unknown, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixed(d) + '%');
@@ -36,6 +37,18 @@ export function Cockpit() {
   const [slIn, setSlIn] = useState('');
   const [tpIn, setTpIn] = useState('');
   const [broadcast, setBroadcast] = useState(false); // mode diffusion : vue épurée pour le live (masque les contrôles opérateur)
+  // MODE AUTOPILOT : Algoria tient le live seule (scène plein écran + chat TikTok + voix). Persisté →
+  // un crash/reload de la machine de stream REPREND l'autopilot tout seul (personne n'est là pour cliquer).
+  const [autopilot, setAutopilot] = useState(false);
+  useEffect(() => {
+    setAutopilot(localStorage.getItem('algoria.autopilot') === '1');
+  }, []);
+  const toggleAutopilot = () =>
+    setAutopilot((v) => {
+      const n = !v;
+      try { localStorage.setItem('algoria.autopilot', n ? '1' : '0'); } catch { /* private mode */ }
+      return n;
+    });
   const [whyDismissed, setWhyDismissed] = useState<string | null>(null); // id du setup fermé manuellement (croix) → se réaffiche au prochain
   // === MODE RECAP — l'HISTOIRE de la semaine, racontée pour les lives du week-end : stats jour par jour,
   // tape des trades passés, et REPLAY d'un setup sur le chart (le chart remonte le temps + WHY rejoué).
@@ -259,7 +272,7 @@ export function Cockpit() {
             </>
           )}
           {/* VOICE — Algoria parle : annonces trades/news + « Hey Algoria » (Q&R vocale avec le contexte live) */}
-          <AlgoriaVoice deskItems={deskItems} trades={trades} st={st} symbol={symbol} dayPnl={dayPnl} rafaleTickets={rafaleTickets} />
+          <AlgoriaVoice deskItems={deskItems} trades={trades} st={st} symbol={symbol} dayPnl={dayPnl} rafaleTickets={rafaleTickets} autopilot={autopilot} />
           {/* RECAP — raconter la semaine en live week-end : stats par jour + replay des setups sur le chart */}
           <button
             onClick={toggleRecap}
@@ -273,8 +286,19 @@ export function Cockpit() {
           >
             {recap ? '📼 RECAP ON' : '📼 Recap'}
           </button>
-          <button onClick={toggleBroadcast} style={broadcast ? onAirBtn : pill(false)} title="Broadcast mode — clean full-screen view for streaming (hides operator controls). Also via ?broadcast=1">
-            {broadcast ? '● ON AIR' : 'Broadcast'}
+          {/* AUTOPILOT — Algoria tient le live seule : scène plein écran (orbe), chat TikTok lu et répondu à voix
+              haute, analyses parlées, trading auto inchangé. (l'ancien mode Broadcast reste via ?broadcast=1) */}
+          <button
+            onClick={toggleAutopilot}
+            style={{
+              ...pill(false), fontWeight: 700, letterSpacing: 0.5,
+              color: autopilot ? '#ff8aa2' : 'var(--muted)',
+              borderColor: autopilot ? 'rgba(255,107,138,.55)' : 'var(--border)',
+              background: autopilot ? 'rgba(255,107,138,.12)' : 'transparent',
+            }}
+            title="AUTOPILOT — Algoria runs the live alone: full-screen orb stage, reads & answers TikTok chat out loud, keeps narrating the market. Trading stays fully automatic."
+          >
+            {autopilot ? '🤖 AUTOPILOT ON' : '🤖 Autopilot'}
           </button>
         </div>
       </header>
@@ -480,6 +504,9 @@ export function Cockpit() {
           </>
         )}
       </section>
+
+      {/* ===== SCÈNE AUTOPILOT — plein écran par-dessus tout (à capturer dans OBS à la place de la caméra) ===== */}
+      {autopilot && <Autopilot st={st} deskItems={deskItems} dayPnl={dayPnl} onExit={toggleAutopilot} />}
     </main>
   );
 }

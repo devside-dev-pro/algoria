@@ -206,6 +206,34 @@ export function useWeekHistory(days = 8, enabled = false) {
   return { trades, signals };
 }
 
+/** Commentaires du live TikTok (mode Autopilot) — seed des N derniers + INSERT temps réel. */
+export function useLiveComments(limit = 40, enabled = false) {
+  const [comments, setComments] = useState<Row[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    supabase
+      .from('live_comments' as never)
+      .select('*')
+      .order('ts', { ascending: false })
+      .limit(limit)
+      .then(({ data }) => {
+        if (alive && data) setComments((data as Row[]).reverse());
+      });
+    const ch = supabase
+      .channel('rt-live-comments')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_comments' }, ({ new: c }) =>
+        setComments((p) => [...p.slice(-limit + 1), c as Row]),
+      )
+      .subscribe();
+    return () => {
+      alive = false;
+      supabase.removeChannel(ch);
+    };
+  }, [limit, enabled]);
+  return comments;
+}
+
 /** Équity au DÉBUT du jour UTC (1er snapshot du jour) → day P&L correct, insensible aux redémarrages du runner. */
 export function useDayStartEquity() {
   const [eq, setEq] = useState<number | null>(null);

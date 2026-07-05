@@ -16,9 +16,10 @@ import { activeInstruments, type InstrumentSpec } from '../lib/engine/instrument
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
 import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from './news';
+import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -543,6 +544,20 @@ async function main() {
           primary.setAction(!!(cmd.payload as any)?.on);
         } else if (cmd.type === 'set_rafale') {
           primary.setRafale(!!(cmd.payload as any)?.on);
+        } else if (cmd.type === 'autopilot') {
+          // MODE AUTOPILOT : branche/coupe le pont TikTok Live (les commentaires arrivent dans live_comments).
+          // Le trading, lui, est DÉJÀ autonome — l'autopilot n'ajoute que la présence "publique" d'Algoria.
+          const on = !!(cmd.payload as any)?.on;
+          const ttUser = process.env.TIKTOK_USERNAME;
+          if (on && !ttUser) {
+            await logNote('autopilot: TIKTOK_USERNAME missing on the runner — chat bridge OFF (voice/stage still work)', 'veto');
+          } else if (on && ttUser) {
+            await startTikTok(ttUser, (user, text) => void recordLiveComment(user, text).catch(() => {}));
+            await logNote(`🤖 AUTOPILOT ON — reading TikTok live chat of @${ttUser}`, 'info');
+          } else {
+            stopTikTok();
+            await logNote('autopilot OFF — TikTok chat bridge closed', 'info');
+          }
         } else if (cmd.type === 'close_position') {
           const ticket = String((cmd.payload as any)?.ticket ?? '');
           if (!ticket) await logNote('close_position ignored — no ticket', 'veto');

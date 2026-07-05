@@ -9,8 +9,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
-import { VoiceEngine, chime } from '@/lib/cockpit/voice';
+import { voiceEngine, type VoiceEngine, chime } from '@/lib/cockpit/voice';
 import { AlgoriaOrb, type OrbState } from './Orb';
+
+export const getSbToken = async () => (await supabase.auth.getSession()).data.session?.access_token ?? null;
 
 const EN_NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' };
 const symName = (s: string) => EN_NAME[s] ?? s;
@@ -59,13 +61,14 @@ function stripWake(text: string): string {
 
 type Mode = 'idle' | 'listening' | 'thinking';
 
-export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTickets }: {
+export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTickets, autopilot = false }: {
   deskItems: any[];
   trades: any[];
   st: any;
   symbol: string;
   dayPnl: number | null;
   rafaleTickets: Set<string>;
+  autopilot?: boolean; // mode AUTOPILOT : annonces forcées ON, micro coupé (l'opérateur est parti), overlay masqué (la scène prend le relais)
 }) {
   const [on, setOn] = useState(false);
   const [mode, setMode] = useState<Mode>('idle');
@@ -92,21 +95,26 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   const seenNews = useRef<Set<string>>(new Set());
   const mountedAt = useRef(Date.now());
 
-  const engine = () => {
-    if (!engineRef.current) {
-      const e = new VoiceEngine(async () => (await supabase.auth.getSession()).data.session?.access_token ?? null);
-      e.onText = (t) => setSubtitle(t);
-      e.onSpeaking = (s) => {
+  const apRef = useRef(autopilot);
+  apRef.current = autopilot;
+
+  const engine = (): VoiceEngine => {
+    if (!engineRef.current) engineRef.current = voiceEngine(getSbToken); // moteur PARTAGÉ (une seule bouche, Autopilot inclus)
+    return engineRef.current;
+  };
+  useEffect(() => {
+    return engine().subscribe({
+      text: (t) => setSubtitle(t),
+      speaking: (s) => {
         speakingRef.current = s;
         setSpeaking(s);
         // micro coupé pendant la parole, relancé après (sinon Algoria s'entend elle-même)
         if (s) stopRec();
-        else if (onRef.current) startRec();
-      };
-      engineRef.current = e;
-    }
-    return engineRef.current;
-  };
+        else if (onRef.current && !apRef.current) startRec();
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ===== Persistance + démarrage/arrêt =====
   useEffect(() => {
@@ -114,15 +122,16 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   }, []);
   useEffect(() => {
     localStorage.setItem('algoria.voice', on ? '1' : '0');
-    if (on) {
+    // en AUTOPILOT le micro opérateur reste COUPÉ (personne devant l'écran + risque de larsen avec sa propre voix)
+    if (on && !autopilot) {
       startRec();
       return () => stopRec();
     }
     stopRec();
-    engineRef.current?.stop();
+    if (!on && !autopilot) engineRef.current?.stop();
     setMode('idle');
     setQuestion(null);
-  }, [on]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [on, autopilot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== Reconnaissance vocale — mot d'éveil + capture de la question =====
   function stopRec() {
@@ -261,7 +270,7 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   // Règle simple et infaillible : un événement n'est annoncé que si son horodatage est POSTÉRIEUR à
   // l'ouverture de la page (mountedAt) ET qu'il n'a pas déjà été annoncé (sets de dédup).
   useEffect(() => {
-    if (!on) return;
+    if (!on && !autopilot) return; // autopilot ⇒ annonces forcées (elle DOIT vivre pendant que l'opérateur est parti)
     const fresh = (iso: unknown) => {
       const ms = typeof iso === 'string' ? Date.parse(iso) : NaN;
       return Number.isFinite(ms) && ms > mountedAt.current - 30_000; // petite marge : événement en cours d'écriture au mount
@@ -293,7 +302,7 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
       const m = Number(e.data.minutes ?? 0);
       engine().speak(`Heads up. ${String(e.data.title ?? 'High-impact economic release')} in ${m || 'a few'} minutes. High impact — I'm standing aside until it settles.`);
     }
-  }, [trades, deskItems, on]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trades, deskItems, on, autopilot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const active = mode !== 'idle' || speaking;
   const orbState: OrbState = speaking ? 'speaking' : mode === 'thinking' ? 'thinking' : mode === 'listening' ? 'listening' : 'idle';
@@ -324,7 +333,7 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
       </button>
 
       {/* ===== Feedback micro : ce que la reco a entendu quand le wake word n'a PAS matché ===== */}
-      {on && heard && !active && (
+      {on && heard && !active && !autopilot && (
         <div className="cardIn" style={{
           position: 'fixed', left: '50%', bottom: 96, transform: 'translateX(-50%)', zIndex: 59, pointerEvents: 'none',
           fontSize: 11, color: 'var(--muted)', background: 'rgba(7,12,24,.88)', border: '1px solid var(--border)',
@@ -335,7 +344,7 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
       )}
 
       {/* ===== L'ÉVEIL — « Hey Algoria » : le grand orbe surgit au centre, façon Siri, sous-titres pour le stream ===== */}
-      {on && active && (
+      {on && active && !autopilot && (
         <div style={{
           position: 'fixed', left: '50%', bottom: 96, transform: 'translateX(-50%)', zIndex: 60,
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
