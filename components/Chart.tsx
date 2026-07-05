@@ -19,6 +19,7 @@ import { ema, swings } from '@/lib/engine/indicators';
 import { TradeZonePrimitive } from '@/components/chart/tradeZonePrimitive';
 import { DrawingsPrimitive } from '@/components/chart/drawingsPrimitive';
 import { loadDrawings, saveDrawings, newId, topHit, anchorXY, type Drawing, type DrawKind, type Anchor, type HitHandle } from '@/components/chart/drawings';
+import { findFVGs, buildAnalysis } from '@/lib/cockpit/analysis';
 import type { Bar } from '@/lib/engine/types';
 
 /** Position ouverte à matérialiser sur le chart (entrée/SL/TP). tps = échelle de TP (TP1, TP2…). null = aucune. */
@@ -65,9 +66,13 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
   activeRef.current = activeTrade;
   const [tf, setTf] = useState<TF>('M5');
   // Visibilité des indicateurs (toggles cliquables). On garde le calcul, on masque juste l'affichage.
-  const [vis, setVis] = useState({ ema: true, bb: true, vwap: true, sr: true, marks: true });
+  // fvg = Fair Value Gaps · ai = l'ANALYSE dessinée par Algoria (trendlines + poches de liquidité)
+  const [vis, setVis] = useState({ ema: true, bb: true, vwap: true, sr: true, marks: true, fvg: true, ai: true });
   const visRef = useRef(vis);
   visRef.current = vis;
+  // primitive des dessins d'ALGORIA (séparée des dessins utilisateur : ni sélection, ni persistance)
+  const aiRef = useRef<DrawingsPrimitive | null>(null);
+  const aiKeyRef = useRef(''); // mémo — on ne recalcule l'analyse qu'à la clôture d'une bougie (pas à chaque tick)
   // HUD crosshair (O/H/L/C + indicateurs de la bougie survolée, sinon la dernière)
   const [hud, setHud] = useState<Hud>(null);
   const lastIndRef = useRef<Partial<Ind>>({}); // dernières valeurs EMA/VWAP/BB (pour le HUD hors survol)
@@ -183,6 +188,24 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     });
   }
 
+  // L'ANALYSE d'ALGORIA posée sur le chart : FVG + trendlines + poches de liquidité. Recalculée uniquement
+  // quand une bougie clôture ou qu'un toggle change (mémo aiKeyRef) — les ticks intra-bougie ne coûtent rien.
+  function drawAnalysis(force = false) {
+    const ai = aiRef.current;
+    const bars = barsRef.current;
+    if (!ai) return;
+    const v = visRef.current;
+    const key = bars.length ? `${bars.length}:${bars[bars.length - 1].time}:${v.fvg}:${v.ai}:${tfRef.current}` : 'empty';
+    if (!force && key === aiKeyRef.current) return;
+    aiKeyRef.current = key;
+    if (bars.length < 60 || (!v.fvg && !v.ai)) return ai.setDrawings([], null);
+    const tfMs = TF_MS[tfRef.current];
+    const ds: Drawing[] = [];
+    if (v.fvg) ds.push(...findFVGs(bars, tfMs));
+    if (v.ai) ds.push(...buildAnalysis(bars, tfMs));
+    ai.setDrawings(ds, null);
+  }
+
   // Support / résistance les plus proches (swings) — lignes discrètes.
   function drawLevels() {
     const series = seriesRef.current;
@@ -276,6 +299,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     series.setData(bars.map(toCandle));
     drawIndicators();
     drawLevels();
+    drawAnalysis();
     drawMarkers();
     drawTrade();
     seedHud(); // légende visible dès le chargement (dernière bougie), avant tout survol
@@ -334,6 +358,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     series.setData(merged.map(toCandle));
     drawIndicators();
     drawLevels();
+    drawAnalysis();
   }
 
   // --- Dessins : persistance + rendu + sélection ---
@@ -570,6 +595,11 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     const zone = new TradeZonePrimitive();
     series.attachPrimitive(zone as Parameters<typeof series.attachPrimitive>[0]);
     zoneRef.current = zone;
+    // primitive ANALYSE d'ALGORIA (FVG, trendlines, liquidité) — SOUS les dessins utilisateur
+    const ai = new DrawingsPrimitive();
+    series.attachPrimitive(ai as Parameters<typeof series.attachPrimitive>[0]);
+    aiRef.current = ai;
+    ai.setTimeToX(timeToX);
     // primitive DESSINS utilisateur (au-dessus des bougies) + restauration localStorage
     const draw = new DrawingsPrimitive();
     series.attachPrimitive(draw as Parameters<typeof series.attachPrimitive>[0]);
@@ -617,6 +647,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
         else return;
         seriesRef.current?.update(toCandle(bar));
         scheduleIndUpdate();
+        drawAnalysis(); // bougie clôturée → l'analyse d'Algoria se rafraîchit (mémo interne : coût nul sinon)
       })
       .subscribe();
 
@@ -640,6 +671,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
         series.update(toCandle(last));
       } else return;
       scheduleIndUpdate();
+      drawAnalysis(); // ne recalcule réellement qu'à l'ouverture d'une NOUVELLE bougie (mémo)
     }, SYMBOL);
 
     return () => {
@@ -659,6 +691,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
       vwapRef.current = null;
       zoneRef.current = null; // chart.remove() dispose la primitive
       drawRef.current = null;
+      aiRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -713,6 +746,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     vwapRef.current?.applyOptions({ visible: vis.vwap });
     drawLevels();
     drawMarkers();
+    drawAnalysis(true); // toggles FVG / ANALYSIS → re-render forcé
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vis]);
 
@@ -729,6 +763,8 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
         <button onClick={() => setVis((v) => ({ ...v, bb: !v.bb }))} style={indBtn(vis.bb, 'rgba(150,170,205,.95)')}>Bollinger</button>
         <button onClick={() => setVis((v) => ({ ...v, vwap: !v.vwap }))} style={indBtn(vis.vwap, 'rgba(190,120,245,.95)')}>VWAP</button>
         <button onClick={() => setVis((v) => ({ ...v, sr: !v.sr }))} style={indBtn(vis.sr, 'rgba(245,194,74,.95)')}>S/R</button>
+        <button onClick={() => setVis((v) => ({ ...v, fvg: !v.fvg }))} style={indBtn(vis.fvg, 'rgba(31,216,176,.95)')} title="Fair Value Gaps — unfilled 3-candle imbalances (teal = bullish, rose = bearish)">FVG</button>
+        <button onClick={() => setVis((v) => ({ ...v, ai: !v.ai }))} style={indBtn(vis.ai, 'rgba(43,227,245,.95)')} title="Algoria draws her read: trendlines on the swings + liquidity pools (equal highs/lows)">✦ ANALYSIS</button>
         <button onClick={() => setVis((v) => ({ ...v, marks: !v.marks }))} style={indBtn(vis.marks, 'rgba(220,233,255,.9)')}>MARKS</button>
         <span style={{ width: 1, height: 16, background: 'var(--border)', margin: '0 5px' }} />
         <div style={drawGroup}>
