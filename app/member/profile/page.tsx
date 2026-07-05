@@ -126,7 +126,7 @@ export default function Profile() {
             <button
               onClick={() => {
                 const link = `https://app.algoria.tech/r/${referral.code}`;
-                if (navigator.share) void navigator.share({ title: 'Join Algoria', text: 'The AI that trades gold & the Nasdaq — get in with my link:', url: link }).catch(() => {});
+                if (navigator.share) void navigator.share({ title: 'Join Algoria', text: 'The AI that trades gold, the Nasdaq & Bitcoin — get in with my link:', url: link }).catch(() => {});
                 else { void navigator.clipboard?.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1600); }
               }}
               style={{ padding: '10px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 12, letterSpacing: 0.5, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)' }}
