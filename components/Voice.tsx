@@ -40,11 +40,13 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   modeRef.current = mode;
   const speakingRef = useRef(false);
   const listenTimer = useRef<number | null>(null);
-  // dédup annonces (seed au 1er lot non vide → pas de lecture du backlog au chargement)
+  // dédup annonces + FILTRE TEMPOREL : on n'annonce QUE ce qui survient APRÈS l'ouverture de la page.
+  // (le seed seul ne suffisait pas : le desk arrive souvent AVANT la liste des trades → le verrou se fermait
+  // sur une liste vide et TOUT le backlog était lu à voix haute au chargement suivant)
   const seenOpen = useRef<Set<string>>(new Set());
   const seenClose = useRef<Set<string>>(new Set());
   const seenNews = useRef<Set<string>>(new Set());
-  const seeded = useRef(false);
+  const mountedAt = useRef(Date.now());
 
   const engine = () => {
     if (!engineRef.current) {
@@ -185,38 +187,38 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   }
 
   // ===== Annonces AUTO : trades ouverts/clôturés (hors BEAST) + alertes éco =====
+  // Règle simple et infaillible : un événement n'est annoncé que si son horodatage est POSTÉRIEUR à
+  // l'ouverture de la page (mountedAt) ET qu'il n'a pas déjà été annoncé (sets de dédup).
   useEffect(() => {
-    if (!seeded.current) {
-      if (trades.length || deskItems.length) {
-        for (const t of trades as any[]) {
-          if (t.ticket != null && !t.closed_at) seenOpen.current.add(String(t.ticket));
-          if (t.ticket != null && t.closed_at) seenClose.current.add(String(t.ticket));
-        }
-        for (const e of deskItems as any[]) if (e?.data?.kind === 'news') seenNews.current.add(String(e.id));
-        seeded.current = true;
-      }
-      return;
-    }
     if (!on) return;
+    const fresh = (iso: unknown) => {
+      const ms = typeof iso === 'string' ? Date.parse(iso) : NaN;
+      return Number.isFinite(ms) && ms > mountedAt.current - 30_000; // petite marge : événement en cours d'écriture au mount
+    };
     for (const t of trades as any[]) {
       const k = t.ticket != null ? String(t.ticket) : '';
       if (!k || rafaleTickets.has(k)) continue;
       if (!t.closed_at && !seenOpen.current.has(k)) {
         seenOpen.current.add(k);
-        const swing = String(t.signal_ref ?? '').includes('-swing-');
-        engine().speak(`${swing ? 'Swing position' : 'Position'} opened. ${t.direction === 'long' ? 'Long' : 'Short'} on ${symName(String(t.symbol))} at ${Math.round(Number(t.entry))} dollars.`);
+        if (fresh(t.opened_at)) {
+          const swing = String(t.signal_ref ?? '').includes('-swing-');
+          engine().speak(`${swing ? 'Swing position' : 'Position'} opened. ${t.direction === 'long' ? 'Long' : 'Short'} on ${symName(String(t.symbol))} at ${Math.round(Number(t.entry))} dollars.`);
+        }
       }
       if (t.closed_at && !seenClose.current.has(k)) {
         seenClose.current.add(k);
-        const pnl = Math.round(Number(t.pnl ?? 0));
-        engine().speak(pnl >= 0
-          ? `Trade closed on ${symName(String(t.symbol))}. Plus ${pnl} dollars.`
-          : `Trade closed on ${symName(String(t.symbol))}, minus ${Math.abs(pnl)} dollars. On to the next one.`);
+        if (fresh(t.closed_at)) {
+          const pnl = Math.round(Number(t.pnl ?? 0));
+          engine().speak(pnl >= 0
+            ? `Trade closed on ${symName(String(t.symbol))}. Plus ${pnl} dollars.`
+            : `Trade closed on ${symName(String(t.symbol))}, minus ${Math.abs(pnl)} dollars. On to the next one.`);
+        }
       }
     }
     for (const e of deskItems as any[]) {
       if (e?.data?.kind !== 'news' || seenNews.current.has(String(e.id))) continue;
       seenNews.current.add(String(e.id));
+      if (!fresh(e.ts)) continue;
       const m = Number(e.data.minutes ?? 0);
       engine().speak(`Heads up. ${String(e.data.title ?? 'High-impact economic release')} in ${m || 'a few'} minutes. High impact — I'm standing aside until it settles.`);
     }
