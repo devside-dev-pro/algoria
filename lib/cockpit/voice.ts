@@ -21,6 +21,8 @@ export class VoiceEngine {
     if (!t) return;
     this.stopped = false;
     this.queue.push(t);
+    // garde-fou anti-monologue : jamais plus de 3 phrases en attente (on garde les plus récentes)
+    while (this.queue.length > 3) this.queue.shift();
     if (!this.playing) void this.drain();
   }
 
