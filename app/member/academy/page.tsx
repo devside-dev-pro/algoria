@@ -18,7 +18,8 @@ const SECTIONS = [
 ];
 
 export default function Academy() {
-  const { member, loading } = useMe({ requireOnboarded: true });
+  // La vidéo de bienvenue reste visible pour les prospects : c'est elle qui vend le rêve.
+  const { member, loading } = useMe();
   if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>

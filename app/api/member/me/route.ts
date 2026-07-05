@@ -84,6 +84,9 @@ export async function POST(req: NextRequest) {
       await queueAction(s.tgId, 'risk_change', { to: tier, lot: TIER_LOT[tier] }); // → le support règle le lot dans STH
     }
   } else if (body.action === 'pause' || body.action === 'resume') {
+    // GARDE-FOU : le statut gate maintenant le contenu (mode teaser) — un prospect ne doit pas pouvoir
+    // s'auto-promouvoir en 'live' via un simple POST resume. Réservé aux comptes déjà activés.
+    if (!['live', 'paused'].includes(cur.status)) return NextResponse.json({ error: 'copy not activated yet' }, { status: 403 });
     patch.status = body.action === 'pause' ? 'paused' : 'live';
     await queueAction(s.tgId, body.action, {}); // → le support (dés)active la copie dans STH
   } else {
