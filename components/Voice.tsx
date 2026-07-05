@@ -15,9 +15,47 @@ import { AlgoriaOrb, type OrbState } from './Orb';
 const EN_NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' };
 const symName = (s: string) => EN_NAME[s] ?? s;
 // « Algoria » n'existe pas dans le vocabulaire du recognizer : il transcrit « Algeria », « Gloria »,
-// « algorithm », « Alegria »… → détection PHONÉTIQUE large (greeting + un mot qui ressemble).
+// « algorithm », voire « I'll go yeah » (vu en live !). Détection en 2 étages :
+// 1) regex rapide sur les formes propres, 2) MATCHING FLOU (distance d'édition ≤ 2 vs « algoria »
+//    sur fenêtres glissantes du texte normalisé qui suit le greeting) → attrape les massacres phonétiques.
 const WAKE = /\b(?:hey|hi|ok|okay)[\s,]+(?:al\w*r[iy]a\w*|gloria|glory|aloria|elgoria|algo\w*|allegri\w*)\b/i;
 const GREET = /\b(?:hey|hi|ok|okay)\b/i;
+
+function lev(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[m][n];
+}
+
+/** Le texte qui suit le greeting ressemble-t-il (même de loin) à « Algoria » ? */
+function likeAlgoria(tail: string): boolean {
+  const joined = tail.toLowerCase().replace(/[^a-z]/g, '').slice(0, 14); // "I'll go yeah" → "illgoyeah"
+  if (!joined) return false;
+  // signatures phonétiques adjacentes : aLG…, LG+voyelle(s)+r/y, GL+voyelle(s)+r (gloria)
+  if (/alg|l+g[aeiou]*r|gl[aeiou]*r|l+g[aeiou]*y/.test(joined)) return true;
+  // distance d'édition vs "algoria" sur fenêtres glissantes 6-9 lettres
+  for (let L = 6; L <= 9; L++) for (let i = 0; i + L <= joined.length; i++) if (lev(joined.slice(i, i + L), 'algoria') <= 2) return true;
+  return false;
+}
+
+/** Wake word : forme propre (regex) OU greeting suivi d'un massacre phonétique plausible. */
+function wakeHeard(text: string): boolean {
+  if (WAKE.test(text)) return true;
+  const m = text.match(/\b(?:hey|hi|ok|okay)\b([\s\S]{0,26})/i);
+  return !!m && likeAlgoria(m[1]);
+}
+
+/** Retire « hey <nom massacré> » en tête pour isoler la question (le cerveau ignore le reste de toute façon). */
+function stripWake(text: string): string {
+  return text
+    .replace(/^[\s\S]*?\b(?:hey|hi|ok|okay)\b[\s,]*/i, '')
+    .replace(/^(?:al\w*r[iy]a\w*|algeria|gloria|glory|algo\w*|i'?ll go\w*( yeah?)?)[\s,]*/i, '')
+    .trim();
+}
 
 type Mode = 'idle' | 'listening' | 'thinking';
 
@@ -117,22 +155,24 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
         else interim += ' ' + t;
       }
       const all = (finalTxt + ' ' + interim).trim();
+      void all;
       if (modeRef.current === 'idle') {
         // feedback opérateur : si un greeting est entendu mais que le wake ne matche pas, on AFFICHE
         // ce que la reco a compris → plus jamais de « je parle et rien ne se passe » inexplicable
-        if (finalTxt.trim() && GREET.test(finalTxt) && !WAKE.test(anyAlt)) {
+        if (finalTxt.trim() && GREET.test(finalTxt) && !wakeHeard(anyAlt)) {
           setHeard(finalTxt.trim().slice(0, 60));
           if (heardTimer.current) window.clearTimeout(heardTimer.current);
           heardTimer.current = window.setTimeout(() => setHeard(null), 3500);
         }
-        if (WAKE.test(anyAlt)) {
+        if (wakeHeard(anyAlt)) {
+          setHeard(null);
           chime();
           setMode('listening');
           setQuestion(null);
-          // if the question is IN the same sentence ("hey algoria, are you in a position?") → take it directly
-          const after = finalTxt.split(WAKE).pop()?.trim() ?? '';
-          if (after.length > 6) return void ask(after);
-          // otherwise: 9s window to ask the question
+          // question DANS la même phrase (« hey algoria, are you in a position? ») → on la prend direct
+          const after = stripWake(finalTxt);
+          if (after.length > 8) return void ask(after);
+          // sinon : fenêtre de 9 s pour poser la question
           if (listenTimer.current) window.clearTimeout(listenTimer.current);
           listenTimer.current = window.setTimeout(() => {
             if (modeRef.current === 'listening') setMode('idle');
@@ -140,7 +180,7 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
         }
       } else if (modeRef.current === 'listening') {
         if (interim.trim()) setQuestion(interim.trim()); // feedback visuel pendant qu'on parle
-        const q = finalTxt.replace(WAKE, '').trim();
+        const q = stripWake(finalTxt) || finalTxt.trim();
         if (q.length > 2) {
           if (listenTimer.current) window.clearTimeout(listenTimer.current);
           void ask(q);
@@ -157,6 +197,21 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
       rec.start();
       recRef.current = rec;
     } catch { /* start() double → ignoré */ }
+  }
+
+  // ===== ÉVEIL MANUEL : un clic sur l'orbe = elle écoute immédiatement (zéro dépendance au wake word).
+  // En live c'est LA garantie de fluidité : clic → carillon → question. Interrompt sa phrase en cours.
+  function manualWake() {
+    engineRef.current?.stop(); // si elle parlait, on l'interrompt (le micro se relance via onSpeaking)
+    chime();
+    setHeard(null);
+    setMode('listening');
+    setQuestion(null);
+    if (listenTimer.current) window.clearTimeout(listenTimer.current);
+    listenTimer.current = window.setTimeout(() => {
+      if (modeRef.current === 'listening') setMode('idle');
+    }, 9000);
+    if (!recRef.current) startRec();
   }
 
   // ===== La question part au cerveau avec le contexte live =====
@@ -246,10 +301,14 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
     <>
       {/* ===== L'ORBE permanent (header) — le cerveau d'Algoria, en vie tout le temps. C'est aussi le bouton. ===== */}
       <button
-        onClick={() => setOn((v) => !v)}
+        onClick={() => (on ? manualWake() : setOn(true))}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (on) setOn(false);
+        }}
         title={supported
           ? on
-            ? 'ALGORIA is live — say “Hey Algoria …” or wait for her trade calls. Click to turn her voice off.'
+            ? 'ALGORIA is live — CLICK the orb to make her listen right now, or say “Hey Algoria …”. Right-click to turn her off.'
             : 'Wake ALGORIA — she announces trades & news out loud and answers to “Hey Algoria …” (mic required)'
           : 'Voice announcements only — the wake word needs Chrome (speech recognition unavailable here)'}
         style={{
