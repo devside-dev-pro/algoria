@@ -29,9 +29,11 @@ export interface Referral {
 }
 
 /** Charge le membre connecté ; redirige vers /member/login si pas de session.
- *  requireOnboarded : bloque AUSSI les comptes en attente d'approbation admin (pending_copier) —
- *  tant que l'accès n'a pas été validé (compte via notre lien + dépôt ≥ 500$ + copieur), AUCUN onglet n'est accessible. */
-export function useMe(opts: { requireOnboarded?: boolean } = {}) {
+ *  PLUS AUCUNE redirection bloquante pour les prospects : un compte non activé (onboarding/pending_copier)
+ *  voit TOUTE l'app en mode TEASER — contenu exclusif grisé, historique des gains en clair, paywall
+ *  « unlock » = wizard broker. Un mur donne envie de partir ; un aperçu grisé donne envie d'entrer.
+ *  `unlocked` = admin OU copie activée (live/paused) — c'est LE drapeau que les pages consultent. */
+export function useMe() {
   const [member, setMember] = useState<Member | null>(null);
   const [referral, setReferral] = useState<Referral | null>(null);
   const [admin, setAdmin] = useState(false);
@@ -46,10 +48,6 @@ export function useMe(opts: { requireOnboarded?: boolean } = {}) {
       })
       .then((d) => {
         if (!alive || !d?.member) return;
-        // Les ADMINS ne passent JAMAIS par le tunnel membre (onboarding/attente d'approbation) —
-        // sinon l'opérateur se retrouve coincé dans son propre wizard en allant sur admin.algoria.tech.
-        if (opts.requireOnboarded && !d.admin && d.member.status === 'onboarding') { router.replace('/member/onboarding'); return; }
-        if (opts.requireOnboarded && !d.admin && d.member.status === 'pending_copier') { router.replace('/member/pending'); return; }
         setMember(d.member);
         setReferral(d.referral ?? null);
         setAdmin(!!d.admin);
@@ -59,8 +57,108 @@ export function useMe(opts: { requireOnboarded?: boolean } = {}) {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return { member, setMember, referral, admin, loading };
+  const unlocked = admin || member?.status === 'live' || member?.status === 'paused';
+  return { member, setMember, referral, admin, unlocked, loading };
 }
+
+// ===== MODE TEASER (prospects) — le paywall qui donne envie =====
+export const SUPPORT_TG = 'https://t.me/mathieu_algoria';
+
+/** Contenu réservé : flouté + cadenas cliquable → ouvre le paywall. Le VRAI contenu reste dessous
+ *  (déjà rédigé côté serveur pour le flux IA) — on voit qu'il se passe des choses, pas ce qui se passe. */
+export function Locked({ unlocked, onUnlock, children, label = 'MEMBERS ONLY' }: {
+  unlocked: boolean;
+  onUnlock: () => void;
+  children: React.ReactNode;
+  label?: string;
+}) {
+  if (unlocked) return <>{children}</>;
+  return (
+    <div style={{ position: 'relative', minHeight: 130, display: 'flex', flexDirection: 'column' }}>
+      <div aria-hidden style={{ filter: 'blur(7px) saturate(.7)', pointerEvents: 'none', userSelect: 'none', opacity: 0.75, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {children}
+      </div>
+      <button
+        onClick={onUnlock}
+        style={{
+          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
+          border: 'none', cursor: 'pointer', background: 'linear-gradient(180deg, rgba(8,16,31,.12) 0%, rgba(8,16,31,.5) 100%)', borderRadius: 14,
+        }}
+      >
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 999,
+          fontSize: 11, fontWeight: 800, letterSpacing: 1.2, color: 'var(--gold)',
+          background: 'rgba(7,12,24,.92)', border: '1px solid rgba(245,194,74,.5)', boxShadow: '0 6px 24px rgba(2,6,16,.6), 0 0 18px rgba(245,194,74,.15)',
+        }}>
+          🔒 {label}
+        </span>
+        <span style={{ fontSize: 10.5, color: 'var(--text)', letterSpacing: 0.4, textShadow: '0 1px 6px rgba(2,6,16,.9)' }}>tap to unlock</span>
+      </button>
+    </div>
+  );
+}
+
+/** Le PAYWALL — bottom sheet : pas d'abonnement, l'accès se débloque en ouvrant le compte broker
+ *  partenaire (le wizard existant EST le paywall). Variante « en vérification » pour pending_copier. */
+export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose: () => void; status: Member['status'] }) {
+  const router = useRouter();
+  if (!open) return null;
+  const pending = status === 'pending_copier';
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(3,7,15,.74)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div
+        className="cardIn"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 560, borderRadius: '22px 22px 0 0', borderBottom: 'none',
+          border: '1px solid rgba(245,194,74,.42)', background: 'linear-gradient(180deg, #132342 0%, #0a1425 100%)',
+          boxShadow: '0 -18px 60px rgba(2,6,16,.8), 0 0 34px rgba(245,194,74,.1)',
+          padding: '20px 20px max(24px, env(safe-area-inset-bottom))', display: 'flex', flexDirection: 'column', gap: 13,
+        }}
+      >
+        <span style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(130,152,190,.35)', margin: '0 auto' }} />
+        {pending ? (
+          <>
+            <h2 style={{ margin: 0, fontSize: 19, textAlign: 'center' }}>⧗ Almost there</h2>
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6, textAlign: 'center' }}>
+              Your setup is in — the team is verifying your broker account and switching the copy on. Everything unlocks automatically, usually <b style={{ color: 'var(--text)' }}>within a few hours</b>.
+            </p>
+            <a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={sheetGoldCta}>💬 MESSAGE SUPPORT — @mathieu_algoria</a>
+          </>
+        ) : (
+          <>
+            <div className="mono" style={{ fontSize: 10, letterSpacing: 2, color: 'var(--gold)', textAlign: 'center', fontWeight: 800 }}>MEMBERS ONLY</div>
+            <h2 style={{ margin: 0, fontSize: 20, textAlign: 'center' }}>Unlock your Algoria access</h2>
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6, textAlign: 'center' }}>
+              <b style={{ color: 'var(--text)' }}>No subscription.</b> Your access unlocks when you open an account with our partner broker — then Algoria trades on it automatically, and you watch it live from here.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                ['1', 'Open your account with the partner broker (min $500 deposit)'],
+                ['2', 'Connect it — encrypted, takes 2 minutes'],
+                ['3', 'Algoria copies every trade to your account, hands-free'],
+              ].map(([n, t]) => (
+                <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 11, background: 'rgba(10,17,31,.6)', border: '1px solid var(--border)', borderRadius: 11, padding: '10px 13px' }}>
+                  <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--gold)' }}>{n}</span>
+                  <span style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.45 }}>{t}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => router.push('/member/onboarding')} style={{ ...sheetGoldCta, border: 'none', cursor: 'pointer' }}>⚡ UNLOCK MY ACCESS →</button>
+            <a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--muted)', textDecoration: 'none' }}>
+              💬 Questions first? Talk to <b style={{ color: 'var(--cyan)' }}>@mathieu_algoria</b>
+            </a>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+const sheetGoldCta: CSSProperties = {
+  padding: '14px 16px', borderRadius: 13, textAlign: 'center', textDecoration: 'none', display: 'block',
+  fontWeight: 800, letterSpacing: 0.6, fontSize: 14, color: '#0b0e14',
+  background: 'linear-gradient(90deg,#ffd166,#f5a623)', boxShadow: '0 8px 26px rgba(245,166,35,.28)',
+};
 
 // Icônes SVG de la nav (traits fins, style cockpit — fini les glyphes texte "basiques")
 const ic = (d: string) => (

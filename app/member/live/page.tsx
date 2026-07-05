@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Desk } from '@/components/Desk';
 import { usePrice } from '@/lib/cockpit/useRealtime';
-import { useMe } from '../ui';
+import { useMe, Locked, UnlockSheet } from '../ui';
 
 const SYMS = [
   { key: 'XAUUSD', short: 'XAU', dp: 2 },
@@ -26,9 +26,10 @@ function PriceChip({ sym, short, dp, active, onClick }: { sym: string; short: st
 }
 
 export default function MemberLive() {
-  const { member, loading } = useMe({ requireOnboarded: true });
+  const { member, unlocked, loading } = useMe();
   const [items, setItems] = useState<unknown[]>([]);
   const [hero, setHero] = useState('XAUUSD');
+  const [paywall, setPaywall] = useState(false);
   useEffect(() => {
     let alive = true;
     const load = () => void fetch('/api/member/feed').then(async (r) => (r.ok && alive ? setItems(((await r.json()) as { desk: unknown[] }).desk) : null));
@@ -42,10 +43,16 @@ export default function MemberLive() {
       <div style={{ display: 'flex', gap: 8 }}>
         {SYMS.map((s) => <PriceChip key={s.key} sym={s.key} short={s.short} dp={s.dp} active={hero === s.key} onClick={() => setHero(s.key)} />)}
       </div>
+      {/* prospect : le flux TOURNE dessous, grisé — il voit l'IA vivre sans lire ses analyses (rédigées côté serveur) */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <Desk items={items as never[]} heroSymbol={hero} />
+        <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="LIVE AI FEED — MEMBERS ONLY">
+          <Desk items={items as never[]} heroSymbol={hero} />
+        </Locked>
       </div>
-      <p className="mono" style={{ margin: 0, fontSize: 10, color: 'var(--dim)', textAlign: 'center', letterSpacing: 1 }}>READ-ONLY FEED · THE COCKPIT STAYS IN THE STREAM</p>
+      <p className="mono" style={{ margin: 0, fontSize: 10, color: 'var(--dim)', textAlign: 'center', letterSpacing: 1 }}>
+        {unlocked ? 'READ-ONLY FEED · THE COCKPIT STAYS IN THE STREAM' : 'THE AI IS LIVE — UNLOCK TO READ HER ANALYSIS'}
+      </p>
+      <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />
     </main>
   );
 }

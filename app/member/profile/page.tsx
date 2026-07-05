@@ -2,7 +2,7 @@
 // PROFIL — identité (Member #N), Risk Studio, parrainage, notifications push, compte, déconnexion.
 // Le Home reste focalisé sur le statut + les trades ; tout ce qui est "réglages du compte" vit ici.
 import { useEffect, useState } from 'react';
-import { useMe, StatusPill, RiskPicker, type Member } from '../ui';
+import { useMe, StatusPill, RiskPicker, Locked, UnlockSheet, type Member } from '../ui';
 
 const b64ToU8 = (s: string) => {
   const pad = '='.repeat((4 - (s.length % 4)) % 4);
@@ -74,9 +74,10 @@ function PushCard() {
 }
 
 export default function Profile() {
-  const { member, setMember, referral, loading } = useMe({ requireOnboarded: true });
+  const { member, setMember, referral, unlocked, loading } = useMe();
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [paywall, setPaywall] = useState(false);
   if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
 
   const act = (action: 'pause' | 'resume' | 'risk', tier?: string) => {
@@ -142,27 +143,32 @@ export default function Profile() {
         </section>
       )}
 
-      {/* Risk Studio */}
-      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>RISK PROFILE</h2>
-        <RiskPicker value={member.risk_tier} busy={busy} onPick={(t) => act('risk', t)} />
-        <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Changes are applied by the team within a few hours — you&apos;ll see it reflected on your MT5.</p>
-      </section>
+      {/* Risk Studio — grisé pour les prospects (le réglage n'a de sens qu'avec la copie active) */}
+      <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="RISK STUDIO — MEMBERS ONLY">
+        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>RISK PROFILE</h2>
+          <RiskPicker value={member.risk_tier} busy={busy || !unlocked} onPick={(t) => act('risk', t)} />
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Changes are applied by the team within a few hours — you&apos;ll see it reflected on your MT5.</p>
+        </section>
+      </Locked>
 
       <PushCard />
 
-      {/* compte */}
-      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
-        <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>TRADING ACCOUNT</h2>
-        <RowKV k="Broker" v={member.broker ? member.broker.toUpperCase() : '—'} />
-        <RowKV k="MT5 login" v={member.mt5_login ?? '—'} />
-        <RowKV k="Server" v={member.mt5_server ?? '—'} />
-        <p style={{ margin: '2px 0 0', fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Your password is encrypted and never displayed. To revoke access, change it on your broker account.</p>
-      </section>
+      {/* compte — grisé tant que l'accès n'est pas activé */}
+      <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="TRADING ACCOUNT — MEMBERS ONLY">
+        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>TRADING ACCOUNT</h2>
+          <RowKV k="Broker" v={member.broker ? member.broker.toUpperCase() : '—'} />
+          <RowKV k="MT5 login" v={member.mt5_login ?? '—'} />
+          <RowKV k="Server" v={member.mt5_server ?? '—'} />
+          <p style={{ margin: '2px 0 0', fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Your password is encrypted and never displayed. To revoke access, change it on your broker account.</p>
+        </section>
+      </Locked>
 
       <form action="/api/member/logout" method="post" style={{ display: 'flex' }}>
         <button style={{ flex: 1, border: '1px solid rgba(255,107,138,.3)', background: 'rgba(255,107,138,.05)', color: 'rgba(210,150,165,.9)', borderRadius: 11, padding: '11px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>SIGN OUT</button>
       </form>
+      {!unlocked && <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />}
     </main>
   );
 }

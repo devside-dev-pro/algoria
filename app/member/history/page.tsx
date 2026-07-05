@@ -2,19 +2,21 @@
 // HISTORY — les trades clôturés d'Algoria (compte maître). L'historique PERSONNEL (son compte, son lot)
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
-import { useMe } from '../ui';
+import { useMe, UnlockSheet } from '../ui';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; closed_at: string }
 
 export default function MemberHistory() {
-  const { member, loading } = useMe({ requireOnboarded: true });
+  const { member, unlocked, loading } = useMe();
   const [trades, setTrades] = useState<FeedTrade[]>([]);
+  const [paywall, setPaywall] = useState(false);
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => (r.ok ? setTrades(((await r.json()) as { trades: FeedTrade[] }).trades) : null));
   }, []);
   if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   const wins = trades.filter((t) => Number(t.pnl) > 0).length;
   const net = trades.reduce((a, t) => a + Number(t.pnl), 0);
+  const winSum = trades.filter((t) => Number(t.pnl) > 0).reduce((a, t) => a + Number(t.pnl), 0);
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
       <section className="panel" style={{ padding: 16, display: 'flex', gap: 18 }}>
@@ -38,9 +40,24 @@ export default function MemberHistory() {
         })}
         {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>No closed trades yet today.</p>}
       </section>
-      <p style={{ margin: 0, fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.55 }}>
-        Master account results. Your personal history — your account, your lot size — lands here once your copier link is live.
-      </p>
+      {/* prospect : l'historique reste EN CLAIR (c'est l'appât) — la bannière convertit le FOMO en action */}
+      {!unlocked ? (
+        <button
+          onClick={() => setPaywall(true)}
+          className="panel"
+          style={{ padding: '15px 16px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', textAlign: 'left', borderColor: 'rgba(245,194,74,.4)', color: 'var(--text)' }}
+        >
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>
+            {winSum > 0 ? <>You just watched <span className="goldText">+{winSum.toFixed(0)}$</span> of wins from the sidelines.</> : 'Every one of these trades lands on members’ accounts.'}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>Members&rsquo; accounts copied all of this automatically — <b style={{ color: 'var(--gold)' }}>unlock your access →</b></span>
+        </button>
+      ) : (
+        <p style={{ margin: 0, fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.55 }}>
+          Master account results. Your personal history — your account, your lot size — lands here once your copier link is live.
+        </p>
+      )}
+      {!unlocked && <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />}
     </main>
   );
 }
