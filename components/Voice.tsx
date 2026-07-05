@@ -14,7 +14,10 @@ import { AlgoriaOrb, type OrbState } from './Orb';
 
 const EN_NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' };
 const symName = (s: string) => EN_NAME[s] ?? s;
-const WAKE = /\b(?:hey|hi|ok|okay)[\s,]+al[gq]o?u?ria\b/i;
+// « Algoria » n'existe pas dans le vocabulaire du recognizer : il transcrit « Algeria », « Gloria »,
+// « algorithm », « Alegria »… → détection PHONÉTIQUE large (greeting + un mot qui ressemble).
+const WAKE = /\b(?:hey|hi|ok|okay)[\s,]+(?:al\w*r[iy]a\w*|gloria|glory|aloria|elgoria|algo\w*|allegri\w*)\b/i;
+const GREET = /\b(?:hey|hi|ok|okay)\b/i;
 
 type Mode = 'idle' | 'listening' | 'thinking';
 
@@ -32,6 +35,8 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   const [subtitle, setSubtitle] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [supported, setSupported] = useState(true);
+  const [heard, setHeard] = useState<string | null>(null); // feedback micro : ce que la reco a VRAIMENT entendu
+  const heardTimer = useRef<number | null>(null);
 
   const engineRef = useRef<VoiceEngine | null>(null);
   const recRef = useRef<any>(null);
@@ -100,17 +105,27 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
     rec.lang = 'en-US';
     rec.continuous = true;
     rec.interimResults = true;
+    rec.maxAlternatives = 3; // « Algoria » est souvent la 2ᵉ/3ᵉ hypothèse du recognizer
     rec.onresult = (ev: any) => {
       let finalTxt = '';
       let interim = '';
+      let anyAlt = '';
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const t = ev.results[i][0].transcript as string;
+        for (let j = 0; j < ev.results[i].length; j++) anyAlt += ' ' + ev.results[i][j].transcript;
         if (ev.results[i].isFinal) finalTxt += ' ' + t;
         else interim += ' ' + t;
       }
       const all = (finalTxt + ' ' + interim).trim();
       if (modeRef.current === 'idle') {
-        if (WAKE.test(all)) {
+        // feedback opérateur : si un greeting est entendu mais que le wake ne matche pas, on AFFICHE
+        // ce que la reco a compris → plus jamais de « je parle et rien ne se passe » inexplicable
+        if (finalTxt.trim() && GREET.test(finalTxt) && !WAKE.test(anyAlt)) {
+          setHeard(finalTxt.trim().slice(0, 60));
+          if (heardTimer.current) window.clearTimeout(heardTimer.current);
+          heardTimer.current = window.setTimeout(() => setHeard(null), 3500);
+        }
+        if (WAKE.test(anyAlt)) {
           chime();
           setMode('listening');
           setQuestion(null);
@@ -248,6 +263,17 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
         <AlgoriaOrb size={30} state={on ? orbState : 'idle'} dim={!on} />
         {on ? 'VOICE ON' : 'Voice'}
       </button>
+
+      {/* ===== Feedback micro : ce que la reco a entendu quand le wake word n'a PAS matché ===== */}
+      {on && heard && !active && (
+        <div className="cardIn" style={{
+          position: 'fixed', left: '50%', bottom: 96, transform: 'translateX(-50%)', zIndex: 59, pointerEvents: 'none',
+          fontSize: 11, color: 'var(--muted)', background: 'rgba(7,12,24,.88)', border: '1px solid var(--border)',
+          borderRadius: 8, padding: '5px 12px', maxWidth: 520, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          heard “{heard}” — say <b style={{ color: 'var(--cyan)' }}>Hey Algoria…</b>
+        </div>
+      )}
 
       {/* ===== L'ÉVEIL — « Hey Algoria » : le grand orbe surgit au centre, façon Siri, sous-titres pour le stream ===== */}
       {on && active && (
