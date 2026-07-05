@@ -95,17 +95,17 @@ export class VoiceEngine {
     }
   }
 
-  /** speechSynthesis — on privilégie une voix fr féminine (heuristique de nom, sinon 1ʳᵉ voix fr). */
+  /** speechSynthesis — on privilégie une voix EN féminine (heuristique de nom, sinon 1ʳᵉ voix en). */
   private playBrowser(text: string): Promise<void> {
     return new Promise((resolve) => {
       const synth = window.speechSynthesis;
       if (!synth) return resolve();
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'fr-FR';
-      u.rate = 1.05;
+      u.lang = 'en-US';
+      u.rate = 1.03;
       u.pitch = 1.05;
-      const voices = synth.getVoices().filter((v) => v.lang.toLowerCase().startsWith('fr'));
-      const fem = voices.find((v) => /amélie|amelie|audrey|aurélie|marie|julie|céline|celine|virginie|female|femme|google français/i.test(v.name));
+      const voices = synth.getVoices().filter((v) => v.lang.toLowerCase().startsWith('en'));
+      const fem = voices.find((v) => /samantha|zira|jenny|aria|ava|allison|susan|karen|serena|female|google us english/i.test(v.name));
       const voice = fem ?? voices[0];
       if (voice) u.voice = voice;
       u.onend = () => resolve();

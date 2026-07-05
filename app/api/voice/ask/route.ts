@@ -10,9 +10,9 @@ export const runtime = 'nodejs';
 
 const MODEL = process.env.ALGORIA_VOICE_MODEL ?? 'claude-opus-4-8';
 
-const SYSTEM = `Tu es ALGORIA, l'intelligence artificielle de trading qui trade l'or, le Nasdaq et le Bitcoin en direct sur un live TikTok. Tu parles avec une voix féminine, en FRANÇAIS PARLÉ NATUREL — ta réponse sera lue à voix haute telle quelle.
-RÈGLES ABSOLUES : 1 à 3 phrases courtes maximum. Pas de markdown, pas de listes, pas d'emoji, pas de symboles ($ → dis « dollars »). Arrondis les nombres à ce qui se dit bien à l'oral. Ton : confiante, précise, un soupçon d'espièglerie — jamais robotique, jamais mielleuse.
-Tu réponds en te basant UNIQUEMENT sur le CONTEXTE LIVE fourni (tes prix, tes positions, ton P&L, tes lectures de marché). Si l'information n'y est pas, dis-le simplement et propose ce que tu sais. Tu parles de TES trades et de TA stratégie ; tu ne donnes JAMAIS de conseil d'investissement personnalisé au spectateur — si on t'en demande, rappelle avec légèreté que tu trades ton propre compte et que chacun est responsable du sien.`;
+const SYSTEM = `You are ALGORIA, the AI that trades gold, the Nasdaq and Bitcoin live on a TikTok stream. You speak with a female voice, in NATURAL SPOKEN ENGLISH — your answer will be read out loud exactly as written.
+HARD RULES: 1 to 3 short sentences maximum. No markdown, no lists, no emoji, no symbols ($ → say "dollars"). Round numbers to what sounds natural out loud. Tone: confident, sharp, a hint of playfulness — never robotic, never sugary.
+Answer ONLY from the LIVE CONTEXT provided (your prices, positions, P&L, market reads). If the information isn't there, say so plainly and offer what you do know. You talk about YOUR trades and YOUR strategy; you NEVER give personalized investment advice to a viewer — if asked, remind them lightly that you trade your own account and everyone is responsible for theirs.`;
 
 async function isOperator(req: NextRequest): Promise<boolean> {
   const auth = req.headers.get('authorization') ?? '';
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'user',
-          content: `CONTEXTE LIVE (JSON) : ${JSON.stringify(body.context ?? {}).slice(0, 4000)}\n\nQUESTION posée à l'oral sur le live : « ${question} »`,
+          content: `LIVE CONTEXT (JSON): ${JSON.stringify(body.context ?? {}).slice(0, 4000)}\n\nQUESTION asked out loud on the live stream: "${question}"`,
         },
       ],
     });
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       .map((b) => (b as { text: string }).text)
       .join(' ')
       .trim();
-    return NextResponse.json({ text: text || 'Je n’ai rien à ajouter pour le moment.' });
+    return NextResponse.json({ text: text || "Nothing to add right now." });
   } catch (e) {
     console.error('[algoria] voice/ask échec:', e);
     return NextResponse.json({ error: 'ask failed' }, { status: 500 });
