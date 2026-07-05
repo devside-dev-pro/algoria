@@ -5,16 +5,29 @@
 // Le moteur premium est sondé UNE fois : s'il répond 501 (non configuré), on bascule en repli pour la session.
 // onSpeaking permet de COUPER LE MICRO pendant qu'Algoria parle (sinon elle s'entendrait elle-même).
 
+type VoiceListener = { speaking?: (s: boolean) => void; text?: (t: string | null) => void };
+
 export class VoiceEngine {
   private queue: string[] = [];
   private playing = false;
   private premium: boolean | null = null; // null = pas encore sondé
   private audio: HTMLAudioElement | null = null;
   private stopped = false;
-  onSpeaking?: (speaking: boolean) => void;
-  onText?: (text: string | null) => void; // sous-titre à l'écran pendant la lecture
+  private listeners = new Set<VoiceListener>();
 
   constructor(private getToken: () => Promise<string | null>) {}
+
+  /** Plusieurs composants (Voice opérateur, Autopilot) écoutent le MÊME moteur — une seule bouche. */
+  subscribe(l: VoiceListener): () => void {
+    this.listeners.add(l);
+    return () => this.listeners.delete(l);
+  }
+  private emitSpeaking(s: boolean) {
+    for (const l of this.listeners) l.speaking?.(s);
+  }
+  private emitText(t: string | null) {
+    for (const l of this.listeners) l.text?.(t);
+  }
 
   speak(text: string) {
     const t = text.trim();
@@ -37,16 +50,16 @@ export class VoiceEngine {
       /* environnement sans TTS */
     }
     this.playing = false;
-    this.onSpeaking?.(false);
-    this.onText?.(null);
+    this.emitSpeaking(false);
+    this.emitText(null);
   }
 
   private async drain() {
     this.playing = true;
-    this.onSpeaking?.(true);
+    this.emitSpeaking(true);
     while (this.queue.length && !this.stopped) {
       const text = this.queue.shift()!;
-      this.onText?.(text);
+      this.emitText(text);
       try {
         await this.play(text);
       } catch {
@@ -54,8 +67,8 @@ export class VoiceEngine {
       }
     }
     this.playing = false;
-    this.onSpeaking?.(false);
-    this.onText?.(null);
+    this.emitSpeaking(false);
+    this.emitText(null);
   }
 
   private async play(text: string): Promise<void> {
@@ -115,6 +128,13 @@ export class VoiceEngine {
       synth.speak(u);
     });
   }
+}
+
+let shared: VoiceEngine | null = null;
+/** Le moteur vocal PARTAGÉ du cockpit — une seule instance, une seule file, une seule bouche. */
+export function voiceEngine(getToken: () => Promise<string | null>): VoiceEngine {
+  if (!shared) shared = new VoiceEngine(getToken);
+  return shared;
 }
 
 /** Petit carillon d'éveil (WebAudio) — le "ding" quand Algoria commence à écouter. */

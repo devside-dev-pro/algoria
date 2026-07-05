@@ -34,6 +34,11 @@ export async function logNarration(text: string, t?: number, meta?: Record<strin
   await db.from('events').insert({ ts: new Date(t ?? Date.now()).toISOString(), level: 'ai', msg: text, data: (meta ?? null) as never });
 }
 
+/** Commentaire du live TikTok (mode Autopilot) → le cockpit les lit en temps réel. Best-effort. */
+export async function recordLiveComment(username: string, text: string) {
+  await (db as unknown as { from: (t: string) => { insert: (r: unknown) => PromiseLike<unknown> } }).from('live_comments').insert({ username, text });
+}
+
 /** Note générique → terminal (ex. breakeven sécurisé). */
 export async function logNote(msg: string, level: 'scan' | 'info' | 'signal' | 'order' | 'veto' | 'ai' = 'info') {
   await db.from('events').insert({ ts: new Date().toISOString(), level, msg, data: null as never });
