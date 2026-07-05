@@ -14,6 +14,9 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
   if (host.startsWith('app.')) {
+    // la fiche store /download vit aussi sur ce sous-domaine (la popup membre y renvoie en relatif —
+    // sans ça, app.algoria.tech/download était réécrit en /member/download → 404)
+    if (url.pathname === '/download') return NextResponse.next();
     if (!url.pathname.startsWith('/member')) {
       url.pathname = `/member${url.pathname === '/' ? '' : url.pathname}`;
       return NextResponse.rewrite(url);
