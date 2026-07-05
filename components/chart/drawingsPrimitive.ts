@@ -115,11 +115,30 @@ function drawOne(
   if (d.kind === 'text') {
     clearShadow(ctx);
     ctx.setLineDash([]);
-    ctx.font = d.soft ? `600 9.5px ${font}` : `13px ${font}`;
+    if (d.soft) {
+      // étiquette d'analyse : PILULE à fond sombre, centrée verticalement sur l'ancre —
+      // posée dans la marge droite du chart (hors bougies), lisible sans écraser le prix
+      ctx.font = `600 9px ${font}`;
+      const label = d.text ?? '';
+      const tw = ctx.measureText(label).width;
+      const h = 15;
+      roundRectPath(ctx, A.x - 5, A.y - h / 2, tw + 10, h, 4);
+      ctx.fillStyle = 'rgba(7,12,24,.85)';
+      ctx.fill();
+      ctx.strokeStyle = withAlpha(d.color, 0.45);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = withAlpha(d.color, 0.95);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, A.x, A.y + 0.5);
+      ctx.restore();
+      return;
+    }
+    ctx.font = `13px ${font}`;
     ctx.textBaseline = 'alphabetic';
     ctx.shadowColor = 'rgba(0,0,0,.55)';
     ctx.shadowBlur = 3;
-    ctx.fillStyle = d.soft ? withAlpha(d.color, 0.75) : d.color;
+    ctx.fillStyle = d.color;
     ctx.fillText(d.text ?? '', A.x, A.y);
     clearShadow(ctx);
     if (sel) {
