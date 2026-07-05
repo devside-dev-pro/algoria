@@ -1,19 +1,19 @@
 'use client';
-// ALGORIA PREND VIE — la voix du cockpit, pensée pour le live :
-// 1) ANNONCES AUTO (français parlé) : ouverture/clôture de trades (hors BEAST), alertes éco T-30/T-5.
-// 2) « HEY ALGORIA » : mot d'éveil capté au micro (reconnaissance fr-FR du navigateur) → carillon →
-//    la question part à /api/voice/ask avec le contexte live → Algoria répond à voix haute,
-//    sous-titres dorés à l'écran (les viewers lisent ET entendent).
-// Le micro est COUPÉ pendant qu'elle parle (sinon elle s'entendrait), puis relancé automatiquement.
-// Chrome desktop requis pour le mot d'éveil (webkitSpeechRecognition) — c'est le navigateur du stream.
+// ALGORIA COMES ALIVE — the cockpit's voice, built for the live stream (English — the audience's language):
+// 1) AUTO ANNOUNCEMENTS: trade opens/closes (excl. BEAST), eco news alerts T-30/T-5.
+// 2) "HEY ALGORIA": wake word caught on the mic (browser en-US speech recognition) → chime →
+//    the question goes to /api/voice/ask with the live context → Algoria answers OUT LOUD,
+//    gold subtitles on screen (viewers read AND hear her).
+// The mic is MUTED while she speaks (she'd hear herself), then restarted automatically.
+// Chrome desktop required for the wake word (webkitSpeechRecognition) — that's the stream browser anyway.
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
 import { VoiceEngine, chime } from '@/lib/cockpit/voice';
 
-const FR_NAME: Record<string, string> = { XAUUSD: "l'or", NAS100: 'le Nasdaq', BTCUSD: 'le Bitcoin' };
-const frSym = (s: string) => FR_NAME[s] ?? s;
-const WAKE = /\b(?:hey|hé|ok|okay)[\s,]+al[gq]o?u?ria\b/i;
+const EN_NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' };
+const symName = (s: string) => EN_NAME[s] ?? s;
+const WAKE = /\b(?:hey|hi|ok|okay)[\s,]+al[gq]o?u?ria\b/i;
 
 type Mode = 'idle' | 'listening' | 'thinking';
 
@@ -94,7 +94,7 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
       return;
     }
     const rec = new SR();
-    rec.lang = 'fr-FR';
+    rec.lang = 'en-US';
     rec.continuous = true;
     rec.interimResults = true;
     rec.onresult = (ev: any) => {
@@ -111,10 +111,10 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
           chime();
           setMode('listening');
           setQuestion(null);
-          // si la question est DANS la même phrase (« hey algoria, tu es en position ? ») → on la prend direct
+          // if the question is IN the same sentence ("hey algoria, are you in a position?") → take it directly
           const after = finalTxt.split(WAKE).pop()?.trim() ?? '';
           if (after.length > 6) return void ask(after);
-          // sinon : fenêtre de 9 s pour poser la question
+          // otherwise: 9s window to ask the question
           if (listenTimer.current) window.clearTimeout(listenTimer.current);
           listenTimer.current = window.setTimeout(() => {
             if (modeRef.current === 'listening') setMode('idle');
@@ -153,31 +153,31 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
         return t ? +((t.bid + t.ask) / 2).toFixed(1) : null;
       };
       const context = {
-        heure_utc: new Date().toISOString().slice(0, 16).replace('T', ' '),
-        marche_affiche: frSym(symbol),
-        prix: { or: px('XAUUSD'), nasdaq: px('NAS100'), bitcoin: px('BTCUSD') },
-        compte: { balance: st?.balance ?? null, equity: st?.equity ?? null, pnl_du_jour: dayPnl, positions_ouvertes: st?.open_positions ?? 0 },
+        utc_time: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        displayed_market: symName(symbol),
+        prices: { gold: px('XAUUSD'), nasdaq: px('NAS100'), bitcoin: px('BTCUSD') },
+        account: { balance: st?.balance ?? null, equity: st?.equity ?? null, day_pnl: dayPnl, open_positions: st?.open_positions ?? 0 },
         session: st?.session ?? null,
         regime: st?.regime ?? null,
-        dernieres_lectures_du_desk: (deskItems as any[]).slice(0, 3).map((e) => ({ marche: frSym(String(e?.data?.symbol ?? 'XAUUSD')), lecture: e?.msg })),
-        trades_recents: (trades as any[])
+        latest_desk_reads: (deskItems as any[]).slice(0, 3).map((e) => ({ market: symName(String(e?.data?.symbol ?? 'XAUUSD')), read: e?.msg })),
+        recent_trades: (trades as any[])
           .filter((t) => t.closed_at && t.pnl != null && !rafaleTickets.has(String(t.ticket)))
           .slice(0, 5)
-          .map((t) => ({ marche: frSym(String(t.symbol)), sens: t.direction, resultat_dollars: Math.round(Number(t.pnl)) })),
+          .map((t) => ({ market: symName(String(t.symbol)), side: t.direction, result_dollars: Math.round(Number(t.pnl)) })),
       };
       const res = await fetch('/api/voice/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ question: q, context }),
       });
-      if (res.status === 501) engine().speak("Mon cerveau vocal n'est pas encore branché côté serveur. Ajoute la clé API et on en reparle.");
-      else if (!res.ok) engine().speak("Petit souci de connexion avec mon cerveau. Repose-moi la question dans un instant.");
+      if (res.status === 501) engine().speak("My voice brain isn't wired up on the server yet. Add the API key and ask me again.");
+      else if (!res.ok) engine().speak("Small glitch reaching my brain. Ask me again in a moment.");
       else {
         const { text } = await res.json();
         engine().speak(String(text ?? ''));
       }
     } catch {
-      engine().speak('Je n’ai pas réussi à réfléchir, réessaie.');
+      engine().speak("I couldn't think that one through — try again.");
     } finally {
       setMode('idle');
       if (onRef.current && !speakingRef.current) startRec();
@@ -204,21 +204,21 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
       if (!t.closed_at && !seenOpen.current.has(k)) {
         seenOpen.current.add(k);
         const swing = String(t.signal_ref ?? '').includes('-swing-');
-        engine().speak(`${swing ? 'Position de fond' : 'Position'} ${t.direction === 'long' ? 'achetée' : 'vendue'} sur ${frSym(String(t.symbol))} à ${Math.round(Number(t.entry))} dollars.`);
+        engine().speak(`${swing ? 'Swing position' : 'Position'} opened. ${t.direction === 'long' ? 'Long' : 'Short'} on ${symName(String(t.symbol))} at ${Math.round(Number(t.entry))} dollars.`);
       }
       if (t.closed_at && !seenClose.current.has(k)) {
         seenClose.current.add(k);
         const pnl = Math.round(Number(t.pnl ?? 0));
         engine().speak(pnl >= 0
-          ? `Trade clôturé sur ${frSym(String(t.symbol))}. Plus ${pnl} dollars.`
-          : `Trade clôturé sur ${frSym(String(t.symbol))} à moins ${Math.abs(pnl)} dollars. On passe au suivant.`);
+          ? `Trade closed on ${symName(String(t.symbol))}. Plus ${pnl} dollars.`
+          : `Trade closed on ${symName(String(t.symbol))}, minus ${Math.abs(pnl)} dollars. On to the next one.`);
       }
     }
     for (const e of deskItems as any[]) {
       if (e?.data?.kind !== 'news' || seenNews.current.has(String(e.id))) continue;
       seenNews.current.add(String(e.id));
       const m = Number(e.data.minutes ?? 0);
-      engine().speak(`Attention. ${String(e.data.title ?? 'Annonce économique')} dans ${m || 'quelques'} minutes. Fort impact — je me mets en retrait le temps que ça passe.`);
+      engine().speak(`Heads up. ${String(e.data.title ?? 'High-impact economic release')} in ${m || 'a few'} minutes. High impact — I'm standing aside until it settles.`);
     }
   }, [trades, deskItems, on]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -267,10 +267,10 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
             </span>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 9, letterSpacing: 1.4, color: speaking ? 'var(--gold)' : 'var(--cyan)', marginBottom: 3 }}>
-                {speaking ? '◆ ALGORIA' : mode === 'thinking' ? '◆ ALGORIA RÉFLÉCHIT…' : '🎙 ALGORIA ÉCOUTE — pose ta question'}
+                {speaking ? '◆ ALGORIA' : mode === 'thinking' ? '◆ ALGORIA IS THINKING…' : '🎙 ALGORIA IS LISTENING — ask your question'}
               </div>
               <div style={{ fontSize: 14.5, lineHeight: 1.45, color: 'var(--text)' }}>
-                {speaking ? subtitle : question ? `« ${question} »` : '…'}
+                {speaking ? subtitle : question ? `“${question}”` : '…'}
               </div>
             </div>
           </div>
