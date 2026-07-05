@@ -55,7 +55,8 @@ export function findFVGs(bars: Bar[], tfMs: number, maxShown = 4): Drawing[] {
       a: { time: sec(bars[i - 1].time), price: top },
       b: { time: sec(lastT + 4 * tfMs), price: bottom }, // étiré vers la droite : la zone reste « active »
     });
-    out.push({ id: `ai_fvgl_${bars[i - 1].time}`, kind: 'text', color, soft: true, text: 'FVG', a: { time: sec(bars[i - 1].time), price: bull ? top : bottom } });
+    // label dans la MARGE DROITE (après la dernière bougie), centré sur la boîte — jamais sur le prix
+    out.push({ id: `ai_fvgl_${bars[i - 1].time}`, kind: 'text', color, soft: true, text: 'FVG', a: { time: sec(lastT + 1 * tfMs), price: (top + bottom) / 2 } });
     if (out.length >= maxShown * 2) break; // rect + label par gap
   }
   return out.reverse();
@@ -140,12 +141,13 @@ export function buildAnalysis(bars: Bar[], tfMs: number): Drawing[] {
         b: { time: sec(lastT + 4 * tfMs), price: bottom },
       },
       {
+        // label dans la MARGE DROITE, centré sur la boîte — même règle que les FVG (jamais sur les bougies)
         id: `ai_liql_${kind}_${view[c.first].time}`,
         kind: 'text',
         color: COL.liq,
         soft: true,
-        text: `liquidity ×${c.prices.length}`,
-        a: { time: sec(view[startIdx].time), price: kind === 'low' ? bottom : top },
+        text: `liq ×${c.prices.length}`,
+        a: { time: sec(lastT + 1 * tfMs), price: (top + bottom) / 2 },
       },
     ];
   };
