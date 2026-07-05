@@ -51,10 +51,11 @@ export function findFVGs(bars: Bar[], tfMs: number, maxShown = 4): Drawing[] {
       id: `ai_fvg_${bars[i - 1].time}`,
       kind: 'rect',
       color,
+      soft: true,
       a: { time: sec(bars[i - 1].time), price: top },
       b: { time: sec(lastT + 4 * tfMs), price: bottom }, // étiré vers la droite : la zone reste « active »
     });
-    out.push({ id: `ai_fvgl_${bars[i - 1].time}`, kind: 'text', color, text: 'FVG', a: { time: sec(bars[i - 1].time), price: bull ? top : bottom } });
+    out.push({ id: `ai_fvgl_${bars[i - 1].time}`, kind: 'text', color, soft: true, text: 'FVG', a: { time: sec(bars[i - 1].time), price: bull ? top : bottom } });
     if (out.length >= maxShown * 2) break; // rect + label par gap
   }
   return out.reverse();
@@ -94,6 +95,7 @@ export function buildAnalysis(bars: Bar[], tfMs: number): Drawing[] {
       id: `ai_tl_${kind}_${view[p1.index].time}`,
       kind: 'trend',
       color: COL.line,
+      soft: true,
       a: { time: sec(view[p1.index].time), price: p1.price },
       b: { time: sec(lastT + 8 * tfMs), price: p1.price + slope * (projIdx - p1.index) },
     };
@@ -126,20 +128,24 @@ export function buildAnalysis(bars: Bar[], tfMs: number): Drawing[] {
     if (!c) return [];
     const top = Math.max(...c.prices) + 0.12 * atrNow;
     const bottom = Math.min(...c.prices) - 0.12 * atrNow;
+    // la boîte ne remonte pas plus loin que ~110 bougies (sinon elle traverse tout le chart)
+    const startIdx = Math.max(c.first, view.length - 110);
     return [
       {
         id: `ai_liq_${kind}_${view[c.first].time}`,
         kind: 'rect',
         color: COL.liq,
-        a: { time: sec(view[c.first].time), price: top },
+        soft: true,
+        a: { time: sec(view[startIdx].time), price: top },
         b: { time: sec(lastT + 4 * tfMs), price: bottom },
       },
       {
         id: `ai_liql_${kind}_${view[c.first].time}`,
         kind: 'text',
         color: COL.liq,
-        text: `liquidity (${c.prices.length} touches)`,
-        a: { time: sec(view[c.first].time), price: kind === 'low' ? bottom : top },
+        soft: true,
+        text: `liquidity ×${c.prices.length}`,
+        a: { time: sec(view[startIdx].time), price: kind === 'low' ? bottom : top },
       },
     ];
   };

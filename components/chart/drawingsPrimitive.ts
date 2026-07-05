@@ -72,7 +72,7 @@ function drawOne(
   font: string,
 ) {
   ctx.save();
-  ctx.setLineDash(draft ? [6, 4] : []);
+  ctx.setLineDash(draft ? [6, 4] : d.soft ? [4, 4] : []);
 
   if (d.kind === 'hline') {
     const y = series.priceToCoordinate(d.a.price);
@@ -115,11 +115,11 @@ function drawOne(
   if (d.kind === 'text') {
     clearShadow(ctx);
     ctx.setLineDash([]);
-    ctx.font = `13px ${font}`;
+    ctx.font = d.soft ? `600 9.5px ${font}` : `13px ${font}`;
     ctx.textBaseline = 'alphabetic';
     ctx.shadowColor = 'rgba(0,0,0,.55)';
     ctx.shadowBlur = 3;
-    ctx.fillStyle = d.color;
+    ctx.fillStyle = d.soft ? withAlpha(d.color, 0.75) : d.color;
     ctx.fillText(d.text ?? '', A.x, A.y);
     clearShadow(ctx);
     if (sel) {
@@ -140,13 +140,19 @@ function drawOne(
   }
 
   if (d.kind === 'trend') {
-    strokeStyle(ctx, d.color, sel);
+    if (d.soft) {
+      // analyse d'Algoria : trait fin semi-transparent, pas de halo
+      ctx.strokeStyle = withAlpha(d.color, 0.65);
+      ctx.lineWidth = 1.25;
+      ctx.lineCap = 'round';
+      ctx.setLineDash([]);
+    } else strokeStyle(ctx, d.color, sel);
     ctx.beginPath();
     ctx.moveTo(A.x, A.y);
     ctx.lineTo(B.x, B.y);
     ctx.stroke();
   } else {
-    // rect : coins arrondis, remplissage léger, contour net
+    // rect : coins arrondis, remplissage léger, contour net (soft : voile discret + bord fin pointillé)
     const x = Math.min(A.x, B.x);
     const y = Math.min(A.y, B.y);
     const rw = Math.abs(B.x - A.x);
@@ -154,9 +160,12 @@ function drawOne(
     const r = Math.max(0, Math.min(5, rw / 2, rh / 2));
     clearShadow(ctx);
     roundRectPath(ctx, x, y, rw, rh, r);
-    ctx.fillStyle = withAlpha(d.color, 0.1);
+    ctx.fillStyle = withAlpha(d.color, d.soft ? 0.055 : 0.1);
     ctx.fill();
-    strokeStyle(ctx, d.color, sel);
+    if (d.soft) {
+      ctx.strokeStyle = withAlpha(d.color, 0.32);
+      ctx.lineWidth = 1;
+    } else strokeStyle(ctx, d.color, sel);
     roundRectPath(ctx, x, y, rw, rh, r);
     ctx.stroke();
   }
@@ -190,11 +199,14 @@ class DrawingsRenderer {
 
 class DrawingsPaneView implements IPrimitivePaneView {
   private readonly renderer_: DrawingsRenderer;
-  constructor(p: DrawingsPrimitive) {
+  constructor(
+    p: DrawingsPrimitive,
+    private readonly z: 'top' | 'bottom',
+  ) {
     this.renderer_ = new DrawingsRenderer(p);
   }
   zOrder() {
-    return 'top' as const; // au-dessus des bougies
+    return this.z; // 'top' = dessins utilisateur (sur les bougies) · 'bottom' = analyse d'Algoria (sous les bougies, lisible)
   }
   renderer() {
     return this.renderer_ as unknown as ReturnType<IPrimitivePaneView['renderer']>;
@@ -211,8 +223,8 @@ export class DrawingsPrimitive {
   private requestUpdate_: (() => void) | null = null;
   private readonly views: DrawingsPaneView[];
 
-  constructor() {
-    this.views = [new DrawingsPaneView(this)];
+  constructor(zOrder: 'top' | 'bottom' = 'top') {
+    this.views = [new DrawingsPaneView(this, zOrder)];
   }
   attached(param: SeriesAttachedParameter<Time>) {
     this.series = param.series;

@@ -595,8 +595,8 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     const zone = new TradeZonePrimitive();
     series.attachPrimitive(zone as Parameters<typeof series.attachPrimitive>[0]);
     zoneRef.current = zone;
-    // primitive ANALYSE d'ALGORIA (FVG, trendlines, liquidité) — SOUS les dessins utilisateur
-    const ai = new DrawingsPrimitive();
+    // primitive ANALYSE d'ALGORIA (FVG, trendlines, liquidité) — rendue SOUS les bougies (lisibilité)
+    const ai = new DrawingsPrimitive('bottom');
     series.attachPrimitive(ai as Parameters<typeof series.attachPrimitive>[0]);
     aiRef.current = ai;
     ai.setTimeToX(timeToX);
