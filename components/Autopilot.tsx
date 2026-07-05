@@ -1,7 +1,8 @@
 'use client';
 // MODE AUTOPILOT — Algoria tient le live TOUTE SEULE pendant que l'opérateur est parti :
-//   · scène plein écran (à capturer dans OBS à la place de la caméra) : grand orbe vivant, prix live,
-//     sous-titres, fil des commentaires, bannières d'acquisition (Telegram)
+//   · le cockpit RESTE INTÉGRALEMENT VISIBLE (chart, stats, desk, trades — rien ne bouge) ; l'autopilot
+//     n'ajoute QUE des calques flottants : orbe + sous-titres au centre-bas (même emplacement que l'overlay
+//     Voice, masqué dans ce mode), fil du chat en bas à gauche, bannière d'acquisition tournante en bas à droite
 //   · elle LIT le chat TikTok (pont runner → live_comments) et RÉPOND à voix haute — persona « viewer »
 //     durci côté serveur : les commentaires sont des DONNÉES, jamais des ordres (aucun trade possible)
 //   · silences meublés : sans question depuis ~2 min, elle narre sa lecture du marché (cartes du desk)
@@ -10,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { voiceEngine } from '@/lib/cockpit/voice';
 import { getSbToken } from './Voice';
-import { useLiveComments, usePrice, sendCommand } from '@/lib/cockpit/useRealtime';
+import { useLiveComments, sendCommand } from '@/lib/cockpit/useRealtime';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
 import { AlgoriaOrb, type OrbState } from './Orb';
 
@@ -26,7 +27,7 @@ const CTAS = [
   '🚀 Want my trades in your pocket? Free Telegram — link in bio',
 ];
 
-export function Autopilot({ st, deskItems, dayPnl, onExit }: { st: any; deskItems: any[]; dayPnl: number | null; onExit: () => void }) {
+export function Autopilot({ st, deskItems, dayPnl }: { st: any; deskItems: any[]; dayPnl: number | null }) {
   const comments = useLiveComments(40, true);
   const [answering, setAnswering] = useState<{ user: string; text: string } | null>(null);
   const [subtitle, setSubtitle] = useState<string | null>(null);
@@ -164,78 +165,63 @@ export function Autopilot({ st, deskItems, dayPnl, onExit }: { st: any; deskItem
   }, []);
 
   const orbState: OrbState = speaking ? 'speaking' : thinking ? 'thinking' : 'idle';
-  const recent = (comments as any[]).slice(-7);
+  const recent = (comments as any[]).slice(-5);
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 90, display: 'flex', flexDirection: 'column',
-      background: 'radial-gradient(1200px 800px at 50% 38%, #0d1830 0%, #070c18 62%, #05080f 100%)',
-    }}>
-      {/* ===== barre haute : marque + LIVE + prix + sortie ===== */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 22px', flex: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img src="/brand/algoria-mark.png" alt="" width={26} height={26} style={{ objectFit: 'contain', filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
-          <strong style={{ fontSize: 16, letterSpacing: 0.6, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, letterSpacing: 1.6, color: '#ff6b8a', fontWeight: 700 }}>
-            <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#ff6b8a' }} /> AUTONOMOUS
-          </span>
+    <>
+      {/* ===== présence centre-bas : orbe + statut + sous-titres — le cockpit reste visible derrière ===== */}
+      <div style={{
+        position: 'fixed', left: '50%', bottom: 96, transform: 'translateX(-50%)', zIndex: 60,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+        maxWidth: 760, width: 'max-content', pointerEvents: 'none',
+      }}>
+        <div className="cardIn" style={{ filter: 'drop-shadow(0 0 34px rgba(43,227,245,.22))' }}>
+          <AlgoriaOrb size={120} state={orbState} />
         </div>
-        <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-          <StagePrice sym="XAUUSD" label="GOLD" dp={2} />
-          <StagePrice sym="NAS100" label="NAS" dp={1} />
-          <StagePrice sym="BTCUSD" label="BTC" dp={1} />
-          <button onClick={onExit} title="exit autopilot" style={{ fontSize: 10, letterSpacing: 1, color: 'var(--muted)', border: '1px solid var(--border)', background: 'transparent', borderRadius: 7, padding: '5px 11px', cursor: 'pointer' }}>
-            ✕ AUTOPILOT
-          </button>
-        </div>
-      </div>
-
-      {/* ===== centre : l'orbe géant + sous-titres ===== */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 24px' }}>
-        <div style={{ filter: 'drop-shadow(0 0 60px rgba(43,227,245,.18))' }}>
-          <AlgoriaOrb size={300} state={orbState} />
-        </div>
-        <div style={{ fontSize: 10, letterSpacing: 2, color: speaking ? 'var(--gold)' : 'var(--cyan)', marginTop: -10 }}>
-          {speaking ? '◆ ALGORIA' : thinking ? '◆ THINKING…' : '● LISTENING TO CHAT'}
-        </div>
-        {answering && (
-          <div style={{ fontSize: 13, color: 'var(--muted)', maxWidth: 700, textAlign: 'center' }}>
-            <b style={{ color: 'var(--cyan)' }}>@{answering.user}</b> — “{answering.text.slice(0, 120)}”
-          </div>
-        )}
-        <div style={{ fontSize: 21, lineHeight: 1.5, color: 'var(--text)', maxWidth: 820, textAlign: 'center', minHeight: 66 }}>
-          {subtitle ?? ''}
-        </div>
-      </div>
-
-      {/* ===== bas : fil du chat + bannière CTA ===== */}
-      <div style={{ flex: 'none', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, padding: '0 22px 18px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, maxWidth: 420 }}>
-          {recent.map((c: any) => (
-            <div key={String(c.id)} style={{ fontSize: 11.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              <span style={{ color: 'rgba(43,227,245,.75)' }}>@{String(c.username)}</span> {String(c.text)}
-            </div>
-          ))}
-          {!recent.length && <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>waiting for the chat…</div>}
-        </div>
-        <div key={ctaIdx} className="cardIn" style={{
-          fontSize: 13.5, fontWeight: 600, letterSpacing: 0.3, color: 'var(--text)', whiteSpace: 'nowrap',
-          padding: '10px 20px', borderRadius: 999, border: '1px solid rgba(245,194,74,.4)',
-          background: 'linear-gradient(90deg, rgba(245,194,74,.1), rgba(43,227,245,.08))',
+        <div className="cardIn" style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '9px 20px', borderRadius: 14,
+          maxWidth: 700, textAlign: 'center', marginTop: -12,
+          background: 'linear-gradient(180deg, rgba(14,23,44,.96) 0%, rgba(7,12,24,.96) 100%)',
+          border: `1px solid ${speaking ? 'rgba(245,194,74,.5)' : 'rgba(255,107,138,.45)'}`,
+          boxShadow: `0 12px 40px rgba(2,6,16,.6), 0 0 24px ${speaking ? 'rgba(245,194,74,.16)' : 'rgba(255,107,138,.12)'}`,
         }}>
-          {CTAS[ctaIdx]}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, letterSpacing: 1.6, color: speaking ? 'var(--gold)' : '#ff8aa2', fontWeight: 700 }}>
+            <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: speaking ? 'var(--gold)' : '#ff6b8a' }} />
+            {speaking ? 'ALGORIA' : thinking ? 'AUTOPILOT — THINKING…' : 'AUTOPILOT — LISTENING TO CHAT'}
+          </div>
+          {answering && (
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', maxWidth: 640, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <b style={{ color: 'var(--cyan)' }}>@{answering.user}</b> — “{answering.text.slice(0, 110)}”
+            </div>
+          )}
+          {subtitle && <div style={{ fontSize: 14.5, lineHeight: 1.45, color: 'var(--text)' }}>{subtitle}</div>}
         </div>
       </div>
-    </div>
-  );
-}
 
-function StagePrice({ sym, label, dp }: { sym: string; label: string; dp: number }) {
-  const px = usePrice(sym);
-  return (
-    <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-      <span style={{ fontSize: 9.5, letterSpacing: 1, color: 'var(--muted)' }}>{label}</span>
-      <span style={{ fontSize: 15, fontWeight: 600, color: px && px.dir >= 0 ? 'var(--up)' : 'var(--down)' }}>{px ? px.mid.toFixed(dp) : '—'}</span>
-    </span>
+      {/* ===== fil du chat TikTok — coin bas-gauche, discret (les viewers voient leurs messages arriver) ===== */}
+      <div style={{
+        position: 'fixed', left: 14, bottom: 96, zIndex: 55, pointerEvents: 'none',
+        display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 320, padding: '8px 12px', borderRadius: 12,
+        background: 'rgba(7,12,24,.84)', border: '1px solid var(--border)',
+      }}>
+        <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 700 }}>LIVE CHAT</div>
+        {recent.map((c: any) => (
+          <div key={String(c.id)} style={{ fontSize: 11, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span style={{ color: 'rgba(43,227,245,.75)' }}>@{String(c.username)}</span> {String(c.text)}
+          </div>
+        ))}
+        {!recent.length && <div style={{ fontSize: 11, color: 'var(--dim)' }}>waiting for the chat…</div>}
+      </div>
+
+      {/* ===== bannière CTA tournante — coin bas-droit ===== */}
+      <div key={ctaIdx} className="cardIn" style={{
+        position: 'fixed', right: 14, bottom: 96, zIndex: 55, pointerEvents: 'none',
+        fontSize: 12, fontWeight: 600, letterSpacing: 0.3, color: 'var(--text)', whiteSpace: 'nowrap',
+        padding: '8px 16px', borderRadius: 999, border: '1px solid rgba(245,194,74,.4)',
+        background: 'linear-gradient(90deg, rgba(245,194,74,.12), rgba(43,227,245,.09))',
+      }}>
+        {CTAS[ctaIdx]}
+      </div>
+    </>
   );
 }
