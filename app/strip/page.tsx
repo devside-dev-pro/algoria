@@ -7,6 +7,7 @@
 // Ouvrir dans le navigateur du stream (session opérateur déjà connectée sur /app).
 import { useEffect, useMemo, useState } from 'react';
 import { useTrades, usePrice } from '@/lib/cockpit/useRealtime';
+import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
 import { AlgoriaOrb } from '@/components/Orb';
 
 const CTAS = [
@@ -43,7 +44,7 @@ export default function StreamStrip() {
   }, []);
 
   // WINS DU JOUR uniquement (≥5$ pour écarter les micro-scalps du show, hors NAS retiré) — le 70/30 à l'antenne
-  const dayStartMs = new Date().setUTCHours(0, 0, 0, 0);
+  const dayStartMs = brokerDayStartMs(); // jour METATRADER — cohérent avec le terminal
   const wins = useMemo(
     () =>
       (trades as any[])

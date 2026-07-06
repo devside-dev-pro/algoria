@@ -17,6 +17,7 @@ import { AlgoriaOrb } from '@/components/Orb';
 import { Telemetry } from '@/components/Telemetry';
 import { useDesk, useSignals, useTrades, usePrice, useLatestState } from '@/lib/cockpit/useRealtime';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
+import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
 
 const CTAS = [
   '💯 ALGORIA IS COMPLETELY FREE — LINK IN BIO',
@@ -112,7 +113,7 @@ export default function LiveStage() {
   }, [trades]);
 
   // wins du jour (≥5$, hors BEAST) — footer + pastilles chart
-  const dayStartMs = new Date().setUTCHours(0, 0, 0, 0);
+  const dayStartMs = brokerDayStartMs(); // jour METATRADER — le bilan à l'antenne colle au terminal
   const wins = (trades as any[]).filter((t) => t.closed_at && Number(t.pnl) >= 5 && !rafale.has(String(t.ticket)) && Date.parse(t.closed_at) >= dayStartMs);
   const winTotal = wins.reduce((a, t) => a + Number(t.pnl), 0);
   const reel = wins.length ? [...wins, ...wins, ...wins] : [];
@@ -170,7 +171,7 @@ export default function LiveStage() {
 
       {/* ===== CHART DOMINANT (M1) + overlays d'état ===== */}
       <section style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', padding: '8px 8px 0' }}>
-        <Chart key={hero} symbol={hero} signals={chartSigs} activeTrade={activeTrade} wins={winsForChart} defaultTf="M1" />
+        <Chart key={hero} symbol={hero} signals={chartSigs} activeTrade={activeTrade} wins={winsForChart} defaultTf="M1" broadcast />
 
         {/* HÉROS EN POSITION — le P&L flottant géant qui tique : LE moment hypnotique du live */}
         {openTrade && (
@@ -259,7 +260,8 @@ export default function LiveStage() {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-          <span key={ctaIdx} className="cardIn" style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: 0.4, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '94%', padding: '9px 18px', borderRadius: 999, border: '1px solid rgba(245,194,74,.45)', background: 'linear-gradient(90deg, rgba(245,194,74,.13), rgba(43,227,245,.08))' }}>
+          {/* jamais de phrase coupée à l'antenne : le pill s'étale sur 2 lignes centrées si besoin */}
+          <span key={ctaIdx} className="cardIn" style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.4, color: 'var(--text)', textAlign: 'center', lineHeight: 1.35, maxWidth: '94%', padding: '8px 18px', borderRadius: 18, border: '1px solid rgba(245,194,74,.45)', background: 'linear-gradient(90deg, rgba(245,194,74,.13), rgba(43,227,245,.08))' }}>
             {CTAS[ctaIdx]}
           </span>
           {winTotal > 0 && <span className="mono goldText" style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap' }}>+{winTotal.toFixed(0)}$ today</span>}

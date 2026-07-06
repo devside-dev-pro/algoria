@@ -5,6 +5,7 @@ import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
 import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk, useWeekHistory } from '@/lib/cockpit/useRealtime';
+import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
 import { AlgoriaVoice } from './Voice';
 import { Autopilot } from './Autopilot';
 
@@ -178,7 +179,8 @@ export function Cockpit() {
   const replaySig = recap && replayTicket ? ((hist.signals as any[]).find((s) => String(s.ticket) === replayTicket && Array.isArray(s?.confluence?.contributions) && s.confluence.contributions.length > 0) ?? null) : null;
   const replayTrade = replayTicket ? (histClosed.find((t) => String(t.ticket) === replayTicket) ?? null) : null;
   // Compteur "trades today" (hors BEAST) — l'activité du jour visible d'un coup d'œil dans le header.
-  const dayStartMs = new Date().setUTCHours(0, 0, 0, 0);
+  // Jour METATRADER (UTC+3) : à minuit local, le bilan colle au terminal MT5 (plus de +47$ fantômes à 00h15).
+  const dayStartMs = brokerDayStartMs();
   const tradesTodayCount = (trades as any[]).filter((t) => t.opened_at && Date.parse(t.opened_at) >= dayStartMs && !rafaleTickets.has(String(t.ticket))).length;
   // Gains clôturés du symbole affiché (hors BEAST) → pastilles "+X$" de célébration sur le chart.
   // En RECAP : TOUTE la semaine (le replay montre chaque win passé) ; sinon les 24 derniers.

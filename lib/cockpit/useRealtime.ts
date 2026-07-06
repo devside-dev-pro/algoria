@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase/client';
 import { subscribeTicks, getLatestTick } from './tickStore';
+import { brokerDayStartMs } from './brokerDay';
 
 type Row = Record<string, unknown>;
 
@@ -239,8 +240,7 @@ export function useDayStartEquity() {
   const [eq, setEq] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;
-    const midnight = new Date();
-    midnight.setUTCHours(0, 0, 0, 0);
+    const midnight = new Date(brokerDayStartMs()); // jour METATRADER (UTC+3) — cohérent avec le terminal
     supabase
       .from('state_snapshots')
       .select('equity')
@@ -262,8 +262,7 @@ export function useEquityCurve(maxPoints = 160) {
   const [curve, setCurve] = useState<number[]>([]);
   useEffect(() => {
     let alive = true;
-    const midnight = new Date();
-    midnight.setUTCHours(0, 0, 0, 0);
+    const midnight = new Date(brokerDayStartMs()); // jour MT5 — même horloge que le Day P&L
     supabase
       .from('state_snapshots')
       .select('equity, ts')
