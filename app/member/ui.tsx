@@ -75,6 +75,11 @@ export function useMe() {
 
 // ===== MODE TEASER (prospects) — le paywall qui donne envie =====
 export const SUPPORT_TG = 'https://t.me/mathieu_algoria';
+// RÉSERVER UN APPEL — l'arme de closing : un prospect au téléphone 10 min = un client. Par défaut,
+// chat Telegram avec message pré-rempli (zéro infra) ; brancher NEXT_PUBLIC_BOOKING_URL (Calendly…) plus tard.
+export const BOOK_CALL_URL =
+  process.env.NEXT_PUBLIC_BOOKING_URL ??
+  `https://t.me/mathieu_algoria?text=${encodeURIComponent("Hey Mathieu! I'd like to book a quick call to activate my Algoria access 📞")}`;
 
 /** Contenu réservé : flouté + cadenas cliquable → ouvre le paywall. Le VRAI contenu reste dessous
  *  (déjà rédigé côté serveur pour le flux IA) — on voit qu'il se passe des choses, pas ce qui se passe. */
@@ -161,8 +166,15 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
               ))}
             </div>
             <button onClick={() => router.push('/member/onboarding')} style={{ ...sheetGoldCta, border: 'none', cursor: 'pointer' }}>⚡ UNLOCK MY ACCESS →</button>
+            <a
+              {...tgHref(BOOK_CALL_URL)}
+              rel="noreferrer"
+              style={{ padding: '12px 16px', borderRadius: 13, textAlign: 'center', textDecoration: 'none', display: 'block', fontWeight: 700, letterSpacing: 0.4, fontSize: 13, color: 'var(--cyan)', border: '1px solid rgba(43,227,245,.4)', background: 'rgba(43,227,245,.06)' }}
+            >
+              📞 Prefer a human? Book a call with Mathieu
+            </a>
             <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--muted)', textDecoration: 'none' }}>
-              💬 Questions first? Talk to <b style={{ color: 'var(--cyan)' }}>@mathieu_algoria</b>
+              💬 Or just message <b style={{ color: 'var(--cyan)' }}>@mathieu_algoria</b>
             </a>
           </>
         )}

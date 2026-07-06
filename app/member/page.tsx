@@ -4,7 +4,7 @@
 // « Algoria trade en ce moment, toi tu regardes de dehors » + UNLOCK (paywall broker) + support Telegram.
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
-import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, type Member } from './ui';
+import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, BOOK_CALL_URL, type Member } from './ui';
 import { tgHref } from '@/lib/telegram';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string }
@@ -80,7 +80,9 @@ export default function MemberHome() {
                 {winTotal > 0 && <> The wins below alone made members <b className="goldText">+{winTotal.toFixed(0)}$</b>.</>}
               </p>
               <button onClick={() => setPaywall(true)} style={ctaGold}>⚡ UNLOCK MY ACCESS</button>
-              <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={ctaGhost}>💬 TALK TO SUPPORT — @mathieu_algoria</a>
+              {/* l'appel = l'arme de closing : 10 min au téléphone avec Mathieu et c'est signé */}
+              <a {...tgHref(BOOK_CALL_URL)} rel="noreferrer" style={ctaGhost}>📞 BOOK A CALL WITH MATHIEU</a>
+              <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ ...ctaGhost, border: 'none', background: 'transparent', fontSize: 12, color: 'var(--muted)' }}>💬 or just message @mathieu_algoria</a>
             </>
           )}
         </section>
