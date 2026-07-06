@@ -88,11 +88,12 @@ export default function MemberHome() {
         </section>
       )}
 
-      {/* Derniers trades d'Algoria — EN CLAIR même pour les prospects (le FOMO fait le travail) */}
+      {/* Derniers trades d'Algoria — pour les prospects le serveur n'envoie QUE les gains (bande-annonce
+          assumée : "LATEST WINS") ; le flux complet et honnête arrive avec l'accès débloqué */}
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>ALGORIA — LATEST TRADES</h2>
-          {wins.length > 0 && <span className="mono" style={{ fontSize: 11, color: 'var(--up)' }}>✓ {wins.length}/{trades.length} wins</span>}
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: unlocked ? 'var(--muted)' : 'var(--gold)' }}>{unlocked ? 'ALGORIA — LATEST TRADES' : '✨ ALGORIA — LATEST WINS'}</h2>
+          {wins.length > 0 && <span className="mono" style={{ fontSize: 11, color: 'var(--up)' }}>{unlocked ? `✓ ${wins.length}/${trades.length} wins` : `✓ ${wins.length} wins`}</span>}
         </div>
         {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>The AI is hunting — trades appear here as they close.</p>}
         {trades.map((t) => {
@@ -108,7 +109,7 @@ export default function MemberHome() {
           );
         })}
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
-          {unlocked ? 'Master account results — your copies scale with your risk profile.' : 'Master account results — members’ accounts copied these automatically.'}
+          {unlocked ? 'Master account results — your copies scale with your risk profile.' : 'Her best recent trades — members’ accounts copied these automatically. The complete live history unlocks with your access.'}
         </p>
       </section>
 
