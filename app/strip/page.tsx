@@ -13,6 +13,7 @@ const CTAS = [
   '💯 ALGORIA IS COMPLETELY FREE — LINK IN BIO',
   '🤖 EVERY TRADE ON SCREEN IS REAL — LIVE ACCOUNT',
   '📲 SCAN THE CODE — JOIN FREE ON TELEGRAM',
+  '🔎 OR TYPE ALGORIA.TECH IN YOUR BROWSER — 100% FREE',
   '🎁 EARN $50 FOR EVERY FRIEND YOU BRING',
 ];
 
@@ -90,7 +91,8 @@ export default function StreamStrip() {
         {qr && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flex: 'none' }}>
             <img src={qr} alt="algoria.tech" width={92} height={92} style={{ borderRadius: 10, border: '2px solid rgba(43,227,245,.4)' }} />
-            <span className="mono" style={{ fontSize: 8.5, letterSpacing: 1, color: 'var(--cyan)' }}>SCAN → JOIN FREE</span>
+            <span className="mono" style={{ fontSize: 11, letterSpacing: 0.6, color: 'var(--cyan)', fontWeight: 700 }}>algoria.tech</span>
+            <span className="mono" style={{ fontSize: 7.5, letterSpacing: 1, color: 'var(--dim)' }}>SCAN OR TYPE IT — FREE</span>
           </div>
         )}
       </div>

@@ -22,6 +22,7 @@ const CTAS = [
   '💯 ALGORIA IS COMPLETELY FREE — LINK IN BIO',
   '🤖 100% AUTONOMOUS — NO HUMAN TOUCHES THESE TRADES',
   '📲 SCAN THE CODE — JOIN FREE ON TELEGRAM',
+  '🔎 OR TYPE ALGORIA.TECH IN YOUR BROWSER — 100% FREE',
   '🎁 EARN $50 FOR EVERY FRIEND YOU BRING',
 ];
 
@@ -234,8 +235,10 @@ export default function LiveStage() {
         </div>
         {qr && (
           <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-            <img src={qr} alt="get the app" width={70} height={70} style={{ borderRadius: 8, border: '2px solid rgba(43,227,245,.4)' }} />
-            <span className="mono" style={{ fontSize: 7, letterSpacing: 0.8, color: 'var(--cyan)' }}>JOIN FREE</span>
+            <img src={qr} alt="algoria.tech" width={70} height={70} style={{ borderRadius: 8, border: '2px solid rgba(43,227,245,.4)' }} />
+            {/* pas à l'aise avec les QR ? l'adresse en toutes lettres — les deux portes d'entrée à l'écran */}
+            <span className="mono" style={{ fontSize: 9, letterSpacing: 0.6, color: 'var(--cyan)', fontWeight: 700 }}>algoria.tech</span>
+            <span className="mono" style={{ fontSize: 6.5, letterSpacing: 0.8, color: 'var(--dim)' }}>SCAN OR TYPE IT — FREE</span>
           </div>
         )}
       </section>
