@@ -114,10 +114,23 @@ export default function LiveStage() {
   const state: 'position' | 'scanning' = openTrade ? 'position' : 'scanning';
 
   return (
-    <main style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#070c18' }}>
+    // SCÈNE 9:16 VERROUILLÉE — la page EST le format portrait (bandes noires autour en fenêtre paysage) :
+    // capture la fenêtre dans TikTok Studio, cale-la plein cadre, pose ta cam sur la ZONE CAMÉRA du haut. Zéro crop.
+    <div style={{ height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', overflow: 'hidden' }}>
+    <main style={{ height: 'min(100dvh, 177.78vw)', width: 'min(100vw, 56.25dvh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#070c18' }}>
       <style>{`@keyframes liveScroll { from { transform: translateX(0); } to { transform: translateX(-33.333%); } }
 @keyframes popIn { from { opacity: 0; transform: translate(-50%, 14px) scale(.94); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 @keyframes winZoom { 0% { opacity: 0; transform: scale(.7); } 12% { opacity: 1; transform: scale(1.06); } 20% { transform: scale(1); } 88% { opacity: 1; } 100% { opacity: 0; } }`}</style>
+
+      {/* ===== ZONE CAMÉRA (~32%) — ta cam se pose PAR-DESSUS dans TikTok Studio ; le fond reste propre
+           si le cadrage dépasse d'un pixel (watermark discret, pas de damier « source manquante ») ===== */}
+      <div style={{
+        flex: '0 0 32%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
+        background: 'radial-gradient(80% 90% at 50% 30%, #0d1a33 0%, #070c18 100%)', borderBottom: '1px solid var(--border)',
+      }}>
+        <img src="/brand/algoria-mark.png" alt="" width={38} height={38} style={{ objectFit: 'contain', opacity: 0.35 }} />
+        <span className="mono" style={{ fontSize: 10, letterSpacing: 2, color: 'rgba(84,104,142,.6)' }}>— YOUR CAMERA HERE —</span>
+      </div>
 
       {/* ===== BANDEAU CONTEXTE — la réponse à « c'est quoi ce truc ? » en 1 seconde, toujours visible ===== */}
       <header style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'linear-gradient(90deg, rgba(43,227,245,.07), rgba(255,107,138,.05))' }}>
@@ -231,6 +244,7 @@ export default function LiveStage() {
         </div>
       </footer>
     </main>
+    </div>
   );
 }
 
