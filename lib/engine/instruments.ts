@@ -3,7 +3,7 @@
 // Chaque instrument a sa PROPRE config (l'or et le Nasdaq n'ont pas le même profil : R:R, SL, seuil, maxSpread…).
 import { SCALP_CONFIG, type EngineConfig } from './config';
 import { GOLD_BREAKOUT, type BreakoutConfig } from './breakout';
-import { BTC_SWING, GOLD_SWING, NAS_SWING, type SwingConfig } from './swing';
+import { BTC_SWING, GOLD_SWING, type SwingConfig } from './swing';
 import type { ContextOptions } from './context';
 
 export interface InstrumentSpec {
@@ -32,25 +32,6 @@ const SCALP_CTX: Partial<ContextOptions> = { tradeAsia: true, volMinPct: 0.05, v
 // Choix produit : fréquence pour le live, au prix d'un DD un peu plus haut — l'edge reste solide.
 const XAUUSD_SCALP: EngineConfig = { ...SCALP_CONFIG, fixedLot: 1, emaGate: 'notOpposed' };
 
-// NAS100 — l'indice laisse courir les gagnants → R:R plus élevé (0.8 vs 0.4), SL serré (0.6×ATR), seuil 0.28.
-// maxSpread relevé (spread indice en POINTS ; 0.95 est petit vs un range M5 ~40 pts).
-// Backtest M5 réel (26 j, harness backtest/validate.ts) : ~15 trades/j, 84% win, PF 1.44, DD 5.8%,
-// robuste (H1 +$1844 / H2 +$1297). SL 0.6×ATR bat 0.9×ATR (PF 1.44 vs 1.30) — sortie plus rapide, moins de bruit encaissé.
-const NAS100_SCALP: EngineConfig = {
-  ...SCALP_CONFIG,
-  targetRR: 0.8,
-  slAtrMult: 0.6,
-  minRR: 0.2,
-  minStopAtr: 0.3,
-  maxStopAtr: 3,
-  beTrigger: 0.15,
-  fixedLot: 10, // 10 lots fixes par trade auto (choix produit — le risque $ varie avec le stop)
-  contractSize: 1, // CFD indice : 1 pt = 1$/lot. SANS cette surcharge, l'héritage or (100) gonflait l'exposition 100× → veto risk sur TOUS les trades NAS.
-  priceStep: 0.1, // tick de prix indice
-  threshold: { soft: 0.28, normal: 0.28, turbo: 0.28, scalp: 0.28 },
-  risk: { ...SCALP_CONFIG.risk, maxSpread: 5 },
-};
-
 // BTC — config de LECTURE seulement (seuils du desk, spread max) : l'auto ne tire jamais (watchOnly).
 const BTCUSD_WATCH: EngineConfig = {
   ...SCALP_CONFIG,
@@ -72,15 +53,9 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     // 3ᵉ couche : SWING de fond H1 (labo 1.75 an : PF 2.21, +88%, tenue moy 3.5 j, en position 67% du temps).
     swing: GOLD_SWING,
   },
-  {
-    display: 'NAS100',
-    broker: process.env.NAS100_SYMBOL ?? 'NAS100',
-    config: NAS100_SCALP,
-    ctx: { ...SCALP_CTX, roundStep: 100 }, // niveaux ronds du Nasdaq ~100 pts (pas les $10 de l'or)
-    enabled: process.env.TRADE_NAS100 === '1', // opt-in tant que le runner multi-symboles n'est pas en place
-    // Couche SWING de fond H1 (labo 2.2 ans : cassure 72h, PF 1.94, +$3086, DD 6.9%, tiers ✅✅✅).
-    swing: NAS_SWING,
-  },
+  // NAS100 RETIRÉ (produit) : Social Trade Hub ne copie pas l'indice et son sizing en lots est piégeux —
+  // les pertes NAS n'apparaissaient QUE sur le compte maître, jamais chez les clients. Focus GOLD + BITCOIN.
+  // (Les configs/backtests NAS restent dans backtest/ et swing.ts si on le réactive un jour.)
   {
     // BTC — seul marché 24/7 (les lives du week-end). AUCUN edge auto validé (scalp ET labo ont échoué —
     // backtest/validate.ts + backtest/lab.ts, 17.4 j) → watchOnly : desk/chart/bougies vivent, l'auto ne tire

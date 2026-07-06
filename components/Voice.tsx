@@ -14,7 +14,7 @@ import { AlgoriaOrb, type OrbState } from './Orb';
 
 export const getSbToken = async () => (await supabase.auth.getSession()).data.session?.access_token ?? null;
 
-const EN_NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' };
+const EN_NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' }; // NAS conservé pour relire les vieux trades
 const symName = (s: string) => EN_NAME[s] ?? s;
 // « Algoria » n'existe pas dans le vocabulaire du recognizer : il transcrit « Algeria », « Gloria »,
 // « algorithm », voire « I'll go yeah » (vu en live !). Détection en 2 étages :
@@ -237,7 +237,7 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
       const context = {
         utc_time: new Date().toISOString().slice(0, 16).replace('T', ' '),
         displayed_market: symName(symbol),
-        prices: { gold: px('XAUUSD'), nasdaq: px('NAS100'), bitcoin: px('BTCUSD') },
+        prices: { gold: px('XAUUSD'), bitcoin: px('BTCUSD') },
         account: { balance: st?.balance ?? null, equity: st?.equity ?? null, day_pnl: dayPnl, open_positions: st?.open_positions ?? 0 },
         session: st?.session ?? null,
         regime: st?.regime ?? null,
