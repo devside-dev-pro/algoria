@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const db = sdb();
   const [wl, members, actions, commsQ, payoutsQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
-    db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at').order('member_no', { ascending: false }).limit(200),
+    db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,mt5_login,mt5_server,usdt_trc20,referred_by').order('member_no', { ascending: false }).limit(200),
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),

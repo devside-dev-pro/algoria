@@ -24,8 +24,8 @@ export default function MemberLogin() {
       if (poll.current) clearInterval(poll.current);
       poll.current = setInterval(async () => {
         const p = (await fetch(`/api/member/tglogin?code=${d.code}`).then((x) => x.json()).catch(() => null)) as { ok?: boolean; denied?: boolean; expired?: boolean } | null;
-        // sur le sous-domaine ADMIN, on atterrit directement sur le back-office (pas sur le Home membre)
-        const dest = typeof window !== 'undefined' && window.location.hostname.startsWith('admin.') ? '/member/admin' : '/member';
+        // sur le sous-domaine ADMIN, on atterrit directement sur le back-office CRM (pas sur le Home membre)
+        const dest = typeof window !== 'undefined' && window.location.hostname.startsWith('admin.') ? '/admin' : '/member';
         if (p?.ok) { if (poll.current) clearInterval(poll.current); router.replace(dest); }
         else if (p?.denied) { if (poll.current) clearInterval(poll.current); router.replace('/member/denied'); }
         else if (p?.expired) { if (poll.current) clearInterval(poll.current); setPhase('expired'); }
