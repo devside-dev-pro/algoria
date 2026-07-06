@@ -5,6 +5,7 @@
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
 import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, type Member } from './ui';
+import { tgHref } from '@/lib/telegram';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string }
 
@@ -66,7 +67,7 @@ export default function MemberHome() {
               <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
                 The team is verifying your broker account and switching the copy on. Everything unlocks automatically — usually within a few hours.
               </p>
-              <a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={ctaGhost}>💬 MESSAGE SUPPORT — @mathieu_algoria</a>
+              <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={ctaGhost}>💬 MESSAGE SUPPORT — @mathieu_algoria</a>
             </>
           ) : (
             <>
@@ -79,7 +80,7 @@ export default function MemberHome() {
                 {winTotal > 0 && <> The wins below alone made members <b className="goldText">+{winTotal.toFixed(0)}$</b>.</>}
               </p>
               <button onClick={() => setPaywall(true)} style={ctaGold}>⚡ UNLOCK MY ACCESS</button>
-              <a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={ctaGhost}>💬 TALK TO SUPPORT — @mathieu_algoria</a>
+              <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={ctaGhost}>💬 TALK TO SUPPORT — @mathieu_algoria</a>
             </>
           )}
         </section>

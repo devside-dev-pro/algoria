@@ -4,6 +4,7 @@
 // Zéro numéro de téléphone, zéro widget, zéro mot de passe. (Le /setdomain BotFather n'est plus nécessaire.)
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { openTelegram } from '@/lib/telegram';
 
 type Phase = 'idle' | 'waiting' | 'expired' | 'error';
 
@@ -19,7 +20,7 @@ export default function MemberLogin() {
       const d = (await r.json()) as { code?: string; link?: string };
       if (!d.code || !d.link) { setPhase('error'); return; }
       setPhase('waiting');
-      window.open(d.link, '_blank'); // ouvre l'app Telegram (mobile) / Telegram Desktop
+      openTelegram(d.link, { fallbackNewTab: true }); // tg:// direct sur le bot ; repli t.me en NOUVEL onglet (le polling continue ici)
       if (poll.current) clearInterval(poll.current);
       poll.current = setInterval(async () => {
         const p = (await fetch(`/api/member/tglogin?code=${d.code}`).then((x) => x.json()).catch(() => null)) as { ok?: boolean; denied?: boolean; expired?: boolean } | null;

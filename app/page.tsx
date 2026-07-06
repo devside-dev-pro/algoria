@@ -1,5 +1,6 @@
 'use client';
 import { usePrice, useFeedHealth } from '@/lib/cockpit/useRealtime';
+import { tgHref } from '@/lib/telegram';
 
 // Funnel PUBLIC (domaine racine) : ce que voit un viewer qui tape algoria.tech (lien en bio TikTok).
 // Objectif unique : convertir → rejoindre le canal Telegram gratuit. Le cockpit opérateur vit sur /app.
@@ -50,9 +51,9 @@ export default function Funnel() {
         </div>
 
         {/* Primary CTA */}
+        {/* deep link tg:// : l'app Telegram s'ouvre DIRECT (zéro page interstitielle), repli web auto */}
         <a
-          href={TELEGRAM}
-          target="_blank"
+          {...tgHref(TELEGRAM)}
           rel="noopener noreferrer"
           style={{
             width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,

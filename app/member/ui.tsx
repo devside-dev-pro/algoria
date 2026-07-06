@@ -3,6 +3,7 @@
 // Réutilise le langage visuel du cockpit (globals.css : .panel, .goldText, .mono) — même ADN, mobile-first.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { tgHref } from '@/lib/telegram';
 
 export interface Member {
   member_no: number;
@@ -123,7 +124,7 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6, textAlign: 'center' }}>
               Your setup is in — the team is verifying your broker account and switching the copy on. Everything unlocks automatically, usually <b style={{ color: 'var(--text)' }}>within a few hours</b>.
             </p>
-            <a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={sheetGoldCta}>💬 MESSAGE SUPPORT — @mathieu_algoria</a>
+            <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={sheetGoldCta}>💬 MESSAGE SUPPORT — @mathieu_algoria</a>
           </>
         ) : (
           <>
@@ -145,7 +146,7 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
               ))}
             </div>
             <button onClick={() => router.push('/member/onboarding')} style={{ ...sheetGoldCta, border: 'none', cursor: 'pointer' }}>⚡ UNLOCK MY ACCESS →</button>
-            <a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--muted)', textDecoration: 'none' }}>
+            <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--muted)', textDecoration: 'none' }}>
               💬 Questions first? Talk to <b style={{ color: 'var(--cyan)' }}>@mathieu_algoria</b>
             </a>
           </>
