@@ -15,7 +15,6 @@ const pct = (n: unknown, d = 1) => (n == null ? '—' : (Number(n) * 100).toFixe
 interface SymSpec { key: string; label: string; short: string; contract: number; pip: number; dp: number; h24?: boolean }
 const SYMS: SymSpec[] = [
   { key: 'XAUUSD', label: 'XAU/USD', short: 'XAU', contract: 100, pip: 0.1, dp: 2 },
-  { key: 'NAS100', label: 'NAS100', short: 'NAS', contract: 1, pip: 1, dp: 1 },
   { key: 'BTCUSD', label: 'BTC/USD', short: 'BTC', contract: 1, pip: 10, dp: 1, h24: true }, // 24/7 — WATCH pour l'auto (pas d'edge validé), manuel OK
 ];
 const symSpec = (k: string) => SYMS.find((s) => s.key === k) ?? SYMS[0];

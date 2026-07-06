@@ -15,7 +15,7 @@ import { useLiveComments, sendCommand } from '@/lib/cockpit/useRealtime';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
 import { AlgoriaOrb, type OrbState } from './Orb';
 
-const NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' };
+const NAME: Record<string, string> = { XAUUSD: 'gold', NAS100: 'the Nasdaq', BTCUSD: 'Bitcoin' }; // NAS conservé pour relire les vieux events
 const ANSWER_GAP_MS = 25_000; // au max ~2 réponses/min — elle respire, elle ne mitraille pas
 const FILLER_GAP_MS = 110_000; // silence > ~2 min → elle meuble avec sa lecture du marché
 const BLOCKED = /(fuck|shit|bitch|nigg|fag|nazi|hitler|porn|sex|dick|cunt|whore|slut|retard|kys|kill yourself)/i; // jamais lu à l'antenne
@@ -64,7 +64,7 @@ export function Autopilot({ st, deskItems, dayPnl }: { st: any; deskItems: any[]
     let lock: { release?: () => Promise<void> } | null = null;
     void (navigator as any).wakeLock?.request?.('screen').then((l: any) => (lock = l)).catch(() => {});
     const t = window.setTimeout(() => {
-      engine().speak("Autopilot engaged. My human stepped away, so it's just you and me now. I'm trading gold, the Nasdaq and Bitcoin live — drop your questions in the chat and I'll answer out loud.");
+      engine().speak("Autopilot engaged. My human stepped away, so it's just you and me now. I'm trading gold and Bitcoin live — drop your questions in the chat and I'll answer out loud.");
     }, 1500);
     return () => {
       window.clearTimeout(t);
@@ -135,7 +135,7 @@ export function Autopilot({ st, deskItems, dayPnl }: { st: any; deskItems: any[]
     };
     return {
       utc_time: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      prices: { gold: px('XAUUSD'), nasdaq: px('NAS100'), bitcoin: px('BTCUSD') },
+      prices: { gold: px('XAUUSD'), bitcoin: px('BTCUSD') },
       account: { balance: stRef.current?.balance ?? null, equity: stRef.current?.equity ?? null, day_pnl: dayPnlRef.current, open_positions: stRef.current?.open_positions ?? 0 },
       latest_desk_reads: (deskRef.current as any[]).slice(0, 3).map((e) => ({ market: NAME[String(e?.data?.symbol ?? 'XAUUSD')] ?? 'gold', read: e?.msg })),
     };

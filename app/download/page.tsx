@@ -118,7 +118,7 @@ export default function DownloadPage() {
               <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: 'var(--up)' }}>+247$</div>
             </div>
             <MockLine icon="✓" color="var(--up)" text="Trade closed · gold · +86$" />
-            <MockLine icon="▲" color="var(--cyan)" text="Long opened · Nasdaq" />
+            <MockLine icon="▲" color="var(--cyan)" text="Long opened · Bitcoin" />
             <MockLine icon="◆" color="var(--gold)" text="Liquidity swept — watching" />
             <MockLine icon="✓" color="var(--up)" text="Trade closed · BTC · +54$" />
             <MockLine icon="●" color="var(--muted)" text="Range regime · standing by" />
@@ -144,7 +144,7 @@ export default function DownloadPage() {
           </Shot>
           <Shot title="Win alerts">
             <MockHeader label="ALERTS" />
-            {[['Algoria', 'Trade closed on gold ✓ +124$', 'now'], ['Algoria', 'Swing target hit on Bitcoin ✓ +212$', '1h'], ['Algoria', 'New setup forming on the Nasdaq', '3h']].map(([app, msg, t], i) => (
+            {[['Algoria', 'Trade closed on gold ✓ +124$', 'now'], ['Algoria', 'Swing target hit on Bitcoin ✓ +212$', '1h'], ['Algoria', 'New setup forming on gold', '3h']].map(([app, msg, t], i) => (
               <div key={i} style={{ display: 'flex', gap: 6, background: 'rgba(255,255,255,.04)', border: '1px solid var(--border)', borderRadius: 9, padding: '7px 8px' }}>
                 <img src="/brand/algoria-mark.png" alt="" width={14} height={14} style={{ objectFit: 'contain', marginTop: 1 }} />
                 <div style={{ minWidth: 0 }}>
@@ -165,7 +165,7 @@ export default function DownloadPage() {
         <section className="panel" style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <h2 style={secTitle}>About this app</h2>
           <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: 'var(--muted)' }}>
-            Algoria is an AI that trades <b style={{ color: 'var(--gold)' }}>gold</b>, the <b style={{ color: 'var(--cyan)' }}>Nasdaq</b> and <b style={{ color: 'var(--gold)' }}>Bitcoin</b> on
+            Algoria is an AI that trades <b style={{ color: 'var(--gold)' }}>gold</b> and <b style={{ color: '#f7931a' }}>Bitcoin</b> on
             a real account, autonomously, and streams it live. The app puts her in your pocket:
           </p>
           {[

@@ -9,7 +9,6 @@ import { useMe, Locked, UnlockSheet } from '../ui';
 
 const SYMS = [
   { key: 'XAUUSD', short: 'XAU', dp: 2 },
-  { key: 'NAS100', short: 'NAS', dp: 1 },
   { key: 'BTCUSD', short: 'BTC', dp: 1 },
 ];
 

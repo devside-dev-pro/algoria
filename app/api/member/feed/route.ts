@@ -20,12 +20,15 @@ export async function GET(req: NextRequest) {
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
   ]);
   const unlocked = isAdmin(s.username) || ['live', 'paused'].includes(String(memberQ.data?.[0]?.status ?? ''));
-  // on écarte les micro-scalps BEAST/RAFALE (show du live, pas la stratégie copiée)
+  // on écarte les micro-scalps BEAST/RAFALE (show du live, pas la stratégie copiée) ET le NAS100
+  // (marché retiré : STH ne l'a jamais copié — ses pertes n'existent que sur le compte maître,
+  // les montrer aux membres serait un rouge qui n'est pas le leur)
   const rafale = new Set((signalsQ.data ?? []).filter((x) => JSON.stringify(x.rationale ?? '').includes('RAFALE') || JSON.stringify(x.rationale ?? '').includes('ACTION mode')).map((x) => String(x.ticket)));
-  const trades = (tradesQ.data ?? []).filter((t) => !rafale.has(String(t.ticket))).slice(0, 30);
+  const trades = (tradesQ.data ?? []).filter((t) => !rafale.has(String(t.ticket)) && String(t.symbol) !== 'NAS100').slice(0, 30);
+  const deskFiltered = (desk.data ?? []).filter((e) => (e.data as { symbol?: string })?.symbol !== 'NAS100');
   const deskOut = unlocked
-    ? desk.data ?? []
-    : (desk.data ?? []).map((e) => ({
+    ? deskFiltered
+    : deskFiltered.map((e) => ({
         id: e.id,
         ts: e.ts,
         msg: String(e.msg ?? '').split(/\s+/).slice(0, 3).join(' ') + ' …',
