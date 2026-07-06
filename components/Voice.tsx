@@ -94,6 +94,12 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
   const seenClose = useRef<Set<string>>(new Set());
   const seenNews = useRef<Set<string>>(new Set());
   const mountedAt = useRef(Date.now());
+  // CERVEAU CONVERSATIONNEL : mémoire des derniers échanges (multi-tours) + relance après sa réponse
+  // (on peut enchaîner "salut ça va ?" → réponse → "et le gold ?" sans redire le wake word).
+  const histRef = useRef<{ q: string; a: string }[]>([]);
+  const pendingFollowUp = useRef(false);
+  const sttOk = useRef<boolean | null>(null); // null = Scribe pas encore sondé · false = indisponible (repli reco navigateur)
+  const capturing = useRef(false);
 
   const apRef = useRef(autopilot);
   apRef.current = autopilot;
@@ -110,7 +116,14 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
         setSpeaking(s);
         // micro coupé pendant la parole, relancé après (sinon Algoria s'entend elle-même)
         if (s) stopRec();
-        else if (onRef.current && !apRef.current) startRec();
+        else if (onRef.current && !apRef.current) {
+          // CONVERSATION : elle vient de répondre → on rouvre le micro une fois pour la suite du dialogue
+          if (pendingFollowUp.current) {
+            pendingFollowUp.current = false;
+            chime();
+            void captureQuestion();
+          } else startRec();
+        }
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -181,7 +194,9 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
           // question DANS la même phrase (« hey algoria, are you in a position? ») → on la prend direct
           const after = stripWake(finalTxt);
           if (after.length > 8) return void ask(after);
-          // sinon : fenêtre de 9 s pour poser la question
+          // sinon : ENREGISTREMENT Scribe (transcription premium — la reco navigateur massacre trop)
+          if (sttOk.current !== false) return void captureQuestion();
+          // repli reco navigateur : fenêtre de 9 s pour poser la question
           if (listenTimer.current) window.clearTimeout(listenTimer.current);
           listenTimer.current = window.setTimeout(() => {
             if (modeRef.current === 'listening') setMode('idle');
@@ -208,19 +223,104 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
     } catch { /* start() double → ignoré */ }
   }
 
-  // ===== ÉVEIL MANUEL : un clic sur l'orbe = elle écoute immédiatement (zéro dépendance au wake word).
+  // ===== ÉVEIL MANUEL : un clic sur ASK = elle écoute immédiatement (zéro dépendance au wake word).
   // En live c'est LA garantie de fluidité : clic → carillon → question. Interrompt sa phrase en cours.
   function manualWake() {
     engineRef.current?.stop(); // si elle parlait, on l'interrompt (le micro se relance via onSpeaking)
+    pendingFollowUp.current = false;
     chime();
     setHeard(null);
-    setMode('listening');
     setQuestion(null);
+    if (sttOk.current !== false) return void captureQuestion(); // oreille premium d'abord
+    setMode('listening');
     if (listenTimer.current) window.clearTimeout(listenTimer.current);
     listenTimer.current = window.setTimeout(() => {
       if (modeRef.current === 'listening') setMode('idle');
     }, 9000);
     if (!recRef.current) startRec();
+  }
+
+  // ===== OREILLE PREMIUM : on ENREGISTRE la question (micro brut, arrêt au silence ~1.3 s, 10 s max)
+  // et ElevenLabs Scribe la transcrit — fini les « I'll go yeah ». Repli automatique : reco navigateur.
+  async function captureQuestion(): Promise<void> {
+    if (capturing.current) return;
+    capturing.current = true;
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      sttOk.current = false; // micro refusé pour l'enregistrement → on reste sur la reco navigateur
+      capturing.current = false;
+      setMode('listening');
+      if (!recRef.current) startRec();
+      return;
+    }
+    stopRec(); // webkit libère le micro pendant la capture
+    setMode('listening');
+    setQuestion(null);
+    const backToIdle = () => {
+      setMode('idle');
+      if (onRef.current && !speakingRef.current && !apRef.current) startRec();
+    };
+    try {
+      const chunks: Blob[] = [];
+      const mime = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : undefined;
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      const stopped = new Promise<void>((res) => { mr.onstop = () => res(); });
+      // détection de fin de phrase : RMS du micro — on coupe après ~1.3 s de silence POST-parole
+      const ac = new AudioContext();
+      const analyser = ac.createAnalyser();
+      analyser.fftSize = 512;
+      ac.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      let spoke = false;
+      let silentMs = 0;
+      const t0 = Date.now();
+      mr.start(250);
+      await new Promise<void>((res) => {
+        const iv = window.setInterval(() => {
+          analyser.getByteTimeDomainData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
+          const rms = Math.sqrt(sum / buf.length);
+          if (rms > 0.02) { spoke = true; silentMs = 0; } else silentMs += 120;
+          const dur = Date.now() - t0;
+          if ((spoke && silentMs >= 1300) || dur >= 10_000 || (!spoke && dur >= 5000)) { window.clearInterval(iv); res(); }
+        }, 120);
+      });
+      try { mr.stop(); } catch { /* déjà stoppé */ }
+      await stopped;
+      void ac.close();
+      if (!spoke) return backToIdle(); // rien dit → pas de requête pour rien
+      setMode('thinking'); // feedback pendant la transcription
+      const token = await getSbToken();
+      const res = await fetch('/api/voice/stt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/webm', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: new Blob(chunks, { type: 'audio/webm' }),
+      });
+      if (res.status === 501) {
+        // Scribe pas configuré → repli DÉFINITIF sur la reco navigateur pour la session
+        sttOk.current = false;
+        setMode('listening');
+        if (!recRef.current) startRec();
+        if (listenTimer.current) window.clearTimeout(listenTimer.current);
+        listenTimer.current = window.setTimeout(() => { if (modeRef.current === 'listening') setMode('idle'); }, 9000);
+        return;
+      }
+      if (!res.ok) return backToIdle();
+      sttOk.current = true;
+      const { text } = (await res.json()) as { text?: string };
+      const q = stripWake(String(text ?? '')) || String(text ?? '').trim();
+      if (q.length > 1) return void ask(q);
+      backToIdle();
+    } catch {
+      backToIdle();
+    } finally {
+      stream?.getTracks().forEach((t) => t.stop());
+      capturing.current = false;
+    }
   }
 
   // ===== La question part au cerveau avec le contexte live =====
@@ -234,15 +334,33 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
         const t = getLatestTick(s);
         return t ? +((t.bid + t.ask) / 2).toFixed(1) : null;
       };
+      // CONTEXTE VÉRIDIQUE — la source unique de vérité de son discours. Le point clé : les positions
+      // OUVERTES en détail + le P&L flottant EXACT (equity − balance) — sans ça elle disait « I'm flat »
+      // en plein drawdown (open_positions=1 sans détail, le modèle ne « voyait » pas le trade).
+      const openTrades = (trades as any[]).filter((t) => !t.closed_at && !rafaleTickets.has(String(t.ticket)));
+      const floating = st?.equity != null && st?.balance != null ? Math.round(Number(st.equity) - Number(st.balance)) : null;
       const context = {
         utc_time: new Date().toISOString().slice(0, 16).replace('T', ' '),
         displayed_market: symName(symbol),
         prices: { gold: px('XAUUSD'), bitcoin: px('BTCUSD') },
-        account: { balance: st?.balance ?? null, equity: st?.equity ?? null, day_pnl: dayPnl, open_positions: st?.open_positions ?? 0 },
+        account: {
+          balance: st?.balance ?? null,
+          equity: st?.equity ?? null,
+          day_pnl: dayPnl,
+          open_positions: st?.open_positions ?? openTrades.length,
+          floating_pnl_dollars: floating, // + = en profit latent · − = en drawdown
+        },
+        open_positions_detail: openTrades.map((t) => ({
+          market: symName(String(t.symbol)),
+          side: t.direction,
+          entry: t.entry != null ? Number(t.entry) : null,
+          current_price: px(String(t.symbol)),
+          opened_at: typeof t.opened_at === 'string' ? t.opened_at.slice(0, 16).replace('T', ' ') : null,
+        })),
         session: st?.session ?? null,
         regime: st?.regime ?? null,
         latest_desk_reads: (deskItems as any[]).slice(0, 3).map((e) => ({ market: symName(String(e?.data?.symbol ?? 'XAUUSD')), read: e?.msg })),
-        recent_trades: (trades as any[])
+        recent_closed_trades: (trades as any[])
           .filter((t) => t.closed_at && t.pnl != null && !rafaleTickets.has(String(t.ticket)))
           .slice(0, 5)
           .map((t) => ({ market: symName(String(t.symbol)), side: t.direction, result_dollars: Math.round(Number(t.pnl)) })),
@@ -250,13 +368,17 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
       const res = await fetch('/api/voice/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ question: q, context }),
+        body: JSON.stringify({ question: q, context, history: histRef.current.slice(-6) }),
       });
       if (res.status === 501) engine().speak("My voice brain isn't wired up on the server yet. Add the API key and ask me again.");
       else if (!res.ok) engine().speak("Small glitch reaching my brain. Ask me again in a moment.");
       else {
         const { text } = await res.json();
-        engine().speak(String(text ?? ''));
+        const answer = String(text ?? '');
+        engine().speak(answer);
+        // mémoire de conversation + relance : après sa réponse, le micro se rouvre une fois pour enchaîner
+        histRef.current = [...histRef.current, { q, a: answer }].slice(-8);
+        pendingFollowUp.current = true;
       }
     } catch {
       engine().speak("I couldn't think that one through — try again.");

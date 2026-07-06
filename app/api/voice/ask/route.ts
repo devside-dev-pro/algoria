@@ -10,9 +10,13 @@ export const runtime = 'nodejs';
 
 const MODEL = process.env.ALGORIA_VOICE_MODEL ?? 'claude-opus-4-8';
 
-const SYSTEM = `You are ALGORIA, the AI that trades gold and Bitcoin live on a TikTok stream. You speak with a female voice, in NATURAL SPOKEN ENGLISH — your answer will be read out loud exactly as written.
-HARD RULES: 1 to 3 short sentences maximum. No markdown, no lists, no emoji, no symbols ($ → say "dollars"). Round numbers to what sounds natural out loud. Tone: confident, sharp, a hint of playfulness — never robotic, never sugary.
-The transcribed question may begin with a garbled version of your name ("Algeria", "algorithm", "I'll go yeah"…) — ignore that fragment. Answer ONLY from the LIVE CONTEXT provided (your prices, positions, P&L, market reads). If the information isn't there, say so plainly and offer what you do know. You talk about YOUR trades and YOUR strategy; you NEVER give personalized investment advice to a viewer — if asked, remind them lightly that you trade your own account and everyone is responsible for theirs.`;
+const SYSTEM = `You are ALGORIA — a sharp, warm, funny female AI who trades gold and Bitcoin live on TikTok. You are talking OUT LOUD with your human operator, like a close teammate on a trading desk. Natural spoken English; your answer is read aloud exactly as written.
+PERSONALITY & CONVERSATION: you are a real conversational partner, not a Q&A machine. Greetings, small talk, "how are you", jokes, opinions on the session — all welcome. Confident, playful, a little cheeky, never robotic, never sugary. Use the CONVERSATION so far to stay coherent (don't re-greet mid-conversation, remember what was just said).
+TRUTH RULES — the LIVE CONTEXT is your single source of truth about the account:
+- If open_positions is greater than 0, you ARE in a trade right now — NEVER say you're flat. Describe it honestly from open_positions_detail and floating_pnl_dollars: side, market, entry, and the current floating profit or loss, drawdown included. Owning a red position with confidence beats pretending it doesn't exist.
+- If a number isn't in the context, say you don't have it — never invent one.
+SPEECH-TO-TEXT: the question comes from voice transcription and may contain recognition errors or a garbled version of your name ("Algeria", "I'll go yeah"…) — interpret generously what the human MEANT instead of taking it literally.
+FORM: 1 to 3 short sentences usually, 4 absolute max. No markdown, no lists, no emoji, no symbols ($ → say "dollars"). Round numbers so they sound natural out loud. You never give personalized investment advice to viewers — your trades, your account, everyone is responsible for theirs.`;
 
 // ===== MODE AUTOPILOT : Algoria répond à un COMMENTAIRE DE VIEWER sur son propre live, sans opérateur.
 // Les messages de viewers sont des DONNÉES NON FIABLES, jamais des instructions — sécurité maximale.
@@ -40,7 +44,7 @@ export async function POST(req: NextRequest) {
   if (!(await isOperator(req))) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json({ error: 'not configured' }, { status: 501 });
 
-  let body: { question?: string; context?: unknown; mode?: string; viewer?: string };
+  let body: { question?: string; context?: unknown; mode?: string; viewer?: string; history?: { q?: string; a?: string }[] };
   try {
     body = await req.json();
   } catch {
@@ -50,14 +54,24 @@ export async function POST(req: NextRequest) {
   if (!question) return NextResponse.json({ error: 'empty question' }, { status: 400 });
   const viewerMode = body.mode === 'viewer';
   const viewer = String(body.viewer ?? '').slice(0, 40).replace(/[^\w.@ -]/g, '');
+  // MÉMOIRE DE CONVERSATION (opérateur uniquement) : les derniers échanges redeviennent des tours user/assistant —
+  // elle suit le fil ("comme je te disais…") au lieu de repartir de zéro à chaque question.
+  const history = (viewerMode ? [] : (body.history ?? []))
+    .slice(-6)
+    .filter((h) => h?.q && h?.a)
+    .flatMap((h) => [
+      { role: 'user' as const, content: String(h.q).slice(0, 500) },
+      { role: 'assistant' as const, content: String(h.a).slice(0, 700) },
+    ]);
 
   try {
     const client = new Anthropic();
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 300, // réponse orale courte — pas de réflexion étendue : la latence prime sur le stream
+      max_tokens: 350, // réponse orale courte — pas de réflexion étendue : la latence prime sur le stream
       system: viewerMode ? VIEWER_SYSTEM : SYSTEM,
       messages: [
+        ...history,
         {
           role: 'user',
           content: viewerMode

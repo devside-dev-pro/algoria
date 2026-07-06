@@ -136,7 +136,14 @@ export function Autopilot({ st, deskItems, dayPnl }: { st: any; deskItems: any[]
     return {
       utc_time: new Date().toISOString().slice(0, 16).replace('T', ' '),
       prices: { gold: px('XAUUSD'), bitcoin: px('BTCUSD') },
-      account: { balance: stRef.current?.balance ?? null, equity: stRef.current?.equity ?? null, day_pnl: dayPnlRef.current, open_positions: stRef.current?.open_positions ?? 0 },
+      account: {
+        balance: stRef.current?.balance ?? null,
+        equity: stRef.current?.equity ?? null,
+        day_pnl: dayPnlRef.current,
+        open_positions: stRef.current?.open_positions ?? 0,
+        // + = profit latent · − = drawdown : elle assume ses positions rouges au lieu de dire qu'elle est flat
+        floating_pnl_dollars: stRef.current?.equity != null && stRef.current?.balance != null ? Math.round(Number(stRef.current.equity) - Number(stRef.current.balance)) : null,
+      },
       latest_desk_reads: (deskRef.current as any[]).slice(0, 3).map((e) => ({ market: NAME[String(e?.data?.symbol ?? 'XAUUSD')] ?? 'gold', read: e?.msg })),
     };
   }
