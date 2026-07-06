@@ -14,7 +14,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Chart } from '@/components/Chart';
 import { AlgoriaOrb } from '@/components/Orb';
-import { useDesk, useSignals, useTrades, usePrice } from '@/lib/cockpit/useRealtime';
+import { Telemetry } from '@/components/Telemetry';
+import { useDesk, useSignals, useTrades, usePrice, useLatestState } from '@/lib/cockpit/useRealtime';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
 
 const CTAS = [
@@ -28,6 +29,11 @@ export default function LiveStage() {
   const signals = useSignals(30);
   const trades = useTrades(60);
   const deskItems = useDesk(12);
+  const st = useLatestState() as any;
+  // MODE SOLO (?solo=1) — live autonome de nuit, sans cam : la zone caméra devient le terminal
+  // mission control qui défile (l'IA visiblement au travail pendant que l'humain dort).
+  const [solo, setSolo] = useState(false);
+  useEffect(() => { setSolo(new URLSearchParams(window.location.search).get('solo') === '1'); }, []);
   const [qr, setQr] = useState<string | null>(null);
   const [ctaIdx, setCtaIdx] = useState(0);
   const [countdown, setCountdown] = useState(60);
@@ -123,15 +129,27 @@ export default function LiveStage() {
 @keyframes popIn { from { opacity: 0; transform: translate(-50%, 14px) scale(.94); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 @keyframes winZoom { 0% { opacity: 0; transform: scale(.7); } 12% { opacity: 1; transform: scale(1.06); } 20% { transform: scale(1); } 88% { opacity: 1; } 100% { opacity: 0; } }`}</style>
 
-      {/* ===== ZONE CAMÉRA (~32%) — ta cam se pose PAR-DESSUS dans TikTok Studio ; le fond reste propre
-           si le cadrage dépasse d'un pixel (watermark discret, pas de damier « source manquante ») ===== */}
-      <div style={{
-        flex: '0 0 32%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
-        background: 'radial-gradient(80% 90% at 50% 30%, #0d1a33 0%, #070c18 100%)', borderBottom: '1px solid var(--border)',
-      }}>
-        <img src="/brand/algoria-mark.png" alt="" width={38} height={38} style={{ objectFit: 'contain', opacity: 0.35 }} />
-        <span className="mono" style={{ fontSize: 10, letterSpacing: 2, color: 'rgba(84,104,142,.6)' }}>— YOUR CAMERA HERE —</span>
-      </div>
+      {/* ===== ZONE HAUTE (~32%) — cam par-dessus en mode normal ; en SOLO (?solo=1, live autonome de nuit)
+           c'est le terminal mission control qui défile : l'IA visiblement au travail, ça impressionne ===== */}
+      {solo ? (
+        <div style={{ flex: '0 0 32%', minHeight: 0, display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', background: 'rgba(255,107,138,.07)', borderBottom: '1px solid rgba(255,107,138,.25)' }}>
+            <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#ff6b8a' }} />
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.6, color: '#ff8aa2' }}>AUTONOMOUS NIGHT SESSION — THE AI RUNS THIS STREAM</span>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 6 }}>
+            <Telemetry state={st} signals={signals} symbol={hero} />
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          flex: '0 0 32%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
+          background: 'radial-gradient(80% 90% at 50% 30%, #0d1a33 0%, #070c18 100%)', borderBottom: '1px solid var(--border)',
+        }}>
+          <img src="/brand/algoria-mark.png" alt="" width={38} height={38} style={{ objectFit: 'contain', opacity: 0.35 }} />
+          <span className="mono" style={{ fontSize: 10, letterSpacing: 2, color: 'rgba(84,104,142,.6)' }}>— YOUR CAMERA HERE —</span>
+        </div>
+      )}
 
       {/* ===== BANDEAU CONTEXTE — la réponse à « c'est quoi ce truc ? » en 1 seconde, toujours visible ===== */}
       <header style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'linear-gradient(90deg, rgba(43,227,245,.07), rgba(255,107,138,.05))' }}>
