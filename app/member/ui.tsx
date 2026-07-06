@@ -2,6 +2,7 @@
 // Coque CLIENT de l'espace membre : enregistrement du service worker, nav basse (onglets), hook useMe.
 // Réutilise le langage visuel du cockpit (globals.css : .panel, .goldText, .mono) — même ADN, mobile-first.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { tgHref } from '@/lib/telegram';
 
@@ -100,13 +101,16 @@ export function Locked({ unlocked, onUnlock, children, label = 'MEMBERS ONLY' }:
 }
 
 /** Le PAYWALL — bottom sheet : pas d'abonnement, l'accès se débloque en ouvrant le compte broker
- *  partenaire (le wizard existant EST le paywall). Variante « en vérification » pour pending_copier. */
+ *  partenaire (le wizard existant EST le paywall). Variante « en vérification » pour pending_copier.
+ *  PORTAL vers <body> obligatoire : rendue dans les pages, la sheet vivait DANS .appScroll — sur iOS,
+ *  un conteneur -webkit-overflow-scrolling piège les position:fixed → sheet clippée/coupée par la nav.
+ *  maxHeight + scroll interne : le CTA reste atteignable même sur un petit écran avec les barres navigateur. */
 export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose: () => void; status: Member['status'] }) {
   const router = useRouter();
-  if (!open) return null;
+  if (!open || typeof document === 'undefined') return null;
   const pending = status === 'pending_copier';
-  return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(3,7,15,.74)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+  return createPortal(
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 95, background: 'rgba(3,7,15,.74)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div
         className="cardIn"
         onClick={(e) => e.stopPropagation()}
@@ -115,6 +119,7 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
           border: '1px solid rgba(245,194,74,.42)', background: 'linear-gradient(180deg, #132342 0%, #0a1425 100%)',
           boxShadow: '0 -18px 60px rgba(2,6,16,.8), 0 0 34px rgba(245,194,74,.1)',
           padding: '20px 20px max(24px, env(safe-area-inset-bottom))', display: 'flex', flexDirection: 'column', gap: 13,
+          maxHeight: '86dvh', overflowY: 'auto',
         }}
       >
         <span style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(130,152,190,.35)', margin: '0 auto' }} />
@@ -152,7 +157,8 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 const sheetGoldCta: CSSProperties = {
