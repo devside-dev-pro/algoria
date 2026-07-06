@@ -17,13 +17,27 @@ export default function MemberHistory() {
   const wins = trades.filter((t) => Number(t.pnl) > 0).length;
   const net = trades.reduce((a, t) => a + Number(t.pnl), 0);
   const winSum = trades.filter((t) => Number(t.pnl) > 0).reduce((a, t) => a + Number(t.pnl), 0);
+  const best = trades.reduce((m, t) => Math.max(m, Number(t.pnl) || 0), 0);
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
-      <section className="panel" style={{ padding: 16, display: 'flex', gap: 18 }}>
-        <Stat label="TRADES" value={String(trades.length)} />
-        <Stat label="WINS" value={trades.length ? `${Math.round((wins / trades.length) * 100)}%` : '—'} color="var(--up)" />
-        <Stat label="NET (MASTER)" value={net > 0 ? `+${net.toFixed(0)}$` : '—'} gold={net > 0} />
-      </section>
+      {/* prospect : le serveur n'envoie que les gains → on l'ASSUME (highlight reel) au lieu d'afficher
+          un win rate 100% qui sentirait le faux. L'historique complet arrive avec l'accès. */}
+      {unlocked ? (
+        <section className="panel" style={{ padding: 16, display: 'flex', gap: 18 }}>
+          <Stat label="TRADES" value={String(trades.length)} />
+          <Stat label="WINS" value={trades.length ? `${Math.round((wins / trades.length) * 100)}%` : '—'} color="var(--up)" />
+          <Stat label="NET (MASTER)" value={net > 0 ? `+${net.toFixed(0)}$` : '—'} gold={net > 0} />
+        </section>
+      ) : (
+        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, borderColor: 'rgba(245,194,74,.3)' }}>
+          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>✨ HIGHLIGHT REEL — HER BEST RECENT TRADES</span>
+          <div style={{ display: 'flex', gap: 18 }}>
+            <Stat label="WINS" value={String(wins)} color="var(--up)" />
+            <Stat label="BANKED" value={winSum > 0 ? `+${winSum.toFixed(0)}$` : '—'} gold={winSum > 0} />
+            <Stat label="BEST" value={best > 0 ? `+${best.toFixed(0)}$` : '—'} color="var(--up)" />
+          </div>
+        </section>
+      )}
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
         {trades.map((t) => {
           const win = Number(t.pnl) > 0;
