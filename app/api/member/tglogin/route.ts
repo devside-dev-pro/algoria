@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
-import { sdb, hasAccess, signSession, SESSION_COOKIE, newReferralCode } from '@/lib/member/server';
+import { sdb, signSession, SESSION_COOKIE, newReferralCode } from '@/lib/member/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,15 +28,17 @@ export async function GET(req: NextRequest) {
   // code confirmé → usage unique (anti-rejeu)
   await db.from('member_login_codes').update({ status: 'used' }).eq('code', code);
 
-  // PARRAINAGE : un lien /r/<code> valide (cookie) sert d'INVITATION — le filleul entre sans passer par la
-  // waitlist (le vrai filtre reste l'approbation admin : compte via notre lien + dépôt ≥ 500$). Auto-parrainage exclu.
+  // PORTE OUVERTE À TOUS (stratégie teaser/FOMO) : plus aucune waitlist à la connexion — n'importe quel
+  // compte Telegram entre et voit l'app en mode grisé (gains en clair, flux verrouillé, paywall broker).
+  // Le VRAI filtre n'a pas bougé : l'approbation admin (compte via notre lien + dépôt ≥ 500$) débloque tout.
+  // Chaque visiteur devient un LEAD visible dans le CRM au lieu d'un rebond sur une page fermée.
+  // PARRAINAGE : un lien /r/<code> valide (cookie) attache le filleul à son parrain. Auto-parrainage exclu.
   const refCookie = (req.cookies.get('alg_ref')?.value ?? '').toLowerCase();
   let referrerTg: number | null = null;
   if (/^[a-f0-9]{6,12}$/.test(refCookie)) {
     const { data: r } = await db.from('members').select('tg_id').eq('referral_code', refCookie).limit(1);
     if (r?.length && Number(r[0].tg_id) !== row.tg_id) referrerTg = Number(r[0].tg_id);
   }
-  if (!(await hasAccess(row.tg_id, row.tg_username)) && referrerTg == null) return NextResponse.json({ denied: true });
 
   const patch = { tg_username: row.tg_username, tg_name: row.tg_name, ...(row.photo_url ? { photo_url: row.photo_url } : {}), updated_at: new Date().toISOString() };
   const { data: existing } = await db.from('members').select('id').eq('tg_id', row.tg_id).limit(1);

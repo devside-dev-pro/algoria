@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { verifyTelegramLogin, hasAccess, sdb, signSession, SESSION_COOKIE } from '@/lib/member/server';
+import { verifyTelegramLogin, sdb, signSession, SESSION_COOKIE, newReferralCode } from '@/lib/member/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,16 +18,14 @@ export async function GET(req: NextRequest) {
   const username = params.username ?? null;
   const name = [params.first_name, params.last_name].filter(Boolean).join(' ') || username || `user ${tgId}`;
 
-  if (!(await hasAccess(tgId, username))) {
-    return NextResponse.redirect(new URL('/member/denied', url.origin));
-  }
-
+  // PORTE OUVERTE (même règle que tglogin, stratégie teaser/FOMO) : plus de waitlist à la connexion —
+  // tout compte Telegram entre en mode grisé, le vrai filtre reste l'approbation admin.
   // upsert du membre (le member_no naît ici, à la première connexion)
   const db = sdb();
   const patch = { tg_username: username, tg_name: name, photo_url: params.photo_url ?? null, updated_at: new Date().toISOString() };
   const { data: existing } = await db.from('members').select('id').eq('tg_id', tgId).limit(1);
   if (existing?.length) await db.from('members').update(patch).eq('tg_id', tgId);
-  else await db.from('members').insert({ tg_id: tgId, ...patch });
+  else await db.from('members').insert({ tg_id: tgId, ...patch, referral_code: newReferralCode() });
 
   const res = NextResponse.redirect(new URL('/member', url.origin));
   res.cookies.set(SESSION_COOKIE, signSession({ tgId, username, name, iat: Date.now() }), {
