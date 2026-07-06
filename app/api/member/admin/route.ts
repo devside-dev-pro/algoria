@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret } from '@/lib/member/server';
+import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,19 +16,100 @@ export async function GET(req: NextRequest) {
   const s = guard(req);
   if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   const db = sdb();
-  const [wl, members, actions] = await Promise.all([
+  const [wl, members, actions, commsQ, payoutsQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
-    db.from('members').select('member_no,tg_username,tg_name,status,broker,risk_tier,created_at').order('member_no', { ascending: false }).limit(200),
+    db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at').order('member_no', { ascending: false }).limit(200),
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
+    db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
+    db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),
   ]);
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [] });
+  // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
+  // Une balance NÉGATIVE (commission annulée APRÈS retrait) est le signal d'abus n°1 → flag rouge.
+  const comms = commsQ.data ?? [];
+  const payouts = payoutsQ.data ?? [];
+  const balances = new Map<number, number>();
+  for (const c of comms) if (c.status === 'confirmed') balances.set(Number(c.referrer_tg_id), (balances.get(Number(c.referrer_tg_id)) ?? 0) + Number(c.amount));
+  for (const p of payouts) if (['requested', 'paid'].includes(String(p.status))) balances.set(Number(p.tg_id), (balances.get(Number(p.tg_id)) ?? 0) - Number(p.amount));
+  const byTg = new Map((members.data ?? []).map((m) => [Number(m.tg_id), m]));
+  const affiliate = {
+    pendingCommissions: comms.filter((c) => c.status === 'pending'),
+    recentCommissions: comms.filter((c) => c.status !== 'pending').slice(0, 30),
+    pendingPayouts: payouts.filter((p) => p.status === 'requested'),
+    recentPayouts: payouts.filter((p) => p.status !== 'requested').slice(0, 20),
+    owedUsd: [...balances.values()].filter((v) => v > 0).reduce((a, v) => a + v, 0), // ta dette totale envers les parrains
+    flagged: [...balances.entries()].filter(([, v]) => v < 0).map(([tg, v]) => ({ tg_id: tg, balance: v, username: byTg.get(tg)?.tg_username ?? null, member_no: byTg.get(tg)?.member_no ?? null })),
+  };
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate });
 }
 
 export async function POST(req: NextRequest) {
   const s = guard(req);
   if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-  const body = (await req.json().catch(() => ({}))) as { add?: string; remove?: string; done?: string; reveal?: string; liveAlert?: boolean };
+  const body = (await req.json().catch(() => ({}))) as {
+    add?: string; remove?: string; done?: string; reveal?: string; liveAlert?: boolean;
+    confirmCommission?: string; cancelCommission?: string; payoutPaid?: string; payoutReject?: string; reason?: string; tx?: string;
+  };
   const db = sdb();
+  const who = s.username ?? String(s.tgId);
+
+  // ===== AFFILIATION : cycle de vie des commissions + traitement des retraits =====
+  if (body.confirmCommission || body.cancelCommission) {
+    const id = body.confirmCommission ?? body.cancelCommission!;
+    const confirm = !!body.confirmCommission;
+    const { data: rows } = await db.from('referral_commissions').select('*').eq('id', id).limit(1);
+    const c = rows?.[0];
+    if (!c) return NextResponse.json({ error: 'commission not found' }, { status: 404 });
+    // CANCEL possible même sur une confirmée (client retire son dépôt APRÈS coup) — la balance se re-débite
+    // toute seule (elle est recalculée depuis les statuts) et peut passer en négatif → flag dans le GET.
+    await db.from('referral_commissions').update({
+      status: confirm ? 'confirmed' : 'canceled',
+      reason: confirm ? null : String(body.reason ?? '').slice(0, 200) || 'canceled by admin',
+      decided_at: new Date().toISOString(),
+      decided_by: who,
+    }).eq('id', id);
+    if (confirm && c.kind === 'referral') {
+      // PALIERS : atteint quand le nombre d'activations CONFIRMÉES croise le seuil → bonus auto-confirmé
+      // (il dérive d'activations déjà validées). Doublon impossible : une ligne milestone par seuil.
+      const [{ data: confirmed }, { data: milestones }] = await Promise.all([
+        db.from('referral_commissions').select('id').eq('referrer_tg_id', c.referrer_tg_id).eq('kind', 'referral').eq('status', 'confirmed'),
+        db.from('referral_commissions').select('detail').eq('referrer_tg_id', c.referrer_tg_id).eq('kind', 'milestone'),
+      ]);
+      const n = confirmed?.length ?? 0;
+      const hit = MILESTONES.find((m) => m.at === n);
+      const already = new Set((milestones ?? []).map((m) => Number((m.detail as { milestone_at?: number })?.milestone_at)));
+      if (hit && !already.has(hit.at)) {
+        await db.from('referral_commissions').insert({
+          referrer_tg_id: c.referrer_tg_id, kind: 'milestone', amount: hit.bonus, status: 'confirmed',
+          detail: { milestone_at: hit.at, label: hit.label } as never, decided_at: new Date().toISOString(), decided_by: who,
+        });
+        const { pushToUser } = await import('@/lib/push/send');
+        void pushToUser(Number(c.referrer_tg_id), { title: `🏆 ${hit.label} unlocked!`, body: `${hit.at} activated referrals — $${hit.bonus} bonus just landed in your wallet.`, url: '/member/profile', tag: 'algoria-affiliate' });
+      }
+      const { pushToUser } = await import('@/lib/push/send');
+      void pushToUser(Number(c.referrer_tg_id), { title: '💰 Commission confirmed', body: `+$${Number(c.amount)} is now withdrawable. Total activated: ${n}.`, url: '/member/profile', tag: 'algoria-affiliate' });
+    }
+    return NextResponse.json({ ok: true });
+  }
+  if (body.payoutPaid || body.payoutReject) {
+    const id = body.payoutPaid ?? body.payoutReject!;
+    const paid = !!body.payoutPaid;
+    const { data: rows } = await db.from('referral_payouts').select('*').eq('id', id).eq('status', 'requested').limit(1);
+    const p = rows?.[0];
+    if (!p) return NextResponse.json({ error: 'payout not found (already processed?)' }, { status: 404 });
+    if (paid && !String(body.tx ?? '').trim()) return NextResponse.json({ error: 'transaction hash required' }, { status: 400 });
+    await db.from('referral_payouts').update({
+      status: paid ? 'paid' : 'rejected',
+      tx_hash: paid ? String(body.tx).trim().slice(0, 100) : null,
+      reason: paid ? null : String(body.reason ?? '').slice(0, 200) || 'rejected by admin',
+      decided_at: new Date().toISOString(),
+      decided_by: who,
+    }).eq('id', id);
+    const { pushToUser } = await import('@/lib/push/send');
+    void pushToUser(Number(p.tg_id), paid
+      ? { title: '✅ Withdrawal sent', body: `$${Number(p.amount)} USDT is on its way to your TRC20 wallet.`, url: '/member/profile', tag: 'algoria-affiliate' }
+      : { title: 'Withdrawal update', body: `Your $${Number(p.amount)} request was declined — check the app or message support.`, url: '/member/profile', tag: 'algoria-affiliate' });
+    return NextResponse.json({ ok: true });
+  }
   if (body.liveAlert) {
     // 📣 ALERTE LIVE : push à tous les membres abonnés — renvoie l'audience vers le stream.
     const { pushToAll } = await import('@/lib/push/send');
@@ -59,18 +141,24 @@ export async function POST(req: NextRequest) {
     await db.from('member_actions').update({ status: 'done', done_at: new Date().toISOString(), done_by: s.username ?? String(s.tgId) }).eq('id', body.done);
     if (act[0].kind === 'connect') {
       await db.from('members').update({ status: 'live', updated_at: new Date().toISOString() }).eq('tg_id', act[0].tg_id).eq('status', 'pending_copier');
-      // PARRAINAGE : filleul approuvé = dépôt vérifié = commission broker gagnée → récompense du parrain
-      // dans la même file (💰 PAY REFERRAL REWARD). Montant : env REFERRAL_REWARD_USD (défaut 50).
+      // PARRAINAGE : filleul approuvé → commission créée en PENDING (elle ne devient retirable que quand
+      // TU confirmes avoir reçu la commission broker — c'est le verrou anti dépôt-retrait éclair).
+      // Montant : 50$, puis 75$ à partir du palier 10 (grille dans lib/member/affiliate.ts).
       const { data: mm } = await db.from('members').select('referred_by,member_no').eq('tg_id', act[0].tg_id).limit(1);
       const refBy = mm?.[0]?.referred_by ? Number(mm[0].referred_by) : null;
       if (refBy) {
-        const { data: rr } = await db.from('members').select('member_no,tg_username').eq('tg_id', refBy).limit(1);
-        await db.from('member_actions').insert({
-          tg_id: refBy,
-          member_no: rr?.[0]?.member_no ?? null,
-          kind: 'referral_reward',
-          detail: { amount: Number(process.env.REFERRAL_REWARD_USD ?? 50), referred_member_no: mm?.[0]?.member_no ?? null, referrer_username: rr?.[0]?.tg_username ?? null } as never,
-        });
+        const { data: dupe } = await db.from('referral_commissions').select('id').eq('referred_tg_id', act[0].tg_id).eq('kind', 'referral').limit(1);
+        if (!dupe?.length) {
+          // le même filleul ne génère JAMAIS deux commissions (re-connect après pause, etc.)
+          const { data: prior } = await db.from('referral_commissions').select('id').eq('referrer_tg_id', refBy).eq('kind', 'referral').neq('status', 'canceled');
+          await db.from('referral_commissions').insert({
+            referrer_tg_id: refBy,
+            referred_tg_id: act[0].tg_id,
+            kind: 'referral',
+            amount: commissionForActivation(prior?.length ?? 0),
+            detail: { referred_member_no: mm?.[0]?.member_no ?? null } as never,
+          });
+        }
       }
     }
     const { data: actions } = await db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100);

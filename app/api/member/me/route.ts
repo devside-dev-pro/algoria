@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin } from '@/lib/member/server';
+import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, nextMilestone } from '@/lib/member/affiliate';
 
 const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
 
@@ -14,7 +15,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // Champs SÛRS renvoyés au client — jamais les identifiants MT5 (même chiffrés).
-const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,onboarding_step,created_at,mt5_login,mt5_server,referral_code';
+const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,onboarding_step,created_at,mt5_login,mt5_server,referral_code,usdt_trc20';
 
 async function me(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -23,23 +24,37 @@ async function me(req: NextRequest) {
   return data?.[0] ? { session: s, member: data[0] as Record<string, unknown> } : null;
 }
 
-/** État du membre connecté (Home + wizard) + stats de PARRAINAGE (filleuls, gains). */
+/** État du membre connecté (Home + wizard) + WALLET d'affiliation (commissions, retraits, paliers).
+ *  Balance retirable = Σ commissions confirmées − Σ retraits (demandés + payés) — calculée ICI, jamais côté client. */
 export async function GET(req: NextRequest) {
   const ctx = await me(req);
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
-  const [refs, rewards] = await Promise.all([
+  const [refs, commsQ, payoutsQ] = await Promise.all([
     db.from('members').select('status').eq('referred_by', ctx.session.tgId),
-    db.from('member_actions').select('status,detail').eq('kind', 'referral_reward').eq('tg_id', ctx.session.tgId),
+    db.from('referral_commissions').select('id,kind,amount,status,reason,detail,created_at').eq('referrer_tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
+    db.from('referral_payouts').select('id,amount,address,status,tx_hash,reason,created_at').eq('tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
   ]);
-  const sum = (st: string) => (rewards.data ?? []).filter((a) => a.status === st).reduce((acc, a) => acc + Number((a.detail as { amount?: number })?.amount ?? 0), 0);
+  const comms = commsQ.data ?? [];
+  const payouts = payoutsQ.data ?? [];
+  const sumC = (st: string) => comms.filter((c) => c.status === st).reduce((a, c) => a + Number(c.amount), 0);
+  const held = payouts.filter((p) => ['requested', 'paid'].includes(String(p.status))).reduce((a, p) => a + Number(p.amount), 0);
+  const activated = comms.filter((c) => c.kind === 'referral' && c.status === 'confirmed').length;
+  const next = nextMilestone(activated);
   const referral = {
     code: (ctx.member as { referral_code?: string }).referral_code ?? null,
     invited: refs.data?.length ?? 0,
-    activated: (refs.data ?? []).filter((r) => ['live', 'paused'].includes(String(r.status))).length,
-    earnedUsd: sum('done'), // récompenses PAYÉES (l'admin a marqué done)
-    pendingUsd: sum('pending'), // validées, paiement en cours
-    rewardUsd: Number(process.env.REFERRAL_REWARD_USD ?? 50),
+    activated,
+    availableUsd: sumC('confirmed') - held, // retirable maintenant (peut être négatif si annulation après retrait → flag admin)
+    pendingUsd: sumC('pending'), // filleuls activés, commission broker pas encore reçue
+    paidUsd: payouts.filter((p) => p.status === 'paid').reduce((a, p) => a + Number(p.amount), 0),
+    totalEarnedUsd: sumC('confirmed'),
+    rewardUsd: commissionForActivation(activated), // la com ACTUELLE par filleul (monte à 75$ après le palier 10)
+    minPayoutUsd: MIN_PAYOUT_USD,
+    nextMilestone: next ? { at: next.at, bonus: next.bonus, label: next.label, remaining: next.at - activated } : null,
+    address: (ctx.member as { usdt_trc20?: string | null }).usdt_trc20 ?? null,
+    commissions: comms.slice(0, 20),
+    payouts: payouts.slice(0, 10),
   };
   return NextResponse.json({ member: ctx.member, admin: isAdmin(ctx.session.username), referral });
 }
@@ -83,6 +98,28 @@ export async function POST(req: NextRequest) {
     } else {
       await queueAction(s.tgId, 'risk_change', { to: tier, lot: TIER_LOT[tier] }); // → le support règle le lot dans STH
     }
+  } else if (body.action === 'trc20') {
+    // adresse de retrait USDT TRC20 — une seule par membre, format vérifié, changement horodaté (audit)
+    const address = String(body.address ?? '').trim();
+    if (!TRC20_RE.test(address)) return NextResponse.json({ error: 'invalid TRC20 address (starts with T, 34 characters)' }, { status: 400 });
+    patch.usdt_trc20 = address;
+  } else if (body.action === 'withdraw') {
+    // DEMANDE DE RETRAIT — la balance est recalculée CÔTÉ SERVEUR à l'instant T (jamais confiée au client).
+    // Ouvert aussi aux prospects (un apporteur d'affaires pas encore client a gagné son argent) — revue
+    // humaine systématique : chaque paiement est traité à la main dans l'admin.
+    const amount = Math.floor(Number(body.amount ?? 0));
+    const { data: mrow } = await db.from('members').select('usdt_trc20,member_no').eq('tg_id', s.tgId).limit(1);
+    const address = String(mrow?.[0]?.usdt_trc20 ?? '');
+    if (!TRC20_RE.test(address)) return NextResponse.json({ error: 'save your USDT TRC20 address first' }, { status: 400 });
+    if (!Number.isFinite(amount) || amount < MIN_PAYOUT_USD) return NextResponse.json({ error: `minimum withdrawal is $${MIN_PAYOUT_USD}` }, { status: 400 });
+    const [commsQ, payoutsQ] = await Promise.all([
+      db.from('referral_commissions').select('amount').eq('referrer_tg_id', s.tgId).eq('status', 'confirmed'),
+      db.from('referral_payouts').select('amount,status').eq('tg_id', s.tgId).in('status', ['requested', 'paid']),
+    ]);
+    const available = (commsQ.data ?? []).reduce((a, c) => a + Number(c.amount), 0) - (payoutsQ.data ?? []).reduce((a, p) => a + Number(p.amount), 0);
+    if (amount > available) return NextResponse.json({ error: `only $${Math.max(0, Math.floor(available))} available` }, { status: 400 });
+    const { error: perr } = await db.from('referral_payouts').insert({ tg_id: s.tgId, amount, address });
+    if (perr) return NextResponse.json({ error: perr.message }, { status: 500 });
   } else if (body.action === 'pause' || body.action === 'resume') {
     // GARDE-FOU : le statut gate maintenant le contenu (mode teaser) — un prospect ne doit pas pouvoir
     // s'auto-promouvoir en 'live' via un simple POST resume. Réservé aux comptes déjà activés.
