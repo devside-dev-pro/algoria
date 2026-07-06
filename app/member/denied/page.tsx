@@ -1,5 +1,7 @@
 'use client';
 // Telegram OK mais pas (encore) membre : ni accepté dans le canal, ni sur la liste VIP.
+import { tgHref } from '@/lib/telegram';
+
 export default function Denied() {
   const tg = process.env.NEXT_PUBLIC_TELEGRAM_URL ?? 'https://t.me';
   return (
@@ -10,7 +12,7 @@ export default function Denied() {
         Access to Algoria Members is granted <strong style={{ color: 'var(--text)' }}>live on stream</strong> — join the Telegram waitlist and get in during the next drop.
       </p>
       <a
-        href={tg}
+        {...tgHref(tg)}
         style={{ display: 'inline-block', padding: '13px 26px', borderRadius: 12, fontWeight: 800, letterSpacing: 0.5, textDecoration: 'none', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', boxShadow: '0 0 22px rgba(43,227,245,.3)' }}
       >
         ✈️ JOIN THE WAITLIST

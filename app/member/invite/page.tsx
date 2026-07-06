@@ -1,6 +1,7 @@
 'use client';
 // PAGE D'INVITATION (arrivée des liens de parrainage) — le canal Telegram D'ABORD : c'est là que le prospect
 // voit le process, les lives, parle au support (le closing). L'app ne vient qu'après, quand il est décidé.
+import { tgHref } from '@/lib/telegram';
 // Le cookie d'attribution est déjà posé (30 j) : peu importe le détour, le parrain garde son filleul.
 export default function Invite() {
   const tg = process.env.NEXT_PUBLIC_TELEGRAM_URL ?? 'https://t.me';
@@ -19,7 +20,7 @@ export default function Invite() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 360 }}>
         <a
-          href={tg}
+          {...tgHref(tg)}
           style={{ display: 'block', padding: '15px 20px', borderRadius: 13, textDecoration: 'none', fontWeight: 800, letterSpacing: 0.5, fontSize: 15, color: '#fff', background: 'linear-gradient(90deg,#2AABEE,#229ED9)', boxShadow: '0 0 26px rgba(42,171,238,.35)' }}
         >
           ✈️ JOIN THE ALGORIA CHANNEL
