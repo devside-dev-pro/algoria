@@ -8,18 +8,22 @@
 //   · VERDICTS : chaque lecture du desk devient une carte flash — même « no edge » est un événement
 //   · EN POSITION : héros P&L flottant géant qui tique en temps réel
 //   · WIN : célébration plein cadre · SL : carte sobre 5 s (« risk managed ») — jamais de rouge dramatisé
-//   · footer : défilé des wins du jour + CTA + QR vers algoria.tech/download
+//   · footer : défilé des wins du jour + CTA + QR vers algoria.tech (funnel Telegram — le closing passe par
+//     le canal et le contact humain AVANT l'app : choix produit)
 // Ouvrir dans le navigateur du stream (session opérateur connectée) et cropper la source en portrait.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Chart } from '@/components/Chart';
 import { AlgoriaOrb } from '@/components/Orb';
-import { useDesk, useSignals, useTrades, usePrice } from '@/lib/cockpit/useRealtime';
+import { Telemetry } from '@/components/Telemetry';
+import { useDesk, useSignals, useTrades, usePrice, useLatestState } from '@/lib/cockpit/useRealtime';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
+import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
 
 const CTAS = [
   '💯 ALGORIA IS COMPLETELY FREE — LINK IN BIO',
   '🤖 100% AUTONOMOUS — NO HUMAN TOUCHES THESE TRADES',
-  '📲 SCAN THE CODE — GET THE APP',
+  '📲 SCAN THE CODE — JOIN FREE ON TELEGRAM',
+  '🔎 OR TYPE ALGORIA.TECH IN YOUR BROWSER — 100% FREE',
   '🎁 EARN $50 FOR EVERY FRIEND YOU BRING',
 ];
 
@@ -27,6 +31,11 @@ export default function LiveStage() {
   const signals = useSignals(30);
   const trades = useTrades(60);
   const deskItems = useDesk(12);
+  const st = useLatestState() as any;
+  // MODE SOLO (?solo=1) — live autonome de nuit, sans cam : la zone caméra devient le terminal
+  // mission control qui défile (l'IA visiblement au travail pendant que l'humain dort).
+  const [solo, setSolo] = useState(false);
+  useEffect(() => { setSolo(new URLSearchParams(window.location.search).get('solo') === '1'); }, []);
   const [qr, setQr] = useState<string | null>(null);
   const [ctaIdx, setCtaIdx] = useState(0);
   const [countdown, setCountdown] = useState(60);
@@ -39,7 +48,7 @@ export default function LiveStage() {
 
   useEffect(() => {
     void import('qrcode').then((m) =>
-      m.toDataURL('https://algoria.tech/download', { margin: 1, width: 200, color: { dark: '#0b0e14', light: '#dce9ff' } }).then(setQr),
+      m.toDataURL('https://algoria.tech', { margin: 1, width: 200, color: { dark: '#0b0e14', light: '#dce9ff' } }).then(setQr),
     );
     const ivCta = window.setInterval(() => setCtaIdx((i) => (i + 1) % CTAS.length), 8000);
     const ivSec = window.setInterval(() => {
@@ -104,7 +113,7 @@ export default function LiveStage() {
   }, [trades]);
 
   // wins du jour (≥5$, hors BEAST) — footer + pastilles chart
-  const dayStartMs = new Date().setUTCHours(0, 0, 0, 0);
+  const dayStartMs = brokerDayStartMs(); // jour METATRADER — le bilan à l'antenne colle au terminal
   const wins = (trades as any[]).filter((t) => t.closed_at && Number(t.pnl) >= 5 && !rafale.has(String(t.ticket)) && Date.parse(t.closed_at) >= dayStartMs);
   const winTotal = wins.reduce((a, t) => a + Number(t.pnl), 0);
   const reel = wins.length ? [...wins, ...wins, ...wins] : [];
@@ -122,15 +131,27 @@ export default function LiveStage() {
 @keyframes popIn { from { opacity: 0; transform: translate(-50%, 14px) scale(.94); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 @keyframes winZoom { 0% { opacity: 0; transform: scale(.7); } 12% { opacity: 1; transform: scale(1.06); } 20% { transform: scale(1); } 88% { opacity: 1; } 100% { opacity: 0; } }`}</style>
 
-      {/* ===== ZONE CAMÉRA (~32%) — ta cam se pose PAR-DESSUS dans TikTok Studio ; le fond reste propre
-           si le cadrage dépasse d'un pixel (watermark discret, pas de damier « source manquante ») ===== */}
-      <div style={{
-        flex: '0 0 32%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
-        background: 'radial-gradient(80% 90% at 50% 30%, #0d1a33 0%, #070c18 100%)', borderBottom: '1px solid var(--border)',
-      }}>
-        <img src="/brand/algoria-mark.png" alt="" width={38} height={38} style={{ objectFit: 'contain', opacity: 0.35 }} />
-        <span className="mono" style={{ fontSize: 10, letterSpacing: 2, color: 'rgba(84,104,142,.6)' }}>— YOUR CAMERA HERE —</span>
-      </div>
+      {/* ===== ZONE HAUTE (~32%) — cam par-dessus en mode normal ; en SOLO (?solo=1, live autonome de nuit)
+           c'est le terminal mission control qui défile : l'IA visiblement au travail, ça impressionne ===== */}
+      {solo ? (
+        <div style={{ flex: '0 0 32%', minHeight: 0, display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', background: 'rgba(255,107,138,.07)', borderBottom: '1px solid rgba(255,107,138,.25)' }}>
+            <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#ff6b8a' }} />
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.6, color: '#ff8aa2' }}>AUTONOMOUS NIGHT SESSION — THE AI RUNS THIS STREAM</span>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 6 }}>
+            <Telemetry state={st} signals={signals} symbol={hero} />
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          flex: '0 0 32%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
+          background: 'radial-gradient(80% 90% at 50% 30%, #0d1a33 0%, #070c18 100%)', borderBottom: '1px solid var(--border)',
+        }}>
+          <img src="/brand/algoria-mark.png" alt="" width={38} height={38} style={{ objectFit: 'contain', opacity: 0.35 }} />
+          <span className="mono" style={{ fontSize: 10, letterSpacing: 2, color: 'rgba(84,104,142,.6)' }}>— YOUR CAMERA HERE —</span>
+        </div>
+      )}
 
       {/* ===== BANDEAU CONTEXTE — la réponse à « c'est quoi ce truc ? » en 1 seconde, toujours visible ===== */}
       <header style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'linear-gradient(90deg, rgba(43,227,245,.07), rgba(255,107,138,.05))' }}>
@@ -150,7 +171,7 @@ export default function LiveStage() {
 
       {/* ===== CHART DOMINANT (M1) + overlays d'état ===== */}
       <section style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', padding: '8px 8px 0' }}>
-        <Chart key={hero} symbol={hero} signals={chartSigs} activeTrade={activeTrade} wins={winsForChart} defaultTf="M1" />
+        <Chart key={hero} symbol={hero} signals={chartSigs} activeTrade={activeTrade} wins={winsForChart} defaultTf="M1" broadcast />
 
         {/* HÉROS EN POSITION — le P&L flottant géant qui tique : LE moment hypnotique du live */}
         {openTrade && (
@@ -215,8 +236,10 @@ export default function LiveStage() {
         </div>
         {qr && (
           <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-            <img src={qr} alt="get the app" width={70} height={70} style={{ borderRadius: 8, border: '2px solid rgba(43,227,245,.4)' }} />
-            <span className="mono" style={{ fontSize: 7, letterSpacing: 0.8, color: 'var(--cyan)' }}>GET THE APP</span>
+            <img src={qr} alt="algoria.tech" width={70} height={70} style={{ borderRadius: 8, border: '2px solid rgba(43,227,245,.4)' }} />
+            {/* pas à l'aise avec les QR ? l'adresse en toutes lettres — les deux portes d'entrée à l'écran */}
+            <span className="mono" style={{ fontSize: 9, letterSpacing: 0.6, color: 'var(--cyan)', fontWeight: 700 }}>algoria.tech</span>
+            <span className="mono" style={{ fontSize: 6.5, letterSpacing: 0.8, color: 'var(--dim)' }}>SCAN OR TYPE IT — FREE</span>
           </div>
         )}
       </section>
@@ -237,7 +260,8 @@ export default function LiveStage() {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-          <span key={ctaIdx} className="cardIn" style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: 0.4, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '94%', padding: '9px 18px', borderRadius: 999, border: '1px solid rgba(245,194,74,.45)', background: 'linear-gradient(90deg, rgba(245,194,74,.13), rgba(43,227,245,.08))' }}>
+          {/* jamais de phrase coupée à l'antenne : le pill s'étale sur 2 lignes centrées si besoin */}
+          <span key={ctaIdx} className="cardIn" style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.4, color: 'var(--text)', textAlign: 'center', lineHeight: 1.35, maxWidth: '94%', padding: '8px 18px', borderRadius: 18, border: '1px solid rgba(245,194,74,.45)', background: 'linear-gradient(90deg, rgba(245,194,74,.13), rgba(43,227,245,.08))' }}>
             {CTAS[ctaIdx]}
           </span>
           {winTotal > 0 && <span className="mono goldText" style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap' }}>+{winTotal.toFixed(0)}$ today</span>}

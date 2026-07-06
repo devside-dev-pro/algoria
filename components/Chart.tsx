@@ -40,7 +40,7 @@ const toBar = (c: Record<string, unknown>): Bar => ({
   time: Number(c.time), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
 });
 
-export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [], focusAt = null, defaultTf = 'M5' }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string; wins?: Array<{ time: number; pnl: number }>; focusAt?: number | null; defaultTf?: TF }) {
+export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [], focusAt = null, defaultTf = 'M5', broadcast = false }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string; wins?: Array<{ time: number; pnl: number }>; focusAt?: number | null; defaultTf?: TF; broadcast?: boolean }) {
   const SYMBOL = symbol; // le parent remonte le Chart (key={symbol}) au changement → réinit propre du chart impératif
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -750,8 +750,26 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vis]);
 
+  // MODE BROADCAST (/live) : le chart se pilote TOUT SEUL toute la nuit — recalé sur le présent toutes
+  // les 20 s (sinon les bougies dérivent hors cadre au fil des minutes) + zoom verrouillé lisible mobile.
+  useEffect(() => {
+    if (!broadcast) return;
+    const follow = () => {
+      const ts = chartRef.current?.timeScale();
+      if (!ts) return;
+      ts.applyOptions({ rightOffset: 5, barSpacing: 9 });
+      ts.scrollToRealTime();
+    };
+    const t0 = window.setTimeout(follow, 1200); // premier calage après le seed
+    const iv = window.setInterval(follow, 20_000);
+    return () => { window.clearTimeout(t0); window.clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [broadcast]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* barres d'outils OPÉRATEUR — masquées en broadcast (elles faisaient tache sur la scène live) */}
+      {!broadcast && (
       <div style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         {TFS.map((t) => (
           <button key={t} onClick={() => setTf(t)} style={tfBtn(t === tf)}>
@@ -782,6 +800,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
           <button onClick={clearDrawings} title="Remove all drawings" className="drawtool" style={clearBtn}>Clear</button>
         </div>
       </div>
+      )}
       <div style={{ position: 'relative', flex: 1, minHeight: 240 }}>
         <div ref={ref} style={{ position: 'absolute', inset: 0 }} />
         {/* overlay de capture souris : actif seulement quand un outil est sélectionné (sinon le chart pan/zoom normalement) */}
