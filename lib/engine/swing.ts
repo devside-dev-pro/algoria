@@ -18,8 +18,11 @@ export interface SwingConfig {
   trailDist: number; // distance du trailing (× riskDist) — les "paliers" qui sécurisent
 }
 
-/** BTC — cassure du range 24h (labo : PF 2.02 sur 2.7 ans, robuste tiers + week-end). */
-export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 0.5, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
+/** BTC — cassure du range 24h (labo : PF 2.02 sur 2.7 ans, robuste tiers + week-end).
+ *  Lot 1 (choix produit) : 1R = 2×ATR H1 (~250-380$) × lot — à 0.5 les gains faisaient ~250-380$, maigres
+ *  dans l'historique face au gold ; à 1 les sorties ~1R tombent dans la cible 500-800$. Revers assumé :
+ *  un SL plein pèse pareil (~500-760$). */
+export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 /** OR — suivi de tendance EMA longues + reprise après repli (labo : PF 2.21 sur 1.75 an, 3.5 j de tenue moyenne). */
 export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 2, tpAtr: 16, lot: 0.25, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 /** NAS100 — cassure du range 72h (labo 2.2 ans : PF 1.94, +$3086, DD 6.9%, tiers ✅ · tenue moy 8.5 j). */
