@@ -19,15 +19,25 @@ export interface Member {
   mt5_login: string | null;
   mt5_server: string | null;
   referral_code: string | null;
+  usdt_trc20: string | null;
 }
 
+export interface RefCommission { id: string; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
+export interface RefPayout { id: string; amount: number; address: string; status: string; tx_hash: string | null; reason: string | null; created_at: string }
 export interface Referral {
   code: string | null;
   invited: number;
   activated: number;
-  earnedUsd: number;
+  availableUsd: number;
   pendingUsd: number;
+  paidUsd: number;
+  totalEarnedUsd: number;
   rewardUsd: number;
+  minPayoutUsd: number;
+  nextMilestone: { at: number; bonus: number; label: string; remaining: number } | null;
+  address: string | null;
+  commissions: RefCommission[];
+  payouts: RefPayout[];
 }
 
 /** Charge le membre connecté ; redirige vers /member/login si pas de session.
