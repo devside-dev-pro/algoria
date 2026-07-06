@@ -22,10 +22,13 @@ const symSpec = (k: string) => SYMS.find((s) => s.key === k) ?? SYMS[0];
 export function Cockpit() {
   const [symbol, setSymbol] = useState('XAUUSD'); // marché affiché/piloté par le cockpit
   const spec = symSpec(symbol);
-  const signals = useSignals(60);
+  // NAS100 RETIRÉ du produit : ses vieux trades/signaux/cartes sont filtrés À LA SOURCE — les stats
+  // (win rate, wins today, tape, recap) et le desk ne parlent plus que de ce qu'Algoria trade : gold + BTC.
+  const noNas = <T extends { symbol?: string }>(rows: T[]): T[] => rows.filter((r) => r.symbol !== 'NAS100');
+  const signals = noNas(useSignals(60) as any[]);
   const st = useLatestState() as any;
-  const trades = useTrades(120);
-  const deskItems = useDesk(24); // desk MULTI-MARCHÉ entrelacé (XAU + NAS) — levé ici pour aussi nourrir le header
+  const trades = noNas(useTrades(120) as any[]);
+  const deskItems = (useDesk(24) as any[]).filter((e) => e?.data?.symbol !== 'NAS100'); // desk multi-marché — levé ici pour aussi nourrir le header
   const symCtx = (deskItems as any[]).find((e) => ((e?.data?.symbol as string | undefined) ?? 'XAUUSD') === symbol)?.data; // dernier contexte structuré du symbole sélectionné
   const dayStartEq = useDayStartEquity();
   const equityCurve = useEquityCurve();
@@ -142,8 +145,8 @@ export function Cockpit() {
     if (Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')) rafaleTickets.add(String(s.ticket));
   }
 
-  // === Données RECAP : trades clôturés de la semaine (hors BEAST), groupés par jour UTC ===
-  const histClosed = (hist.trades as any[]).filter((t) => t.pnl != null && t.closed_at && !rafaleTickets.has(String(t.ticket)));
+  // === Données RECAP : trades clôturés de la semaine (hors BEAST, hors NAS100 retiré), groupés par jour UTC ===
+  const histClosed = (hist.trades as any[]).filter((t) => t.pnl != null && t.closed_at && t.symbol !== 'NAS100' && !rafaleTickets.has(String(t.ticket)));
   const dayOf = (t: any) => new Date(Date.parse(t.closed_at)).toISOString().slice(0, 10);
   const recapDays = (() => {
     const out: { key: string; label: string; net: number; n: number }[] = [];
