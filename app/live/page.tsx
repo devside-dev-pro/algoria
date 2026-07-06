@@ -8,7 +8,8 @@
 //   · VERDICTS : chaque lecture du desk devient une carte flash — même « no edge » est un événement
 //   · EN POSITION : héros P&L flottant géant qui tique en temps réel
 //   · WIN : célébration plein cadre · SL : carte sobre 5 s (« risk managed ») — jamais de rouge dramatisé
-//   · footer : défilé des wins du jour + CTA + QR vers algoria.tech/download
+//   · footer : défilé des wins du jour + CTA + QR vers algoria.tech (funnel Telegram — le closing passe par
+//     le canal et le contact humain AVANT l'app : choix produit)
 // Ouvrir dans le navigateur du stream (session opérateur connectée) et cropper la source en portrait.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Chart } from '@/components/Chart';
@@ -19,7 +20,7 @@ import { getLatestTick } from '@/lib/cockpit/tickStore';
 const CTAS = [
   '💯 ALGORIA IS COMPLETELY FREE — LINK IN BIO',
   '🤖 100% AUTONOMOUS — NO HUMAN TOUCHES THESE TRADES',
-  '📲 SCAN THE CODE — GET THE APP',
+  '📲 SCAN THE CODE — JOIN FREE ON TELEGRAM',
   '🎁 EARN $50 FOR EVERY FRIEND YOU BRING',
 ];
 
@@ -39,7 +40,7 @@ export default function LiveStage() {
 
   useEffect(() => {
     void import('qrcode').then((m) =>
-      m.toDataURL('https://algoria.tech/download', { margin: 1, width: 200, color: { dark: '#0b0e14', light: '#dce9ff' } }).then(setQr),
+      m.toDataURL('https://algoria.tech', { margin: 1, width: 200, color: { dark: '#0b0e14', light: '#dce9ff' } }).then(setQr),
     );
     const ivCta = window.setInterval(() => setCtaIdx((i) => (i + 1) % CTAS.length), 8000);
     const ivSec = window.setInterval(() => {
@@ -216,7 +217,7 @@ export default function LiveStage() {
         {qr && (
           <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
             <img src={qr} alt="get the app" width={70} height={70} style={{ borderRadius: 8, border: '2px solid rgba(43,227,245,.4)' }} />
-            <span className="mono" style={{ fontSize: 7, letterSpacing: 0.8, color: 'var(--cyan)' }}>GET THE APP</span>
+            <span className="mono" style={{ fontSize: 7, letterSpacing: 0.8, color: 'var(--cyan)' }}>JOIN FREE</span>
           </div>
         )}
       </section>

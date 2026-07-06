@@ -1,7 +1,8 @@
 'use client';
 // BANDEAU DE STREAM (/strip) — source navigateur à poser dans la zone vide de la scène TikTok/OBS.
 // Conçu pour un crop horizontal (~1080×350, s'adapte) : orbe vivante + prix live + défilé des WINS du jour
-// + stats + CTA tournant + QR CODE scannable vers algoria.tech/download (les viewers scannent l'écran).
+// + stats + CTA tournant + QR CODE scannable vers algoria.tech (funnel Telegram — canal et contact humain
+// AVANT l'app : choix produit, le closing se fait en DM).
 // Règle broadcast 70/30 : QUE du positif — wins uniquement, jamais une perte à l'antenne.
 // Ouvrir dans le navigateur du stream (session opérateur déjà connectée sur /app).
 import { useEffect, useMemo, useState } from 'react';
@@ -11,7 +12,7 @@ import { AlgoriaOrb } from '@/components/Orb';
 const CTAS = [
   '💯 ALGORIA IS COMPLETELY FREE — LINK IN BIO',
   '🤖 EVERY TRADE ON SCREEN IS REAL — LIVE ACCOUNT',
-  '📲 GET THE APP — SCAN THE CODE',
+  '📲 SCAN THE CODE — JOIN FREE ON TELEGRAM',
   '🎁 EARN $50 FOR EVERY FRIEND YOU BRING',
 ];
 
@@ -34,7 +35,7 @@ export default function StreamStrip() {
   useEffect(() => {
     // QR généré côté client (aucun asset à héberger) — pointe sur la fiche store
     void import('qrcode').then((m) =>
-      m.toDataURL('https://algoria.tech/download', { margin: 1, width: 220, color: { dark: '#0b0e14', light: '#dce9ff' } }).then(setQr),
+      m.toDataURL('https://algoria.tech', { margin: 1, width: 220, color: { dark: '#0b0e14', light: '#dce9ff' } }).then(setQr),
     );
     const iv = window.setInterval(() => setCtaIdx((i) => (i + 1) % CTAS.length), 8000);
     return () => window.clearInterval(iv);
@@ -88,8 +89,8 @@ export default function StreamStrip() {
         </div>
         {qr && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flex: 'none' }}>
-            <img src={qr} alt="algoria.tech/download" width={92} height={92} style={{ borderRadius: 10, border: '2px solid rgba(43,227,245,.4)' }} />
-            <span className="mono" style={{ fontSize: 8.5, letterSpacing: 1, color: 'var(--cyan)' }}>SCAN → GET THE APP</span>
+            <img src={qr} alt="algoria.tech" width={92} height={92} style={{ borderRadius: 10, border: '2px solid rgba(43,227,245,.4)' }} />
+            <span className="mono" style={{ fontSize: 8.5, letterSpacing: 1, color: 'var(--cyan)' }}>SCAN → JOIN FREE</span>
           </div>
         )}
       </div>
