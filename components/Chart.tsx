@@ -40,7 +40,7 @@ const toBar = (c: Record<string, unknown>): Bar => ({
   time: Number(c.time), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
 });
 
-export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [], focusAt = null }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string; wins?: Array<{ time: number; pnl: number }>; focusAt?: number | null }) {
+export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [], focusAt = null, defaultTf = 'M5' }: { signals: Array<Record<string, unknown>>; activeTrade?: ActiveTrade; symbol?: string; wins?: Array<{ time: number; pnl: number }>; focusAt?: number | null; defaultTf?: TF }) {
   const SYMBOL = symbol; // le parent remonte le Chart (key={symbol}) au changement → réinit propre du chart impératif
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -64,7 +64,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
   winsRef.current = wins;
   const activeRef = useRef<ActiveTrade>(activeTrade);
   activeRef.current = activeTrade;
-  const [tf, setTf] = useState<TF>('M5');
+  const [tf, setTf] = useState<TF>(defaultTf); // la scène /live démarre en M1 (rythme de décision à la minute)
   // Visibilité des indicateurs (toggles cliquables). On garde le calcul, on masque juste l'affichage.
   // fvg = Fair Value Gaps · ai = l'ANALYSE dessinée par Algoria (trendlines + poches de liquidité)
   const [vis, setVis] = useState({ ema: true, bb: true, vwap: true, sr: true, marks: true, fvg: true, ai: true });
