@@ -320,9 +320,11 @@ export function Cockpit() {
             {openPos > 0 && <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--up)' }} />}
             {openPos > 0 ? `IN POSITION ×${openPos}` : 'flat'}
           </span>
+          {/* règle broadcast 70/30 (comme la tuile Day P&L du bas) : un jour rouge ne s'affiche JAMAIS —
+              le chip est à l'écran pendant les lives. Le réel reste lisible via Balance/Equity. */}
           <span style={{ fontSize: 11, color: 'var(--dim)' }}>day</span>
-          <span className="mono popVal" key={dayPnl ?? 'x'} style={{ fontSize: 16, fontWeight: 700, color: (dayPnl ?? 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>
-            {dayPnl == null ? '—' : (dayPnl >= 0 ? '+' : '') + dayPnl.toFixed(0) + '$'}
+          <span className="mono popVal" key={dayPnl ?? 'x'} style={{ fontSize: 16, fontWeight: 700, color: dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--dim)' }}>
+            {dayPnl == null || dayPnl < 0 ? '—' : '+' + dayPnl.toFixed(0) + '$'}
           </span>
         </div>
       </section>
