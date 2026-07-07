@@ -484,7 +484,11 @@ export function Cockpit() {
                     <span style={{ fontSize: win ? 12 : 11, fontWeight: win ? 700 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ +' : ''}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
                   </span>
                 ) : rejected ? (
-                  <span style={{ fontSize: 10, color: 'rgba(210,150,165,.8)' }}>✗ not executed</span>
+                  // la RAISON directement sur le chip (spread rollover, cap portefeuille, refus broker…) —
+                  // elle n'était que dans le tooltip, et personne ne survole pendant un live
+                  <span style={{ fontSize: 10, color: 'rgba(210,150,165,.8)' }}>
+                    ✗ {String(s.result_code ?? '').replace(/^(risk|portfolio):\s*/, '').slice(0, 34) || 'not executed'}
+                  </span>
                 ) : (
                   <span style={{ fontSize: 10, color: 'var(--dim)' }}>placed</span>
                 )}
