@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const db = sdb();
   const [wl, members, actions, commsQ, payoutsQ, depositsQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
-    db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,mt5_login,mt5_server,usdt_trc20,referred_by').order('member_no', { ascending: false }).limit(200),
+    db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by').order('member_no', { ascending: false }).limit(200),
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),
@@ -55,9 +55,37 @@ export async function POST(req: NextRequest) {
     addDeposit?: { tg_id: number; broker?: string; amount: number; commission?: number; date?: string; note?: string };
     updateDeposit?: { id: string; amount?: number; commission?: number; comStatus?: string; note?: string; broker?: string; date?: string };
     deleteDeposit?: string;
+    customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
+
+  // ===== PUSH COMPOSER — le canal marketing de l'opérateur =====
+  // Message libre vers un segment : all (tout le monde), prospects (pas encore activés), live (copie
+  // active/en pause), self (test sur soi AVANT d'arroser), user (relance individuelle d'un lead).
+  // Règle 70/30 inchangée : c'est l'humain qui écrit — jamais d'automatisme négatif ici.
+  if (body.customPush) {
+    const p = body.customPush;
+    const title = String(p.title ?? '').trim().slice(0, 80);
+    const text = String(p.body ?? '').trim().slice(0, 300);
+    if (!title || !text) return NextResponse.json({ error: 'title and body required' }, { status: 400 });
+    const rawUrl = String(p.url ?? '').trim();
+    const url = rawUrl.startsWith('/') || rawUrl.startsWith('https://') ? rawUrl.slice(0, 300) : '/member';
+    const payload = { title, body: text, url, tag: 'algoria-broadcast' };
+    const push = await import('@/lib/push/send');
+    let sent = 0;
+    if (p.audience === 'all') sent = await push.pushToAll(payload);
+    else if (p.audience === 'self') sent = await push.pushToUser(s.tgId, payload);
+    else if (p.audience === 'user') {
+      if (!Number(p.tg_id)) return NextResponse.json({ error: 'tg_id required' }, { status: 400 });
+      sent = await push.pushToUser(Number(p.tg_id), payload);
+    } else if (p.audience === 'prospects' || p.audience === 'live') {
+      const statuses = p.audience === 'live' ? ['live', 'paused'] : ['onboarding', 'pending_copier'];
+      const { data: seg } = await db.from('members').select('tg_id').in('status', statuses);
+      sent = await push.pushToUsers((seg ?? []).map((m) => Number(m.tg_id)), payload);
+    } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });
+    return NextResponse.json({ sent });
+  }
 
   // ===== REGISTRE DES DÉPÔTS — le bilan broker de fin de mois =====
   // Une ligne par dépôt constaté chez le broker partenaire : montant déposé + commission attendue.

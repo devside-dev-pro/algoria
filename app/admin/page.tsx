@@ -11,8 +11,8 @@ import { useRouter } from 'next/navigation';
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
   member_no: number; tg_id: number; tg_username: string | null; tg_name: string | null; status: string;
-  broker: string | null; risk_tier: string; created_at: string; mt5_login: string | null; mt5_server: string | null;
-  usdt_trc20: string | null; referred_by: number | null;
+  broker: string | null; risk_tier: string; created_at: string; updated_at: string | null; onboarding_step: number;
+  mt5_login: string | null; mt5_server: string | null; usdt_trc20: string | null; referred_by: number | null;
 }
 interface Action { id: string; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
@@ -47,6 +47,12 @@ export default function AdminCRM() {
   const [depCom, setDepCom] = useState('');
   const [depDate, setDepDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [depNote, setDepNote] = useState('');
+  // ===== push composer (TOOLS) : message libre + segment ciblé =====
+  const [pushTitle, setPushTitle] = useState('');
+  const [pushBody, setPushBody] = useState('');
+  const [pushUrl, setPushUrl] = useState('/member');
+  const [pushAud, setPushAud] = useState<'self' | 'prospects' | 'live' | 'all'>('self');
+  const [pushResult, setPushResult] = useState<string | null>(null);
 
   const load = () =>
     void fetch('/api/member/admin').then(async (r) => {
@@ -128,6 +134,40 @@ export default function AdminCRM() {
   const deleteDeposit = (d: Deposit) => {
     if (window.confirm(`Delete this deposit line ($${Number(d.detail?.amount_usd ?? 0)} · #${d.member_no ?? '—'})? This can't be undone.`)) post({ deleteDeposit: d.id });
   };
+
+  // ===== PUSH COMPOSER + relance des leads (TOOLS) =====
+  const sendCustomPush = (payload: { audience: string; tg_id?: number; title: string; body: string; url?: string }, label: string) => {
+    setBusy(true);
+    setPushResult(null);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customPush: payload }) })
+      .then(async (r) => {
+        const d = (await r.json()) as { sent?: number; error?: string };
+        if (d.error) { window.alert(d.error); return; }
+        const n = d.sent ?? 0;
+        setPushResult(`${label} → delivered to ${n} device${n === 1 ? '' : 's'}${n === 0 ? ' (no push-enabled devices — DM on Telegram instead)' : ''}`);
+      })
+      .finally(() => setBusy(false));
+  };
+  const composerSend = () => {
+    if (pushAud !== 'self' && !window.confirm(`Send this push to ${pushAud.toUpperCase()}? Test it on yourself first if you haven't.`)) return;
+    sendCustomPush({ audience: pushAud, title: pushTitle, body: pushBody, url: pushUrl }, pushAud.toUpperCase());
+  };
+  // relance individuelle d'un lead coincé — message fixe, bienveillant, qui renvoie vers le wizard
+  const nudge = (r: Row) => {
+    sendCustomPush({
+      audience: 'user', tg_id: r.tg_id,
+      title: '👋 Need a hand finishing your setup?',
+      body: 'Your Algoria access is 2 minutes from ready. Mathieu can walk you through it — reply on Telegram or book a call from the app.',
+      url: '/member/onboarding',
+    }, `#${r.member_no}`);
+  };
+  // LEADS COINCÉS : encore en onboarding, triés du plus ancien mouvement au plus récent — la liste de closing
+  const leads = useMemo(
+    () => rows.filter((r) => r.status === 'onboarding').sort((a, b) => Date.parse(a.updated_at ?? a.created_at) - Date.parse(b.updated_at ?? b.created_at)),
+    [rows],
+  );
+  const STEP_LABEL = ['signed up — never picked a broker', 'picked a broker — MT5 not submitted', 'MT5 in — never finished the risk step'];
+  const daysStuck = (r: Row) => Math.floor((Date.now() - Date.parse(r.updated_at ?? r.created_at)) / 86_400_000);
   // EXPORT CSV (bilan du mois) — généré côté client, s'ouvre direct dans Google Sheets / Excel (BOM UTF-8)
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -477,9 +517,52 @@ export default function AdminCRM() {
           </>
         )}
 
-        {/* ===== TOOLS — whitelist VIP + utilitaires ===== */}
+        {/* ===== TOOLS — la boîte à outils de l'opérateur : push composer, relance des leads, legacy ===== */}
         {tab === 'tools' && (
-          <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 560 }}>
+          <>
+            {/* PUSH COMPOSER — le canal marketing gratuit : message libre vers un segment, test sur soi d'abord */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
+              <h2 style={secH}>📣 PUSH COMPOSER</h2>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {([['self', '🧪 ONLY ME — TEST'], ['prospects', `PROSPECTS · ${rows.filter((r) => ['onboarding', 'pending_copier'].includes(r.status)).length}`], ['live', `LIVE MEMBERS · ${rows.filter((r) => ['live', 'paused'].includes(r.status)).length}`], ['all', `EVERYONE · ${rows.length}`]] as const).map(([k, label]) => (
+                  <button key={k} onClick={() => setPushAud(k)} style={{
+                    padding: '7px 12px', borderRadius: 9, cursor: 'pointer', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8,
+                    border: `1px solid ${pushAud === k ? 'rgba(43,227,245,.5)' : 'var(--border)'}`,
+                    background: pushAud === k ? 'rgba(43,227,245,.08)' : 'transparent',
+                    color: pushAud === k ? 'var(--cyan)' : 'var(--muted)',
+                  }}>{label}</button>
+                ))}
+              </div>
+              <input value={pushTitle} onChange={(e) => setPushTitle(e.target.value)} placeholder="title — e.g. 🔥 +1,896$ banked today" maxLength={80} style={inp} />
+              <textarea value={pushBody} onChange={(e) => setPushBody(e.target.value)} placeholder="message — e.g. The AI closed 25 winning trades today. Come see the recap live." maxLength={300} rows={3} style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input value={pushUrl} onChange={(e) => setPushUrl(e.target.value)} placeholder="/member or https://…" style={{ ...inp, flex: 1, minWidth: 200 }} />
+                <button disabled={busy || !pushTitle.trim() || !pushBody.trim()} onClick={composerSend} style={{ padding: '10px 18px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: !pushTitle.trim() || !pushBody.trim() ? 0.5 : 1 }}>
+                  {pushAud === 'self' ? '🧪 SEND TEST' : '📣 SEND'}
+                </button>
+              </div>
+              {pushResult && <p style={{ ...dimP, color: 'var(--up)' }}>✓ {pushResult}</p>}
+              <p style={dimP}>Only members who enabled notifications receive it — always 🧪 test on yourself before blasting a segment.</p>
+            </section>
+
+            {/* RELANCE — les leads coincés dans le funnel, du plus ancien au plus récent : ta liste de closing */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 680 }}>
+              <h2 style={secH}>🎯 FOLLOW-UP — STUCK IN THE FUNNEL {leads.length > 0 && `· ${leads.length}`}</h2>
+              {leads.length === 0 && <p style={dimP}>Nobody stuck — every signup either finished the wizard or is waiting in the QUEUE.</p>}
+              {leads.map((r) => (
+                <div key={r.member_no} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
+                  <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 34 }}>#{r.member_no}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text)', minWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', flex: 1, minWidth: 150 }}>{STEP_LABEL[r.onboarding_step] ?? STEP_LABEL[0]}</span>
+                  <span className="mono" style={{ fontSize: 10, color: daysStuck(r) >= 3 ? 'var(--gold)' : 'var(--dim)', whiteSpace: 'nowrap' }}>{daysStuck(r) === 0 ? 'today' : `${daysStuck(r)}d stuck`}</span>
+                  {r.tg_username && <a href={`https://t.me/${r.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
+                  <button disabled={busy} onClick={() => nudge(r)} title="push: 'Need a hand finishing your setup?' → opens the wizard" style={goldBtn}>🔔 NUDGE</button>
+                </div>
+              ))}
+              {pushResult && leads.length > 0 && <p style={{ ...dimP, color: 'var(--up)' }}>✓ {pushResult}</p>}
+            </section>
+
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 680 }}>
             <h2 style={secH}>VIP WHITELIST (LEGACY)</h2>
             {/* héritage de l'époque « porte fermée » : depuis l'open-door, cette liste ne débloque RIEN —
                 l'app complète s'ouvre automatiquement quand le membre passe LIVE (queue → ✓ DONE) */}
@@ -496,8 +579,9 @@ export default function AdminCRM() {
                 <button disabled={busy} onClick={() => post({ remove: w.username })} style={dangerBtn}>remove</button>
               </div>
             ))}
-            {wl.length === 0 && <p style={dimP}>Empty — channel-accepted users get in automatically; add VIP handles here.</p>}
-          </section>
+            {wl.length === 0 && <p style={dimP}>Empty — and that&rsquo;s fine: it gates nothing anymore.</p>}
+            </section>
+          </>
         )}
       </div>
     </main>
