@@ -226,7 +226,19 @@ export async function POST(req: NextRequest) {
     if (!act?.length) return NextResponse.json({ error: 'action not found' }, { status: 404 });
     await db.from('member_actions').update({ status: 'done', done_at: new Date().toISOString(), done_by: s.username ?? String(s.tgId) }).eq('id', body.done);
     if (act[0].kind === 'connect') {
-      await db.from('members').update({ status: 'live', updated_at: new Date().toISOString() }).eq('tg_id', act[0].tg_id).eq('status', 'pending_copier');
+      // .in et non .eq('pending_copier') : un membre repassé en onboarding (rejet puis DONE sur l'ancienne
+      // demande) doit quand même passer LIVE — l'ancien garde-fou no-opait en silence et le membre restait
+      // grisé alors que le support croyait l'avoir activé. live/paused restent intouchés.
+      await db.from('members').update({ status: 'live', updated_at: new Date().toISOString() }).eq('tg_id', act[0].tg_id).in('status', ['pending_copier', 'onboarding']);
+      // le passage en LIVE = le VIP : l'app complète se déverrouille toute seule (useMe re-poll) — on
+      // prévient le membre pour qu'il ouvre l'app et voie le déblocage immédiatement.
+      const { pushToUser: pushLive } = await import('@/lib/push/send');
+      void pushLive(Number(act[0].tg_id), {
+        title: '🎉 Access unlocked — you are LIVE',
+        body: 'Your account is connected. Algoria now trades for you automatically — the full app is open.',
+        url: '/member',
+        tag: 'algoria-connect',
+      });
       // PARRAINAGE : filleul approuvé → commission créée en PENDING (elle ne devient retirable que quand
       // TU confirmes avoir reçu la commission broker — c'est le verrou anti dépôt-retrait éclair).
       // Montant : 50$, puis 75$ à partir du palier 10 (grille dans lib/member/affiliate.ts).

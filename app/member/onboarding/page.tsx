@@ -35,6 +35,10 @@ export default function Onboarding() {
   if (loading || !member) return <Center>loading…</Center>;
   if (member.status !== 'onboarding') { router.replace('/member'); return <Center>redirecting…</Center>; }
   const cur = step ?? member.onboarding_step;
+  // le choix broker N'EST JAMAIS verrouillé : on repart du broker déjà enregistré (fiche membre) et
+  // chaque étape a un retour ← — un compte refusé peut re-choisir un autre broker au lieu de rester coincé
+  const picked = brokerPick ?? member.broker ?? null;
+  const othersOpen = showOthers || (picked != null && picked !== FEATURED.key);
 
   const run = (body: Record<string, unknown>, next: number | 'done') => {
     setBusy(true);
@@ -79,21 +83,21 @@ export default function Onboarding() {
               <strong style={{ color: 'var(--gold)' }}>Minimum deposit: $500.</strong> Below that, position sizing doesn&apos;t work even at the lowest risk — trades simply won&apos;t run. Don&apos;t fund less.
             </p>
           </div>
-          {!showOthers ? (
+          {!othersOpen ? (
             <button onClick={() => setShowOthers(true)} style={linkBtn}>I&apos;d rather use another broker</button>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>OTHER PARTNER BROKERS — SAME $500 MINIMUM</span>
               {OTHERS.map((b) => (
                 <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(b.key)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${brokerPick === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: brokerPick === b.key ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)' }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${picked === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: picked === b.key ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)' }}>
                   <span style={{ fontWeight: 750, fontSize: 13.5 }}>{b.name}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--dim)' }}>open account ↗</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: picked === b.key ? 'var(--cyan)' : 'var(--dim)' }}>{picked === b.key ? '✓ selected' : 'open account ↗'}</span>
                 </a>
               ))}
             </div>
           )}
-          <button disabled={busy} onClick={() => run({ action: 'broker', broker: brokerPick ?? FEATURED.key }, 1)} style={ctaMain}>MY ACCOUNT IS READY →</button>
+          <button disabled={busy} onClick={() => run({ action: 'broker', broker: picked ?? FEATURED.key }, 1)} style={ctaMain}>MY ACCOUNT IS READY →</button>
         </section>
       )}
 
@@ -110,6 +114,7 @@ export default function Onboarding() {
           <button disabled={busy || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
             {busy ? 'ENCRYPTING…' : 'CONNECT MY ACCOUNT →'}
           </button>
+          <button onClick={() => setStep(0)} style={linkBtn}>← Wrong broker? Go back and pick another</button>
           <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · YOU CAN REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
         </section>
       )}
@@ -120,6 +125,7 @@ export default function Onboarding() {
           <p style={pMuted}>This sets the lot size copied to your account for every Algoria trade. You can change it anytime from Home.</p>
           <RiskPicker value={tier} onPick={setTier} busy={busy} />
           <button disabled={busy} onClick={() => run({ action: 'risk', tier }, 'done')} style={ctaMain}>{busy ? 'SAVING…' : '⚡ START COPYING ALGORIA'}</button>
+          <button onClick={() => setStep(1)} style={linkBtn}>← Back to MT5 details</button>
         </section>
       )}
 
