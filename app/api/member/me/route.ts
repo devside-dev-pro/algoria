@@ -30,11 +30,16 @@ export async function GET(req: NextRequest) {
   const ctx = await me(req);
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
-  const [refs, commsQ, payoutsQ] = await Promise.all([
+  const [refs, commsQ, payoutsQ, rejQ] = await Promise.all([
     db.from('members').select('status').eq('referred_by', ctx.session.tgId),
     db.from('referral_commissions').select('id,kind,amount,status,reason,detail,created_at').eq('referrer_tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
     db.from('referral_payouts').select('id,amount,address,status,tx_hash,reason,created_at').eq('tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
+    // dernière connexion REFUSÉE (vérification broker) — affichée dans le wizard pour corriger et re-soumettre
+    db.from('member_actions').select('detail,done_at').eq('tg_id', ctx.session.tgId).eq('kind', 'connect').eq('status', 'rejected').order('done_at', { ascending: false }).limit(1),
   ]);
+  const rejection = (ctx.member as { status?: string }).status === 'onboarding' && rejQ.data?.[0]
+    ? { reason: String((rejQ.data[0].detail as { reject_reason?: string })?.reject_reason ?? 'verification failed'), at: rejQ.data[0].done_at }
+    : null;
   const comms = commsQ.data ?? [];
   const payouts = payoutsQ.data ?? [];
   const sumC = (st: string) => comms.filter((c) => c.status === st).reduce((a, c) => a + Number(c.amount), 0);
@@ -56,7 +61,7 @@ export async function GET(req: NextRequest) {
     commissions: comms.slice(0, 20),
     payouts: payouts.slice(0, 10),
   };
-  return NextResponse.json({ member: ctx.member, admin: isAdmin(ctx.session.username), referral });
+  return NextResponse.json({ member: ctx.member, admin: isAdmin(ctx.session.username), referral, rejection });
 }
 
 /** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'risk'|'pause'|'resume', ... } */

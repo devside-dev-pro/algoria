@@ -16,7 +16,7 @@ async function post(body: Record<string, unknown>) {
 }
 
 export default function Onboarding() {
-  const { member, loading } = useMe();
+  const { member, rejection, loading } = useMe();
   const router = useRouter();
   const [step, setStep] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,6 +56,18 @@ export default function Onboarding() {
           <span key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= cur ? 'linear-gradient(90deg,#2be3f5,#2e8bf0)' : 'rgba(130,152,190,.2)' }} />
         ))}
       </div>
+
+      {/* demande précédente REFUSÉE (vérification broker) : la raison s'affiche, on corrige, on re-soumet —
+          jamais de blocage définitif (le membre qui s'est trompé — ou a tenté — garde une porte de sortie) */}
+      {rejection && (
+        <div className="cardIn" style={{ border: '1px solid rgba(245,194,74,.5)', background: 'rgba(245,194,74,.07)', borderRadius: 12, padding: '12px 15px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 16 }}>⚠️</span>
+          <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--text)' }}>
+            <b>Your previous request was declined:</b> {rejection.reason}
+            <br /><span style={{ color: 'var(--muted)' }}>Fix your details below and resubmit — approvals are fast when everything checks out.</span>
+          </div>
+        </div>
+      )}
 
       {cur === 0 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
