@@ -1,7 +1,8 @@
 'use client';
 // ALGORIA ADMIN — le back-office CRM de l'opérateur (admin.algoria.tech). Desktop-first, hors coque membre.
-// 5 espaces : DASHBOARD (les chiffres qui comptent), QUEUE (à appliquer dans Social Trade Hub),
-// MEMBERS (le CRM : recherche, statuts, comptes), AFFILIATE (l'argent des parrains), TOOLS (whitelist, push).
+// 6 espaces : DASHBOARD (les chiffres qui comptent), QUEUE (à appliquer dans Social Trade Hub),
+// MEMBERS (le CRM : recherche, statuts, comptes), DEPOSITS (le registre des dépôts broker → bilan
+// mensuel exportable en CSV), AFFILIATE (l'argent des parrains), TOOLS (whitelist, push).
 // Garde : l'API /api/member/admin renvoie 403 à quiconque n'est pas dans ADMIN_TG_USERNAMES — cette page
 // n'est qu'une façade. Session : le même login Telegram que l'espace membre.
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
@@ -17,8 +18,13 @@ interface Action { id: string; member_no: number | null; kind: string; detail: R
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Payout { id: string; tg_id: number; amount: number; address: string; status: string; tx_hash: string | null; reason: string | null; created_at: string }
 interface Affiliate { pendingCommissions: Comm[]; recentCommissions: Comm[]; pendingPayouts: Payout[]; recentPayouts: Payout[]; owedUsd: number; flagged: { tg_id: number; balance: number; username: string | null; member_no: number | null }[] }
+// registre des dépôts broker (bilan mensuel) — porté par member_actions kind='deposit'
+interface Deposit {
+  id: string; tg_id: number; member_no: number | null; created_at: string;
+  detail: { broker?: string | null; amount_usd?: number; commission_usd?: number; commission_status?: string; note?: string | null; deposited_at?: string } | null;
+}
 
-type Tab = 'dashboard' | 'queue' | 'members' | 'affiliate' | 'tools';
+type Tab = 'dashboard' | 'queue' | 'members' | 'deposits' | 'affiliate' | 'tools';
 
 export default function AdminCRM() {
   const router = useRouter();
@@ -32,16 +38,26 @@ export default function AdminCRM() {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   const [creds, setCreds] = useState<Record<string, { login: string; server: string; password: string }>>({});
+  // ===== registre des dépôts : mois affiché + formulaire de saisie =====
+  const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
+  const [depTg, setDepTg] = useState('');
+  const [depBroker, setDepBroker] = useState('');
+  const [depAmount, setDepAmount] = useState('');
+  const [depCom, setDepCom] = useState('');
+  const [depDate, setDepDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [depNote, setDepNote] = useState('');
 
   const load = () =>
     void fetch('/api/member/admin').then(async (r) => {
       if (r.status === 401) { router.replace('/member/login'); return; }
       if (r.status === 403) return setState('forbidden');
-      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate };
+      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[] };
       setWl(d.whitelist);
       setRows(d.members);
       setActions(d.actions ?? []);
       setAff(d.affiliate ?? null);
+      setDeposits(d.deposits ?? []);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -75,6 +91,74 @@ export default function AdminCRM() {
     return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), r.status].some((v) => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, search]);
 
+  // ===== bilan du mois affiché : lignes + totaux (dépôts, coms reçues/attendues/sautées) =====
+  const depDateOf = (d: Deposit) => String(d.detail?.deposited_at ?? d.created_at);
+  const monthDeps = useMemo(
+    () => deposits.filter((d) => depDateOf(d).slice(0, 7) === ym).sort((a, b) => depDateOf(a).localeCompare(depDateOf(b))),
+    [deposits, ym],
+  );
+  const depTotals = useMemo(() => {
+    const t = { deposited: 0, received: 0, pending: 0, lost: 0 };
+    for (const d of monthDeps) {
+      t.deposited += Number(d.detail?.amount_usd ?? 0);
+      const com = Number(d.detail?.commission_usd ?? 0);
+      const st = String(d.detail?.commission_status ?? 'pending');
+      if (st === 'received') t.received += com;
+      else if (st === 'canceled') t.lost += com;
+      else t.pending += com;
+    }
+    return t;
+  }, [monthDeps]);
+  const shiftMonth = (delta: number) => {
+    const [y, m] = ym.split('-').map(Number);
+    setYm(new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7));
+  };
+  const monthLabel = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).toUpperCase();
+  const addDeposit = () => {
+    if (!depTg || !depAmount) return;
+    post(
+      { addDeposit: { tg_id: Number(depTg), broker: depBroker, amount: Number(depAmount), commission: Number(depCom || 0), date: depDate, note: depNote } },
+      () => { setDepAmount(''); setDepCom(''); setDepNote(''); },
+    );
+  };
+  const editDepositCom = (d: Deposit) => {
+    const v = window.prompt('Expected commission ($):', String(d.detail?.commission_usd ?? 0));
+    if (v !== null && Number.isFinite(Number(v))) post({ updateDeposit: { id: d.id, commission: Number(v) } });
+  };
+  const deleteDeposit = (d: Deposit) => {
+    if (window.confirm(`Delete this deposit line ($${Number(d.detail?.amount_usd ?? 0)} · #${d.member_no ?? '—'})? This can't be undone.`)) post({ deleteDeposit: d.id });
+  };
+  // EXPORT CSV (bilan du mois) — généré côté client, s'ouvre direct dans Google Sheets / Excel (BOM UTF-8)
+  const exportCsv = () => {
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = [
+      ['date', 'member', 'username', 'broker', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
+      ...monthDeps.map((d) => [
+        depDateOf(d).slice(0, 10),
+        d.member_no != null ? `#${d.member_no}` : '',
+        (() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? ''); })(),
+        d.detail?.broker ?? '',
+        Number(d.detail?.amount_usd ?? 0),
+        Number(d.detail?.commission_usd ?? 0),
+        d.detail?.commission_status ?? 'pending',
+        d.detail?.note ?? '',
+      ]),
+      [],
+      ['SUMMARY ' + ym],
+      ['deposits', monthDeps.length],
+      ['deposited_usd', depTotals.deposited],
+      ['commission_received_usd', depTotals.received],
+      ['commission_pending_usd', depTotals.pending],
+      ['commission_lost_usd', depTotals.lost],
+    ];
+    const csv = '\ufeff' + lines.map((l) => l.map(esc).join(',')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `algoria-deposits-${ym}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   if (state === 'loading') return <Center>loading…</Center>;
   if (state === 'forbidden') return <Center>admin only</Center>;
 
@@ -86,6 +170,7 @@ export default function AdminCRM() {
     { key: 'dashboard', label: 'DASHBOARD' },
     { key: 'queue', label: 'QUEUE', badge: actions.length },
     { key: 'members', label: 'MEMBERS', badge: rows.length },
+    { key: 'deposits', label: 'DEPOSITS', badge: deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending').length },
     { key: 'affiliate', label: 'AFFILIATE', badge: (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) },
     { key: 'tools', label: 'TOOLS' },
   ];
@@ -131,6 +216,7 @@ export default function AdminCRM() {
               <Kpi label="UNDER REVIEW" value={String(pendingRev)} accent="var(--gold)" hot={pendingRev > 0} />
               <Kpi label="TO PROCESS" value={String(todo)} accent="#ff8a5c" hot={todo > 0} />
               <Kpi label="OWED TO PARTNERS" value={`$${Math.floor(aff?.owedUsd ?? 0)}`} accent="var(--gold)" />
+              <Kpi label={`BROKER COM · ${monthLabel.split(' ')[0].slice(0, 3)}`} value={`$${Math.floor(depTotals.received)}`} accent="var(--up)" hot={depTotals.pending > 0} />
             </div>
             {(aff?.flagged.length ?? 0) > 0 && (
               <div style={{ ...warnBox }}>⚠ negative balances: {aff!.flagged.map((f) => `${f.username ? '@' + f.username : '#' + f.member_no} (${Math.floor(f.balance)}$)`).join(' · ')}</div>
@@ -246,6 +332,82 @@ export default function AdminCRM() {
               {filtered.length === 0 && <p style={{ ...dimP, padding: 10 }}>No member matches “{search}”.</p>}
             </div>
           </section>
+        )}
+
+        {/* ===== DEPOSITS — le registre des dépôts broker : la source du bilan de fin de mois ===== */}
+        {tab === 'deposits' && (
+          <>
+            {/* saisie : une ligne dès qu'un dépôt est constaté chez le broker partenaire */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <h2 style={secH}>LOG A DEPOSIT</h2>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  value={depTg}
+                  onChange={(e) => {
+                    setDepTg(e.target.value);
+                    const m = rows.find((r) => String(r.tg_id) === e.target.value);
+                    if (m?.broker) setDepBroker(m.broker);
+                  }}
+                  style={{ ...inp, width: 210 }}
+                >
+                  <option value="">member…</option>
+                  {[...rows].sort((a, b) => a.member_no - b.member_no).map((r) => (
+                    <option key={r.tg_id} value={String(r.tg_id)}>#{r.member_no} {r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '')}</option>
+                  ))}
+                </select>
+                <input value={depBroker} onChange={(e) => setDepBroker(e.target.value)} placeholder="broker" style={{ ...inp, width: 150 }} />
+                <input value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder="deposit $" inputMode="decimal" style={{ ...inp, width: 110 }} />
+                <input value={depCom} onChange={(e) => setDepCom(e.target.value)} placeholder="expected com $" inputMode="decimal" style={{ ...inp, width: 140 }} />
+                <input type="date" value={depDate} onChange={(e) => setDepDate(e.target.value)} style={{ ...inp, width: 150 }} />
+                <input value={depNote} onChange={(e) => setDepNote(e.target.value)} placeholder="note (optional)" style={{ ...inp, flex: 1, minWidth: 160 }} />
+                <button disabled={busy || !depTg || !Number(depAmount)} onClick={addDeposit} style={{ padding: '10px 18px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: !depTg || !Number(depAmount) ? 0.5 : 1 }}>+ ADD</button>
+              </div>
+            </section>
+
+            {/* le bilan du mois : navigation ‹ › + totaux + export CSV (Google Sheets / Excel) */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button onClick={() => shiftMonth(-1)} style={miniBtn}>‹</button>
+                <h2 style={{ ...secH, minWidth: 150, textAlign: 'center' }}>{monthLabel}</h2>
+                <button onClick={() => shiftMonth(1)} style={miniBtn}>›</button>
+                <span style={{ flex: 1 }} />
+                <button disabled={monthDeps.length === 0} onClick={exportCsv} style={{ ...goldBtn, opacity: monthDeps.length === 0 ? 0.5 : 1 }}>⬇ EXPORT CSV</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+                <Kpi label="DEPOSITS" value={String(monthDeps.length)} accent="var(--cyan)" />
+                <Kpi label="DEPOSITED" value={`$${Math.floor(depTotals.deposited)}`} accent="var(--cyan)" />
+                <Kpi label="COM RECEIVED" value={`$${Math.floor(depTotals.received)}`} accent="var(--up)" />
+                <Kpi label="COM PENDING" value={`$${Math.floor(depTotals.pending)}`} accent="var(--gold)" hot={depTotals.pending > 0} />
+                <Kpi label="COM LOST" value={`$${Math.floor(depTotals.lost)}`} accent="#ff6b8a" />
+              </div>
+              {monthDeps.length === 0 && <p style={dimP}>No deposits logged for this month yet — add one above as soon as a member funds his broker account.</p>}
+              {monthDeps.map((d) => {
+                const st = String(d.detail?.commission_status ?? 'pending');
+                const stC = st === 'received' ? 'var(--up)' : st === 'canceled' ? '#ff6b8a' : 'var(--gold)';
+                return (
+                  <div key={d.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 70 }}>{depDateOf(d).slice(0, 10)}</span>
+                      <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12 }}>#{d.member_no ?? '—'}</span>
+                      {/* pas nameOf : sans @username il renvoie #no, déjà affiché juste avant → doublon */}
+                      <span style={{ fontSize: 12, color: 'var(--text)' }}>{(() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? '—'); })()}</span>
+                      <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{(d.detail?.broker ?? '—').toUpperCase()}</span>
+                      <span className="mono" style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--cyan)' }}>${Number(d.detail?.amount_usd ?? 0)}</span>
+                      <span style={{ color: 'var(--dim)', fontSize: 11 }}>→ com</span>
+                      <button onClick={() => editDepositCom(d)} title="edit expected commission" className="mono" style={{ ...miniBtn, fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>${Number(d.detail?.commission_usd ?? 0)} ✎</button>
+                      <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, color: stC, border: `1px solid color-mix(in srgb, ${stC} 40%, transparent)`, borderRadius: 6, padding: '2px 7px' }}>{st === 'canceled' ? 'LOST' : st.toUpperCase()}</span>
+                      <span style={{ flex: 1 }} />
+                      {st !== 'received' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'received' } })} style={okBtn}>✓ RECEIVED</button>}
+                      {st !== 'canceled' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'canceled' } })} title="commission fell through (flash withdrawal, broker refusal…)" style={dangerBtn}>✗ LOST</button>}
+                      {st !== 'pending' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'pending' } })} title="back to pending" style={miniBtn}>↺</button>}
+                      <button disabled={busy} onClick={() => deleteDeposit(d)} title="delete this line (typo)" style={miniBtn}>🗑</button>
+                    </div>
+                    {d.detail?.note && <div style={{ fontSize: 11, color: 'var(--dim)', paddingLeft: 80 }}>{String(d.detail.note)}</div>}
+                  </div>
+                );
+              })}
+            </section>
+          </>
         )}
 
         {/* ===== AFFILIATE — l'argent des parrains ===== */}
