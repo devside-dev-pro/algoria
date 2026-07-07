@@ -7,7 +7,7 @@
 // n'est qu'une façade. Session : le même login Telegram que l'espace membre.
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
-import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
+import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -61,6 +61,8 @@ export default function AdminCRM() {
   // ===== win card studio (TOOLS) : les gains récents du compte maître, à télécharger pour la CM =====
   const [feedWins, setFeedWins] = useState<{ ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[]>([]);
   const [carding, setCarding] = useState<string | null>(null);
+  // stats jour/semaine (wins only, API publique) — alimentent les cartes RÉCAP du studio
+  const [proof, setProof] = useState<{ today: { count: number; total: number; best: number }; week: { count: number; total: number; best: number } } | null>(null);
 
   const load = () =>
     void fetch('/api/member/admin').then(async (r) => {
@@ -82,7 +84,29 @@ export default function AdminCRM() {
       const d = (await r.json()) as { trades?: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[] };
       setFeedWins((d.trades ?? []).filter((t) => Number(t.pnl) > 0).slice(0, 8));
     });
+    void fetch('/api/public/proof').then(async (r) => {
+      if (!r.ok) return;
+      const d = (await r.json()) as { today: { count: number; total: number; best: number }; week: { count: number; total: number; best: number } };
+      setProof(d);
+    });
   }, []);
+  const downloadRecap = async (period: 'day' | 'week', format: 'story' | 'landscape') => {
+    if (!proof) return;
+    const s = period === 'day' ? proof.today : proof.week;
+    const fmtD = (t: number) => new Date(t).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    setCarding(`${period}-${format}`);
+    try {
+      const blob = await drawRecapCard({
+        periodLabel: period === 'day' ? "TODAY'S SESSION" : 'THIS WEEK', format,
+        count: s.count, total: s.total, best: s.best,
+        dateLabel: period === 'day' ? fmtD(Date.now()) : `${fmtD(Date.now() - 7 * 86_400_000)} – ${fmtD(Date.now())}`,
+        qrUrl: 'https://algoria.tech', qrLabel: 'algoria.tech',
+      });
+      await shareOrDownloadCard(blob, `algoria-${period}-recap-${format === 'landscape' ? 'wide' : 'story'}.png`);
+    } finally {
+      setCarding(null);
+    }
+  };
   const downloadCard = async (t: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }, format: 'story' | 'landscape') => {
     setCarding(`${t.ticket}-${format}`);
     try {
@@ -652,6 +676,21 @@ export default function AdminCRM() {
                 format 1080×1920 prêt à poster (canal, stories, TikTok) — à déposer dans le Drive */}
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 680 }}>
               <h2 style={secH}>🎨 WIN CARDS — STORY 9:16 · WIDE 16:9</h2>
+              {/* les RÉCAPS — le post de fin de session et le bilan hebdo, wins only (règle 70/30) */}
+              {([
+                ['day', '📅 DAY RECAP', proof?.today] as const,
+                ['week', '🗓 WEEK RECAP', proof?.week] as const,
+              ]).map(([period, label, s]) => (
+                <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.05)' }}>
+                  <span style={{ fontSize: 12, fontWeight: 800 }}>{label}</span>
+                  <span className="mono" style={{ fontSize: 11.5, color: s?.count ? 'var(--up)' : 'var(--dim)' }}>
+                    {s ? (s.count ? `✓ ${s.count} wins · +$${Math.round(s.total)} · best +$${Math.round(s.best)}` : 'no wins yet') : '…'}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <button disabled={!s?.count || carding === `${period}-story`} onClick={() => void downloadRecap(period, 'story')} style={{ ...goldBtn, opacity: s?.count ? 1 : 0.45 }}>{carding === `${period}-story` ? '…' : '⬇ STORY'}</button>
+                  <button disabled={!s?.count || carding === `${period}-landscape`} onClick={() => void downloadRecap(period, 'landscape')} style={{ ...goldBtn, opacity: s?.count ? 1 : 0.45 }}>{carding === `${period}-landscape` ? '…' : '⬇ WIDE'}</button>
+                </div>
+              ))}
               {feedWins.length === 0 && <p style={dimP}>Recent wins appear here as trades close — each downloads as a ready-to-post story card.</p>}
               {feedWins.map((t) => (
                 <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>

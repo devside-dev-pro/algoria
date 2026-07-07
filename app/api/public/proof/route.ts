@@ -12,7 +12,9 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const db = sdb();
   const [tradesQ, signalsQ] = await Promise.all([
-    db.from('trades').select('ticket,symbol,direction,pnl,lot,closed_at').not('closed_at', 'is', null).not('pnl', 'is', null).order('closed_at', { ascending: false }).limit(120),
+    // fenêtre large : les jours BEAST spamment des micro-trades (exclus ensuite) qui éjecteraient
+    // les vrais gains d'une fenêtre trop courte → le récap SEMAINE sous-compterait
+    db.from('trades').select('ticket,symbol,direction,pnl,lot,closed_at').not('closed_at', 'is', null).not('pnl', 'is', null).order('closed_at', { ascending: false }).limit(500),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
   ]);
   const rafale = new Set((signalsQ.data ?? []).filter((x) => JSON.stringify(x.rationale ?? '').includes('RAFALE') || JSON.stringify(x.rationale ?? '').includes('ACTION mode')).map((x) => String(x.ticket)));
@@ -21,10 +23,12 @@ export async function GET() {
     .map((t) => ({ symbol: String(t.symbol), direction: String(t.direction), pnl: Math.round(Number(t.pnl)), closed_at: t.closed_at as string }));
   const dayStart = brokerDayStartMs();
   const today = wins.filter((t) => Date.parse(t.closed_at) >= dayStart);
+  const week = wins.filter((t) => Date.parse(t.closed_at) >= Date.now() - 7 * 86_400_000);
   const res = NextResponse.json({
     wins: wins.slice(0, 12),
     today: { count: today.length, total: today.reduce((a, t) => a + t.pnl, 0), best: today.reduce((m, t) => Math.max(m, t.pnl), 0) },
-    week: { total: wins.filter((t) => Date.parse(t.closed_at) >= Date.now() - 7 * 86_400_000).reduce((a, t) => a + t.pnl, 0) },
+    // count/best aussi : alimente les cartes RÉCAP (jour/semaine) du studio admin
+    week: { count: week.length, total: week.reduce((a, t) => a + t.pnl, 0), best: week.reduce((m, t) => Math.max(m, t.pnl), 0) },
   });
   // cache CDN 60s : la landing peut encaisser un raid TikTok sans marteler Supabase
   res.headers.set('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
