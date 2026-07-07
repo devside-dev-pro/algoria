@@ -3,16 +3,34 @@
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
 import { useMe, UnlockSheet } from '../ui';
+import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; closed_at: string }
 
 export default function MemberHistory() {
-  const { member, unlocked, loading } = useMe();
+  const { member, unlocked, loading, referral } = useMe();
   const [trades, setTrades] = useState<FeedTrade[]>([]);
   const [paywall, setPaywall] = useState(false);
+  const [sharing, setSharing] = useState<string | null>(null);
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => (r.ok ? setTrades(((await r.json()) as { trades: FeedTrade[] }).trades) : null));
   }, []);
+  // WIN CARD — le flex viral : la story façon Binance avec le QR du lien de PARRAINAGE du membre.
+  // Il frime avec son gain → ses viewers scannent → il touche 50$ par activation. Tout le monde gagne.
+  const shareWin = async (t: FeedTrade) => {
+    setSharing(t.ticket);
+    try {
+      const code = referral?.code;
+      const blob = await drawWinCard({
+        symbol: t.symbol, direction: t.direction, pnl: Number(t.pnl), closedAt: t.closed_at,
+        qrUrl: code ? `https://app.algoria.tech/r/${code}` : 'https://algoria.tech',
+        qrLabel: code ? `app.algoria.tech/r/${code}` : 'algoria.tech',
+      });
+      await shareOrDownloadCard(blob, `algoria-win-${t.ticket}.png`);
+    } finally {
+      setSharing(null);
+    }
+  };
   if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   const wins = trades.filter((t) => Number(t.pnl) > 0).length;
   const net = trades.reduce((a, t) => a + Number(t.pnl), 0);
@@ -49,6 +67,12 @@ export default function MemberHistory() {
               <span style={{ flex: 1 }} />
               {t.reason === 'be' && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>BE</span>}
               <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
+              {win && (
+                <button onClick={() => void shareWin(t)} disabled={sharing === t.ticket} title="share this win as a story card — the QR is YOUR referral link ($50 per friend who activates)"
+                  style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '3px 8px', fontSize: 11, cursor: 'pointer', lineHeight: 1 }}>
+                  {sharing === t.ticket ? '…' : '📤'}
+                </button>
+              )}
             </div>
           );
         })}

@@ -7,6 +7,7 @@
 // n'est qu'une façade. Session : le même login Telegram que l'espace membre.
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
+import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -53,6 +54,9 @@ export default function AdminCRM() {
   const [pushUrl, setPushUrl] = useState('/member');
   const [pushAud, setPushAud] = useState<'self' | 'prospects' | 'live' | 'all'>('self');
   const [pushResult, setPushResult] = useState<string | null>(null);
+  // ===== win card studio (TOOLS) : les gains récents du compte maître, à télécharger pour la CM =====
+  const [feedWins, setFeedWins] = useState<{ ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[]>([]);
+  const [carding, setCarding] = useState<string | null>(null);
 
   const load = () =>
     void fetch('/api/member/admin').then(async (r) => {
@@ -67,6 +71,23 @@ export default function AdminCRM() {
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // gains récents pour le WIN CARD STUDIO — le feed membre renvoie tout à une session admin
+  useEffect(() => {
+    void fetch('/api/member/feed').then(async (r) => {
+      if (!r.ok) return;
+      const d = (await r.json()) as { trades?: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[] };
+      setFeedWins((d.trades ?? []).filter((t) => Number(t.pnl) > 0).slice(0, 8));
+    });
+  }, []);
+  const downloadCard = async (t: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }) => {
+    setCarding(t.ticket);
+    try {
+      const blob = await drawWinCard({ symbol: t.symbol, direction: t.direction, pnl: Number(t.pnl), closedAt: t.closed_at, qrUrl: 'https://algoria.tech', qrLabel: 'algoria.tech' });
+      await shareOrDownloadCard(blob, `algoria-win-${t.ticket}.png`);
+    } finally {
+      setCarding(null);
+    }
+  };
 
   const post = (body: Record<string, unknown>, cb?: () => void) => {
     setBusy(true);
@@ -551,6 +572,23 @@ export default function AdminCRM() {
               </div>
               {pushResult && <p style={{ ...dimP, color: 'var(--up)' }}>✓ {pushResult}</p>}
               <p style={dimP}>Only members who enabled notifications receive it — always 🧪 test on yourself before blasting a segment.</p>
+            </section>
+
+            {/* WIN CARD STUDIO — les stories façon Binance pour la CM : P&L en énorme + QR algoria.tech,
+                format 1080×1920 prêt à poster (canal, stories, TikTok) — à déposer dans le Drive */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 680 }}>
+              <h2 style={secH}>🎨 WIN CARDS — STORY VISUALS (1080×1920)</h2>
+              {feedWins.length === 0 && <p style={dimP}>Recent wins appear here as trades close — each downloads as a ready-to-post story card.</p>}
+              {feedWins.map((t) => (
+                <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
+                  <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
+                  <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--up)' }}>+${Number(t.pnl).toFixed(0)}</span>
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{new Date(t.closed_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                  <span style={{ flex: 1 }} />
+                  <button disabled={carding === t.ticket} onClick={() => void downloadCard(t)} style={goldBtn}>{carding === t.ticket ? '…' : '⬇ CARD'}</button>
+                </div>
+              ))}
             </section>
 
             {/* RELANCE — les leads coincés dans le funnel, du plus ancien au plus récent : ta liste de closing */}
