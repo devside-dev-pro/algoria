@@ -83,11 +83,11 @@ export default function AdminCRM() {
       setFeedWins((d.trades ?? []).filter((t) => Number(t.pnl) > 0).slice(0, 8));
     });
   }, []);
-  const downloadCard = async (t: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }) => {
-    setCarding(t.ticket);
+  const downloadCard = async (t: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }, format: 'story' | 'landscape') => {
+    setCarding(`${t.ticket}-${format}`);
     try {
-      const blob = await drawWinCard({ symbol: t.symbol, direction: t.direction, pnl: Number(t.pnl), closedAt: t.closed_at, qrUrl: 'https://algoria.tech', qrLabel: 'algoria.tech' });
-      await shareOrDownloadCard(blob, `algoria-win-${t.ticket}.png`);
+      const blob = await drawWinCard({ symbol: t.symbol, direction: t.direction, pnl: Number(t.pnl), closedAt: t.closed_at, format, qrUrl: 'https://algoria.tech', qrLabel: 'algoria.tech' });
+      await shareOrDownloadCard(blob, `algoria-win-${t.ticket}-${format === 'landscape' ? 'wide' : 'story'}.png`);
     } finally {
       setCarding(null);
     }
@@ -651,7 +651,7 @@ export default function AdminCRM() {
             {/* WIN CARD STUDIO — les stories façon Binance pour la CM : P&L en énorme + QR algoria.tech,
                 format 1080×1920 prêt à poster (canal, stories, TikTok) — à déposer dans le Drive */}
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 680 }}>
-              <h2 style={secH}>🎨 WIN CARDS — STORY VISUALS (1080×1920)</h2>
+              <h2 style={secH}>🎨 WIN CARDS — STORY 9:16 · WIDE 16:9</h2>
               {feedWins.length === 0 && <p style={dimP}>Recent wins appear here as trades close — each downloads as a ready-to-post story card.</p>}
               {feedWins.map((t) => (
                 <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
@@ -660,7 +660,8 @@ export default function AdminCRM() {
                   <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--up)' }}>+${Number(t.pnl).toFixed(0)}</span>
                   <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{new Date(t.closed_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                   <span style={{ flex: 1 }} />
-                  <button disabled={carding === t.ticket} onClick={() => void downloadCard(t)} style={goldBtn}>{carding === t.ticket ? '…' : '⬇ CARD'}</button>
+                  <button disabled={carding === `${t.ticket}-story`} onClick={() => void downloadCard(t, 'story')} style={goldBtn}>{carding === `${t.ticket}-story` ? '…' : '⬇ STORY'}</button>
+                  <button disabled={carding === `${t.ticket}-landscape`} onClick={() => void downloadCard(t, 'landscape')} style={goldBtn}>{carding === `${t.ticket}-landscape` ? '…' : '⬇ WIDE'}</button>
                 </div>
               ))}
             </section>
