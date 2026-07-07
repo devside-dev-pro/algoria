@@ -207,27 +207,165 @@ function drawLandscape(d: DrawCtx, o: WinCardOpts): void {
   }
 }
 
-/** Dessine la carte (format story par défaut) et retourne le PNG en Blob. */
-export async function drawWinCard(o: WinCardOpts): Promise<Blob> {
+// ===== CARTE RÉCAP (jour / semaine) — le post de fin de session : « X wins · +$Y banked » =====
+export interface RecapCardOpts {
+  periodLabel: string; // 'TODAY'S SESSION' | 'THIS WEEK'
+  count: number; // nb de trades gagnants
+  total: number; // $ encaissés sur la période
+  best: number; // meilleur trade
+  dateLabel: string; // '07 Jul 2026' ou '01 – 07 Jul 2026'
+  qrUrl: string;
+  qrLabel: string;
+  format?: CardFormat;
+}
+
+function drawRecapStory(d: DrawCtx, o: RecapCardOpts): void {
+  const { ctx, display, mono } = d;
+  const W = 1080;
+  paintBackground(ctx, W, 1920, { x: W / 2, y: 350 }, { x: W / 2, y: 980 });
+  ctx.textAlign = 'center';
+
+  if (d.mark) ctx.drawImage(d.mark, W / 2 - 160, 150, 92, 92);
+  ctx.font = `800 64px ${display}`;
+  const grad = ctx.createLinearGradient(W / 2 - 60, 0, W / 2 + 260, 0);
+  grad.addColorStop(0, '#2be3f5');
+  grad.addColorStop(1, '#2e8bf0');
+  ctx.fillStyle = grad;
+  ctx.fillText('ALGORIA', W / 2 + 60, 218);
+
+  ctx.font = `500 30px ${mono}`;
+  ctx.fillStyle = 'rgba(147,165,196,.9)';
+  ctx.fillText(`${o.periodLabel} · REAL ACCOUNT`, W / 2, 320);
+
+  ctx.font = `800 78px ${display}`;
+  ctx.fillStyle = '#22e0a6';
+  ctx.fillText(`✓ ${o.count} WINNING TRADES`, W / 2, 620);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(34,224,166,.55)';
+  ctx.shadowBlur = 60;
+  ctx.font = `800 210px ${display}`;
+  ctx.fillStyle = '#22e0a6';
+  ctx.fillText(`+$${Math.round(o.total)}`, W / 2, 920);
+  ctx.restore();
+
+  ctx.font = `500 34px ${mono}`;
+  ctx.fillStyle = '#f5c24a';
+  ctx.fillText('BANKED BY THE AI — AUTOMATICALLY', W / 2, 1010);
+
+  ctx.font = `500 32px ${mono}`;
+  ctx.fillStyle = 'rgba(147,165,196,.85)';
+  ctx.fillText(`BEST TRADE +$${Math.round(o.best)}  ·  ${o.dateLabel}`, W / 2, 1090);
+
+  ctx.strokeStyle = 'rgba(130,152,190,.25)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(200, 1210);
+  ctx.lineTo(W - 200, 1210);
+  ctx.stroke();
+
+  ctx.font = `700 42px ${display}`;
+  ctx.fillStyle = '#e8f0ff';
+  ctx.fillText('The AI trades gold & Bitcoin — live.', W / 2, 1310);
+  ctx.font = `500 32px ${display}`;
+  ctx.fillStyle = 'rgba(147,165,196,.9)';
+  ctx.fillText('Watch it for free. Scan to get in.', W / 2, 1366);
+
+  paintQr(d, W / 2 - 165, 1424, 330);
+
+  ctx.font = `700 40px ${mono}`;
+  ctx.fillStyle = '#2be3f5';
+  ctx.fillText(o.qrLabel, W / 2, 1848);
+}
+
+function drawRecapLandscape(d: DrawCtx, o: RecapCardOpts): void {
+  const { ctx, display, mono } = d;
+  const W = 1200;
+  const H = 675;
+  paintBackground(ctx, W, H, { x: 190, y: 90 }, { x: 420, y: 400 });
+
+  if (d.mark) {
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.drawImage(d.mark, W - 470, H / 2 - 210, 430, 430);
+    ctx.restore();
+  }
+
+  ctx.textAlign = 'left';
+
+  if (d.mark) ctx.drawImage(d.mark, 56, 44, 58, 58);
+  ctx.font = `800 44px ${display}`;
+  const grad = ctx.createLinearGradient(128, 0, 400, 0);
+  grad.addColorStop(0, '#2be3f5');
+  grad.addColorStop(1, '#2e8bf0');
+  ctx.fillStyle = grad;
+  ctx.fillText('ALGORIA', 128, 90);
+  ctx.font = `500 20px ${mono}`;
+  ctx.fillStyle = 'rgba(147,165,196,.9)';
+  ctx.fillText(`${o.periodLabel} · REAL ACCOUNT`, 132, 122);
+
+  ctx.font = `800 46px ${display}`;
+  ctx.fillStyle = '#22e0a6';
+  ctx.fillText(`✓ ${o.count} WINNING TRADES`, 60, 232);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(34,224,166,.5)';
+  ctx.shadowBlur = 45;
+  ctx.font = `800 140px ${display}`;
+  ctx.fillStyle = '#22e0a6';
+  ctx.fillText(`+$${Math.round(o.total)}`, 54, 380);
+  ctx.restore();
+
+  ctx.font = `500 24px ${mono}`;
+  ctx.fillStyle = '#f5c24a';
+  ctx.fillText(`BANKED AUTOMATICALLY · BEST +$${Math.round(o.best)}`, 60, 430);
+
+  const qs = 150;
+  const qy = H - qs - 56;
+  paintQr(d, 60, qy, qs);
+  ctx.font = `700 26px ${display}`;
+  ctx.fillStyle = '#e8f0ff';
+  ctx.fillText('Watch the AI trade live — free.', 250, qy + 52);
+  ctx.font = `500 22px ${display}`;
+  ctx.fillStyle = 'rgba(147,165,196,.9)';
+  ctx.fillText('Scan to get in.', 250, qy + 88);
+  ctx.font = `700 26px ${mono}`;
+  ctx.fillStyle = '#2be3f5';
+  ctx.fillText(o.qrLabel, 250, qy + 132);
+
+  ctx.textAlign = 'right';
+  ctx.font = `400 20px ${mono}`;
+  ctx.fillStyle = 'rgba(147,165,196,.7)';
+  ctx.fillText(o.dateLabel, W - 48, H - 44);
+}
+
+/** Prépare canvas + polices + assets, puis délègue au dessinateur voulu. */
+async function renderCard(qrUrl: string, format: CardFormat | undefined, draw: (d: DrawCtx) => void): Promise<Blob> {
   if (typeof document !== 'undefined' && 'fonts' in document) await document.fonts.ready;
   const display = fontFamily('--font-display', 'system-ui, sans-serif');
   const mono = fontFamily('--font-mono', 'ui-monospace, monospace');
   const [qrData, mark] = await Promise.all([
-    QRCode.toDataURL(o.qrUrl, { margin: 1, width: 400, color: { dark: '#0b0e14', light: '#ffffff' } }),
+    QRCode.toDataURL(qrUrl, { margin: 1, width: 400, color: { dark: '#0b0e14', light: '#ffffff' } }),
     loadImage('/brand/algoria-mark.png'),
   ]);
   const qrImg = await loadImage(qrData);
-
-  const landscape = o.format === 'landscape';
+  const landscape = format === 'landscape';
   const cv = document.createElement('canvas');
   cv.width = landscape ? 1200 : 1080;
   cv.height = landscape ? 675 : 1920;
   const ctx = cv.getContext('2d')!;
-  const d: DrawCtx = { ctx, display, mono, qrImg, mark };
-  if (landscape) drawLandscape(d, o);
-  else drawStory(d, o);
-
+  draw({ ctx, display, mono, qrImg, mark });
   return new Promise<Blob>((resolve, reject) => cv.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas export failed'))), 'image/png'));
+}
+
+/** Dessine la carte d'UN gain (format story par défaut) et retourne le PNG en Blob. */
+export async function drawWinCard(o: WinCardOpts): Promise<Blob> {
+  return renderCard(o.qrUrl, o.format, (d) => (o.format === 'landscape' ? drawLandscape(d, o) : drawStory(d, o)));
+}
+
+/** Dessine la carte RÉCAP (jour/semaine) et retourne le PNG en Blob. */
+export async function drawRecapCard(o: RecapCardOpts): Promise<Blob> {
+  return renderCard(o.qrUrl, o.format, (d) => (o.format === 'landscape' ? drawRecapLandscape(d, o) : drawRecapStory(d, o)));
 }
 
 /** Partage natif (story-ready) si dispo, sinon téléchargement direct du PNG. */
