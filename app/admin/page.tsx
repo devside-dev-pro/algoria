@@ -480,7 +480,10 @@ export default function AdminCRM() {
         {/* ===== TOOLS — whitelist VIP + utilitaires ===== */}
         {tab === 'tools' && (
           <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 560 }}>
-            <h2 style={secH}>VIP WHITELIST</h2>
+            <h2 style={secH}>VIP WHITELIST (LEGACY)</h2>
+            {/* héritage de l'époque « porte fermée » : depuis l'open-door, cette liste ne débloque RIEN —
+                l'app complète s'ouvre automatiquement quand le membre passe LIVE (queue → ✓ DONE) */}
+            <p style={dimP}>⚠ This list no longer gates anything. Full app access unlocks automatically the moment a member goes LIVE — approve his connect request in the QUEUE instead.</p>
             <div style={{ display: 'flex', gap: 8 }}>
               <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="@username" style={{ ...inp, flex: 1 }} />
               <button disabled={busy || !input.trim()} onClick={() => post({ add: input }, () => setInput(''))} style={{ padding: '10px 16px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>ADD</button>

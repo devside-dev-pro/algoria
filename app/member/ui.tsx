@@ -54,21 +54,30 @@ export function useMe() {
   const router = useRouter();
   useEffect(() => {
     let alive = true;
-    void fetch('/api/member/me')
-      .then(async (r) => {
-        if (r.status === 401) { router.replace('/member/login'); return null; }
-        return (await r.json()) as { member: Member; admin: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null };
-      })
-      .then((d) => {
-        if (!alive || !d?.member) return;
-        setMember(d.member);
-        setReferral(d.referral ?? null);
-        setRejection(d.rejection ?? null);
-        setAdmin(!!d.admin);
-        setLoading(false);
-      })
-      .catch(() => alive && setLoading(false));
-    return () => { alive = false; };
+    const load = () =>
+      void fetch('/api/member/me')
+        .then(async (r) => {
+          if (r.status === 401) { router.replace('/member/login'); return null; }
+          return (await r.json()) as { member: Member; admin: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null };
+        })
+        .then((d) => {
+          if (!alive || !d?.member) return;
+          setMember(d.member);
+          setReferral(d.referral ?? null);
+          setRejection(d.rejection ?? null);
+          setAdmin(!!d.admin);
+          setLoading(false);
+        })
+        .catch(() => alive && setLoading(false));
+    load();
+    // Le STATUT se re-vérifie tout seul (retour au premier plan + poll 60s) : un prospect approuvé pendant
+    // que sa PWA est ouverte voit l'app se DÉVERROUILLER sans reload — sinon il restait grisé alors qu'il
+    // était déjà LIVE côté serveur (vécu : l'admin croyait devoir le « whitelister » en plus, à tort).
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    const iv = window.setInterval(load, 60_000);
+    return () => { alive = false; document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); window.clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const unlocked = admin || member?.status === 'live' || member?.status === 'paused';
