@@ -61,6 +61,8 @@ export default function AdminCRM() {
   const cancelCommission = (id: string) => { const reason = window.prompt('Cancel reason (e.g. "client withdrew deposit"):'); if (reason !== null) post({ cancelCommission: id, reason }); };
   const payPayout = (id: string) => { const tx = window.prompt('USDT sent? Paste the TRC20 transaction hash:'); if (tx?.trim()) post({ payoutPaid: id, tx: tx.trim() }); };
   const rejectPayout = (id: string) => { const reason = window.prompt('Reject reason (shown to the member):'); if (reason !== null) post({ payoutReject: id, reason }); };
+  // refuser une CONNEXION (vérification broker échouée) : le membre repasse en onboarding avec la raison — jamais bloqué
+  const rejectConnect = (id: string) => { const reason = window.prompt('Decline reason (shown to the member, e.g. "no deposit found under this name"):'); if (reason !== null && reason.trim()) post({ rejectConnect: id, reason }); };
   const liveAlert = () => { if (window.confirm('Send "🔴 ALGORIA IS LIVE" to every subscribed member?')) post({ liveAlert: true }); };
 
   const nameOf = (tg: number | null | undefined) => {
@@ -188,6 +190,9 @@ export default function AdminCRM() {
                     <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password (timestamped)" style={goldBtn}>🔑 REVEAL</button>
                   )}
                   <button disabled={busy} onClick={() => post({ done: a.id }, () => setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }))} style={okBtn}>✓ DONE</button>
+                  {a.kind === 'connect' && (
+                    <button disabled={busy} onClick={() => rejectConnect(a.id)} title="verification failed → member goes back to the wizard with your reason, can resubmit" style={dangerBtn}>REJECT</button>
+                  )}
                 </div>
                 {creds[a.id] && (
                   <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.06)' }}>

@@ -48,9 +48,35 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     add?: string; remove?: string; done?: string; reveal?: string; liveAlert?: boolean;
     confirmCommission?: string; cancelCommission?: string; payoutPaid?: string; payoutReject?: string; reason?: string; tx?: string;
+    rejectConnect?: string;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
+
+  // ===== REFUSER une demande de connexion (vérification broker échouée) — SANS bloquer le membre :
+  // il repasse en onboarding à l'étape MT5, voit la raison dans le wizard, corrige et re-soumet.
+  if (body.rejectConnect) {
+    const { data: rows } = await db.from('member_actions').select('*').eq('id', body.rejectConnect).eq('status', 'pending').limit(1);
+    const act = rows?.[0];
+    if (!act || act.kind !== 'connect') return NextResponse.json({ error: 'connect request not found (already processed?)' }, { status: 404 });
+    const reason = String(body.reason ?? '').slice(0, 200) || 'verification failed';
+    await db.from('member_actions').update({
+      status: 'rejected',
+      done_at: new Date().toISOString(),
+      done_by: who,
+      detail: { ...(act.detail as Record<string, unknown> | null ?? {}), reject_reason: reason } as never,
+    }).eq('id', act.id);
+    await db.from('members').update({ status: 'onboarding', onboarding_step: 1, updated_at: new Date().toISOString() })
+      .eq('tg_id', act.tg_id).eq('status', 'pending_copier');
+    const { pushToUser } = await import('@/lib/push/send');
+    void pushToUser(Number(act.tg_id), {
+      title: 'Connection request declined',
+      body: `${reason} — open the app to fix your details and resubmit.`,
+      url: '/member/onboarding',
+      tag: 'algoria-connect',
+    });
+    return NextResponse.json({ ok: true });
+  }
 
   // ===== AFFILIATION : cycle de vie des commissions + traitement des retraits =====
   if (body.confirmCommission || body.cancelCommission) {

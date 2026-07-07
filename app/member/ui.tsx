@@ -48,6 +48,7 @@ export interface Referral {
 export function useMe() {
   const [member, setMember] = useState<Member | null>(null);
   const [referral, setReferral] = useState<Referral | null>(null);
+  const [rejection, setRejection] = useState<{ reason: string; at: string | null } | null>(null);
   const [admin, setAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -56,12 +57,13 @@ export function useMe() {
     void fetch('/api/member/me')
       .then(async (r) => {
         if (r.status === 401) { router.replace('/member/login'); return null; }
-        return (await r.json()) as { member: Member; admin: boolean; referral?: Referral };
+        return (await r.json()) as { member: Member; admin: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null };
       })
       .then((d) => {
         if (!alive || !d?.member) return;
         setMember(d.member);
         setReferral(d.referral ?? null);
+        setRejection(d.rejection ?? null);
         setAdmin(!!d.admin);
         setLoading(false);
       })
@@ -70,7 +72,7 @@ export function useMe() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const unlocked = admin || member?.status === 'live' || member?.status === 'paused';
-  return { member, setMember, referral, admin, unlocked, loading };
+  return { member, setMember, referral, rejection, admin, unlocked, loading };
 }
 
 // ===== MODE TEASER (prospects) — le paywall qui donne envie =====
