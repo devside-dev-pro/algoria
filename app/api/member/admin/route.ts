@@ -16,12 +16,15 @@ export async function GET(req: NextRequest) {
   const s = guard(req);
   if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   const db = sdb();
-  const [wl, members, actions, commsQ, payoutsQ] = await Promise.all([
+  const [wl, members, actions, commsQ, payoutsQ, depositsQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,mt5_login,mt5_server,usdt_trc20,referred_by').order('member_no', { ascending: false }).limit(200),
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),
+    // REGISTRE DES DÉPÔTS (bilan broker) : lignes saisies par l'admin, kind='deposit' status='done'
+    // (jamais dans la file). Stockées dans member_actions — zéro migration, pattern du stash kyc.
+    db.from('member_actions').select('*').eq('kind', 'deposit').order('created_at', { ascending: false }).limit(500),
   ]);
   // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
   // Une balance NÉGATIVE (commission annulée APRÈS retrait) est le signal d'abus n°1 → flag rouge.
@@ -39,7 +42,7 @@ export async function GET(req: NextRequest) {
     owedUsd: [...balances.values()].filter((v) => v > 0).reduce((a, v) => a + v, 0), // ta dette totale envers les parrains
     flagged: [...balances.entries()].filter(([, v]) => v < 0).map(([tg, v]) => ({ tg_id: tg, balance: v, username: byTg.get(tg)?.tg_username ?? null, member_no: byTg.get(tg)?.member_no ?? null })),
   };
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [] });
 }
 
 export async function POST(req: NextRequest) {
@@ -49,9 +52,66 @@ export async function POST(req: NextRequest) {
     add?: string; remove?: string; done?: string; reveal?: string; liveAlert?: boolean;
     confirmCommission?: string; cancelCommission?: string; payoutPaid?: string; payoutReject?: string; reason?: string; tx?: string;
     rejectConnect?: string;
+    addDeposit?: { tg_id: number; broker?: string; amount: number; commission?: number; date?: string; note?: string };
+    updateDeposit?: { id: string; amount?: number; commission?: number; comStatus?: string; note?: string; broker?: string; date?: string };
+    deleteDeposit?: string;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
+
+  // ===== REGISTRE DES DÉPÔTS — le bilan broker de fin de mois =====
+  // Une ligne par dépôt constaté chez le broker partenaire : montant déposé + commission attendue.
+  // Cycle de la com : pending (attendue) → received (encaissée) | canceled (sautée : retrait éclair, refus broker…).
+  // Vit dans member_actions (kind='deposit', status='done' → jamais dans la file) — zéro migration.
+  if (body.addDeposit) {
+    const d = body.addDeposit;
+    const amount = Number(d.amount);
+    const commission = Number(d.commission ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: 'deposit amount required' }, { status: 400 });
+    const { data: m } = await db.from('members').select('member_no,broker').eq('tg_id', d.tg_id).limit(1);
+    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    const depositedAt = d.date && !Number.isNaN(Date.parse(String(d.date))) ? new Date(String(d.date)).toISOString() : new Date().toISOString();
+    const { error } = await db.from('member_actions').insert({
+      tg_id: d.tg_id, member_no: m[0].member_no, kind: 'deposit', status: 'done', done_by: who,
+      detail: {
+        broker: String(d.broker ?? m[0].broker ?? '').trim().toLowerCase() || null,
+        amount_usd: amount,
+        commission_usd: Number.isFinite(commission) && commission > 0 ? commission : 0,
+        commission_status: 'pending',
+        note: String(d.note ?? '').slice(0, 300) || null,
+        deposited_at: depositedAt,
+      } as never,
+    });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.updateDeposit) {
+    const u = body.updateDeposit;
+    const { data: rows } = await db.from('member_actions').select('id,detail').eq('id', u.id).eq('kind', 'deposit').limit(1);
+    if (!rows?.length) return NextResponse.json({ error: 'deposit not found' }, { status: 404 });
+    const det = { ...((rows[0].detail as Record<string, unknown>) ?? {}) };
+    if (u.amount != null && Number.isFinite(Number(u.amount)) && Number(u.amount) > 0) det.amount_usd = Number(u.amount);
+    if (u.commission != null && Number.isFinite(Number(u.commission)) && Number(u.commission) >= 0) det.commission_usd = Number(u.commission);
+    if (u.comStatus) {
+      if (!['pending', 'received', 'canceled'].includes(u.comStatus)) return NextResponse.json({ error: 'invalid commission status' }, { status: 400 });
+      // received ↔ canceled ↔ pending librement : une com « reçue » peut sauter après coup (clawback broker)
+      det.commission_status = u.comStatus;
+      det.commission_decided_at = new Date().toISOString();
+      det.commission_decided_by = who;
+    }
+    if (u.note !== undefined) det.note = String(u.note).slice(0, 300) || null;
+    if (u.broker !== undefined) det.broker = String(u.broker).trim().toLowerCase() || null;
+    if (u.date && !Number.isNaN(Date.parse(String(u.date)))) det.deposited_at = new Date(String(u.date)).toISOString();
+    const { error } = await db.from('member_actions').update({ detail: det as never }).eq('id', u.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.deleteDeposit) {
+    // garde kind='deposit' : impossible d'effacer une action de la file par erreur avec un mauvais id
+    const { error } = await db.from('member_actions').delete().eq('id', body.deleteDeposit).eq('kind', 'deposit');
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
 
   // ===== REFUSER une demande de connexion (vérification broker échouée) — SANS bloquer le membre :
   // il repasse en onboarding à l'étape MT5, voit la raison dans le wizard, corrige et re-soumet.
