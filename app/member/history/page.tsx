@@ -15,18 +15,19 @@ export default function MemberHistory() {
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => (r.ok ? setTrades(((await r.json()) as { trades: FeedTrade[] }).trades) : null));
   }, []);
-  // WIN CARD — le flex viral : la story façon Binance avec le QR du lien de PARRAINAGE du membre.
+  // WIN CARD — le flex viral : la carte façon Binance avec le QR du lien de PARRAINAGE du membre.
   // Il frime avec son gain → ses viewers scannent → il touche 50$ par activation. Tout le monde gagne.
-  const shareWin = async (t: FeedTrade) => {
-    setSharing(t.ticket);
+  // Deux formats : story 9:16 (Insta/TikTok) et paysage 16:9 (posts, statuts, X).
+  const shareWin = async (t: FeedTrade, format: 'story' | 'landscape') => {
+    setSharing(`${t.ticket}-${format}`);
     try {
       const code = referral?.code;
       const blob = await drawWinCard({
-        symbol: t.symbol, direction: t.direction, pnl: Number(t.pnl), closedAt: t.closed_at,
+        symbol: t.symbol, direction: t.direction, pnl: Number(t.pnl), closedAt: t.closed_at, format,
         qrUrl: code ? `https://app.algoria.tech/r/${code}` : 'https://algoria.tech',
         qrLabel: code ? `app.algoria.tech/r/${code}` : 'algoria.tech',
       });
-      await shareOrDownloadCard(blob, `algoria-win-${t.ticket}.png`);
+      await shareOrDownloadCard(blob, `algoria-win-${t.ticket}-${format === 'landscape' ? 'wide' : 'story'}.png`);
     } finally {
       setSharing(null);
     }
@@ -68,10 +69,16 @@ export default function MemberHistory() {
               {t.reason === 'be' && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>BE</span>}
               <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
               {win && (
-                <button onClick={() => void shareWin(t)} disabled={sharing === t.ticket} title="share this win as a story card — the QR is YOUR referral link ($50 per friend who activates)"
-                  style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '3px 8px', fontSize: 11, cursor: 'pointer', lineHeight: 1 }}>
-                  {sharing === t.ticket ? '…' : '📤'}
-                </button>
+                <>
+                  <button onClick={() => void shareWin(t, 'story')} disabled={sharing === `${t.ticket}-story`} title="story card 9:16 — the QR is YOUR referral link ($50 per friend who activates)"
+                    style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '3px 8px', fontSize: 11, cursor: 'pointer', lineHeight: 1 }}>
+                    {sharing === `${t.ticket}-story` ? '…' : '📤'}
+                  </button>
+                  <button onClick={() => void shareWin(t, 'landscape')} disabled={sharing === `${t.ticket}-landscape`} title="wide card 16:9 (posts, statuses) — same referral QR"
+                    style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '3px 8px', fontSize: 11, cursor: 'pointer', lineHeight: 1 }}>
+                    {sharing === `${t.ticket}-landscape` ? '…' : '🖼'}
+                  </button>
+                </>
               )}
             </div>
           );
