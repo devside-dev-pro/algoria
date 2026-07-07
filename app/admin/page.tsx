@@ -169,6 +169,20 @@ export default function AdminCRM() {
                       {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')})`}
                       {(a.kind === 'pause' || a.kind === 'resume') && new Date(a.created_at).toLocaleString('en-GB')}
                     </div>
+                    {/* la ligne VÉRIFICATION : tout ce qu'il faut contrôler chez le broker AVANT d'approuver.
+                        Anciennes demandes (sans les nouveaux champs) : broker/@ récupérés de la fiche membre + ⚠ sur le manquant */}
+                    {a.kind === 'connect' && (() => {
+                      const m = rows.find((r) => r.member_no != null && r.member_no === a.member_no);
+                      const broker = String(a.detail?.broker ?? m?.broker ?? '') || null;
+                      const uname = String(a.detail?.username ?? m?.tg_username ?? '') || null;
+                      const bname = String(a.detail?.broker_name ?? '') || null;
+                      const dep = Number(a.detail?.declared_deposit ?? 0) || null;
+                      return (
+                        <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          VERIFY → {broker ? broker.toUpperCase() : '⚠ broker ?'} · {bname ?? '⚠ no name — ask'} · {dep ? `$${dep} declared` : '⚠ no deposit declared — ask'}{uname ? <span style={{ color: 'var(--cyan)' }}> · @{uname}</span> : ''}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {a.kind === 'connect' && !creds[a.id] && (
                     <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password (timestamped)" style={goldBtn}>🔑 REVEAL</button>

@@ -24,6 +24,10 @@ export default function Onboarding() {
   const [login, setLogin] = useState('');
   const [server, setServer] = useState('');
   const [password, setPassword] = useState('');
+  // VÉRIFICATION : le support contrôle le compte chez le broker AVANT d'approuver — sans le nom du
+  // titulaire et le dépôt déclaré, la file admin était aveugle (n'importe qui pouvait raconter n'importe quoi)
+  const [fullName, setFullName] = useState('');
+  const [deposit, setDeposit] = useState('');
   const [tier, setTier] = useState<'low' | 'balanced' | 'high'>('balanced');
   const [brokerPick, setBrokerPick] = useState<string | null>(null); // broker cliqué (le lien ouvre un onglet, on retient le choix)
   const [showOthers, setShowOthers] = useState(false);
@@ -85,10 +89,13 @@ export default function Onboarding() {
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <h2 style={{ fontSize: 15, margin: 0 }}>2 · Connect your MT5 account</h2>
           <p style={pMuted}>These credentials link your account to the copier. They are <strong style={{ color: 'var(--text)' }}>encrypted end-to-end</strong> and never displayed again — not even to you.</p>
+          <label style={lbl}>Full name on your broker account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
           <label style={lbl}>MT5 login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} /></label>
           <label style={lbl}>Server<input value={server} onChange={(e) => setServer(e.target.value)} placeholder="Raise-Live" style={inp} /></label>
           <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} /></label>
-          <button disabled={busy || !login || !server || !password} onClick={() => run({ action: 'mt5', login, server, password }, 2)} style={ctaMain}>
+          <label style={lbl}>Amount deposited ($ — min 500)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="500" style={inp} /></label>
+          <p style={{ ...pMuted, fontSize: 11.5 }}>The team verifies your name and deposit with the broker before switching the copy on — accurate info = faster approval.</p>
+          <button disabled={busy || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
             {busy ? 'ENCRYPTING…' : 'CONNECT MY ACCOUNT →'}
           </button>
           <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · YOU CAN REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>

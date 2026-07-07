@@ -79,11 +79,22 @@ export async function POST(req: NextRequest) {
     const login = String(body.login ?? '').trim().slice(0, 40);
     const server = String(body.server ?? '').trim().slice(0, 80);
     const password = String(body.password ?? '');
+    const fullName = String(body.name ?? '').trim().slice(0, 80);
+    const deposit = Math.round(Number(body.deposit ?? 0));
     if (!login || !server || !password) return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 });
+    if (fullName.length < 3) return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 });
+    if (!Number.isFinite(deposit) || deposit <= 0) return NextResponse.json({ error: 'deposit amount is required' }, { status: 400 });
     patch.mt5_login = login;
     patch.mt5_server = server;
     patch.mt5_password_enc = encryptSecret(password); // AES-256-GCM — jamais en clair, jamais renvoyé
     patch.onboarding_step = 2;
+    // STASH VÉRIFICATION (nom du titulaire + dépôt déclaré) : porté par la file d'actions (statut done →
+    // jamais dans la queue), relu à la fin du wizard pour enrichir la carte CONNECT côté admin.
+    const { data: mn } = await db.from('members').select('member_no').eq('tg_id', s.tgId).limit(1);
+    await db.from('member_actions').insert({
+      tg_id: s.tgId, member_no: mn?.[0]?.member_no ?? null, kind: 'kyc', status: 'done', done_by: 'member',
+      detail: { broker_name: fullName, declared_deposit: deposit } as never,
+    });
   } else if (body.action === 'risk') {
     const tier = String(body.tier ?? '');
     if (!['low', 'balanced', 'high'].includes(tier)) return NextResponse.json({ error: 'invalid tier' }, { status: 400 });
@@ -93,8 +104,21 @@ export async function POST(req: NextRequest) {
       // UNE action 'connect' complète (compte + lot initial) part dans la file — PAS de mot de passe dedans.
       patch.onboarding_step = 3;
       patch.status = 'pending_copier';
-      const { data: mrow } = await db.from('members').select('mt5_login,mt5_server').eq('tg_id', s.tgId).limit(1);
-      await queueAction(s.tgId, 'connect', { login: mrow?.[0]?.mt5_login ?? null, server: mrow?.[0]?.mt5_server ?? null, tier, lot: TIER_LOT[tier] });
+      // la carte CONNECT porte TOUT ce qu'il faut pour VÉRIFIER avant d'approuver : broker choisi,
+      // nom du titulaire, dépôt déclaré, @telegram — plus jamais une demande aveugle dans la file.
+      const [{ data: mrow }, { data: kyc }] = await Promise.all([
+        db.from('members').select('mt5_login,mt5_server,broker,tg_username').eq('tg_id', s.tgId).limit(1),
+        db.from('member_actions').select('detail').eq('tg_id', s.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
+      ]);
+      await queueAction(s.tgId, 'connect', {
+        login: mrow?.[0]?.mt5_login ?? null,
+        server: mrow?.[0]?.mt5_server ?? null,
+        tier,
+        lot: TIER_LOT[tier],
+        broker: mrow?.[0]?.broker ?? null,
+        username: mrow?.[0]?.tg_username ?? null,
+        ...(kyc?.[0]?.detail as Record<string, unknown> | undefined),
+      });
     } else {
       await queueAction(s.tgId, 'risk_change', { to: tier, lot: TIER_LOT[tier] }); // → le support règle le lot dans STH
     }
