@@ -204,7 +204,9 @@ export default function AdminCRM() {
 
   const live = rows.filter((r) => r.status === 'live').length;
   const pendingRev = rows.filter((r) => r.status === 'pending_copier').length;
-  const todo = actions.length + (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0);
+  // les coms de dépôt EN ATTENTE comptent dans le travail à faire : confirmer quand le broker a payé
+  const depPending = deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending');
+  const todo = actions.length + (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) + depPending.length;
   const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', referral_reward: '💰 PAY REFERRAL REWARD (legacy)' };
   const TABS: { key: Tab; label: string; badge?: number }[] = [
     { key: 'dashboard', label: 'DASHBOARD' },
@@ -256,7 +258,10 @@ export default function AdminCRM() {
               <Kpi label="UNDER REVIEW" value={String(pendingRev)} accent="var(--gold)" hot={pendingRev > 0} />
               <Kpi label="TO PROCESS" value={String(todo)} accent="#ff8a5c" hot={todo > 0} />
               <Kpi label="OWED TO PARTNERS" value={`$${Math.floor(aff?.owedUsd ?? 0)}`} accent="var(--gold)" />
-              <Kpi label={`BROKER COM · ${monthLabel.split(' ')[0].slice(0, 3)}`} value={`$${Math.floor(depTotals.received)}`} accent="var(--up)" hot={depTotals.pending > 0} />
+              {/* reçu = encaissé (✓ RECEIVED) ; le pending s'affiche en dessous — sinon $0 après une
+                  saisie de dépôt semble être un bug alors que la com attend juste le paiement broker */}
+              <Kpi label={`BROKER COM · ${monthLabel.split(' ')[0].slice(0, 3)}`} value={`$${Math.floor(depTotals.received)}`} accent="var(--up)" hot={depTotals.pending > 0}
+                sub={depTotals.pending > 0 ? `+ $${Math.floor(depTotals.pending)} pending broker payout` : undefined} />
             </div>
             {(aff?.flagged.length ?? 0) > 0 && (
               <div style={{ ...warnBox }}>⚠ negative balances: {aff!.flagged.map((f) => `${f.username ? '@' + f.username : '#' + f.member_no} (${Math.floor(f.balance)}$)`).join(' · ')}</div>
@@ -273,6 +278,9 @@ export default function AdminCRM() {
                 ))}
                 {(aff?.pendingCommissions ?? []).slice(0, 5).map((c) => (
                   <RowLine key={c.id} onClick={() => setTab('affiliate')} icon="💰" text={`commission $${Number(c.amount)} → ${nameOf(c.referrer_tg_id)}`} sub="confirm once the broker paid you" />
+                ))}
+                {depPending.slice(0, 5).map((d) => (
+                  <RowLine key={d.id} onClick={() => setTab('deposits')} icon="🏦" text={`deposit com $${Number(d.detail?.commission_usd ?? 0)} · member #${d.member_no ?? '—'} (${(d.detail?.broker ?? '?').toUpperCase()})`} sub="mark ✓ RECEIVED once the broker paid you" gold />
                 ))}
               </section>
             ) : (
@@ -589,11 +597,12 @@ export default function AdminCRM() {
 }
 
 // ===== briques UI du CRM =====
-function Kpi({ label, value, accent, hot }: { label: string; value: string; accent: string; hot?: boolean }) {
+function Kpi({ label, value, accent, hot, sub }: { label: string; value: string; accent: string; hot?: boolean; sub?: string }) {
   return (
     <div className="panel" style={{ padding: '13px 15px', borderTop: `2px solid ${accent}`, boxShadow: hot ? `0 0 18px ${accent}22` : undefined }}>
       <div style={{ fontSize: 9.5, letterSpacing: 1.3, color: 'var(--dim)' }}>{label}</div>
       <div className="mono" style={{ fontSize: 23, fontWeight: 800, marginTop: 3, color: hot ? accent : 'var(--text)' }}>{value}</div>
+      {sub && <div className="mono" style={{ fontSize: 9.5, marginTop: 2, color: 'var(--gold)' }}>{sub}</div>}
     </div>
   );
 }
