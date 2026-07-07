@@ -55,6 +55,15 @@ export async function pushToAdmins(payload: PushPayload): Promise<number> {
   return send(subs, payload);
 }
 
+/** Envoie à un SEGMENT de membres (tous leurs appareils) — campagnes ciblées du push composer admin. */
+export async function pushToUsers(tgIds: number[], payload: PushPayload): Promise<number> {
+  if (!configure() || !tgIds.length) return 0;
+  const db = pdb();
+  const { data: subs } = await db.from('member_push_subs').select('endpoint,p256dh,auth').in('tg_id', tgIds);
+  if (!subs?.length) return 0;
+  return send(subs, payload);
+}
+
 /** Envoie à UN membre (tous ses appareils) — commissions confirmées, retraits payés, etc. */
 export async function pushToUser(tgId: number, payload: PushPayload): Promise<number> {
   if (!configure()) return 0;
