@@ -6,6 +6,7 @@ import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
 import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk, useWeekHistory } from '@/lib/cockpit/useRealtime';
 import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
+import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { AlgoriaVoice } from './Voice';
 import { Autopilot } from './Autopilot';
 
@@ -138,12 +139,18 @@ export function Cockpit() {
   const whyClosed = !!whyTrade?.closed_at;
   const whyPnl = whyTrade?.pnl != null ? Number(whyTrade.pnl) : null;
 
-  // Stats desk (track record) depuis les trades clôturés. On exclut les micro-scalps BEAST (spam) repérés via les signaux.
-  const rafaleTickets = new Set(
+  // Stats desk (track record) depuis les trades clôturés. On exclut les micro-scalps BEAST (spam) :
+  // tag RAFALE via les signaux + FILET DE SÉCURITÉ par lot micro (les vieux tickets sortent de la fenêtre
+  // des ~60 signaux quand le BEAST spam → leurs trades fuyaient dans le win rate et masquaient la tuile).
+  const rafaleBase = new Set(
     signals.filter((s: any) => Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')).map((s: any) => String(s.ticket)),
   );
   for (const s of hist.signals as any[]) {
-    if (Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')) rafaleTickets.add(String(s.ticket));
+    if (Array.isArray(s.rationale) && s.rationale.join(' ').includes('RAFALE')) rafaleBase.add(String(s.ticket));
+  }
+  const rafaleTickets = new Set(rafaleBase);
+  for (const t of [...(trades as any[]), ...(hist.trades as any[])]) {
+    if (t?.ticket != null && isShowTrade(t)) rafaleTickets.add(String(t.ticket));
   }
 
   // === Données RECAP : trades clôturés de la semaine (hors BEAST, hors NAS100 retiré), groupés par jour UTC ===

@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTrades, usePrice } from '@/lib/cockpit/useRealtime';
 import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
+import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { AlgoriaOrb } from '@/components/Orb';
 
 const CTAS = [
@@ -48,7 +49,7 @@ export default function StreamStrip() {
   const wins = useMemo(
     () =>
       (trades as any[])
-        .filter((t) => t.closed_at && Number(t.pnl) >= 5 && t.symbol !== 'NAS100' && Date.parse(t.closed_at) >= dayStartMs)
+        .filter((t) => t.closed_at && Number(t.pnl) >= 5 && t.symbol !== 'NAS100' && !isShowTrade(t) && Date.parse(t.closed_at) >= dayStartMs)
         .slice(0, 20),
     [trades, dayStartMs],
   );

@@ -18,6 +18,7 @@ import { Telemetry } from '@/components/Telemetry';
 import { useDesk, useSignals, useTrades, usePrice, useLatestState } from '@/lib/cockpit/useRealtime';
 import { getLatestTick } from '@/lib/cockpit/tickStore';
 import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
+import { isShowTrade } from '@/lib/cockpit/showTrades';
 
 const CTAS = [
   '💯 ALGORIA IS COMPLETELY FREE — LINK IN BIO',
@@ -65,7 +66,7 @@ export default function LiveStage() {
   );
 
   // ===== position ouverte (le héros) : trade ouvert + son signal (SL/TP) — P&L flottant recalculé au tick
-  const openTrade = (trades as any[]).find((t) => !t.closed_at && t.ticket != null && !rafale.has(String(t.ticket)));
+  const openTrade = (trades as any[]).find((t) => !t.closed_at && t.ticket != null && !isShowTrade(t, rafale));
   const hero = String(openTrade?.symbol ?? 'XAUUSD');
   const openSig = openTrade ? (signals as any[]).find((s) => String(s.ticket) === String(openTrade.ticket)) : null;
   const activeTrade = openTrade
@@ -103,7 +104,7 @@ export default function LiveStage() {
       const k = t.ticket != null ? String(t.ticket) : '';
       if (!k || !t.closed_at || t.pnl == null || seenClosed.current.has(k)) continue;
       seenClosed.current.add(k);
-      if (Date.parse(t.closed_at) < mountedAt.current - 5000 || rafale.has(k)) continue;
+      if (Date.parse(t.closed_at) < mountedAt.current - 5000 || isShowTrade(t, rafale)) continue;
       const pnl = Number(t.pnl);
       setFlash({ kind: pnl > 0 ? 'win' : 'loss', pnl, sym: String(t.symbol) === 'XAUUSD' ? 'GOLD' : 'BTC' });
       window.setTimeout(() => setFlash(null), pnl > 0 ? 5000 : 4000);
@@ -114,7 +115,7 @@ export default function LiveStage() {
 
   // wins du jour (≥5$, hors BEAST) — footer + pastilles chart
   const dayStartMs = brokerDayStartMs(); // jour METATRADER — le bilan à l'antenne colle au terminal
-  const wins = (trades as any[]).filter((t) => t.closed_at && Number(t.pnl) >= 5 && !rafale.has(String(t.ticket)) && Date.parse(t.closed_at) >= dayStartMs);
+  const wins = (trades as any[]).filter((t) => t.closed_at && Number(t.pnl) >= 5 && !isShowTrade(t, rafale) && Date.parse(t.closed_at) >= dayStartMs);
   const winTotal = wins.reduce((a, t) => a + Number(t.pnl), 0);
   const reel = wins.length ? [...wins, ...wins, ...wins] : [];
   const chartSigs = (signals as any[]).filter((s) => s.symbol === hero);

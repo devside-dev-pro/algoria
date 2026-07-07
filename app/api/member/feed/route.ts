@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin } from '@/lib/member/server';
+import { isShowTrade } from '@/lib/cockpit/showTrades';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
   // (marché retiré : STH ne l'a jamais copié — ses pertes n'existent que sur le compte maître,
   // les montrer aux membres serait un rouge qui n'est pas le leur)
   const rafale = new Set((signalsQ.data ?? []).filter((x) => JSON.stringify(x.rationale ?? '').includes('RAFALE') || JSON.stringify(x.rationale ?? '').includes('ACTION mode')).map((x) => String(x.ticket)));
-  let trades = (tradesQ.data ?? []).filter((t) => !rafale.has(String(t.ticket)) && String(t.symbol) !== 'NAS100');
+  let trades = (tradesQ.data ?? []).filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100');
   // PROSPECTS : la BANDE-ANNONCE, pas le flux brut — un curieux qui arrive sur 2 SL d'affilée ne rejoint
   // jamais, même après des semaines vertes. On ne montre que les GAINS (l'UI l'assume : "highlights") ;
   // l'historique complet, honnête, s'ouvre avec l'accès débloqué.
