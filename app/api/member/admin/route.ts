@@ -56,9 +56,33 @@ export async function POST(req: NextRequest) {
     updateDeposit?: { id: string; amount?: number; commission?: number; comStatus?: string; note?: string; broker?: string; date?: string };
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
+    memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
+
+  // ===== FICHE MEMBRE — l'historique complet d'un membre + notes privées du CRM =====
+  if (body.memberDetail) {
+    // toutes ses actions (connect/kyc/risk/pause/deposit/note…), tous statuts — la timeline de la fiche
+    const { data: acts } = await db.from('member_actions').select('*').eq('tg_id', body.memberDetail).order('created_at', { ascending: false }).limit(100);
+    return NextResponse.json({ actions: acts ?? [] });
+  }
+  if (body.addNote) {
+    const text = String(body.addNote.text ?? '').trim().slice(0, 500);
+    if (!text || !Number(body.addNote.tg_id)) return NextResponse.json({ error: 'text and tg_id required' }, { status: 400 });
+    const { data: m } = await db.from('members').select('member_no').eq('tg_id', body.addNote.tg_id).limit(1);
+    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    // note PRIVÉE opérateur (kind='note', status='done' → jamais dans la file, jamais vue par le membre)
+    const { error } = await db.from('member_actions').insert({ tg_id: body.addNote.tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text } as never });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.deleteNote) {
+    // garde kind='note' : on ne peut effacer QUE des notes avec cette action
+    const { error } = await db.from('member_actions').delete().eq('id', body.deleteNote).eq('kind', 'note');
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
 
   // ===== PUSH COMPOSER — le canal marketing de l'opérateur =====
   // Message libre vers un segment : all (tout le monde), prospects (pas encore activés), live (copie

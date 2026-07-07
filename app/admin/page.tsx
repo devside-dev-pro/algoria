@@ -15,7 +15,7 @@ interface Row {
   broker: string | null; risk_tier: string; created_at: string; updated_at: string | null; onboarding_step: number;
   mt5_login: string | null; mt5_server: string | null; usdt_trc20: string | null; referred_by: number | null;
 }
-interface Action { id: string; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }
+interface Action { id: string; tg_id?: number; member_no: number | null; kind: string; status?: string; done_by?: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Payout { id: string; tg_id: number; amount: number; address: string; status: string; tx_hash: string | null; reason: string | null; created_at: string }
 interface Affiliate { pendingCommissions: Comm[]; recentCommissions: Comm[]; pendingPayouts: Payout[]; recentPayouts: Payout[]; owedUsd: number; flagged: { tg_id: number; balance: number; username: string | null; member_no: number | null }[] }
@@ -54,6 +54,10 @@ export default function AdminCRM() {
   const [pushUrl, setPushUrl] = useState('/member');
   const [pushAud, setPushAud] = useState<'self' | 'prospects' | 'live' | 'all'>('self');
   const [pushResult, setPushResult] = useState<string | null>(null);
+  // ===== fiche membre (MEMBERS) : timeline complète + notes privées =====
+  const [sel, setSel] = useState<Row | null>(null);
+  const [selActs, setSelActs] = useState<Action[] | null>(null);
+  const [noteText, setNoteText] = useState('');
   // ===== win card studio (TOOLS) : les gains récents du compte maître, à télécharger pour la CM =====
   const [feedWins, setFeedWins] = useState<{ ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[]>([]);
   const [carding, setCarding] = useState<string | null>(null);
@@ -182,6 +186,29 @@ export default function AdminCRM() {
       url: '/member/onboarding',
     }, `#${r.member_no}`);
   };
+  // ===== FICHE MEMBRE : ouverture + notes privées =====
+  const openMember = (r: Row) => {
+    setSel(r);
+    setSelActs(null);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberDetail: r.tg_id }) })
+      .then(async (res) => { const d = (await res.json()) as { actions?: Action[] }; setSelActs(d.actions ?? []); });
+  };
+  const addNote = () => {
+    if (!sel || !noteText.trim()) return;
+    post({ addNote: { tg_id: sel.tg_id, text: noteText } }, () => { setNoteText(''); openMember(sel); });
+  };
+  const delNote = (id: string) => { if (sel && window.confirm('Delete this note?')) post({ deleteNote: id }, () => openMember(sel)); };
+  // résumé d'une action pour la timeline de la fiche — chaque kind a sa ligne parlante
+  const actSummary = (a: Action) => {
+    const d = (a.detail ?? {}) as Record<string, unknown>;
+    if (a.kind === 'connect') return `MT5 ${String(d.login ?? '?')} @ ${String(d.server ?? '?')} · lot ${String(d.lot ?? '?')}${d.reject_reason ? ` · ✗ ${String(d.reject_reason)}` : ''}`;
+    if (a.kind === 'kyc') return `${String(d.broker_name ?? '?')} · declared $${String(d.declared_deposit ?? '?')}`;
+    if (a.kind === 'risk_change') return `→ ${String(d.to ?? '?')} (lot ${String(d.lot ?? '?')})`;
+    if (a.kind === 'deposit') return `$${Number(d.amount_usd ?? 0)} deposited · com $${Number(d.commission_usd ?? 0)} (${String(d.commission_status ?? 'pending')})`;
+    if (a.kind === 'note') return String(d.text ?? '');
+    return '';
+  };
+
   // LEADS COINCÉS : encore en onboarding, triés du plus ancien mouvement au plus récent — la liste de closing
   const leads = useMemo(
     () => rows.filter((r) => r.status === 'onboarding').sort((a, b) => Date.parse(a.updated_at ?? a.created_at) - Date.parse(b.updated_at ?? b.created_at)),
@@ -228,7 +255,7 @@ export default function AdminCRM() {
   // les coms de dépôt EN ATTENTE comptent dans le travail à faire : confirmer quand le broker a payé
   const depPending = deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending');
   const todo = actions.length + (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) + depPending.length;
-  const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', referral_reward: '💰 PAY REFERRAL REWARD (legacy)' };
+  const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', referral_reward: '💰 PAY REFERRAL REWARD (legacy)', kyc: '🪪 BROKER DETAILS', deposit: '🏦 DEPOSIT', note: '📝 NOTE' };
   const TABS: { key: Tab; label: string; badge?: number }[] = [
     { key: 'dashboard', label: 'DASHBOARD' },
     { key: 'queue', label: 'QUEUE', badge: actions.length },
@@ -362,7 +389,53 @@ export default function AdminCRM() {
           </section>
         )}
 
-        {/* ===== MEMBERS — le CRM : recherche + table complète ===== */}
+        {/* ===== MEMBERS — le CRM : recherche + table complète + FICHE au clic ===== */}
+        {tab === 'members' && sel && (
+          <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'rgba(43,227,245,.35)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span className="mono goldText" style={{ fontWeight: 800, fontSize: 15 }}>#{sel.member_no}</span>
+              <span style={{ fontSize: 15, fontWeight: 800 }}>{sel.tg_username ? '@' + sel.tg_username : (sel.tg_name ?? '—')}</span>
+              {sel.tg_username && sel.tg_name && <span style={{ fontSize: 12, color: 'var(--dim)' }}>{sel.tg_name}</span>}
+              <StatusChip status={sel.status} />
+              {sel.tg_username && <a href={`https://t.me/${sel.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
+              <span style={{ flex: 1 }} />
+              <button onClick={() => { setSel(null); setSelActs(null); }} style={miniBtn}>✕ close</button>
+            </div>
+            {/* identité + compte — tout ce qu'il faut savoir avant un appel */}
+            <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 22px', fontSize: 11.5, color: 'var(--muted)' }}>
+              <span>broker <b style={{ color: 'var(--text)' }}>{sel.broker ?? '—'}</b></span>
+              <span>risk <b style={{ color: 'var(--text)' }}>{sel.risk_tier}</b></span>
+              <span>MT5 <b style={{ color: 'var(--text)' }}>{sel.mt5_login ? `${sel.mt5_login} @ ${sel.mt5_server ?? '?'}` : '—'}</b></span>
+              <span>USDT <b style={{ color: 'var(--text)' }}>{sel.usdt_trc20 ? sel.usdt_trc20.slice(0, 8) + '…' : '—'}</b></span>
+              <span>since <b style={{ color: 'var(--text)' }}>{new Date(sel.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</b></span>
+              <span>referred by <b style={{ color: 'var(--text)' }}>{sel.referred_by ? nameOf(sel.referred_by) : '—'}</b></span>
+              <span>invited <b style={{ color: 'var(--text)' }}>{rows.filter((r) => Number(r.referred_by) === Number(sel.tg_id)).length}</b></span>
+            </div>
+            {/* notes privées — le réflexe CRM avant/après chaque appel */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={noteText} onChange={(e) => setNoteText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addNote(); }} placeholder="private note — e.g. called on the 12th, waiting for his salary…" style={{ ...inp, flex: 1 }} />
+              <button disabled={busy || !noteText.trim()} onClick={addNote} style={{ padding: '10px 16px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: noteText.trim() ? 1 : 0.5 }}>+ NOTE</button>
+            </div>
+            {/* timeline — toutes ses actions (connect, kyc, dépôts, notes…), la plus récente en premier */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' }}>
+              {selActs == null && <p style={dimP}>loading history…</p>}
+              {selActs?.length === 0 && <p style={dimP}>No activity yet — this member signed up and stopped there.</p>}
+              {selActs?.map((a) => {
+                const stC = a.status === 'pending' ? 'var(--gold)' : a.status === 'rejected' ? '#ff6b8a' : 'var(--up)';
+                return (
+                  <div key={a.id} style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: a.kind === 'note' ? 'rgba(245,194,74,.05)' : 'rgba(10,17,31,.5)' }}>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{new Date(a.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: 120, overflowWrap: 'anywhere' }}>{actSummary(a)}</span>
+                    {a.kind !== 'note' && a.status && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.8, color: stC, whiteSpace: 'nowrap' }}>{a.status.toUpperCase()}</span>}
+                    {a.kind === 'note' && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap' }}>by {a.done_by ?? '—'}</span>}
+                    {a.kind === 'note' && <button disabled={busy} onClick={() => delNote(a.id)} style={miniBtn}>🗑</button>}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
         {tab === 'members' && (
           <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -381,7 +454,8 @@ export default function AdminCRM() {
                 </thead>
                 <tbody>
                   {filtered.map((r) => (
-                    <tr key={r.member_no} style={{ borderBottom: '1px solid rgba(130,152,190,.08)' }}>
+                    <tr key={r.member_no} onClick={() => openMember(r)} title="open member file"
+                      style={{ borderBottom: '1px solid rgba(130,152,190,.08)', cursor: 'pointer', background: sel?.member_no === r.member_no ? 'rgba(43,227,245,.06)' : undefined }}>
                       <td style={td}><span className="goldText" style={{ fontWeight: 800 }}>#{r.member_no}</span></td>
                       <td style={{ ...td, maxWidth: 190 }}>
                         <div style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</div>
