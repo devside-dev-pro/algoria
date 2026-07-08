@@ -70,16 +70,14 @@ export function verifyTelegramLogin(params: Record<string, string>): { ok: boole
   return { ok: true };
 }
 
-// ===== Droit d'accès : accepté dans le canal (telegram_joins) OU sur la liste VIP (member_whitelist) OU admin =====
-export async function hasAccess(tgId: number, username: string | null): Promise<boolean> {
-  if (isAdmin(username)) return true;
-  const db = sdb();
-  const uname = (username ?? '').toLowerCase();
-  const [joined, listed] = await Promise.all([
-    db.from('telegram_joins').select('id').eq('status', 'accepted').or(`user_id.eq.${tgId}${uname ? `,username.ilike.${uname}` : ''}`).limit(1),
-    uname ? db.from('member_whitelist').select('username').eq('username', uname).limit(1) : Promise.resolve({ data: [] as unknown[] }),
-  ]);
-  return !!joined.data?.length || !!(listed.data as unknown[])?.length;
+// ===== ACCÈS VIP/ÉQUIPE (member_whitelist) : app COMPLÈTE débloquée sans connexion copieur =====
+// Usage : CM (screens vue utilisateur), partenaires, invités de confiance. Ne touche PAS au statut —
+// la personne reste 'onboarding' côté copieur, elle voit juste tout (le mode teaser saute pour elle).
+export async function isVip(username: string | null | undefined): Promise<boolean> {
+  const uname = (username ?? '').trim().toLowerCase();
+  if (!uname) return false;
+  const { data } = await sdb().from('member_whitelist').select('username').eq('username', uname).limit(1);
+  return !!data?.length;
 }
 
 export function isAdmin(username: string | null | undefined): boolean {
