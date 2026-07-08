@@ -34,6 +34,7 @@ export function Cockpit() {
   const symCtx = (deskItems as any[]).find((e) => ((e?.data?.symbol as string | undefined) ?? 'XAUUSD') === symbol)?.data; // dernier contexte structuré du symbole sélectionné
   const dayStartEq = useDayStartEquity();
   const equityCurve = useEquityCurve();
+  const livePx = usePrice(symbol); // prix live du symbole affiché — sert au garde-fou "position réellement ouverte ?"
   const [optKilled, setOptKilled] = useState<boolean | null>(null);
   const [show, setShow] = useState(false); // SHOW = générateur d'activité (ex action + rafale fusionnés → set_rafale)
   const [lastFire, setLastFire] = useState<string | null>(null);
@@ -100,19 +101,32 @@ export function Cockpit() {
     if (!prev || (t.closed_at && !prev.closed_at)) tradeByTicket.set(k, t);
   }
 
+  // GARDE-FOU "position réellement ouverte" : un trade dont le prix a FRANCHI son SL ne peut plus être ouvert
+  // (le broker l'a stoppé). Après un redémarrage du runner, le reconcile() attend 2 min avant de nettoyer les
+  // ghosts → la base garde le trade en closed_at=null pendant ce temps, et le cockpit affichait une position
+  // fantôme avec un P&L flottant délirant (ex. short @4031 SL 4052 alors que le prix est à 4080 = −4859$).
+  // On ne juge QUE le symbole affiché (seul prix live dispo) ; sans prix ou sans SL valide → on fait confiance.
+  const mid = livePx?.mid ?? null;
+  const stillOpen = (t: any, dir: string, sym: string): boolean => {
+    if (!t || t.closed_at) return false;
+    if (sym !== symbol || mid == null) return true;
+    const sl = Number(t.sl ?? NaN);
+    if (!Number.isFinite(sl) || sl <= 0) return true;
+    return String(dir) === 'short' ? mid < sl : mid > sl; // au-delà du SL → stoppé → plus ouvert
+  };
+
   // Positions ouvertes PAR symbole (pour la barre marchés : point + sens sur chaque marché en position).
   const openBySym: Record<string, { dir: string }> = {};
   for (const s of signals as any[]) {
     if (s.ticket == null || !s.symbol) continue;
     const t = tradeByTicket.get(String(s.ticket));
-    if (t && !t.closed_at) openBySym[s.symbol] ??= { dir: String(s.direction) };
+    if (stillOpen(t, String(s.direction), s.symbol)) openBySym[s.symbol] ??= { dir: String(s.direction) };
   }
 
   // open position à dessiner sur le chart (entry/SL/TP) — DU SYMBOLE SÉLECTIONNÉ ; null sinon
   const openSig = signals.find((s: any) => {
     if (s.ticket == null || s.symbol !== symbol) return false;
-    const t = tradeByTicket.get(String(s.ticket));
-    return t && !t.closed_at;
+    return stillOpen(tradeByTicket.get(String(s.ticket)), String(s.direction), s.symbol);
   }) as any;
   const openRefMs = openSig ? Number(String(openSig.ref ?? '').split('-')[1]) : NaN; // temps d'entrée (comme le marqueur)
   // SL COURANT : la ligne trades porte le stop VIVANT (mis à jour par le runner au breakeven/trailing) —
