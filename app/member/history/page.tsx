@@ -68,17 +68,13 @@ export default function MemberHistory() {
               <span style={{ flex: 1 }} />
               {t.reason === 'be' && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>BE</span>}
               <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
+              {/* UN SEUL bouton, texte explicite (les emojis iOS rendaient gros et chargés × 2 par ligne).
+                  Carte paysage — le format le plus polyvalent (posts, statuts, DM) ; QR = SON lien de parrainage */}
               {win && (
-                <>
-                  <button onClick={() => void shareWin(t, 'story')} disabled={sharing === `${t.ticket}-story`} title="story card 9:16 — the QR is YOUR referral link ($50 per friend who activates)"
-                    style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '3px 8px', fontSize: 11, cursor: 'pointer', lineHeight: 1 }}>
-                    {sharing === `${t.ticket}-story` ? '…' : '📤'}
-                  </button>
-                  <button onClick={() => void shareWin(t, 'landscape')} disabled={sharing === `${t.ticket}-landscape`} title="wide card 16:9 (posts, statuses) — same referral QR"
-                    style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '3px 8px', fontSize: 11, cursor: 'pointer', lineHeight: 1 }}>
-                    {sharing === `${t.ticket}-landscape` ? '…' : '🖼'}
-                  </button>
-                </>
+                <button onClick={() => void shareWin(t, 'landscape')} disabled={sharing === `${t.ticket}-landscape`} title="share this win as a card — the QR is YOUR referral link ($50 per friend who activates)"
+                  style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '4px 9px', fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, cursor: 'pointer', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                  {sharing === `${t.ticket}-landscape` ? '…' : 'SHARE'}
+                </button>
               )}
             </div>
           );
