@@ -23,8 +23,16 @@ export interface SwingConfig {
  *  dans l'historique face au gold ; à 1 les sorties ~1R tombent dans la cible 500-800$. Revers assumé :
  *  un SL plein pèse pareil (~500-760$). */
 export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
-/** OR — suivi de tendance EMA longues + reprise après repli (labo : PF 2.21 sur 1.75 an, 3.5 j de tenue moyenne). */
-export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 2, tpAtr: 16, lot: 0.25, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
+/** OR — suivi de tendance EMA longues + reprise après repli.
+ *  STOP RESSERRÉ slAtr 1 (au lieu de 2) : le copieur des clients est en LOT FIXE (~0.05), donc le risque
+ *  client = largeur du stop × son lot, indépendant du lot master. Un stop 2×ATR (~37 pts) = −187$ sur un
+ *  compte 500$ (37% en un trade) ; à 1×ATR (~18 pts) ça tombe à −93$ (19%). L'edge tient : backtest 637j
+ *  gold H1 → PF 1.79, robuste sur les 3 tiers (T1 1.28 · T2 2.23 · T3 1.69) ; il ne s'écroule qu'en dessous
+ *  (slAtr 0.5 → PF 1.29, DD 27%). LOT 0.5 (au lieu de 0.25) : le stop ayant fondu de moitié, 0.5 lot garde
+ *  le MÊME risque master qu'avant (−935$/stop) tout en rapprochant la fraction copiée du scalp (10% vs 5%,
+ *  au lieu de 20%) → bilans client↔master 2× plus cohérents. Le vrai fix (copie proportionnelle) viendra
+ *  avec l'API STH. NB : 1.0 lot resterait impossible ici (−1870$/stop souffle un master à ~2300$). */
+export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 0.5, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 /** NAS100 — cassure du range 72h (labo 2.2 ans : PF 1.94, +$3086, DD 6.9%, tiers ✅ · tenue moy 8.5 j). */
 export const NAS_SWING: SwingConfig = { kind: 'breakout', N: 72, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 3, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 
