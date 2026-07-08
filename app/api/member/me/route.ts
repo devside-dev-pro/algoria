@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin } from '@/lib/member/server';
+import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin, isVip } from '@/lib/member/server';
 import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, nextMilestone } from '@/lib/member/affiliate';
 
 const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
@@ -61,7 +61,12 @@ export async function GET(req: NextRequest) {
     commissions: comms.slice(0, 20),
     payouts: payouts.slice(0, 10),
   };
-  return NextResponse.json({ member: ctx.member, admin: isAdmin(ctx.session.username), referral, rejection });
+  // unlocked calculé SERVEUR : admin OU copie activée OU whitelist VIP/équipe (CM, partenaires —
+  // app complète sans connexion copieur). La whitelist TOOLS redevient un vrai levier.
+  const admin = isAdmin(ctx.session.username);
+  const status = String((ctx.member as { status?: string }).status ?? '');
+  const unlocked = admin || ['live', 'paused'].includes(status) || (await isVip(ctx.session.username));
+  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection });
 }
 
 /** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'risk'|'pause'|'resume', ... } */

@@ -723,10 +723,10 @@ export default function AdminCRM() {
             </section>
 
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 680 }}>
-            <h2 style={secH}>VIP WHITELIST (LEGACY)</h2>
-            {/* héritage de l'époque « porte fermée » : depuis l'open-door, cette liste ne débloque RIEN —
-                l'app complète s'ouvre automatiquement quand le membre passe LIVE (queue → ✓ DONE) */}
-            <p style={dimP}>⚠ This list no longer gates anything. Full app access unlocks automatically the moment a member goes LIVE — approve his connect request in the QUEUE instead.</p>
+            <h2 style={secH}>👑 VIP / TEAM ACCESS</h2>
+            {/* whitelist RESSUSCITÉE : un @ ici voit l'app COMPLÈTE (zéro mode teaser) sans connexion
+                copieur — CM (screens vue utilisateur), partenaires, invités. Ne touche pas au statut. */}
+            <p style={dimP}>Handles here see the FULL app (no teaser mode) without connecting a broker account — for your CM, partners and trusted guests. Members still unlock automatically when they go LIVE.</p>
             <div style={{ display: 'flex', gap: 8 }}>
               <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="@username" style={{ ...inp, flex: 1 }} />
               <button disabled={busy || !input.trim()} onClick={() => post({ add: input }, () => setInput(''))} style={{ padding: '10px 16px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>ADD</button>
@@ -739,7 +739,7 @@ export default function AdminCRM() {
                 <button disabled={busy} onClick={() => post({ remove: w.username })} style={dangerBtn}>remove</button>
               </div>
             ))}
-            {wl.length === 0 && <p style={dimP}>Empty — and that&rsquo;s fine: it gates nothing anymore.</p>}
+            {wl.length === 0 && <p style={dimP}>Empty — add your CM&rsquo;s @ to give her the full member view.</p>}
             </section>
           </>
         )}

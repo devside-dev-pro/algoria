@@ -50,6 +50,7 @@ export function useMe() {
   const [referral, setReferral] = useState<Referral | null>(null);
   const [rejection, setRejection] = useState<{ reason: string; at: string | null } | null>(null);
   const [admin, setAdmin] = useState(false);
+  const [srvUnlocked, setSrvUnlocked] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   useEffect(() => {
@@ -58,7 +59,7 @@ export function useMe() {
       void fetch('/api/member/me')
         .then(async (r) => {
           if (r.status === 401) { router.replace('/member/login'); return null; }
-          return (await r.json()) as { member: Member; admin: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null };
+          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null };
         })
         .then((d) => {
           if (!alive || !d?.member) return;
@@ -66,6 +67,7 @@ export function useMe() {
           setReferral(d.referral ?? null);
           setRejection(d.rejection ?? null);
           setAdmin(!!d.admin);
+          setSrvUnlocked(typeof d.unlocked === 'boolean' ? d.unlocked : null);
           setLoading(false);
         })
         .catch(() => alive && setLoading(false));
@@ -80,7 +82,8 @@ export function useMe() {
     return () => { alive = false; document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); window.clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const unlocked = admin || member?.status === 'live' || member?.status === 'paused';
+  // le serveur fait foi (il connaît la whitelist VIP/équipe) — repli local pour les vieux payloads
+  const unlocked = srvUnlocked ?? (admin || member?.status === 'live' || member?.status === 'paused');
   return { member, setMember, referral, rejection, admin, unlocked, loading };
 }
 

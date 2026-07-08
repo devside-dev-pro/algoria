@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { verifySession, SESSION_COOKIE, sdb, isAdmin } from '@/lib/member/server';
+import { verifySession, SESSION_COOKIE, sdb, isAdmin, isVip } from '@/lib/member/server';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
 
 export const runtime = 'nodejs';
@@ -20,7 +20,8 @@ export async function GET(req: NextRequest) {
     db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot').not('closed_at', 'is', null).not('pnl', 'is', null).order('closed_at', { ascending: false }).limit(60),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
   ]);
-  const unlocked = isAdmin(s.username) || ['live', 'paused'].includes(String(memberQ.data?.[0]?.status ?? ''));
+  // même règle que /api/member/me : admin OU copie activée OU whitelist VIP/équipe (CM…)
+  const unlocked = isAdmin(s.username) || ['live', 'paused'].includes(String(memberQ.data?.[0]?.status ?? '')) || (await isVip(s.username));
   // on écarte les micro-scalps BEAST/RAFALE (show du live, pas la stratégie copiée) ET le NAS100
   // (marché retiré : STH ne l'a jamais copié — ses pertes n'existent que sur le compte maître,
   // les montrer aux membres serait un rouge qui n'est pas le leur)
