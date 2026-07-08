@@ -66,7 +66,18 @@ export default function LiveStage() {
   );
 
   // ===== position ouverte (le héros) : trade ouvert + son signal (SL/TP) — P&L flottant recalculé au tick
-  const openTrade = (trades as any[]).find((t) => !t.closed_at && t.ticket != null && !isShowTrade(t, rafale));
+  // GARDE-FOU (à l'antenne surtout) : un trade dont le prix a franchi son SL a été stoppé par le broker —
+  // après un redémarrage runner la base le garde "open" ~2 min (le reconcile attend). Sans ce filtre, le
+  // live affichait une position fantôme aux spectateurs avec un flottant délirant. Sans tick/SL → on fait confiance.
+  const stillOpen = (t: any): boolean => {
+    if (!t || t.closed_at || t.ticket == null || isShowTrade(t, rafale)) return false;
+    const sl = Number(t.sl ?? NaN);
+    const tk = getLatestTick(String(t.symbol));
+    if (!Number.isFinite(sl) || sl <= 0 || !tk) return true;
+    const m = (tk.bid + tk.ask) / 2;
+    return t.direction === 'long' ? m > sl : m < sl; // au-delà du SL → stoppé → plus ouvert
+  };
+  const openTrade = (trades as any[]).find(stillOpen);
   const hero = String(openTrade?.symbol ?? 'XAUUSD');
   const openSig = openTrade ? (signals as any[]).find((s) => String(s.ticket) === String(openTrade.ticket)) : null;
   const activeTrade = openTrade
