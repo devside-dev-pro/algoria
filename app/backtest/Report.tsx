@@ -2,24 +2,24 @@
 // Rapport de backtest PUBLIC (algoria.tech/backtest) — à partager aux prospects qui demandent un historique.
 // HONNÊTETÉ : clairement étiqueté SIMULATION, jamais présenté comme du live, et surtout COMBINÉ — toutes les
 // stratégies (scalp gold + swing gold + swing BTC) sur UN SEUL compte, comme un membre les reçoit vraiment.
-// Fenêtre du combiné = 17 mois (6 fév 2025 → 9 juil 2026), backfill M5+H1 profond chez le broker via
-// scripts/backtest-12mo.ts, config EXACTE de prod (SCALP_CONFIG maxOpenPositions:1 + emaGate notOpposed + mode scalp).
+// Fenêtre du combiné = 16 mois PLEINS (mars 2025 → juin 2026 ; on retire fév. partiel + juil. désormais live),
+// backfill M5+H1 profond chez le broker via scripts/backtest-12mo.ts, config EXACTE de prod
+// (SCALP_CONFIG maxOpenPositions:1 + emaGate notOpposed + mode scalp).
 // Le swing seul (multi-années) sert de CONTEXTE de robustesse. Chiffres du backtester causal (simulator.ts + labcore.ts).
 import { useEffect, useRef } from 'react';
 
-// équité SIMULÉE du LIVRE COMPLET (scalp+swings, un compte, 1% de risque/trade, composé) — 17 mois, 152 pts.
+// équité SIMULÉE du LIVRE COMPLET (scalp+swings, un compte, 1% de risque/trade, composé) — 16 mois pleins, ~143 pts.
 // Config EXACTE de prod : SCALP_CONFIG (maxOpenPositions:1, anti-empilement) + emaGate 'notOpposed' + mode 'scalp'.
-const EQ = [1000, 1033, 1010, 947, 945, 882, 889, 859, 814, 812, 800, 887, 952, 952, 944, 981, 982, 967, 1000, 954, 919, 1064, 1060, 1036, 988, 1010, 1028, 1028, 1057, 1036, 1120, 1106, 1072, 1083, 1058, 1069, 1086, 1204, 1208, 1212, 1276, 1293, 1222, 1234, 1175, 1138, 1164, 1137, 1222, 1278, 1326, 1271, 1290, 1262, 1203, 1189, 1117, 1083, 1014, 1030, 979, 953, 954, 982, 1022, 1217, 1206, 1180, 1232, 1150, 1270, 1261, 1332, 1362, 1552, 1528, 1516, 1530, 1547, 1566, 1548, 1569, 1606, 1587, 1636, 1696, 1678, 1676, 1651, 1958, 1962, 2018, 1996, 2032, 2081, 2203, 2721, 2488, 2416, 2318, 2378, 2374, 2319, 2399, 2342, 2586, 2843, 2773, 2997, 3058, 3040, 3053, 2974, 2950, 3139, 3174, 3032, 3021, 3041, 3200, 3323, 3114, 3036, 2840, 2783, 2854, 2972, 2862, 2728, 2692, 2596, 2792, 2814, 3081, 3117, 2790, 2774, 2682, 2694, 2777, 2812, 2698, 3111, 3218, 3247, 3364, 3273, 3756, 3932, 3770, 3618, 3622];
+const EQ = [1000, 986, 935, 933, 918, 1019, 1093, 1092, 1084, 1127, 1128, 1111, 1148, 1095, 1055, 1221, 1217, 1190, 1135, 1160, 1180, 1180, 1213, 1190, 1286, 1270, 1230, 1243, 1214, 1227, 1246, 1382, 1386, 1391, 1464, 1484, 1403, 1417, 1349, 1306, 1336, 1306, 1403, 1468, 1522, 1459, 1481, 1449, 1381, 1365, 1283, 1243, 1164, 1183, 1124, 1094, 1096, 1128, 1173, 1398, 1385, 1354, 1415, 1320, 1458, 1448, 1530, 1564, 1782, 1754, 1740, 1757, 1776, 1798, 1777, 1802, 1844, 1822, 1879, 1946, 1926, 1925, 1895, 2248, 2253, 2317, 2291, 2333, 2388, 2529, 3124, 2857, 2774, 2661, 2730, 2725, 2662, 2754, 2689, 2969, 3264, 3183, 3440, 3511, 3490, 3505, 3414, 3387, 3603, 3644, 3481, 3468, 3491, 3674, 3815, 3575, 3486, 3260, 3195, 3276, 3412, 3285, 3132, 3090, 2980, 3205, 3230, 3536, 3578, 3202, 3184, 3078, 3093, 3187, 3228, 3098, 3572, 3694, 3728, 3861, 3757, 4312, 4437];
 const MONTHS = [
-  { label: 'Feb 25', n: 320, win: 78, net: -129 }, { label: 'Mar 25', n: 397, win: 85, net: 114 },
-  { label: 'Apr 25', n: 411, win: 80, net: 1 }, { label: 'May 25', n: 445, win: 84, net: 84 },
-  { label: 'Jun 25', n: 447, win: 85, net: 147 }, { label: 'Jul 25', n: 458, win: 82, net: 60 },
-  { label: 'Aug 25', n: 428, win: 78, net: -334 }, { label: 'Sep 25', n: 435, win: 84, net: 344 },
-  { label: 'Oct 25', n: 498, win: 82, net: 260 }, { label: 'Nov 25', n: 414, win: 84, net: 279 },
-  { label: 'Dec 25', n: 478, win: 85, net: 481 }, { label: 'Jan 26', n: 349, win: 83, net: 525 },
-  { label: 'Feb 26', n: 365, win: 84, net: 233 }, { label: 'Mar 26', n: 434, win: 80, net: -252 },
-  { label: 'Apr 26', n: 440, win: 83, net: 38 }, { label: 'May 26', n: 366, win: 79, net: -129 },
-  { label: 'Jun 26', n: 408, win: 87, net: 1144 }, { label: 'Jul 26', n: 134, win: 79, net: -243 },
+  { label: 'Mar 25', n: 397, win: 85, net: 131 }, { label: 'Apr 25', n: 411, win: 80, net: 1 },
+  { label: 'May 25', n: 445, win: 84, net: 96 }, { label: 'Jun 25', n: 447, win: 85, net: 169 },
+  { label: 'Jul 25', n: 458, win: 82, net: 69 }, { label: 'Aug 25', n: 428, win: 78, net: -383 },
+  { label: 'Sep 25', n: 435, win: 84, net: 395 }, { label: 'Oct 25', n: 498, win: 82, net: 299 },
+  { label: 'Nov 25', n: 414, win: 84, net: 320 }, { label: 'Dec 25', n: 478, win: 85, net: 552 },
+  { label: 'Jan 26', n: 349, win: 83, net: 603 }, { label: 'Feb 26', n: 365, win: 84, net: 268 },
+  { label: 'Mar 26', n: 434, win: 80, net: -290 }, { label: 'Apr 26', n: 440, win: 83, net: 43 },
+  { label: 'May 26', n: 366, win: 79, net: -149 }, { label: 'Jun 26', n: 408, win: 87, net: 1314 },
 ];
 const START = 1_000;
 const greenMonths = MONTHS.filter((m) => m.net >= 0).length;
@@ -164,26 +164,26 @@ export default function Report() {
           </div>
         </div>
 
-        <p className="lede">Algoria runs several strategies at once — fast intraday scalps plus slower swing positions held for days. This is <b>17 months of all of them together, on one account</b> — every trade a member&rsquo;s account would have taken, not a hand-picked strategy. Real gold &amp; Bitcoin prices, with spreads, commissions and slippage modelled in. Live trading began July 2026; this is the history behind it.</p>
+        <p className="lede">Algoria runs several strategies at once — fast intraday scalps plus slower swing positions held for days. This is <b>16 months of all of them together, on one account</b> — every trade a member&rsquo;s account would have taken, not a hand-picked strategy. Real gold &amp; Bitcoin prices, with spreads, commissions and slippage modelled in. Live trading began July 2026; this is the history behind it.</p>
 
         <section>
           <div className="sechead">
             <h3>The complete book — every strategy, one account</h3>
             <span className="tag">all trades</span>
-            <span className="per">6 Feb 2025 → 9 Jul 2026 · 17 months</span>
+            <span className="per">Mar 2025 → Jun 2026 · 16 months</span>
           </div>
-          <p className="subhead">Scalping and swing running side by side, exactly as a member receives them — 7,227 trades over 17 months on a single simulated account, replayed with the exact live filters (never two stacked trades, no counter-trend entries).</p>
+          <p className="subhead">Scalping and swing running side by side, exactly as a member receives them — 6,773 trades over 16 full months on a single simulated account, replayed with the exact live filters (never two stacked trades, no counter-trend entries).</p>
 
           <div className="chartcard">
             <div className="cap">
               <span className="l">Simulated equity · $1,000 start · 1% risk / trade · compounding</span>
               <span className="l">$1,000 → ${usd(EQ[EQ.length - 1])} (sim)</span>
             </div>
-            <canvas ref={cv} aria-label="Simulated 17-month equity curve of all Algoria strategies combined" />
+            <canvas ref={cv} aria-label="Simulated 16-month equity curve of all Algoria strategies combined" />
           </div>
 
           <div className="tiles">
-            <div className="tile" style={tile('var(--blue)')}><div className="k">Total trades</div><div className="v">7,227</div><div className="s">6,967 scalp · 260 swing</div></div>
+            <div className="tile" style={tile('var(--blue)')}><div className="k">Total trades</div><div className="v">6,773</div><div className="s">gold scalp + swing</div></div>
             <div className="tile" style={tile('var(--up)')}><div className="k">Win rate</div><div className="v" style={{ color: 'var(--up)' }}>83%</div><div className="s">across all strategies</div></div>
             <div className="tile" style={tile('var(--cyan)')}><div className="k">Profit factor</div><div className="v">1.12</div><div className="s">gross win ÷ gross loss</div></div>
             <div className="tile" style={tile('var(--down)')}><div className="k">Max drawdown</div><div className="v" style={{ color: 'var(--down)' }}>30.7%</div><div className="s">worst peak-to-trough</div></div>
@@ -211,12 +211,12 @@ export default function Report() {
               </tbody>
             </table>
           </div>
-          <p className="note">Shown honestly, warts and all: <b>5 of the 18 months closed red</b>, and along the way the account sat through a drawdown of about <b>30%</b> before recovering — a member would have watched roughly a third of their balance disappear at the low point. One month (June 2026) was exceptional and flatters the total; most months are far smaller. Result is the net on a simulated $1,000 account risking <b>1% per trade, compounding</b>, so dollar amounts grow with the balance. This is a history of what the strategies did, <b>not a promised return</b> — the risk you choose and live conditions change everything.</p>
+          <p className="note">Full calendar months only — the partial opening month and the current month (now trading live) are left out. Shown honestly, warts and all: <b>3 of the 16 months closed red</b>, and along the way the account sat through a drawdown of about <b>30%</b> before recovering — a member would have watched roughly a third of their balance disappear at the low point. One month (June 2026) was exceptional and flatters the total; most months are far smaller. Result is the net on a simulated $1,000 account risking <b>1% per trade, compounding</b>, so dollar amounts grow with the balance. This is a history of what the strategies did, <b>not a promised return</b> — the risk you choose and live conditions change everything.</p>
         </section>
 
         <section>
           <div className="sechead"><h3>The edge isn&rsquo;t new — the swing layer, further back</h3></div>
-          <p className="subhead">The full book above already spans 17 months. The slower swing layer runs on hourly candles and can be replayed even further back — here it is on its own, as evidence the edge holds across years, not just this window.</p>
+          <p className="subhead">The full book above already spans 16 months. The slower swing layer runs on hourly candles and can be replayed even further back — here it is on its own, as evidence the edge holds across years, not just this window.</p>
           <div className="cards">
             <div className="card">
               <div className="h"><span className="dot" style={{ background: 'var(--gold)' }} /><span className="name">Gold swing</span><span className="yrs">12 months</span></div>
