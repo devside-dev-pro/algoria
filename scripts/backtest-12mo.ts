@@ -6,6 +6,7 @@ import 'dotenv/config';
 //
 //   npx tsx scripts/backtest-12mo.ts            (symboles = ALGORIA_SYMBOL / BTCUSD_SYMBOL)
 //   npx tsx scripts/backtest-12mo.ts Gold BTCUSD
+//   WINDOW_FROM=2025-03-01 WINDOW_TO=2026-07-01 npx tsx scripts/backtest-12mo.ts   (mois pleins mars 25 → juin 26)
 import { connectMaster } from '../runner/metaapi/client';
 import { backfill } from '../runner/metaapi/candles';
 import { backtest } from '../backtest/simulator';
@@ -63,21 +64,30 @@ async function main() {
     ...swing(h1b, brk(24), 'BTCUSD').map((t) => ({ t: t.exitTime, r: t.r, win: t.pnl > 0, src: 'btc-swing' })),
   ].sort((a, b) => a.t - b.t);
 
+  // fenêtre optionnelle (mois pleins) : WINDOW_FROM / WINDOW_TO en YYYY-MM-DD (bornes UTC, TO exclusif).
+  // ex. mois pleins mars 2025 → juin 2026 (on retire fév. partiel + juil. live) :
+  //   WINDOW_FROM=2025-03-01 WINDOW_TO=2026-07-01 npx tsx scripts/backtest-12mo.ts
+  const WF = process.env.WINDOW_FROM ? Date.parse(process.env.WINDOW_FROM + 'T00:00:00Z') : W0;
+  const WT = process.env.WINDOW_TO ? Date.parse(process.env.WINDOW_TO + 'T00:00:00Z') : W1 + 1;
+  const win = all.filter((t) => t.t >= WF && t.t < WT);
+  if (!win.length) { console.error('[12mo] aucun trade dans la fenêtre demandée'); process.exit(1); }
+
   // UN compte : chaque trade risque 1% du solde courant (compounding)
-  let bal = START, peak = START, maxDD = 0, gW = 0, gL = 0, wins = 0; const curveRaw: { t: number; eq: number }[] = [{ t: W0, eq: bal }];
-  for (const tr of all) { bal += tr.r * 0.01 * bal; curveRaw.push({ t: tr.t, eq: Math.round(bal) }); peak = Math.max(peak, bal); maxDD = Math.max(maxDD, (peak - bal) / peak); if (tr.r > 0) gW += tr.r; else gL += -tr.r; if (tr.win) wins++; }
+  let bal = START, peak = START, maxDD = 0, gW = 0, gL = 0, wins = 0; const curveRaw: { t: number; eq: number }[] = [{ t: WF, eq: bal }];
+  for (const tr of win) { bal += tr.r * 0.01 * bal; curveRaw.push({ t: tr.t, eq: Math.round(bal) }); peak = Math.max(peak, bal); maxDD = Math.max(maxDD, (peak - bal) / peak); if (tr.r > 0) gW += tr.r; else gL += -tr.r; if (tr.win) wins++; }
   // mensuel
   const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const byM: Record<string, { n: number; w: number; net: number }> = {}; let mb = START;
-  for (const tr of all) { const d = new Date(tr.t); const k = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; (byM[k] ??= { n: 0, w: 0, net: 0 }); const delta = tr.r * 0.01 * mb; byM[k].n++; if (tr.win) byM[k].w++; byM[k].net += delta; mb += delta; }
+  for (const tr of win) { const d = new Date(tr.t); const k = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; (byM[k] ??= { n: 0, w: 0, net: 0 }); const delta = tr.r * 0.01 * mb; byM[k].n++; if (tr.win) byM[k].w++; byM[k].net += delta; mb += delta; }
   const months = Object.keys(byM).sort().map((k) => { const [y, m] = k.split('-'); return { label: `${MO[+m - 1]} ${y.slice(2)}`, n: byM[k].n, win: Math.round(byM[k].w / byM[k].n * 100), net: Math.round(byM[k].net) }; });
   // équité downsamplée ~150 pts
   const step = Math.max(1, Math.floor(curveRaw.length / 150)); const eq: number[] = []; for (let i = 0; i < curveRaw.length; i += step) eq.push(curveRaw[i].eq); eq.push(curveRaw[curveRaw.length - 1].eq);
 
+  const lastT = win[win.length - 1].t;
   const result = {
-    window: { from: new Date(W0).toISOString().slice(0, 10), to: new Date(W1).toISOString().slice(0, 10), days: Math.round((W1 - W0) / 86_400_000) },
-    trades: all.length, win: Math.round(wins / all.length * 100), pf: +(gW / gL).toFixed(2), maxDD: +(maxDD * 100).toFixed(1), ret: Math.round((bal - START) / START * 100), end: Math.round(bal),
-    split: { scalp: all.filter((t) => t.src === 'scalp').length, goldSwing: all.filter((t) => t.src === 'gold-swing').length, btcSwing: all.filter((t) => t.src === 'btc-swing').length },
+    window: { from: new Date(WF).toISOString().slice(0, 10), to: new Date(lastT).toISOString().slice(0, 10), days: Math.round((lastT - WF) / 86_400_000) },
+    trades: win.length, win: Math.round(wins / win.length * 100), pf: +(gW / gL).toFixed(2), maxDD: +(maxDD * 100).toFixed(1), ret: Math.round((bal - START) / START * 100), end: Math.round(bal),
+    split: { scalp: win.filter((t) => t.src === 'scalp').length, goldSwing: win.filter((t) => t.src === 'gold-swing').length, btcSwing: win.filter((t) => t.src === 'btc-swing').length },
     months, eq,
   };
   console.log('\n================ COPIE TOUT CE BLOC ET COLLE-LE MOI ================');
