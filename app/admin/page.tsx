@@ -5,9 +5,9 @@
 // mensuel exportable en CSV), AFFILIATE (l'argent des parrains), TOOLS (whitelist, push).
 // Garde : l'API /api/member/admin renvoie 403 à quiconque n'est pas dans ADMIN_TG_USERNAMES — cette page
 // n'est qu'une façade. Session : le même login Telegram que l'espace membre.
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
+import { openTelegram } from '@/lib/telegram';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -28,13 +28,12 @@ interface Deposit {
 type Tab = 'dashboard' | 'queue' | 'members' | 'deposits' | 'affiliate' | 'tools';
 
 export default function AdminCRM() {
-  const router = useRouter();
   const [tab, setTab] = useState<Tab>('dashboard');
   const [wl, setWl] = useState<WL[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
   const [aff, setAff] = useState<Affiliate | null>(null);
-  const [state, setState] = useState<'loading' | 'ok' | 'forbidden'>('loading');
+  const [state, setState] = useState<'loading' | 'ok' | 'forbidden' | 'anon'>('loading');
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
@@ -66,7 +65,10 @@ export default function AdminCRM() {
 
   const load = () =>
     void fetch('/api/member/admin').then(async (r) => {
-      if (r.status === 401) { router.replace('/member/login'); return; }
+      // 401 = aucune session · 403 = session mais pas admin. Les DEUX ouvrent la porte de connexion admin
+      // (au lieu d'un cul-de-sac) — mais l'accès reste réservé à ADMIN_TG_USERNAMES : un autre compte
+      // se reconnecte, se refait renvoyer en 403, et ne voit jamais le CRM. Sécurité intacte, porte ajoutée.
+      if (r.status === 401) return setState('anon');
       if (r.status === 403) return setState('forbidden');
       const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[] };
       setWl(d.whitelist);
@@ -272,7 +274,7 @@ export default function AdminCRM() {
   };
 
   if (state === 'loading') return <Center>loading…</Center>;
-  if (state === 'forbidden') return <Center>admin only</Center>;
+  if (state === 'anon' || state === 'forbidden') return <AdminGate forbidden={state === 'forbidden'} />;
 
   const live = rows.filter((r) => r.status === 'live').length;
   const pendingRev = rows.filter((r) => r.status === 'pending_copier').length;
@@ -775,6 +777,61 @@ function RowLine({ icon, text, sub, onClick, gold }: { icon: string; text: strin
 }
 function Center({ children }: { children: React.ReactNode }) {
   return <main style={{ minHeight: '90vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>{children}</main>;
+}
+
+// PORTE DE CONNEXION ADMIN — remplace l'ancien cul-de-sac « admin only ». Même login Telegram natif que
+// l'espace membre (code à usage unique + deep-link, pollé). `forbidden` = une session NON-admin traîne sur
+// ce poste → on la purge (logout) avant de relancer, pour repartir propre. L'accès reste gardé côté API :
+// tout compte hors ADMIN_TG_USERNAMES se reconnecte puis se refait refuser — il ne voit jamais le CRM.
+function AdminGate({ forbidden }: { forbidden: boolean }) {
+  const [phase, setPhase] = useState<'idle' | 'waiting' | 'expired' | 'error'>('idle');
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => () => { if (poll.current) clearInterval(poll.current); }, []);
+  const start = async () => {
+    try {
+      if (forbidden) { try { await fetch('/api/member/logout', { method: 'POST' }); } catch { /* purge best-effort */ } }
+      const r = await fetch('/api/member/tglogin', { method: 'POST' });
+      const d = (await r.json()) as { code?: string; link?: string };
+      if (!d.code || !d.link) { setPhase('error'); return; }
+      setPhase('waiting');
+      openTelegram(d.link, { fallbackNewTab: true });
+      if (poll.current) clearInterval(poll.current);
+      poll.current = setInterval(async () => {
+        const p = (await fetch(`/api/member/tglogin?code=${d.code}`).then((x) => x.json()).catch(() => null)) as { ok?: boolean; expired?: boolean } | null;
+        if (p?.ok) { if (poll.current) clearInterval(poll.current); window.location.replace('/admin'); } // reload complet → re-check admin
+        else if (p?.expired) { if (poll.current) clearInterval(poll.current); setPhase('expired'); }
+      }, 2000);
+    } catch {
+      setPhase('error');
+    }
+  };
+  return (
+    <main style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, textAlign: 'center', padding: '0 18px', background: 'radial-gradient(90% 60% at 50% -10%, #0e1c33 0%, #070b12 60%)' }}>
+      <img src="/brand/algoria-mark.png" alt="Algoria" width={60} height={60} style={{ objectFit: 'contain', filter: 'drop-shadow(0 0 12px rgba(43,227,245,.45))' }} />
+      <div>
+        <h1 style={{ fontSize: 24, margin: 0, letterSpacing: 0.5 }}>ALGORIA <span className="goldText">ADMIN</span></h1>
+        <p style={{ color: 'var(--muted)', fontSize: 13.5, lineHeight: 1.6, maxWidth: 360, margin: '9px auto 0' }}>
+          {forbidden
+            ? 'This account isn’t an admin. Sign in with your authorized Telegram to open the back-office.'
+            : 'Restricted back-office. Sign in with your authorized Telegram account.'}
+        </p>
+      </div>
+      {phase !== 'waiting' ? (
+        <button onClick={() => void start()} style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '13px 26px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 14.5, color: '#fff', background: 'linear-gradient(90deg,#2AABEE,#229ED9)', boxShadow: '0 0 24px rgba(42,171,238,.35)' }}>
+          ✈️ {forbidden ? 'SIGN IN WITH A DIFFERENT ACCOUNT' : 'LOG IN WITH TELEGRAM'}
+        </button>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9 }}>
+          <span className="pulse" style={{ fontSize: 13, color: 'var(--cyan)', fontWeight: 700 }}>● waiting for Telegram…</span>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', maxWidth: 300, lineHeight: 1.55 }}>Telegram just opened — tap <strong style={{ color: 'var(--text)' }}>START</strong> in the bot chat.</p>
+          <button onClick={() => void start()} style={{ border: 'none', background: 'transparent', color: 'var(--dim)', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>Didn’t open? Tap to retry</button>
+        </div>
+      )}
+      {phase === 'expired' && <p style={{ fontSize: 12, color: 'rgba(210,150,165,.9)' }}>Link expired — tap to try again.</p>}
+      {phase === 'error' && <p style={{ fontSize: 12, color: 'rgba(210,150,165,.9)' }}>Something went wrong — try again.</p>}
+      <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', letterSpacing: 1 }}>ADMIN ONLY · ADMIN_TG_USERNAMES</p>
+    </main>
+  );
 }
 const secH: CSSProperties = { fontSize: 12, margin: 0, letterSpacing: 1.4, color: 'var(--muted)' };
 const warnBox: CSSProperties = { border: '1px solid rgba(255,107,138,.45)', background: 'rgba(255,107,138,.08)', borderRadius: 10, padding: '10px 13px', fontSize: 12, color: 'rgba(210,150,165,.95)' };
