@@ -9,19 +9,19 @@ import { useEffect, useRef } from 'react';
 
 // équité SIMULÉE du LIVRE COMPLET (scalp+swings, un compte, 1% de risque/trade, composé) — 17 mois, 152 pts.
 // Config EXACTE de prod : SCALP_CONFIG (maxOpenPositions:1, anti-empilement) + emaGate 'notOpposed' + mode 'scalp'.
-const EQ = [10000, 10327, 10099, 9474, 9449, 8817, 8889, 8588, 8144, 8125, 7998, 8874, 9517, 9515, 9445, 9813, 9824, 9674, 10002, 9540, 9194, 10636, 10605, 10365, 9883, 10104, 10276, 10276, 10569, 10362, 11205, 11060, 10717, 10827, 10578, 10686, 10858, 12041, 12077, 12115, 12755, 12929, 12219, 12342, 11749, 11379, 11642, 11374, 12218, 12784, 13258, 12707, 12900, 12623, 12027, 11888, 11172, 10830, 10136, 10305, 9789, 9532, 9544, 9823, 10219, 12174, 12062, 11795, 12322, 11498, 12702, 12614, 13324, 13624, 15519, 15280, 15155, 15305, 15474, 15659, 15479, 15694, 16061, 15874, 16364, 16955, 16781, 16765, 16506, 19584, 19624, 20183, 19956, 20319, 20806, 22026, 27212, 24884, 24164, 23181, 23783, 23741, 23186, 23986, 23425, 25865, 28434, 27728, 29968, 30584, 30403, 30530, 29737, 29503, 31389, 31743, 30322, 30211, 30410, 32003, 33234, 31143, 30365, 28400, 27830, 28538, 29718, 28617, 27279, 26917, 25956, 27920, 28140, 30806, 31172, 27896, 27740, 26816, 26943, 27766, 28115, 26983, 31114, 32181, 32474, 33635, 32728, 37565, 39319, 37705, 36179, 36217];
+const EQ = [1000, 1033, 1010, 947, 945, 882, 889, 859, 814, 812, 800, 887, 952, 952, 944, 981, 982, 967, 1000, 954, 919, 1064, 1060, 1036, 988, 1010, 1028, 1028, 1057, 1036, 1120, 1106, 1072, 1083, 1058, 1069, 1086, 1204, 1208, 1212, 1276, 1293, 1222, 1234, 1175, 1138, 1164, 1137, 1222, 1278, 1326, 1271, 1290, 1262, 1203, 1189, 1117, 1083, 1014, 1030, 979, 953, 954, 982, 1022, 1217, 1206, 1180, 1232, 1150, 1270, 1261, 1332, 1362, 1552, 1528, 1516, 1530, 1547, 1566, 1548, 1569, 1606, 1587, 1636, 1696, 1678, 1676, 1651, 1958, 1962, 2018, 1996, 2032, 2081, 2203, 2721, 2488, 2416, 2318, 2378, 2374, 2319, 2399, 2342, 2586, 2843, 2773, 2997, 3058, 3040, 3053, 2974, 2950, 3139, 3174, 3032, 3021, 3041, 3200, 3323, 3114, 3036, 2840, 2783, 2854, 2972, 2862, 2728, 2692, 2596, 2792, 2814, 3081, 3117, 2790, 2774, 2682, 2694, 2777, 2812, 2698, 3111, 3218, 3247, 3364, 3273, 3756, 3932, 3770, 3618, 3622];
 const MONTHS = [
-  { label: 'Feb 25', n: 320, win: 78, net: -1289 }, { label: 'Mar 25', n: 397, win: 85, net: 1140 },
-  { label: 'Apr 25', n: 411, win: 80, net: 6 }, { label: 'May 25', n: 445, win: 84, net: 838 },
-  { label: 'Jun 25', n: 447, win: 85, net: 1472 }, { label: 'Jul 25', n: 458, win: 82, net: 603 },
-  { label: 'Aug 25', n: 428, win: 78, net: -3340 }, { label: 'Sep 25', n: 435, win: 84, net: 3437 },
-  { label: 'Oct 25', n: 498, win: 82, net: 2605 }, { label: 'Nov 25', n: 414, win: 84, net: 2789 },
-  { label: 'Dec 25', n: 478, win: 85, net: 4806 }, { label: 'Jan 26', n: 349, win: 83, net: 5250 },
-  { label: 'Feb 26', n: 365, win: 84, net: 2332 }, { label: 'Mar 26', n: 434, win: 80, net: -2523 },
-  { label: 'Apr 26', n: 440, win: 83, net: 375 }, { label: 'May 26', n: 366, win: 79, net: -1294 },
-  { label: 'Jun 26', n: 408, win: 87, net: 11445 }, { label: 'Jul 26', n: 134, win: 79, net: -2434 },
+  { label: 'Feb 25', n: 320, win: 78, net: -129 }, { label: 'Mar 25', n: 397, win: 85, net: 114 },
+  { label: 'Apr 25', n: 411, win: 80, net: 1 }, { label: 'May 25', n: 445, win: 84, net: 84 },
+  { label: 'Jun 25', n: 447, win: 85, net: 147 }, { label: 'Jul 25', n: 458, win: 82, net: 60 },
+  { label: 'Aug 25', n: 428, win: 78, net: -334 }, { label: 'Sep 25', n: 435, win: 84, net: 344 },
+  { label: 'Oct 25', n: 498, win: 82, net: 260 }, { label: 'Nov 25', n: 414, win: 84, net: 279 },
+  { label: 'Dec 25', n: 478, win: 85, net: 481 }, { label: 'Jan 26', n: 349, win: 83, net: 525 },
+  { label: 'Feb 26', n: 365, win: 84, net: 233 }, { label: 'Mar 26', n: 434, win: 80, net: -252 },
+  { label: 'Apr 26', n: 440, win: 83, net: 38 }, { label: 'May 26', n: 366, win: 79, net: -129 },
+  { label: 'Jun 26', n: 408, win: 87, net: 1144 }, { label: 'Jul 26', n: 134, win: 79, net: -243 },
 ];
-const START = 10_000;
+const START = 1_000;
 const greenMonths = MONTHS.filter((m) => m.net >= 0).length;
 const maxAbs = Math.max(...MONTHS.map((m) => Math.abs(m.net)));
 const usd = (n: number) => n.toLocaleString('en-US');
@@ -176,8 +176,8 @@ export default function Report() {
 
           <div className="chartcard">
             <div className="cap">
-              <span className="l">Simulated equity · $10,000 start · 1% risk / trade · compounding</span>
-              <span className="l">$10,000 → ${usd(EQ[EQ.length - 1])} (sim)</span>
+              <span className="l">Simulated equity · $1,000 start · 1% risk / trade · compounding</span>
+              <span className="l">$1,000 → ${usd(EQ[EQ.length - 1])} (sim)</span>
             </div>
             <canvas ref={cv} aria-label="Simulated 17-month equity curve of all Algoria strategies combined" />
           </div>
@@ -211,7 +211,7 @@ export default function Report() {
               </tbody>
             </table>
           </div>
-          <p className="note">Shown honestly, warts and all: <b>5 of the 18 months closed red</b>, and along the way the account sat through a drawdown of about <b>30%</b> before recovering — a member would have watched roughly a third of their balance disappear at the low point. One month (June 2026) was exceptional and flatters the total; most months are far smaller. Result is the net on a simulated $10,000 account risking <b>1% per trade, compounding</b>, so dollar amounts grow with the balance. This is a history of what the strategies did, <b>not a promised return</b> — the risk you choose and live conditions change everything.</p>
+          <p className="note">Shown honestly, warts and all: <b>5 of the 18 months closed red</b>, and along the way the account sat through a drawdown of about <b>30%</b> before recovering — a member would have watched roughly a third of their balance disappear at the low point. One month (June 2026) was exceptional and flatters the total; most months are far smaller. Result is the net on a simulated $1,000 account risking <b>1% per trade, compounding</b>, so dollar amounts grow with the balance. This is a history of what the strategies did, <b>not a promised return</b> — the risk you choose and live conditions change everything.</p>
         </section>
 
         <section>
