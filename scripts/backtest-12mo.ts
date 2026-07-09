@@ -11,7 +11,7 @@ import { backfill } from '../runner/metaapi/candles';
 import { backtest } from '../backtest/simulator';
 import { computeIndicators, labBacktest, SPECS, type StrategyDef } from '../backtest/labcore';
 import { metrics } from '../backtest/metrics';
-import { DEFAULT_CONFIG } from '../lib/engine/config';
+import { SCALP_CONFIG } from '../lib/engine/config';
 import { FEATURES } from '../lib/engine/features';
 import type { Bar } from '../lib/engine/types';
 import type { ContextOptions } from '../lib/engine/context';
@@ -20,9 +20,11 @@ const goldSym = process.argv[2] ?? process.env.ALGORIA_SYMBOL ?? 'XAUUSD';
 const btcSym = process.argv[3] ?? process.env.BTCUSD_SYMBOL ?? 'BTCUSD';
 const START = 10_000;
 
-// ---- configs de PROD ----
-const CTX: Partial<ContextOptions> = { tradeAsia: true, volMinPct: 0.05, volMaxPct: 0.995 };
-const scalpCfg = { ...DEFAULT_CONFIG, targetRR: 0.4, slAtrMult: 1.2, minRR: 0.2, minStopAtr: 0.35, maxStopAtr: 3.2, beTrigger: 0.15, threshold: { soft: 0.25, normal: 0.25, turbo: 0.25, scalp: 0.25 }, risk: { ...DEFAULT_CONFIG.risk, maxTradesPerDay: 200, minSecondsBetweenTrades: 0, maxOpenPositions: 2 } };
+// ---- config EXACTE de prod (instruments.ts XAUUSD_SCALP) : SCALP_CONFIG + emaGate 'notOpposed' + mode 'scalp'.
+// fixedLot RETIRÉ (le lot fixe live n'existe pas dans un compte sim à 10k → on garde le sizing risque 1%, les
+// métriques PF/win/DD sont invariantes d'échelle). SCALP_CONFIG porte déjà maxOpenPositions:1 (anti-empilement).
+const CTX: Partial<ContextOptions> = { tradeAsia: true, volMinPct: 0.05, volMaxPct: 0.995 }; // = SCALP_CTX
+const scalpCfg = { ...SCALP_CONFIG, emaGate: 'notOpposed' as const };
 const trend = (slAtr: number): StrategyDef => ({ family: 'sw-trend', params: 't', minBars: 700, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5 }, onClose(i, d) {
   const { bars: b, atr, emaF, emaS, ema21 } = d; if (i < 601) return null; const bar = b[i], a = atr[i];
   const bull = emaF[i] > emaS[i] * 1.001, bear = emaF[i] < emaS[i] * 0.999;
@@ -53,7 +55,7 @@ async function main() {
 
   // fenêtre = span du M5 dispo (la seule couche limitante) ; les swings filtrés dessus
   const W0 = m5[0].time, W1 = m5[m5.length - 1].time;
-  const scalp = backtest(m5, FEATURES, scalpCfg, { symbol: 'XAUUSD', mode: 'normal', startBalance: START, spread: 0.2, slippage: 0.05, commissionPerLot: 7, contractSize: 100, warmup: 210, window: 600, ctxOpts: CTX });
+  const scalp = backtest(m5, FEATURES, scalpCfg, { symbol: 'XAUUSD', mode: 'scalp', startBalance: START, spread: 0.2, slippage: 0.05, commissionPerLot: 7, contractSize: 100, warmup: 210, window: 600, ctxOpts: CTX });
   const swing = (bars: Bar[], s: StrategyDef, sym: 'XAUUSD' | 'BTCUSD') => bars.length > 800 ? labBacktest(computeIndicators(bars), s, SPECS[sym]).trades.filter((t) => t.exitTime >= W0 && t.exitTime <= W1) : [];
   const all: Tr[] = [
     ...scalp.trades.map((t) => ({ t: t.exitTime, r: t.r, win: t.pnl > 0, src: 'scalp' })),
