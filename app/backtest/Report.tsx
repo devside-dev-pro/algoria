@@ -2,20 +2,28 @@
 // Rapport de backtest PUBLIC (algoria.tech/backtest) — à partager aux prospects qui demandent un historique.
 // HONNÊTETÉ : clairement étiqueté SIMULATION, jamais présenté comme du live, et surtout COMBINÉ — toutes les
 // stratégies (scalp gold + swing gold + swing BTC) sur UN SEUL compte, comme un membre les reçoit vraiment.
-// Fenêtre du combiné = le mois de M5 dispo (le seul où on a scalp ET swing). Le swing seul, backtesté plus loin
-// (12 mois / plusieurs années), sert de CONTEXTE (l'edge n'est pas neuf). Chiffres issus du backtester causal du
-// repo (backtest/combined.ts + lab.ts) — régénérer et remplacer les tableaux quand les données s'allongent.
+// Fenêtre du combiné = 16 mois PLEINS (mars 2025 → juin 2026 ; on retire fév. partiel + juil. désormais live),
+// backfill M5+H1 profond chez le broker via scripts/backtest-12mo.ts, config EXACTE de prod
+// (SCALP_CONFIG maxOpenPositions:1 + emaGate notOpposed + mode scalp).
+// Le swing seul (multi-années) sert de CONTEXTE de robustesse. Chiffres du backtester causal (simulator.ts + labcore.ts).
 import { useEffect, useRef } from 'react';
 
-// équité SIMULÉE du LIVRE COMPLET (scalp+swings, un compte, 1% de risque/trade, composé) sur le mois — ~140 pts
-const EQ = [10000, 9982, 9823, 9771, 9851, 9788, 9734, 9577, 9408, 9227, 9181, 9153, 9271, 9384, 9364, 9411, 9460, 9509, 9558, 9640, 9709, 9774, 9855, 9916, 9847, 9860, 9945, 10030, 10118, 10206, 10044, 10022, 10074, 10194, 10140, 10159, 10213, 10269, 10141, 10119, 10050, 10171, 10045, 10149, 10147, 10153, 10110, 9932, 10075, 11239, 11297, 11342, 11399, 11325, 11419, 11491, 11413, 11346, 11150, 11187, 11308, 11450, 11385, 11343, 11418, 11473, 11305, 11381, 11559, 11708, 11825, 11930, 12070, 12189, 12252, 12315, 12415, 12529, 12461, 12524, 12482, 12560, 12508, 12310, 12778, 12706, 12634, 12725, 12559, 12486, 12590, 12656, 12764, 12704, 12751, 13045, 13123, 13146, 12896, 13007, 13164, 13135, 13246, 13922, 13996, 13905, 13857, 13829, 13873, 13898, 13667, 13715, 13485, 13227, 13185, 13340, 13312, 13241, 13384, 13540, 13501, 13403, 13569, 13668, 13775, 13654, 13593, 13560, 13677, 13792, 13773, 13740, 13822, 13971, 14036, 14193, 14306, 14397, 14515, 14595, 14764, 14841, 14629, 14701, 14418, 14387, 14387];
-const WEEKS = [
-  { label: 'Jun 02–08', n: 56, win: 73, net: -636 }, { label: 'Jun 08–15', n: 133, win: 87, net: 595 },
-  { label: 'Jun 15–22', n: 139, win: 91, net: 2548 }, { label: 'Jun 22–29', n: 144, win: 83, net: 876 },
-  { label: 'Jun 29–Jul 02', n: 108, win: 89, net: 1003 },
+// équité SIMULÉE du LIVRE COMPLET (scalp+swings, un compte, 1% de risque/trade, composé) — 16 mois pleins, ~143 pts.
+// Config EXACTE de prod : SCALP_CONFIG (maxOpenPositions:1, anti-empilement) + emaGate 'notOpposed' + mode 'scalp'.
+const EQ = [1000, 986, 935, 933, 918, 1019, 1093, 1092, 1084, 1127, 1128, 1111, 1148, 1095, 1055, 1221, 1217, 1190, 1135, 1160, 1180, 1180, 1213, 1190, 1286, 1270, 1230, 1243, 1214, 1227, 1246, 1382, 1386, 1391, 1464, 1484, 1403, 1417, 1349, 1306, 1336, 1306, 1403, 1468, 1522, 1459, 1481, 1449, 1381, 1365, 1283, 1243, 1164, 1183, 1124, 1094, 1096, 1128, 1173, 1398, 1385, 1354, 1415, 1320, 1458, 1448, 1530, 1564, 1782, 1754, 1740, 1757, 1776, 1798, 1777, 1802, 1844, 1822, 1879, 1946, 1926, 1925, 1895, 2248, 2253, 2317, 2291, 2333, 2388, 2529, 3124, 2857, 2774, 2661, 2730, 2725, 2662, 2754, 2689, 2969, 3264, 3183, 3440, 3511, 3490, 3505, 3414, 3387, 3603, 3644, 3481, 3468, 3491, 3674, 3815, 3575, 3486, 3260, 3195, 3276, 3412, 3285, 3132, 3090, 2980, 3205, 3230, 3536, 3578, 3202, 3184, 3078, 3093, 3187, 3228, 3098, 3572, 3694, 3728, 3861, 3757, 4312, 4437];
+const MONTHS = [
+  { label: 'Mar 25', n: 397, win: 85, net: 131 }, { label: 'Apr 25', n: 411, win: 80, net: 1 },
+  { label: 'May 25', n: 445, win: 84, net: 96 }, { label: 'Jun 25', n: 447, win: 85, net: 169 },
+  { label: 'Jul 25', n: 458, win: 82, net: 69 }, { label: 'Aug 25', n: 428, win: 78, net: -383 },
+  { label: 'Sep 25', n: 435, win: 84, net: 395 }, { label: 'Oct 25', n: 498, win: 82, net: 299 },
+  { label: 'Nov 25', n: 414, win: 84, net: 320 }, { label: 'Dec 25', n: 478, win: 85, net: 552 },
+  { label: 'Jan 26', n: 349, win: 83, net: 603 }, { label: 'Feb 26', n: 365, win: 84, net: 268 },
+  { label: 'Mar 26', n: 434, win: 80, net: -290 }, { label: 'Apr 26', n: 440, win: 83, net: 43 },
+  { label: 'May 26', n: 366, win: 79, net: -149 }, { label: 'Jun 26', n: 408, win: 87, net: 1314 },
 ];
-const START = 10_000;
-const maxAbs = Math.max(...WEEKS.map((w) => Math.abs(w.net)));
+const START = 1_000;
+const greenMonths = MONTHS.filter((m) => m.net >= 0).length;
+const maxAbs = Math.max(...MONTHS.map((m) => Math.abs(m.net)));
 const usd = (n: number) => n.toLocaleString('en-US');
 
 const CSS = `
@@ -156,46 +164,46 @@ export default function Report() {
           </div>
         </div>
 
-        <p className="lede">Algoria runs several strategies at once — fast intraday scalps plus slower swing positions held for days. This is a <b>full month of all of them together, on one account</b> — every trade a member&rsquo;s account would have taken, not a hand-picked strategy. Real gold &amp; Bitcoin prices, with spreads, commissions and slippage modelled in. Live trading began July 2026; this is the history behind it.</p>
+        <p className="lede">Algoria runs several strategies at once — fast intraday scalps plus slower swing positions held for days. This is <b>16 months of all of them together, on one account</b> — every trade a member&rsquo;s account would have taken, not a hand-picked strategy. Real gold &amp; Bitcoin prices, with spreads, commissions and slippage modelled in. Live trading began July 2026; this is the history behind it.</p>
 
         <section>
           <div className="sechead">
             <h3>The complete book — every strategy, one account</h3>
             <span className="tag">all trades</span>
-            <span className="per">2 Jun → 2 Jul 2026 · 31 days</span>
+            <span className="per">Mar 2025 → Jun 2026 · 16 months</span>
           </div>
-          <p className="subhead">Scalping and swing running side by side, exactly as a member receives them — 580 trades in one month on a single simulated account.</p>
+          <p className="subhead">Scalping and swing running side by side, exactly as a member receives them — 6,773 trades over 16 full months on a single simulated account, replayed with the exact live filters (never two stacked trades, no counter-trend entries).</p>
 
           <div className="chartcard">
             <div className="cap">
-              <span className="l">Simulated equity · $10,000 start · 1% risk / trade · compounding</span>
-              <span className="l">$10,000 → ${usd(EQ[EQ.length - 1])} (sim)</span>
+              <span className="l">Simulated equity · $1,000 start · 1% risk / trade · compounding</span>
+              <span className="l">$1,000 → ${usd(EQ[EQ.length - 1])} (sim)</span>
             </div>
-            <canvas ref={cv} aria-label="Simulated one-month equity curve of all Algoria strategies combined" />
+            <canvas ref={cv} aria-label="Simulated 16-month equity curve of all Algoria strategies combined" />
           </div>
 
           <div className="tiles">
-            <div className="tile" style={tile('var(--blue)')}><div className="k">Total trades</div><div className="v">580</div><div className="s">562 scalp · 18 swing</div></div>
-            <div className="tile" style={tile('var(--up)')}><div className="k">Win rate</div><div className="v" style={{ color: 'var(--up)' }}>86%</div><div className="s">498 winners</div></div>
-            <div className="tile" style={tile('var(--cyan)')}><div className="k">Profit factor</div><div className="v">1.47</div><div className="s">gross win ÷ gross loss</div></div>
-            <div className="tile" style={tile('var(--down)')}><div className="k">Max drawdown</div><div className="v">8.7%</div><div className="s">worst peak-to-trough</div></div>
-            <div className="tile" style={tile('var(--gold)')}><div className="k">Weeks green</div><div className="v">4<span style={{ fontSize: 15, color: 'var(--dim)' }}> / 5</span></div><div className="s">one week closed red</div></div>
+            <div className="tile" style={tile('var(--blue)')}><div className="k">Total trades</div><div className="v">6,773</div><div className="s">gold scalp + swing</div></div>
+            <div className="tile" style={tile('var(--up)')}><div className="k">Win rate</div><div className="v" style={{ color: 'var(--up)' }}>83%</div><div className="s">across all strategies</div></div>
+            <div className="tile" style={tile('var(--cyan)')}><div className="k">Profit factor</div><div className="v">1.12</div><div className="s">gross win ÷ gross loss</div></div>
+            <div className="tile" style={tile('var(--down)')}><div className="k">Max drawdown</div><div className="v" style={{ color: 'var(--down)' }}>30.7%</div><div className="s">worst peak-to-trough</div></div>
+            <div className="tile" style={tile('var(--gold)')}><div className="k">Months green</div><div className="v">{greenMonths}<span style={{ fontSize: 15, color: 'var(--dim)' }}> / {MONTHS.length}</span></div><div className="s">{MONTHS.length - greenMonths} months closed red</div></div>
           </div>
 
           <div className="tblwrap">
             <table>
-              <thead><tr><th>Week</th><th>Trades</th><th>Win rate</th><th>Result (sim)</th></tr></thead>
+              <thead><tr><th>Month</th><th>Trades</th><th>Win rate</th><th>Result (sim)</th></tr></thead>
               <tbody>
-                {WEEKS.map((wk) => {
-                  const pos = wk.net >= 0;
+                {MONTHS.map((mo) => {
+                  const pos = mo.net >= 0;
                   return (
-                    <tr key={wk.label}>
-                      <td>{wk.label}</td>
-                      <td style={{ textAlign: 'right' }}>{wk.n}</td>
-                      <td style={{ textAlign: 'right' }}>{wk.win}%</td>
+                    <tr key={mo.label}>
+                      <td>{mo.label}</td>
+                      <td style={{ textAlign: 'right' }}>{mo.n}</td>
+                      <td style={{ textAlign: 'right' }}>{mo.win}%</td>
                       <td style={{ textAlign: 'right' }}>
-                        <span className="bar" style={{ width: Math.round(Math.abs(wk.net) / maxAbs * 80), background: pos ? 'rgba(38,224,166,.5)' : 'rgba(255,111,142,.5)' }} />
-                        <span className={pos ? 'pos' : 'neg'}>{pos ? '+' : '−'}${usd(Math.abs(wk.net))}</span>
+                        <span className="bar" style={{ width: Math.round(Math.abs(mo.net) / maxAbs * 80), background: pos ? 'rgba(38,224,166,.5)' : 'rgba(255,111,142,.5)' }} />
+                        <span className={pos ? 'pos' : 'neg'}>{pos ? '+' : '−'}${usd(Math.abs(mo.net))}</span>
                       </td>
                     </tr>
                   );
@@ -203,12 +211,12 @@ export default function Report() {
               </tbody>
             </table>
           </div>
-          <p className="note">The first week closed red — shown as it happened. Result is the net on a simulated $10,000 account risking <b>1% per trade, compounding</b>, so dollar amounts grow with the (simulated) balance. This is a history of what the strategies did, <b>not a promised return</b> — the risk you choose and live conditions change everything.</p>
+          <p className="note">Full calendar months only — the partial opening month and the current month (now trading live) are left out. Shown honestly, warts and all: <b>3 of the 16 months closed red</b>, and along the way the account sat through a drawdown of about <b>30%</b> before recovering — a member would have watched roughly a third of their balance disappear at the low point. One month (June 2026) was exceptional and flatters the total; most months are far smaller. Result is the net on a simulated $1,000 account risking <b>1% per trade, compounding</b>, so dollar amounts grow with the balance. This is a history of what the strategies did, <b>not a promised return</b> — the risk you choose and live conditions change everything.</p>
         </section>
 
         <section>
           <div className="sechead"><h3>The edge isn&rsquo;t new — the swing layer, further back</h3></div>
-          <p className="subhead">Only one month of minute-level data is available for the intraday layer, so the full book above spans one month. The slower swing layer, which runs on hourly candles, can be replayed over years — here&rsquo;s that layer on its own, as evidence the strategy predates the live account.</p>
+          <p className="subhead">The full book above already spans 16 months. The slower swing layer runs on hourly candles and can be replayed even further back — here it is on its own, as evidence the edge holds across years, not just this window.</p>
           <div className="cards">
             <div className="card">
               <div className="h"><span className="dot" style={{ background: 'var(--gold)' }} /><span className="name">Gold swing</span><span className="yrs">12 months</span></div>
@@ -242,6 +250,7 @@ export default function Report() {
             <ul>
               <li><b>Real historical prices</b> — gold and Bitcoin candles from the live data feed, not synthetic.</li>
               <li><b>All strategies on one account</b> — scalp and swing share a single simulated balance, as a member receives them.</li>
+              <li><b>Exact live filters</b> — never two positions stacked the same way, and no counter-trend entries, identical to the production engine.</li>
               <li><b>Real costs modelled</b> — broker spread, commission ($7/lot on gold) and slippage on every fill.</li>
               <li><b>Causal, no look-ahead</b> — each decision uses only the candles closed at that moment, exactly like live.</li>
               <li><b>Pessimistic execution</b> — the stop is always assumed hit before the target on the same bar; 1% account risk per trade.</li>

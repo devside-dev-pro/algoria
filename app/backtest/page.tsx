@@ -7,10 +7,10 @@ import Report from './Report';
 export const metadata: Metadata = {
   metadataBase: new URL('https://algoria.tech'),
   title: 'Algoria — Strategy Backtest (historical simulation)',
-  description: 'How Algoria’s gold and Bitcoin strategies performed in historical simulation — 12 months of swing trading and a recent month of intraday scalping. A backtest, clearly labelled, not a live track record.',
+  description: 'How Algoria’s gold and Bitcoin strategies performed in historical simulation — 16 months of every trade, scalp and swing on one account. A backtest, clearly labelled, not a live track record.',
   openGraph: {
     title: 'Algoria — Strategy Backtest',
-    description: 'Historical simulation of the gold & Bitcoin strategies — 12-month swing + recent intraday. Clearly labelled, not a live track record.',
+    description: 'Historical simulation of the gold & Bitcoin strategies — 16 months, every trade on one account. Clearly labelled, not a live track record.',
     type: 'website',
     url: 'https://algoria.tech/backtest',
     siteName: 'Algoria AI',
