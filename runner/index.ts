@@ -398,7 +398,7 @@ async function main() {
             if (veto) { await logSignal(sig, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' }); break st2; }
             const ticket = await executeSignal(sig);
             if (ticket) {
-              rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, riskDist: Math.abs(sig.entry - sig.stopLoss) });
+              rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, ladder: SW.ladder, riskDist: Math.abs(sig.entry - sig.stopLoss) });
               await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at 1R, ${SW.trailDist}R trailing)`, 'order');
             }
           }

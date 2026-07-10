@@ -16,13 +16,19 @@ export interface SwingConfig {
   beTrigger: number; // breakeven à × riskDist (1R — un swing a besoin d'air)
   trailActivate: number; // trailing activé à × riskDist
   trailDist: number; // distance du trailing (× riskDist) — les "paliers" qui sécurisent
+  // PALIERS de verrouillage : [plus-haut atteint en R, niveau de SL verrouillé en R]. Combiné (max) avec le BE
+  // et le trailing, jamais dans le mauvais sens. Backtesté (backtest/swing-ladder.ts) : sur GOLD, verrouiller
+  // +0.5R à 2R garde le PF (1.72) et monte le rendement (+189%→+251%) — évite le « beau trade qui rentre à BE ».
+  ladder?: [number, number][];
 }
 
 /** BTC — cassure du range 24h (labo : PF 2.02 sur 2.7 ans, robuste tiers + week-end).
  *  Lot 1 (choix produit) : 1R = 2×ATR H1 (~250-380$) × lot — à 0.5 les gains faisaient ~250-380$, maigres
  *  dans l'historique face au gold ; à 1 les sorties ~1R tombent dans la cible 500-800$. Revers assumé :
  *  un SL plein pèse pareil (~500-760$). */
-export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
+// TRAIL ÉLARGI (activate 2.0, dist 3.0 au lieu de 2.5/2.5) : le breakout BTC a besoin d'encore plus d'air —
+// backtest 2.7 ans → PF 2.02→2.25, +39%→+48% (petit échantillon 72 trades, amélioration probable). Config-only.
+export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.0, trailDist: 3.0 };
 /** OR — suivi de tendance EMA longues + reprise après repli.
  *  STOP RESSERRÉ slAtr 1 (au lieu de 2) : le copieur des clients est en LOT FIXE (~0.05), donc le risque
  *  client = largeur du stop × son lot, indépendant du lot master. Un stop 2×ATR (~37 pts) = −187$ sur un
@@ -32,7 +38,9 @@ export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.1
  *  le MÊME risque master qu'avant (−935$/stop) tout en rapprochant la fraction copiée du scalp (10% vs 5%,
  *  au lieu de 20%) → bilans client↔master 2× plus cohérents. Le vrai fix (copie proportionnelle) viendra
  *  avec l'API STH. NB : 1.0 lot resterait impossible ici (−1870$/stop souffle un master à ~2300$). */
-export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 0.5, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
+// PALIER +0.5R à 2R (ladder) : verrouille un petit profit sur les trades qui plafonnent à 2-2.5R au lieu de
+// les laisser rentrer à BE — backtest 637j gold → PF 1.72 tenu, +189%→+251%. BE 1R + trail 2.5R gardés (runners).
+export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 0.5, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] };
 /** NAS100 — cassure du range 72h (labo 2.2 ans : PF 1.94, +$3086, DD 6.9%, tiers ✅ · tenue moy 8.5 j). */
 export const NAS_SWING: SwingConfig = { kind: 'breakout', N: 72, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 3, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 

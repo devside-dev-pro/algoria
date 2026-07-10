@@ -42,12 +42,15 @@ const steps = (name: string, s: [number, number][], beyond?: number): Ladder => 
   name,
   stopR: (p) => { let lock = -1; for (const [t, l] of s) if (p >= t) lock = l; if (beyond != null && p > s[s.length - 1][0]) lock = Math.max(lock, p - beyond); return lock; },
 });
+// CONCLUSION de l'affinage (voir le comparatif complet dans l'historique) :
+//  • config-only (juste trailActivate/trailDist) ne bouge quasi rien sur gold et ne règle pas le retour à BE.
+//  • le VRAI gain gold vient d'un PALIER (verrouiller +0.5R à 2R), qui demande une extension moteur → I4.
+//  • sur BTC, un trail plus LARGE (activate2 dist3, config-only) améliore l'edge (PF 2.02→2.25).
+const cfg = (name: string, A: number, D: number): Ladder => ({ name, stopR: (p) => (p >= A ? p - D : p >= 1 ? 0.05 : -1) });
 const LADDERS: Ladder[] = [
-  { name: 'PROD (BE1 · trail 2.5@2.5)', stopR: (p) => (p >= 2.5 ? p - 2.5 : p >= 1 ? 0.05 : -1) },
-  steps('escalier 1R (palier tous les 1R)', [[1, 0], [2, 1], [3, 2], [4, 3], [5, 4], [6, 5], [8, 7], [10, 9], [12, 11], [14, 13]]),
-  steps('escalier serré (lock peak−1)', [[1, 0]], 1),
-  steps('escalier ÉLARGISSANT (serré tôt, lâche tard)', [[1, 0], [2, 0.8], [3, 1.5], [4, 2.2]], 2.5),
-  steps('escalier doux (serré tôt → trail 2.5)', [[1.5, 0.3], [2.5, 1.2]], 2.5),
+  cfg('PROD (activate2.5 dist2.5)', 2.5, 2.5),
+  steps('GOLD I4 · BE1 · lock .5R@2R · trail2.5', [[1, 0.05], [2, 0.5]], 2.5), // ← gagnant GOLD (moteur : palier)
+  cfg('BTC · activate2.0 dist3.0 (config-only)', 2.0, 3.0),                     // ← gagnant BTC (juste des chiffres)
 ];
 
 function run(label: string, ind: Indicators, strat: StrategyDef, spec: Spec, tpAtr: number) {
