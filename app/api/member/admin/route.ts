@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const s = guard(req);
   if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   const db = sdb();
-  const [wl, members, actions, commsQ, payoutsQ, depositsQ] = await Promise.all([
+  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by').order('member_no', { ascending: false }).limit(200),
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
@@ -25,7 +25,10 @@ export async function GET(req: NextRequest) {
     // REGISTRE DES DÉPÔTS (bilan broker) : lignes saisies par l'admin, kind='deposit' status='done'
     // (jamais dans la file). Stockées dans member_actions — zéro migration, pattern du stash kyc.
     db.from('member_actions').select('*').eq('kind', 'deposit').order('created_at', { ascending: false }).limit(500),
+    // ABONNEMENTS PUSH : qui a activé les alertes (au moins 1 appareil). Sert au tableau « qui relancer ».
+    db.from('member_push_subs').select('tg_id'),
   ]);
+  const pushTgIds = [...new Set((pushQ.data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
   // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
   // Une balance NÉGATIVE (commission annulée APRÈS retrait) est le signal d'abus n°1 → flag rouge.
   const comms = commsQ.data ?? [];
@@ -42,7 +45,7 @@ export async function GET(req: NextRequest) {
     owedUsd: [...balances.values()].filter((v) => v > 0).reduce((a, v) => a + v, 0), // ta dette totale envers les parrains
     flagged: [...balances.entries()].filter(([, v]) => v < 0).map(([tg, v]) => ({ tg_id: tg, balance: v, username: byTg.get(tg)?.tg_username ?? null, member_no: byTg.get(tg)?.member_no ?? null })),
   };
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [] });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds });
 }
 
 export async function POST(req: NextRequest) {

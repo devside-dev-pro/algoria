@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { tgHref } from '@/lib/telegram';
+import { pushState, enablePush } from '@/lib/push/client';
 
 export interface Member {
   member_no: number;
@@ -224,35 +225,54 @@ const ICONS: Record<string, React.ReactNode> = {
   ),
 };
 
-// PROMPT D'INSTALLATION PWA — personne n'a le réflexe "ajouter à l'écran d'accueil" : on le provoque.
-// Un SEUL bouton : Android/Chrome → prompt natif (un tap, imbattable) ; sinon → la page store /download
-// (fiche façon App Store : screenshots, avis, tuto iPhone détaillé — bien mieux qu'un mini-guide en popup).
-// Réapparaît à CHAQUE ouverture (dismiss = session seulement) ; disparaît définitivement une fois installée.
+// NUDGE PWA — UN SEUL créneau, qui ENCHAÎNE (jamais deux popups) :
+//   pas installé  → « installe l'app » (Android/Chrome = prompt natif 1 tap ; sinon fiche /download)
+//   installé + notifs OFF → le MÊME créneau devient « active tes alertes » (1 tap) — c'était le trou :
+//     avant, une fois installé, plus rien ne proposait les notifs, donc ~personne ne les avait.
+//   installé + notifs ON/refusées → rien.
+// Install et alerts sont mutuellement exclusifs (l'un hors-standalone, l'autre en standalone) → jamais empilés.
+// Réapparaît à chaque session (dismiss = session seulement) ; chaque étape a sa propre clé de dismiss.
 function InstallPrompt() {
-  const [mode, setMode] = useState<'hidden' | 'native' | 'store'>('hidden');
+  const [mode, setMode] = useState<'hidden' | 'native' | 'store' | 'alerts'>('hidden');
   const deferred = useRef<{ prompt: () => Promise<void> } | null>(null);
   useEffect(() => {
     const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
-    if (standalone || sessionStorage.getItem('alg_install_hide')) return;
+    if (standalone) {
+      // installé → propose les ALERTES si pas encore activées (et pas déjà rejeté cette session)
+      if (sessionStorage.getItem('alg_alerts_hide')) return;
+      void pushState().then((st) => { if (st === 'off') setMode('alerts'); });
+      return;
+    }
+    if (sessionStorage.getItem('alg_install_hide')) return;
     setMode('store'); // par défaut : direction la fiche store (iOS, Firefox, navigateur intégré…)
     const onBip = (e: Event) => { e.preventDefault(); deferred.current = e as unknown as { prompt: () => Promise<void> }; setMode('native'); };
     window.addEventListener('beforeinstallprompt', onBip);
     return () => window.removeEventListener('beforeinstallprompt', onBip);
   }, []);
   if (mode === 'hidden') return null;
-  const dismiss = () => { sessionStorage.setItem('alg_install_hide', '1'); setMode('hidden'); };
+  const alerts = mode === 'alerts';
+  const dismiss = () => { sessionStorage.setItem(alerts ? 'alg_alerts_hide' : 'alg_install_hide', '1'); setMode('hidden'); };
   return (
     <div style={{ position: 'fixed', left: 10, right: 10, bottom: 88, zIndex: 45, maxWidth: 540, margin: '0 auto' }}>
       <div className="panel cardIn" style={{ padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'rgba(43,227,245,.4)', boxShadow: '0 10px 34px rgba(2,6,16,.7), 0 0 24px rgba(43,227,245,.12)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-          <img src="/brand/algoria-mark.png" alt="" width={34} height={34} style={{ objectFit: 'contain' }} />
+          <span style={{ fontSize: 24, width: 34, textAlign: 'center' }}>{alerts ? '🔔' : <img src="/brand/algoria-mark.png" alt="" width={34} height={34} style={{ objectFit: 'contain' }} />}</span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: 14 }}>Get the Algoria app</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>Full-screen, on your home screen, with win alerts — this is meant to live on your phone.</div>
+            <div style={{ fontWeight: 800, fontSize: 14 }}>{alerts ? 'Turn on win alerts' : 'Get the Algoria app'}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>
+              {alerts ? 'Get pinged the moment Algoria banks a win — never miss a trade.' : 'Full-screen, on your home screen, with win alerts — this is meant to live on your phone.'}
+            </div>
           </div>
           <button onClick={dismiss} aria-label="close" style={{ border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', borderRadius: 7, width: 24, height: 24, cursor: 'pointer', fontSize: 13, lineHeight: '20px' }}>×</button>
         </div>
-        {mode === 'native' ? (
+        {alerts ? (
+          <button
+            onClick={() => void enablePush().then((ok) => (ok ? setMode('hidden') : dismiss()))}
+            style={{ padding: '11px 14px', borderRadius: 11, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 13, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', textAlign: 'center' }}
+          >
+            🔔 ENABLE ALERTS — ONE TAP
+          </button>
+        ) : mode === 'native' ? (
           <button
             onClick={() => { void deferred.current?.prompt(); dismiss(); }}
             style={{ padding: '11px 14px', borderRadius: 11, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 13, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', textAlign: 'center' }}
