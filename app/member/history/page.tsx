@@ -2,12 +2,15 @@
 // HISTORY — les trades clôturés d'Algoria (compte maître). L'historique PERSONNEL (son compte, son lot)
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet } from '../ui';
 import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
+import { RECORD } from '@/lib/backtest/record';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; closed_at: string }
 
 export default function MemberHistory() {
+  const router = useRouter();
   const { member, unlocked, loading, referral } = useMe();
   const [trades, setTrades] = useState<FeedTrade[]>([]);
   const [paywall, setPaywall] = useState(false);
@@ -81,6 +84,24 @@ export default function MemberHistory() {
         })}
         {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>No closed trades yet today.</p>}
       </section>
+
+      {/* « tu veux voir plus loin ? » → le track record COMPLET (16 mois, simulé), en natif. Visible par tous :
+          c'est du contenu public-équivalent (même données que la page /backtest), excellent pour la conversion. */}
+      <button
+        onClick={() => router.push('/member/track-record')}
+        className="panel"
+        style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', textAlign: 'left', color: 'var(--text)', borderColor: 'rgba(43,227,245,.28)' }}
+      >
+        <span style={{ fontSize: 20 }}>📊</span>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>See Algoria&rsquo;s full track record</span>
+          <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45 }}>
+            {RECORD.window.months} months, every strategy combined — <b style={{ color: 'var(--cyan)' }}>+{RECORD.returnPct}%</b> simulated <span style={{ color: 'var(--dim)' }}>· drawdowns shown</span>
+          </span>
+        </span>
+        <span style={{ color: 'var(--cyan)', fontSize: 18 }}>›</span>
+      </button>
+
       {/* prospect : l'historique reste EN CLAIR (c'est l'appât) — la bannière convertit le FOMO en action */}
       {!unlocked ? (
         <button
