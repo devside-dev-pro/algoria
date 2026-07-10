@@ -42,6 +42,24 @@ export default function MemberHistory() {
   const best = trades.reduce((m, t) => Math.max(m, Number(t.pnl) || 0), 0);
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
+      {/* CLOSING EN HAUT (prospects) — la 1re chose qu'un non-membre voit : le manque à gagner + le CTA.
+          C'est l'arme de conversion, elle doit être au-dessus de la ligne de flottaison, pas noyée en bas. */}
+      {!unlocked && winSum > 0 && (
+        <button
+          onClick={() => setPaywall(true)}
+          className="panel"
+          style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', textAlign: 'left', color: 'var(--text)', borderColor: 'rgba(245,194,74,.5)', background: 'linear-gradient(180deg, rgba(245,194,74,.08), rgba(10,17,31,.45))' }}
+        >
+          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>⚡ YOU WATCHED FROM THE SIDELINES</span>
+          <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.25 }}>
+            <span className="goldText" style={{ fontSize: 27 }}>+{winSum.toFixed(0)}$</span> you&rsquo;d have banked following Algoria
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+            Every trade below copied straight to members&rsquo; accounts, hands-free — you just watched. Unlock and the next ones land on <b style={{ color: 'var(--text)' }}>yours</b>. <b style={{ color: 'var(--gold)' }}>Unlock my access →</b>
+          </span>
+        </button>
+      )}
+
       {/* prospect : le serveur n'envoie que les gains → on l'ASSUME (highlight reel) au lieu d'afficher
           un win rate 100% qui sentirait le faux. L'historique complet arrive avec l'accès. */}
       {unlocked ? (
@@ -102,23 +120,22 @@ export default function MemberHistory() {
         <span style={{ color: 'var(--cyan)', fontSize: 18 }}>›</span>
       </button>
 
-      {/* prospect : l'historique reste EN CLAIR (c'est l'appât) — la bannière convertit le FOMO en action */}
-      {!unlocked ? (
+      {/* Le CLOSING prospect vit désormais EN HAUT (bannière « manque à gagner »). Ici, juste un repli
+          si aucun gain n'est encore chargé (winSum 0) — sinon on ne duplique pas le CTA. Membre : la note. */}
+      {unlocked ? (
+        <p style={{ margin: 0, fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.55 }}>
+          Master account results. Your personal history — your account, your lot size — lands here once your copier link is live.
+        </p>
+      ) : winSum === 0 ? (
         <button
           onClick={() => setPaywall(true)}
           className="panel"
           style={{ padding: '15px 16px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', textAlign: 'left', borderColor: 'rgba(245,194,74,.4)', color: 'var(--text)' }}
         >
-          <span style={{ fontSize: 13.5, fontWeight: 800 }}>
-            {winSum > 0 ? <>You just watched <span className="goldText">+{winSum.toFixed(0)}$</span> of wins from the sidelines.</> : 'Every one of these trades lands on members’ accounts.'}
-          </span>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>Every one of these trades lands on members&rsquo; accounts.</span>
           <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>Members&rsquo; accounts copied all of this automatically — <b style={{ color: 'var(--gold)' }}>unlock your access →</b></span>
         </button>
-      ) : (
-        <p style={{ margin: 0, fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.55 }}>
-          Master account results. Your personal history — your account, your lot size — lands here once your copier link is live.
-        </p>
-      )}
+      ) : null}
       {!unlocked && <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />}
     </main>
   );
