@@ -87,39 +87,28 @@ export default function MemberLive() {
 
       {unlocked ? (
         <>
-          {/* ===== LE GRAPHIQUE ROI ===== */}
-          <section style={{ position: 'relative', flex: '0 0 46%', minHeight: 264, borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(43,227,245,.3)', background: '#070f1d' }}>
-            <Chart key={hero} symbol={hero} signals={[]} wins={wins} defaultTf="M5" broadcast />
-
-            {/* bandeau moniteur posé sur le chart : mini-orbe qui respire + état + méta */}
-            <div style={{ position: 'absolute', top: 8, left: 10, zIndex: 20, display: 'flex', alignItems: 'center', gap: 9, pointerEvents: 'none' }}>
-              <AlgoriaOrb size={30} state="thinking" />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: 0.3, color: stColor, textShadow: '0 1px 8px rgba(2,6,16,.9)' }}>
-                  {glyphOf(meta?.state)} {stateWord}{conf != null && <span style={{ fontSize: 9, color: 'var(--dim)', fontWeight: 600 }}> · {conf}%</span>}
-                </span>
-                <span className="mono" style={{ fontSize: 9, color: 'var(--dim)', letterSpacing: 0.4 }}>
-                  {hero} · M5{meta?.session ? ` · ${meta.session}` : ''}
-                </span>
-              </div>
-            </div>
-
-            {/* live + scan (droite) */}
-            <div style={{ position: 'absolute', top: 9, right: 10, zIndex: 20, display: 'flex', alignItems: 'center', gap: 9, pointerEvents: 'none' }}>
-              <span className="pulse mono" style={{ fontSize: 10, color: 'var(--up)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--up)', boxShadow: '0 0 8px var(--up)' }} />live
+          {/* ===== BANDEAU MONITEUR — au-DESSUS du chart (le chart a déjà son propre HUD OHLC/EMA :
+                  poser l'orbe dessus le cachait). Mini-orbe qui respire + état moteur + scan. ===== */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 11px', borderRadius: 12, border: '1px solid var(--border)', background: 'linear-gradient(180deg,rgba(18,33,62,.55),rgba(10,20,37,.55))', flex: '0 0 auto' }}>
+            <AlgoriaOrb size={34} state="thinking" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.3, color: stColor, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {glyphOf(meta?.state)} {stateWord}
+                {conf != null && <span style={{ fontSize: 9.5, color: 'var(--dim)', fontWeight: 600, fontFamily: 'var(--mono, ui-monospace)' }}>· {conf}%</span>}
+                {isWatch && <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', background: 'rgba(245,194,74,.08)', borderRadius: 5, padding: '1px 6px' }}>◆ SWING ONLY</span>}
+              </span>
+              <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', letterSpacing: 0.4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {hero} · M5{meta?.session ? ` · ${meta.session}` : ''}{isWatch ? ' · no intraday scalp' : ''}
               </span>
             </div>
-            <div style={{ position: 'absolute', bottom: 8, right: 10, zIndex: 20, pointerEvents: 'none', fontFamily: 'var(--mono, ui-monospace)', fontSize: 9.5, color: 'var(--dim)', background: 'rgba(7,13,24,.7)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 7px' }}>
-              scan {scan}
-            </div>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', textAlign: 'right', borderLeft: '1px solid var(--border)', paddingLeft: 10, lineHeight: 1.2 }}>
+              scan<br /><b style={{ color: 'var(--cyan)', fontSize: 13.5, fontWeight: 700 }}>{scan}</b>
+            </span>
+          </div>
 
-            {/* honnêteté BTC : watch-only, jamais de scalp intraday */}
-            {isWatch && (
-              <div style={{ position: 'absolute', bottom: 8, left: 10, zIndex: 20, pointerEvents: 'none', fontFamily: 'var(--mono, ui-monospace)', fontSize: 9, fontWeight: 800, letterSpacing: 0.6, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', background: 'rgba(245,194,74,.08)', borderRadius: 5, padding: '2px 7px' }}>
-                ◆ WATCH · SWING ONLY
-              </div>
-            )}
+          {/* ===== LE GRAPHIQUE ROI (garde son propre HUD, aucun overlay par-dessus) ===== */}
+          <section style={{ position: 'relative', flex: '0 0 44%', minHeight: 250, borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(43,227,245,.3)', background: '#070f1d' }}>
+            <Chart key={hero} symbol={hero} signals={[]} wins={wins} defaultTf="M5" broadcast />
           </section>
 
           {/* ===== LE DESK, filtré sur le marché choisi ===== */}
