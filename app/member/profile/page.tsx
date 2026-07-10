@@ -5,48 +5,21 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMe, StatusPill, RiskPicker, Locked, UnlockSheet, type Member, type Referral } from '../ui';
 import { TRC20_RE } from '@/lib/member/affiliate';
-
-const b64ToU8 = (s: string) => {
-  const pad = '='.repeat((4 - (s.length % 4)) % 4);
-  const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
-  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
-};
+import { pushState, enablePush, disablePush } from '@/lib/push/client';
 
 // Alertes push : wins d'Algoria, recap du jour, annonce de live. Opt-in explicite (permission navigateur).
+// Logique partagée avec la popup d'install (lib/push/client.ts) — ici c'est le réglage manuel dans Profile.
 function PushCard() {
   const [state, setState] = useState<'unsupported' | 'off' | 'on' | 'denied' | 'busy'>('busy');
-  useEffect(() => {
-    void (async () => {
-      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY) return setState('unsupported');
-      if (Notification.permission === 'denied') return setState('denied');
-      const reg = await navigator.serviceWorker.ready;
-      setState((await reg.pushManager.getSubscription()) ? 'on' : 'off');
-    })();
-  }, []);
+  useEffect(() => { void pushState().then(setState); }, []);
   const enable = async () => {
     setState('busy');
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!) });
-      const j = sub.toJSON();
-      await fetch('/api/member/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint, keys: j.keys }) });
-      setState('on');
-    } catch {
-      setState(Notification.permission === 'denied' ? 'denied' : 'off');
-    }
+    const ok = await enablePush();
+    setState(ok ? 'on' : Notification.permission === 'denied' ? 'denied' : 'off');
   };
   const disable = async () => {
     setState('busy');
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if (sub) {
-        await fetch('/api/member/push', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) });
-        await sub.unsubscribe();
-      }
-    } finally {
-      setState('off');
-    }
+    try { await disablePush(); } finally { setState('off'); }
   };
   if (state === 'unsupported') return null;
   return (

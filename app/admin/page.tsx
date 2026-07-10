@@ -40,6 +40,7 @@ export default function AdminCRM() {
   const [creds, setCreds] = useState<Record<string, { login: string; server: string; password: string }>>({});
   // ===== registre des dépôts : mois affiché + formulaire de saisie =====
   const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [pushTgIds, setPushTgIds] = useState<number[]>([]); // tg_id ayant au moins 1 appareil abonné aux alertes
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
   const [depBroker, setDepBroker] = useState('');
@@ -70,12 +71,13 @@ export default function AdminCRM() {
       // se reconnecte, se refait renvoyer en 403, et ne voit jamais le CRM. Sécurité intacte, porte ajoutée.
       if (r.status === 401) return setState('anon');
       if (r.status === 403) return setState('forbidden');
-      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[] };
+      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[] };
       setWl(d.whitelist);
       setRows(d.members);
       setActions(d.actions ?? []);
       setAff(d.affiliate ?? null);
       setDeposits(d.deposits ?? []);
+      setPushTgIds(d.pushTgIds ?? []);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -147,6 +149,11 @@ export default function AdminCRM() {
     if (!q) return rows;
     return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), r.status].some((v) => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, search]);
+
+  // ===== ALERTES PUSH : qui a activé, qui relancer (Telegram) =====
+  const pushSet = useMemo(() => new Set(pushTgIds.map(Number)), [pushTgIds]);
+  const alertsOff = useMemo(() => rows.filter((r) => !pushSet.has(Number(r.tg_id))), [rows, pushSet]);
+  const alertsOn = rows.length - alertsOff.length;
 
   // ===== bilan du mois affiché : lignes + totaux (dépôts, coms reçues/attendues/sautées) =====
   const depDateOf = (d: Deposit) => String(d.detail?.deposited_at ?? d.created_at);
@@ -462,6 +469,33 @@ export default function AdminCRM() {
             </div>
           </section>
         )}
+        {tab === 'members' && (
+          <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'rgba(43,227,245,.28)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+              <h2 style={secH}>🔔 PUSH ALERTS</h2>
+              <span className="mono" style={{ fontSize: 18, fontWeight: 800, color: alertsOn > 0 ? 'var(--up)' : 'var(--dim)' }}>{alertsOn}<span style={{ color: 'var(--dim)', fontWeight: 500 }}> / {rows.length}</span></span>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>have alerts on{alertsOff.length ? ` · ${alertsOff.length} to nudge` : ' · everyone covered 🎉'}</span>
+            </div>
+            {alertsOff.length > 0 && (
+              <>
+                <p style={{ margin: 0, fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+                  These members haven&rsquo;t enabled notifications (no device subscribed). Ping them on Telegram — installing the app + one tap on <b style={{ color: 'var(--muted)' }}>Profile → Enable alerts</b> is all it takes.
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                  {alertsOff.map((r) => (
+                    <span key={r.member_no} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)', fontSize: 11.5 }}>
+                      <span className="goldText mono" style={{ fontWeight: 800 }}>#{r.member_no}</span>
+                      <span style={{ color: 'var(--text)' }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
+                      <StatusChip status={r.status} />
+                      {r.tg_username && <a href={`https://t.me/${r.tg_username}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none', color: 'var(--cyan)', fontWeight: 700, fontSize: 10.5 }}>💬 DM</a>}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
         {tab === 'members' && (
           <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
