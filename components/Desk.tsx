@@ -178,7 +178,11 @@ function Card({ e, latest }: { e: any; latest: boolean }) {
   );
 }
 
-export function Desk({ items = [], heroSymbol = 'XAUUSD' }: { items?: any[]; heroSymbol?: string }) {
+export function Desk({ items = [], heroSymbol = 'XAUUSD', only }: { items?: any[]; heroSymbol?: string; only?: string }) {
+  // FILTRE PAR MARCHÉ (cockpit de poche) : quand `only` est fourni, on ne garde que les cartes de ce
+  // symbole — MAIS on laisse passer les recaps/news (globaux, sans marché). C'est ce qui fait « vivre »
+  // le sélecteur GOLD/BTC : avant, le flux montrait tous les marchés entrelacés quel que soit l'onglet.
+  if (only) items = items.filter((e: any) => { const m = e?.data ?? {}; return m.kind === 'recap' || m.kind === 'news' || symOf(m) === only; });
   // dédup structurel ASSOUPLI : on effondre les lectures consécutives identiques (symbole·état·niveau·direction)
   // MAIS au plus par tranche de 15 min — un marché plat re-parle quand même (le desk doit rester bavard en live).
   // Le flux est MULTI-MARCHÉ (XAU + NAS entrelacés) ; les recaps ne sont jamais fusionnés.
