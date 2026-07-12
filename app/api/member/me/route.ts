@@ -86,6 +86,9 @@ export async function POST(req: NextRequest) {
     patch.broker = broker;
     patch.onboarding_step = 1;
   } else if (body.action === 'mt5') {
+    const broker = String(body.broker ?? '').trim().slice(0, 40);
+    if (broker) patch.broker = broker; // broker choisi sur l'écran de connexion (menu déroulant)
+    const platform = String(body.platform ?? 'mt5') === 'mt4' ? 'mt4' : 'mt5'; // MT4 vs MT5 → STH IsMT4
     const login = String(body.login ?? '').trim().slice(0, 40);
     const server = String(body.server ?? '').trim().slice(0, 80);
     const password = String(body.password ?? '');
@@ -103,7 +106,7 @@ export async function POST(req: NextRequest) {
     const { data: mn } = await db.from('members').select('member_no').eq('tg_id', s.tgId).limit(1);
     await db.from('member_actions').insert({
       tg_id: s.tgId, member_no: mn?.[0]?.member_no ?? null, kind: 'kyc', status: 'done', done_by: 'member',
-      detail: { broker_name: fullName, declared_deposit: deposit } as never,
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4' } as never,
     });
   } else if (body.action === 'risk') {
     const tier = String(body.tier ?? '');
@@ -154,6 +157,16 @@ export async function POST(req: NextRequest) {
     if (amount > available) return NextResponse.json({ error: `only $${Math.max(0, Math.floor(available))} available` }, { status: 400 });
     const { error: perr } = await db.from('referral_payouts').insert({ tg_id: s.tgId, amount, address });
     if (perr) return NextResponse.json({ error: perr.message }, { status: 500 });
+  } else if (body.action === 'disconnect') {
+    // DÉCONNECTER / changer de compte de trading : on efface les identifiants MT5 et on repasse le membre en
+    // onboarding (broker gardé → il retombe sur l'étape « connexion MT5 »). Une action 'disconnect' part dans la
+    // file pour que le support retire le copieur côté STH (jusqu'à ce que l'API STH le fasse automatiquement).
+    patch.status = 'onboarding';
+    patch.onboarding_step = 1;
+    patch.mt5_login = null;
+    patch.mt5_server = null;
+    patch.mt5_password_enc = null;
+    await queueAction(s.tgId, 'disconnect', {}); // → le support retire le compte du copieur STH
   } else if (body.action === 'pause' || body.action === 'resume') {
     // GARDE-FOU : le statut gate maintenant le contenu (mode teaser) — un prospect ne doit pas pouvoir
     // s'auto-promouvoir en 'live' via un simple POST resume. Réservé aux comptes déjà activés.

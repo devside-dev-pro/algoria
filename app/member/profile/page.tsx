@@ -3,6 +3,7 @@
 // Le Home reste focalisé sur le statut + les trades ; tout ce qui est "réglages du compte" vit ici.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, RiskPicker, Locked, UnlockSheet, type Member, type Referral } from '../ui';
 import { TRC20_RE } from '@/lib/member/affiliate';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
@@ -49,8 +50,10 @@ function PushCard() {
 }
 
 export default function Profile() {
+  const router = useRouter();
   const { member, setMember, referral: refInit, unlocked, loading } = useMe();
   const [busy, setBusy] = useState(false);
+  const [disc, setDisc] = useState(false);
   const [copied, setCopied] = useState(false);
   const [paywall, setPaywall] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
@@ -66,6 +69,15 @@ export default function Profile() {
     void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...(tier ? { tier } : {}) }) })
       .then(async (r) => { const d = (await r.json()) as { member?: Member }; if (d.member) setMember(d.member); })
       .finally(() => setBusy(false));
+  };
+  // DÉCONNECTER le compte de trading : coupe la copie (queue une action pour STH) et repasse en onboarding
+  // pour reconnecter / changer de broker. Confirmation obligatoire (destructif).
+  const disconnect = () => {
+    if (!window.confirm('Disconnect your trading account? This stops the copy and you’ll re-enter your MT5 details to reconnect.')) return;
+    setDisc(true);
+    void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'disconnect' }) })
+      .then((r) => (r.ok ? router.push('/member/onboarding') : setDisc(false)))
+      .catch(() => setDisc(false));
   };
   const since = member.created_at ? new Date(member.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
 
@@ -232,6 +244,9 @@ export default function Profile() {
           <RowKV k="MT5 login" v={member.mt5_login ?? '—'} />
           <RowKV k="Server" v={member.mt5_server ?? '—'} />
           <p style={{ margin: '2px 0 0', fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Your password is encrypted and never displayed. To revoke access, change it on your broker account.</p>
+          <button onClick={disconnect} disabled={disc} style={{ alignSelf: 'flex-start', marginTop: 4, border: '1px solid rgba(255,107,138,.28)', background: 'transparent', color: 'rgba(210,150,165,.9)', borderRadius: 9, padding: '8px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
+            {disc ? 'Disconnecting…' : 'Disconnect / change trading account'}
+          </button>
         </section>
       </Locked>
 
