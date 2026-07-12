@@ -24,6 +24,7 @@ export default function Onboarding() {
   const [login, setLogin] = useState('');
   const [server, setServer] = useState('');
   const [serverManual, setServerManual] = useState(false); // « mon serveur n'est pas listé » → saisie libre
+  const [platform, setPlatform] = useState<'mt5' | 'mt4'>('mt5'); // MT5 par défaut ; le copieur STH a besoin du IsMT4
   const [password, setPassword] = useState('');
   // VÉRIFICATION : le support contrôle le compte chez le broker AVANT d'approuver — sans le nom du
   // titulaire et le dépôt déclaré, la file admin était aveugle (n'importe qui pouvait raconter n'importe quoi)
@@ -105,18 +106,29 @@ export default function Onboarding() {
 
       {cur === 1 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2 style={{ fontSize: 15, margin: 0 }}>2 · Connect your MT5 account</h2>
-          <p style={pMuted}>Pick your broker, then enter the account it gave you. <strong style={{ color: 'var(--text)' }}>Encrypted end-to-end</strong> and never displayed again — not even to you.</p>
-          {/* BROKER — choisi ICI (menu), pilote la liste des serveurs juste en dessous. Plus besoin de « revenir
-              en arrière » pour changer : broker → serveur → mot de passe, dans l'ordre, au même endroit. */}
+          <h2 style={{ fontSize: 15, margin: 0 }}>2 · Connect your MetaTrader account</h2>
+          <p style={pMuted}>Pick your broker &amp; platform, then enter the account it gave you. <strong style={{ color: 'var(--text)' }}>Encrypted end-to-end</strong> and never displayed again — not even to you.</p>
+          {/* BROKER + PLATEFORME choisis ICI (menu/toggle), pilotent la suite. Plus besoin de « revenir en
+              arrière » pour changer : broker → plateforme → serveur → mot de passe, dans l'ordre, au même endroit. */}
           <label style={lbl}>Broker
             <select value={picked ?? ''} onChange={(e) => { setBrokerPick(e.target.value || null); setServer(''); setServerManual(false); }} style={inp}>
               <option value="">— choose your broker —</option>
               {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
             </select>
           </label>
+          <label style={lbl}>Platform
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(['mt5', 'mt4'] as const).map((p) => (
+                <button key={p} type="button" onClick={() => setPlatform(p)}
+                  style={{ flex: 1, padding: '10px 8px', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 12.5, letterSpacing: 0.3,
+                    border: `1px solid ${platform === p ? 'rgba(43,227,245,.55)' : 'var(--border)'}`, background: platform === p ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)', color: platform === p ? 'var(--cyan)' : 'var(--muted)' }}>
+                  {p === 'mt5' ? 'MetaTrader 5' : 'MetaTrader 4'}
+                </button>
+              ))}
+            </div>
+          </label>
           <label style={lbl}>Full name on your broker account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
-          <label style={lbl}>MT5 login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} /></label>
+          <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} /></label>
           {/* SERVEUR — menu déroulant des noms EXACTS (le copieur exige la chaîne exacte, une faute de casse/espace
               casse la copie). Repli en saisie libre si le serveur n'est pas listé → personne n'est bloqué. */}
           <label style={lbl}>Server
@@ -135,7 +147,7 @@ export default function Onboarding() {
           <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} /><span style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4, lineHeight: 1.4 }}>Your <b style={{ color: 'var(--muted)' }}>main</b> account password (the one you log in with) — <b style={{ color: 'var(--muted)' }}>not</b> the read-only &ldquo;investor&rdquo; password, or the copy can&apos;t place trades.</span></label>
           <label style={lbl}>Amount deposited ($ — min 500)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="500" style={inp} /></label>
           <p style={{ ...pMuted, fontSize: 11.5 }}>The team verifies your name and deposit with the broker before switching the copy on — accurate info = faster approval.</p>
-          <button disabled={busy || !picked || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', broker: picked, login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
+          <button disabled={busy || !picked || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', broker: picked, platform, login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
             {busy ? 'ENCRYPTING…' : 'CONNECT MY ACCOUNT →'}
           </button>
           <button onClick={() => setStep(0)} style={linkBtn}>Don&apos;t have a broker account yet? Open one →</button>

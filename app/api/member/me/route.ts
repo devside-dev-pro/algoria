@@ -88,6 +88,7 @@ export async function POST(req: NextRequest) {
   } else if (body.action === 'mt5') {
     const broker = String(body.broker ?? '').trim().slice(0, 40);
     if (broker) patch.broker = broker; // broker choisi sur l'écran de connexion (menu déroulant)
+    const platform = String(body.platform ?? 'mt5') === 'mt4' ? 'mt4' : 'mt5'; // MT4 vs MT5 → STH IsMT4
     const login = String(body.login ?? '').trim().slice(0, 40);
     const server = String(body.server ?? '').trim().slice(0, 80);
     const password = String(body.password ?? '');
@@ -105,7 +106,7 @@ export async function POST(req: NextRequest) {
     const { data: mn } = await db.from('members').select('member_no').eq('tg_id', s.tgId).limit(1);
     await db.from('member_actions').insert({
       tg_id: s.tgId, member_no: mn?.[0]?.member_no ?? null, kind: 'kyc', status: 'done', done_by: 'member',
-      detail: { broker_name: fullName, declared_deposit: deposit } as never,
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4' } as never,
     });
   } else if (body.action === 'risk') {
     const tier = String(body.tier ?? '');
