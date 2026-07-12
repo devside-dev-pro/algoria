@@ -106,7 +106,15 @@ export default function Onboarding() {
       {cur === 1 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <h2 style={{ fontSize: 15, margin: 0 }}>2 · Connect your MT5 account</h2>
-          <p style={pMuted}>These credentials link your account to the copier. They are <strong style={{ color: 'var(--text)' }}>encrypted end-to-end</strong> and never displayed again — not even to you.</p>
+          <p style={pMuted}>Pick your broker, then enter the account it gave you. <strong style={{ color: 'var(--text)' }}>Encrypted end-to-end</strong> and never displayed again — not even to you.</p>
+          {/* BROKER — choisi ICI (menu), pilote la liste des serveurs juste en dessous. Plus besoin de « revenir
+              en arrière » pour changer : broker → serveur → mot de passe, dans l'ordre, au même endroit. */}
+          <label style={lbl}>Broker
+            <select value={picked ?? ''} onChange={(e) => { setBrokerPick(e.target.value || null); setServer(''); setServerManual(false); }} style={inp}>
+              <option value="">— choose your broker —</option>
+              {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
+            </select>
+          </label>
           <label style={lbl}>Full name on your broker account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
           <label style={lbl}>MT5 login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} /></label>
           {/* SERVEUR — menu déroulant des noms EXACTS (le copieur exige la chaîne exacte, une faute de casse/espace
@@ -127,10 +135,10 @@ export default function Onboarding() {
           <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} /><span style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4, lineHeight: 1.4 }}>Your <b style={{ color: 'var(--muted)' }}>main</b> account password (the one you log in with) — <b style={{ color: 'var(--muted)' }}>not</b> the read-only &ldquo;investor&rdquo; password, or the copy can&apos;t place trades.</span></label>
           <label style={lbl}>Amount deposited ($ — min 500)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="500" style={inp} /></label>
           <p style={{ ...pMuted, fontSize: 11.5 }}>The team verifies your name and deposit with the broker before switching the copy on — accurate info = faster approval.</p>
-          <button disabled={busy || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
+          <button disabled={busy || !picked || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', broker: picked, login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
             {busy ? 'ENCRYPTING…' : 'CONNECT MY ACCOUNT →'}
           </button>
-          <button onClick={() => setStep(0)} style={linkBtn}>← Wrong broker? Go back and pick another</button>
+          <button onClick={() => setStep(0)} style={linkBtn}>Don&apos;t have a broker account yet? Open one →</button>
           <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · YOU CAN REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
         </section>
       )}

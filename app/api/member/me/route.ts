@@ -86,6 +86,8 @@ export async function POST(req: NextRequest) {
     patch.broker = broker;
     patch.onboarding_step = 1;
   } else if (body.action === 'mt5') {
+    const broker = String(body.broker ?? '').trim().slice(0, 40);
+    if (broker) patch.broker = broker; // broker choisi sur l'écran de connexion (menu déroulant)
     const login = String(body.login ?? '').trim().slice(0, 40);
     const server = String(body.server ?? '').trim().slice(0, 80);
     const password = String(body.password ?? '');
