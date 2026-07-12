@@ -105,53 +105,63 @@ export default function Onboarding() {
       )}
 
       {cur === 1 && (
-        <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h2 style={{ fontSize: 15, margin: 0 }}>2 · Connect your MetaTrader account</h2>
-          <p style={pMuted}>Pick your broker &amp; platform, then enter the account it gave you. <strong style={{ color: 'var(--text)' }}>Encrypted end-to-end</strong> and never displayed again — not even to you.</p>
-          {/* BROKER + PLATEFORME choisis ICI (menu/toggle), pilotent la suite. Plus besoin de « revenir en
-              arrière » pour changer : broker → plateforme → serveur → mot de passe, dans l'ordre, au même endroit. */}
-          <label style={lbl}>Broker
-            <select value={picked ?? ''} onChange={(e) => { setBrokerPick(e.target.value || null); setServer(''); setServerManual(false); }} style={inp}>
-              <option value="">— choose your broker —</option>
-              {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
-            </select>
-          </label>
-          <label style={lbl}>Platform
-            <div style={{ display: 'flex', gap: 8 }}>
-              {(['mt5', 'mt4'] as const).map((p) => (
-                <button key={p} type="button" onClick={() => setPlatform(p)}
-                  style={{ flex: 1, padding: '10px 8px', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 12.5, letterSpacing: 0.3,
-                    border: `1px solid ${platform === p ? 'rgba(43,227,245,.55)' : 'var(--border)'}`, background: platform === p ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)', color: platform === p ? 'var(--cyan)' : 'var(--muted)' }}>
-                  {p === 'mt5' ? 'MetaTrader 5' : 'MetaTrader 4'}
-                </button>
-              ))}
+          <p style={pMuted}>Pick your broker &amp; platform, then enter the account it gave you. <strong style={{ color: 'var(--text)' }}>Encrypted end-to-end</strong>, never shown again.</p>
+
+          {/* BLOC 1 — le compte : broker → plateforme → login → serveur → mdp, dans l'ordre, au même endroit
+              (plus de « revenir en arrière » pour changer le serveur). */}
+          <div style={grp}>
+            <span style={grpLbl}>YOUR ACCOUNT</span>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <label style={{ ...lbl, flex: '1 1 130px' }}>Broker
+                <select value={picked ?? ''} onChange={(e) => { setBrokerPick(e.target.value || null); setServer(''); setServerManual(false); }} style={inp}>
+                  <option value="">— choose —</option>
+                  {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
+                </select>
+              </label>
+              <label style={{ ...lbl, flex: '1 1 150px' }}>Platform
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {(['mt5', 'mt4'] as const).map((p) => (
+                    <button key={p} type="button" onClick={() => setPlatform(p)}
+                      style={{ flex: 1, padding: '10px 6px', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 12.5, letterSpacing: 0.3,
+                        border: `1px solid ${platform === p ? 'rgba(43,227,245,.55)' : 'var(--border)'}`, background: platform === p ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)', color: platform === p ? 'var(--cyan)' : 'var(--muted)' }}>
+                      {p === 'mt5' ? 'MT5' : 'MT4'}
+                    </button>
+                  ))}
+                </div>
+              </label>
             </div>
-          </label>
-          <label style={lbl}>Full name on your broker account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
-          <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} /></label>
-          {/* SERVEUR — menu déroulant des noms EXACTS (le copieur exige la chaîne exacte, une faute de casse/espace
-              casse la copie). Repli en saisie libre si le serveur n'est pas listé → personne n'est bloqué. */}
-          <label style={lbl}>Server
-            {brokerServers.length > 0 && !serverManual ? (
-              <select value={server} onChange={(e) => { const v = e.target.value; if (v === '__other__') { setServerManual(true); setServer(''); } else setServer(v); }} style={inp}>
-                <option value="">— choose your MT5 server —</option>
-                {brokerServers.map((s) => <option key={s} value={s}>{s}</option>)}
-                <option value="__other__">My server isn&apos;t listed…</option>
-              </select>
-            ) : (
-              <input value={server} onChange={(e) => setServer(e.target.value)} placeholder="type it EXACTLY as MT5 shows it" style={inp} />
-            )}
-            <span style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4, lineHeight: 1.4 }}>Must match your broker&apos;s server <b style={{ color: 'var(--muted)' }}>exactly</b> — copy it from MT5 (caps &amp; spaces count).</span>
-            {brokerServers.length > 0 && serverManual && <button type="button" onClick={() => { setServerManual(false); setServer(''); }} style={{ ...linkBtn, marginTop: 4, textAlign: 'left' }}>← Pick from the list instead</button>}
-          </label>
-          <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} /><span style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4, lineHeight: 1.4 }}>Your <b style={{ color: 'var(--muted)' }}>main</b> account password (the one you log in with) — <b style={{ color: 'var(--muted)' }}>not</b> the read-only &ldquo;investor&rdquo; password, or the copy can&apos;t place trades.</span></label>
-          <label style={lbl}>Amount deposited ($ — min 500)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="500" style={inp} /></label>
-          <p style={{ ...pMuted, fontSize: 11.5 }}>The team verifies your name and deposit with the broker before switching the copy on — accurate info = faster approval.</p>
+            <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} /></label>
+            <label style={lbl}>Server
+              {brokerServers.length > 0 && !serverManual ? (
+                <select value={server} onChange={(e) => { const v = e.target.value; if (v === '__other__') { setServerManual(true); setServer(''); } else setServer(v); }} style={inp}>
+                  <option value="">— choose your server —</option>
+                  {brokerServers.map((s) => <option key={s} value={s}>{s}</option>)}
+                  <option value="__other__">My server isn&apos;t listed…</option>
+                </select>
+              ) : (
+                <input value={server} onChange={(e) => setServer(e.target.value)} placeholder="type it EXACTLY as MetaTrader shows it" style={inp} />
+              )}
+              <span style={hint}>Must match your broker&apos;s server <b style={{ color: 'var(--muted)' }}>exactly</b> — copy it from MetaTrader (caps &amp; spaces count).</span>
+              {brokerServers.length > 0 && serverManual && <button type="button" onClick={() => { setServerManual(false); setServer(''); }} style={{ ...linkBtn, marginTop: 4, textAlign: 'left' }}>← Pick from the list instead</button>}
+            </label>
+            <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} /><span style={hint}>Your <b style={{ color: 'var(--muted)' }}>main</b> password (the one you log in with) — <b style={{ color: 'var(--muted)' }}>not</b> the read-only &ldquo;investor&rdquo; one, or the copy can&apos;t trade.</span></label>
+          </div>
+
+          {/* BLOC 2 — vérification (nom + dépôt) : le support recoupe avec le broker avant d'activer la copie. */}
+          <div style={grp}>
+            <span style={grpLbl}>FOR VERIFICATION</span>
+            <label style={lbl}>Full name on your broker account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
+            <label style={lbl}>Amount deposited ($ — min 500)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="500" style={inp} /></label>
+            <span style={hint}>Accurate name &amp; deposit = faster approval — the team checks them with the broker before switching the copy on.</span>
+          </div>
+
           <button disabled={busy || !picked || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', broker: picked, platform, login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
             {busy ? 'ENCRYPTING…' : 'CONNECT MY ACCOUNT →'}
           </button>
           <button onClick={() => setStep(0)} style={linkBtn}>Don&apos;t have a broker account yet? Open one →</button>
-          <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · YOU CAN REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
+          <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
         </section>
       )}
 
@@ -179,3 +189,7 @@ const inp = { padding: '11px 13px', borderRadius: 10, border: '1px solid var(--b
 const ctaMain = { padding: '13px 16px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' } as const;
 const ctaGold = { padding: '13px 16px', borderRadius: 12, textAlign: 'center', textDecoration: 'none', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)', boxShadow: '0 0 20px rgba(245,194,74,.25)' } as const;
 const linkBtn = { padding: 6, border: 'none', background: 'transparent', color: 'var(--dim)', fontSize: 12.5, cursor: 'pointer', textDecoration: 'underline' } as const;
+// blocs visuels du wizard de connexion (regroupent les champs → moins « mur de formulaire »)
+const grp = { display: 'flex', flexDirection: 'column', gap: 11, padding: '13px 13px 15px', borderRadius: 13, border: '1px solid var(--border)', background: 'rgba(10,17,31,.35)' } as const;
+const grpLbl = { fontSize: 9.5, letterSpacing: 1.8, color: 'var(--dim)', fontWeight: 800 } as const;
+const hint = { fontSize: 10.5, color: 'var(--dim)', marginTop: 4, lineHeight: 1.4 } as const;
