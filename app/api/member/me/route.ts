@@ -154,6 +154,16 @@ export async function POST(req: NextRequest) {
     if (amount > available) return NextResponse.json({ error: `only $${Math.max(0, Math.floor(available))} available` }, { status: 400 });
     const { error: perr } = await db.from('referral_payouts').insert({ tg_id: s.tgId, amount, address });
     if (perr) return NextResponse.json({ error: perr.message }, { status: 500 });
+  } else if (body.action === 'disconnect') {
+    // DÉCONNECTER / changer de compte de trading : on efface les identifiants MT5 et on repasse le membre en
+    // onboarding (broker gardé → il retombe sur l'étape « connexion MT5 »). Une action 'disconnect' part dans la
+    // file pour que le support retire le copieur côté STH (jusqu'à ce que l'API STH le fasse automatiquement).
+    patch.status = 'onboarding';
+    patch.onboarding_step = 1;
+    patch.mt5_login = null;
+    patch.mt5_server = null;
+    patch.mt5_password_enc = null;
+    await queueAction(s.tgId, 'disconnect', {}); // → le support retire le compte du copieur STH
   } else if (body.action === 'pause' || body.action === 'resume') {
     // GARDE-FOU : le statut gate maintenant le contenu (mode teaser) — un prospect ne doit pas pouvoir
     // s'auto-promouvoir en 'live' via un simple POST resume. Réservé aux comptes déjà activés.
