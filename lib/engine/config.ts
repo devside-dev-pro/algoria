@@ -67,7 +67,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
 
 /**
  * MODE SCALP — stratégie de scalping VALIDÉE par backtest (5 601 bougies M5 gold réel, 2026-06, ~19 jours de session).
- * Profil : seuil bas (trade souvent) + TP rapide (R:R 0.4) + SL serré (1.2×ATR) + breakeven précoce.
+ * Profil : seuil bas (trade souvent) + on laisse courir (R:R 1.0) + SL serré (1.2×ATR) + breakeven précoce.
  * Résultats (riskPct 1%/trade, robuste sur les DEUX moitiés out-of-sample — voir backtest/scalp.ts) :
  *   239 trades · ~8.4/jour · win rate 88.3% · PF 1.44 · expectancy +0.05 R · netPnl +$1257 · maxDD 4.4% · H1 +$520 / H2 +$424.
  * NB : pousser la fréquence plus haut (seuil <0.25, R:R 0.2) fait s'effondrer le PF vers ~1.05 → churn sans edge réel.
@@ -75,7 +75,12 @@ export const DEFAULT_CONFIG: EngineConfig = {
  */
 export const SCALP_CONFIG: EngineConfig = {
   ...DEFAULT_CONFIG,
-  targetRR: 0.4, // TP = 0.4 × SL : sortie rapide, win rate élevé
+  // TP = 1.0 × SL : on LAISSE COURIR le gagnant. Le breakeven précoce (0.15) reste le filet — il transforme
+  // les futurs perdants en trades ~0 —, mais couper les gagnants à 0.4×SL laissait trop d'argent sur la table.
+  // Backtest M5 gold juin+juillet (inclut les journées rouges 10 & 14/07) : net ×4 (+153 → +609 $),
+  // perte de la quinzaine rouge amortie de 85% (−395 → −60 $), win rate identique 84%, drawdown ~inchangé.
+  // Desserrer le BE, à l'inverse, effondrait le win rate 86%→65% : on n'y touche pas.
+  targetRR: 1.0,
   slAtrMult: 1.2,
   minRR: 0.2,
   minStopAtr: 0.35, // autorise des stops un peu plus serrés (scalp)
