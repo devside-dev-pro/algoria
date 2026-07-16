@@ -117,4 +117,6 @@ export interface EngineState {
   spread: number;
   newsWindows: Array<{ start: number; end: number; label: string }>;
   killed: boolean;
+  dayStamp?: string; // jour UTC (YYYY-MM-DD) courant — sert au reset journalier des compteurs/plafonds
+  dayDone?: boolean; // LATCH : plafond de gain OU de perte du jour atteint → plus de nouvelles entrées jusqu'au lendemain
 }

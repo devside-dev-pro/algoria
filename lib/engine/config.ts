@@ -53,7 +53,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
   minRR: 0.24, // était 1.2 — débloque les trades à R:R < 1 (sinon ils étaient tous rejetés)
   beTrigger: 0.15, // breakeven validé : SL → entrée dès que le profit atteint 15% du risque → win rate 93% (vs 86% sans), PF 2.60
   risk: {
-    maxDailyLossPct: 0.04,
+    maxDailyLossPct: 0.04, // −4% du solde master (~$2 800 sur 70k) → journée coupée. Client (ratio copie) ≈ −$30 à −$60, sous la barre des 100€.
     maxOpenPositions: 2,
     maxOpenRiskPct: 0.03,
     maxTradesPerDay: 60,
@@ -61,7 +61,9 @@ export const DEFAULT_CONFIG: EngineConfig = {
     minSecondsBetweenTrades: 60,
     newsLockoutBeforeSec: 120,
     newsLockoutAfterSec: 300,
-    dailyProfitTargetPct: 0.05,
+    // +4% du solde master → objectif du jour atteint, Algoria arrête de trader (latch dayDone, cf. readState).
+    // Symétrique au plafond de perte : « petits gains réguliers » plutôt que rendre un gain sur des stops.
+    dailyProfitTargetPct: 0.04,
   },
 };
 
