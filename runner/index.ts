@@ -277,7 +277,7 @@ async function main() {
     // ===== Boucle MOTEUR : à chaque bougie M5 clôturée, on fait tourner la confluence sur CET instrument =====
     const onClosed = async (bars: Bar[]) => {
       try {
-        state = readState(terminal, BROKER, state);
+        state = readState(terminal, BROKER, state, { targetPct: inst.config.risk.dailyProfitTargetPct, lossPct: inst.config.risk.maxDailyLossPct });
         state.killed = killed; // le kill switch global gèle l'auto sur tous les instruments
         state.newsWindows = newsWindows(); // annonces éco USD fort impact → checkRisk refuse les entrées autour
         // mode scalp = config scalp VALIDÉE de l'instrument (l'or et le Nasdaq n'ont pas la même). NORMAL → DEFAULT strict.
@@ -480,7 +480,7 @@ async function main() {
     // même un snapshot minimal — sinon la balance du cockpit reste FIGÉE sur vendredi soir tout le week-end.
     const pushAccount = async () => {
       if (!isPrimary) return;
-      state = readState(terminal, BROKER, state);
+      state = readState(terminal, BROKER, state, { targetPct: inst.config.risk.dailyProfitTargetPct, lossPct: inst.config.risk.maxDailyLossPct });
       state.killed = killed;
       const ctx: MarketContext = lastCtx ?? {
         symbol: DISPLAY, time: Date.now(), price: 0, session: 'closed', regime: 'range',

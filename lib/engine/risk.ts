@@ -8,6 +8,10 @@ export function checkRisk(signal: Signal, state: EngineState, cfg: EngineConfig)
 
   if (state.killed) reasons.push('kill switch active');
 
+  // LATCH « journée terminée » : une fois le plafond de gain OU de perte du jour touché, on ne prend plus AUCUNE
+  // nouvelle entrée jusqu'au reset (minuit UTC). Les positions déjà ouvertes finissent leur vie normalement.
+  if (state.dayDone) reasons.push('day closed — daily cap reached');
+
   const lossPct = (state.dayStartBalance - state.equity) / state.dayStartBalance;
   if (lossPct >= r.maxDailyLossPct) reasons.push(`daily loss ${(lossPct * 100).toFixed(1)}% ≥ ${r.maxDailyLossPct * 100}% → kill switch`);
 
