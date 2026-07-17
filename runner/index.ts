@@ -554,6 +554,12 @@ async function main() {
   const primary = engines[0];
   console.log(`[algoria] ${engines.length} moteur(s) actif(s) · primaire=${primary.inst.display}`);
 
+  // Diagnostic STRATÉGIE au boot — chaque runner/master tourne UN profil (env ALGORIA_STRATEGY, défaut S2).
+  {
+    const { ACTIVE_STRATEGY } = await import('../lib/engine/strategies');
+    console.log(`[algoria] strategy: ${ACTIVE_STRATEGY.label} · thr ${ACTIVE_STRATEGY.thresholdScalp} · RR ${ACTIVE_STRATEGY.targetRR} · asia ${ACTIVE_STRATEGY.tradeAsia ? 'on' : 'OFF'} · caps +${ACTIVE_STRATEGY.dailyProfitTargetPct * 100}%/−${ACTIVE_STRATEGY.maxDailyLossPct * 100}% · swing ${ACTIVE_STRATEGY.swing ? 'on' : 'off'} · breakout ${ACTIVE_STRATEGY.breakout ? 'on' : 'off'}`);
+  }
+
   // Diagnostic canal VIP au boot — dit dans les logs Railway pourquoi ça ne poste pas (token/chat manquant).
   console.log(
     `[algoria] VIP channel: ${vipReady() ? 'ready ✓' : 'NOT ready ✗'} · TELEGRAM_BOT_TOKEN=${process.env.TELEGRAM_BOT_TOKEN ? 'set' : 'MISSING'} · TELEGRAM_VIP_CHAT=${process.env.TELEGRAM_VIP_CHAT ? 'set' : 'MISSING'} · VIP_DEMO=${process.env.VIP_DEMO === '1' ? 'on' : 'off'}`,
