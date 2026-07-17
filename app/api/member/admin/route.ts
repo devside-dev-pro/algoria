@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret } from '@/lib/member/server';
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
+import { sthReady, sthConnectAndJoin, sthDisconnect } from '@/lib/member/sth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; offboard?: number;
+    revealMember?: number; offboard?: number; connectSth?: string;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -293,12 +294,44 @@ export async function POST(req: NextRequest) {
   }
   if (body.offboard) {
     // OFF-BOARD : le client est parti (retrait). Statut → paused (sort du compte "actifs", fiche + creds conservés),
-    // déconnexion copieur empilée dans la file (retrait STH côté support), et note timeline explicite.
+    // déconnexion copieur (via STH si configuré, sinon empilée dans la file support), et note timeline explicite.
     const { data: m } = await db.from('members').select('member_no,tg_id').eq('tg_id', body.offboard).limit(1);
     if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
     await db.from('members').update({ status: 'paused', updated_at: new Date().toISOString() }).eq('tg_id', body.offboard);
-    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'disconnect', status: 'pending', done_by: who, detail: { reason: 'off-board (client left)' } as never });
-    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: '⛔ off-boarded — client left. Also remove them from the VIP Telegram channel.' } as never });
+    let discLine = 'copier disconnect queued for STH';
+    if (sthReady()) {
+      const d = await sthDisconnect(String(m[0].tg_id));
+      if (d.ok) discLine = 'copier disconnected via STH';
+      else {
+        discLine = `STH disconnect failed (${d.errorMessage}) — do it manually`;
+        await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'disconnect', status: 'pending', done_by: who, detail: { reason: `off-board (STH failed: ${d.errorMessage})` } as never });
+      }
+    } else {
+      await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'disconnect', status: 'pending', done_by: who, detail: { reason: 'off-board (client left)' } as never });
+    }
+    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `⛔ off-boarded — client left · ${discLine}. Also remove them from the VIP Telegram channel.` } as never });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.connectSth) {
+    // CONNEXION AUTO via STH (option B) : le support clique « connect » sur la demande → on branche le compte
+    // dans le copieur (connect + join master) SANS ressaisie. Succès → le front enchaîne `done` (passage LIVE).
+    if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
+    const { data: act } = await db.from('member_actions').select('id,tg_id,detail').eq('id', body.connectSth).eq('kind', 'connect').limit(1);
+    if (!act?.length) return NextResponse.json({ error: 'connect request not found (already processed?)' }, { status: 404 });
+    const detail = (act[0].detail as Record<string, unknown>) ?? {};
+    const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier').eq('tg_id', act[0].tg_id).limit(1);
+    if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
+    if (!m[0].mt5_login || !m[0].mt5_server) return NextResponse.json({ error: 'missing MT5 login/server' }, { status: 400 });
+    let password: string;
+    try {
+      password = decryptSecret(m[0].mt5_password_enc as string);
+    } catch {
+      return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
+    }
+    const lots = Number(detail.lot ?? { low: 0.01, balanced: 0.05, high: 0.1 }[String(m[0].risk_tier)] ?? 0.01) || 0.01;
+    const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots });
+    if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
+    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots})` } as never });
     return NextResponse.json({ ok: true });
   }
   if (body.done) {

@@ -147,6 +147,14 @@ export default function AdminCRM() {
       .then(async (r) => { const d = (await r.json()) as { login?: string; server?: string; password?: string; error?: string }; if (d.error) window.alert(d.error); else if (d.password) setSelCreds({ login: d.login ?? '', server: d.server ?? '', password: d.password }); })
       .finally(() => setBusy(false));
   };
+  // connexion AUTO via STH : branche le compte dans le copieur, puis enchaîne `done` (passage LIVE) si OK
+  const connectViaSth = (id: string) => {
+    if (!window.confirm('Connect this account to the copier via STH now?\n\nVerify the deposit first — on success the member goes LIVE.')) return;
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectSth: id }) })
+      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return window.alert(d.error); post({ done: id }, () => setCreds((c) => { const n = { ...c }; delete n[id]; return n; })); })
+      .catch(() => setBusy(false));
+  };
   // off-board : le client est parti → paused + déconnexion copieur + note (le kick du canal Telegram reste manuel)
   const offboard = (r: Row) => {
     const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
@@ -419,7 +427,10 @@ export default function AdminCRM() {
                   {a.kind === 'connect' && !creds[a.id] && (
                     <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password (timestamped)" style={goldBtn}>🔑 REVEAL</button>
                   )}
-                  <button disabled={busy} onClick={() => post({ done: a.id }, () => setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }))} style={okBtn}>✓ DONE</button>
+                  {a.kind === 'connect' && (
+                    <button disabled={busy} onClick={() => connectViaSth(a.id)} title="connect this account to the copier via STH now, then go LIVE (one click, no manual STH entry)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔗 CONNECT (STH)</button>
+                  )}
+                  <button disabled={busy} onClick={() => post({ done: a.id }, () => setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }))} title="mark done manually (if you connected the account in STH yourself)" style={okBtn}>✓ DONE</button>
                   {a.kind === 'connect' && (
                     <button disabled={busy} onClick={() => rejectConnect(a.id)} title="verification failed → member goes back to the wizard with your reason, can resubmit" style={dangerBtn}>REJECT</button>
                   )}
