@@ -554,6 +554,11 @@ async function main() {
   const primary = engines[0];
   console.log(`[algoria] ${engines.length} moteur(s) actif(s) · primaire=${primary.inst.display}`);
 
+  // Diagnostic canal VIP au boot — dit dans les logs Railway pourquoi ça ne poste pas (token/chat manquant).
+  console.log(
+    `[algoria] VIP channel: ${vipReady() ? 'ready ✓' : 'NOT ready ✗'} · TELEGRAM_BOT_TOKEN=${process.env.TELEGRAM_BOT_TOKEN ? 'set' : 'MISSING'} · TELEGRAM_VIP_CHAT=${process.env.TELEGRAM_VIP_CHAT ? 'set' : 'MISSING'} · VIP_DEMO=${process.env.VIP_DEMO === '1' ? 'on' : 'off'}`,
+  );
+
   // ===== DÉMO CANAL VIP : pose VIP_DEMO=1 sur Railway (+ TELEGRAM_VIP_CHAT) → au boot, une salve de messages
   // d'exemple part dans le canal (un de chaque type) pour vérifier la connexion sans attendre le marché.
   // À RETIRER ensuite (sinon la démo se re-poste à chaque redéploiement).
