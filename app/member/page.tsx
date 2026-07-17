@@ -7,16 +7,26 @@ import { useEffect, useState } from 'react';
 import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, BOOK_CALL_URL, type Member } from './ui';
 import { tgHref } from '@/lib/telegram';
 
-interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string }
+interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string; lot?: number }
 
 export default function MemberHome() {
   const { member, setMember, unlocked, loading } = useMe();
   const [trades, setTrades] = useState<FeedTrade[]>([]);
+  const [clientLot, setClientLot] = useState(0.01);
   const [busy, setBusy] = useState(false);
   const [paywall, setPaywall] = useState(false);
   useEffect(() => {
-    void fetch('/api/member/feed').then(async (r) => (r.ok ? setTrades(((await r.json()) as { trades: FeedTrade[] }).trades.slice(0, 8)) : null));
+    void fetch('/api/member/feed').then(async (r) => {
+      if (!r.ok) return;
+      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number };
+      setTrades(d.trades.slice(0, 8));
+      if (d.clientLot) setClientLot(d.clientLot);
+    });
   }, []);
+  // ÉCHELLE CLIENT (voir History) : « −1291$ » du master ($70k, lot 1) = −13$ pour un copieur en 0.01 —
+  // afficher le chiffre du master en premier fait fuir ; on montre le SIEN, master en note.
+  const you = (t: FeedTrade) => Number(t.pnl) * clientLot / (Number(t.lot) > 0 ? Number(t.lot) : 1);
+  const fmtYou = (v: number) => `${v > 0 ? '+' : ''}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)}$`;
   if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
 
   const act = (action: 'pause' | 'resume' | 'risk', tier?: string) => {
@@ -104,12 +114,19 @@ export default function MemberHome() {
               <span style={{ fontSize: 10, fontWeight: 700, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲' : '▼'}</span>
               <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol}</span>
               <span style={{ flex: 1 }} />
-              <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
+              {unlocked ? (
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
+                  <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>({Number(t.pnl) > 0 ? '+' : ''}{Number(t.pnl).toFixed(0)}$)</span>
+                </span>
+              ) : (
+                <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
+              )}
             </div>
           );
         })}
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
-          {unlocked ? 'Master account results — your copies scale with your risk profile.' : 'Her best recent trades — members’ accounts copied these automatically. The complete live history unlocks with your access.'}
+          {unlocked ? `Shown at your copy size (${clientLot} lot) — master account in brackets.` : 'Her best recent trades — members’ accounts copied these automatically. The complete live history unlocks with your access.'}
         </p>
       </section>
 

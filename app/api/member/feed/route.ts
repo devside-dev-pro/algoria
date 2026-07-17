@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   if (!s) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
   const [memberQ, desk, tradesQ, signalsQ] = await Promise.all([
-    db.from('members').select('status').eq('tg_id', s.tgId).limit(1),
+    db.from('members').select('status,risk_tier').eq('tg_id', s.tgId).limit(1),
     db.from('events').select('id,ts,msg,data').eq('level', 'ai').order('ts', { ascending: false }).limit(24),
     db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot').not('closed_at', 'is', null).not('pnl', 'is', null).order('closed_at', { ascending: false }).limit(60),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
@@ -41,5 +41,9 @@ export async function GET(req: NextRequest) {
         msg: String(e.msg ?? '').split(/\s+/).slice(0, 3).join(' ') + ' …',
         data: { symbol: (e.data as { symbol?: string })?.symbol, kind: (e.data as { kind?: string })?.kind },
       }));
-  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked });
+  // TAILLE DE COPIE du membre (lot STH fixe par tier) → l'UI convertit chaque montant master À SON ÉCHELLE.
+  // Leçon churn : un client à 500$ qui voit « −1291$ » (le master à 70k en lot 1) retire immédiatement —
+  // son vrai chiffre était −13$. On affiche SON échelle en premier, le master en petit.
+  const clientLot = ({ low: 0.01, balanced: 0.05, high: 0.1 } as Record<string, number>)[String(memberQ.data?.[0]?.risk_tier ?? '')] ?? 0.01;
+  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot });
 }
