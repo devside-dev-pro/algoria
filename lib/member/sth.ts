@@ -59,25 +59,29 @@ export function sthDisconnect(userId: string) {
   return sthPost('/Partner/disconnect', { UserID: userId });
 }
 
-/** Flux complet « brancher un client » : connect + join master (id via env ou auto-découverte si unique).
+/** Flux complet « brancher un client » : connect PUIS join master (id via env ou auto-découverte si unique).
+ *  ORDRE IMPORTANT : get-user-status sur un utilisateur JAMAIS connecté renvoie une liste de masters VIDE
+ *  (doc STH : « un utilisateur inconnu renvoie tradingAccountConnected: false et une liste vide ») — la
+ *  découverte du master ne marche donc qu'APRÈS connect-customer-copier.
  *  Renvoie {ok, error} — error non vide = à AFFICHER au support (ex. « MetaTrader Server not found »). */
 export async function sthConnectAndJoin(o: {
   userId: string; login: string | number; password: string; server: string; isMt4: boolean; lots: number;
 }): Promise<{ ok: boolean; error: string }> {
-  // 1) master id : env prioritaire, sinon get-user-status s'il n'y en a qu'un sous la licence
+  // 1) connecter le compte au copieur (rend l'utilisateur « connu » de STH)
+  const c = await sthConnectCustomer(o);
+  if (!c.ok) return { ok: false, error: c.errorMessage };
+  // 2) master id : env prioritaire, sinon auto-découverte maintenant que l'utilisateur existe
   let masterId = MASTER_ID;
   if (!masterId) {
     const st = await sthStatus(o.userId);
-    if (!st.ok) return { ok: false, error: st.errorMessage };
+    if (!st.ok) return { ok: false, error: `connected, but master lookup failed: ${st.errorMessage}` };
     const list = st.data.masterAccountsList ?? [];
     if (list.length === 1) masterId = list[0].id;
-    else return { ok: false, error: `set STH_MASTER_ID — ${list.length} masters found under this license (can't auto-pick)` };
+    else if (list.length === 0) return { ok: false, error: 'connected, but NO master visible under this license — ask STH to attach your master account to the Partner license (or set STH_MASTER_ID)' };
+    else return { ok: false, error: `connected, but ${list.length} masters under this license — set STH_MASTER_ID to pick the right one (${list.map((m) => m.id).join(', ')})` };
   }
-  // 2) connecter le compte au copieur
-  const c = await sthConnectCustomer(o);
-  if (!c.ok) return { ok: false, error: c.errorMessage };
   // 3) abonner au master Algoria
   const j = await sthJoinMaster({ userId: o.userId, masterId, lots: o.lots });
-  if (!j.ok) return { ok: false, error: j.errorMessage };
+  if (!j.ok) return { ok: false, error: `connected, but join failed: ${j.errorMessage}` };
   return { ok: true, error: '' };
 }
