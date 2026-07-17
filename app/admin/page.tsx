@@ -38,6 +38,7 @@ export default function AdminCRM() {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   const [creds, setCreds] = useState<Record<string, { login: string; server: string; password: string }>>({});
+  const [selCreds, setSelCreds] = useState<{ login: string; server: string; password: string } | null>(null);
   // ===== registre des dépôts : mois affiché + formulaire de saisie =====
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [pushTgIds, setPushTgIds] = useState<number[]>([]); // tg_id ayant au moins 1 appareil abonné aux alertes
@@ -139,6 +140,19 @@ export default function AdminCRM() {
   // refuser une CONNEXION (vérification broker échouée) : le membre repasse en onboarding avec la raison — jamais bloqué
   const rejectConnect = (id: string) => { const reason = window.prompt('Decline reason (shown to the member, e.g. "no deposit found under this name"):'); if (reason !== null && reason.trim()) post({ rejectConnect: id, reason }); };
   const liveAlert = () => { if (window.confirm('Send "🔴 ALGORIA IS LIVE" to every subscribed member?')) post({ liveAlert: true }); };
+  // révéler les identifiants d'un membre À TOUT MOMENT (déchiffrés côté serveur, tracés en timeline)
+  const showCreds = (tgId: number) => {
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revealMember: tgId }) })
+      .then(async (r) => { const d = (await r.json()) as { login?: string; server?: string; password?: string; error?: string }; if (d.error) window.alert(d.error); else if (d.password) setSelCreds({ login: d.login ?? '', server: d.server ?? '', password: d.password }); })
+      .finally(() => setBusy(false));
+  };
+  // off-board : le client est parti → paused + déconnexion copieur + note (le kick du canal Telegram reste manuel)
+  const offboard = (r: Row) => {
+    const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
+    if (!window.confirm(`Off-board ${who}?\n\n• status → paused\n• copier disconnect queued (remove from STH)\n• DON'T FORGET to remove them from the VIP Telegram channel (manual)`)) return;
+    post({ offboard: r.tg_id }, () => setSel((s) => (s ? { ...s, status: 'paused' } : s)));
+  };
 
   const nameOf = (tg: number | null | undefined) => {
     const m = rows.find((r) => Number(r.tg_id) === Number(tg));
@@ -223,6 +237,7 @@ export default function AdminCRM() {
   const openMember = (r: Row) => {
     setSel(r);
     setSelActs(null);
+    setSelCreds(null);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberDetail: r.tg_id }) })
       .then(async (res) => { const d = (await res.json()) as { actions?: Action[] }; setSelActs(d.actions ?? []); });
   };
@@ -432,7 +447,20 @@ export default function AdminCRM() {
               <StatusChip status={sel.status} />
               {sel.tg_username && <a href={`https://t.me/${sel.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
               <span style={{ flex: 1 }} />
-              <button onClick={() => { setSel(null); setSelActs(null); }} style={miniBtn}>✕ close</button>
+              <button onClick={() => { setSel(null); setSelActs(null); setSelCreds(null); }} style={miniBtn}>✕ close</button>
+            </div>
+            {/* actions fiche : voir les identifiants à tout moment + off-board d'un client parti */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {sel.mt5_login && <button disabled={busy} onClick={() => showCreds(sel.tg_id)} title="decrypt this member's MT5 login/server/password (timestamped)" style={goldBtn}>🔑 SHOW CREDENTIALS</button>}
+              {sel.status !== 'paused' && <button disabled={busy} onClick={() => offboard(sel)} title="client left → status paused + copier disconnect queued (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>}
+              {selCreds && (
+                <span className="mono" style={{ display: 'inline-flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', fontSize: 11.5, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)' }}>
+                  <span>login <b style={{ color: 'var(--text)' }}>{selCreds.login}</b></span>
+                  <span>server <b style={{ color: 'var(--text)' }}>{selCreds.server}</b></span>
+                  <span>password <b style={{ color: 'var(--gold)' }}>{selCreds.password}</b></span>
+                  <button onClick={() => void navigator.clipboard?.writeText(selCreds.password)} style={miniBtn}>copy pwd</button>
+                </span>
+              )}
             </div>
             {/* identité + compte — tout ce qu'il faut savoir avant un appel */}
             <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 22px', fontSize: 11.5, color: 'var(--muted)' }}>

@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
+    revealMember?: number; offboard?: number;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -274,6 +275,31 @@ export async function POST(req: NextRequest) {
     const detail = { ...((act[0].detail as Record<string, unknown>) ?? {}), revealed_at: new Date().toISOString(), revealed_by: s.username ?? String(s.tgId) };
     await db.from('member_actions').update({ detail: detail as never }).eq('id', body.reveal);
     return NextResponse.json({ login: m[0].mt5_login, server: m[0].mt5_server, password });
+  }
+  if (body.revealMember) {
+    // RÉVÉLATION des identifiants À TOUT MOMENT (par membre, pas seulement à la validation) : le support
+    // en a besoin pour rebrancher le compte ailleurs sans redemander au client. Admin only, tracé en timeline.
+    const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc').eq('tg_id', body.revealMember).limit(1);
+    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    if (!m[0].mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
+    let password: string;
+    try {
+      password = decryptSecret(m[0].mt5_password_enc as string);
+    } catch {
+      return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
+    }
+    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔑 credentials revealed by ${who}` } as never });
+    return NextResponse.json({ login: m[0].mt5_login, server: m[0].mt5_server, password });
+  }
+  if (body.offboard) {
+    // OFF-BOARD : le client est parti (retrait). Statut → paused (sort du compte "actifs", fiche + creds conservés),
+    // déconnexion copieur empilée dans la file (retrait STH côté support), et note timeline explicite.
+    const { data: m } = await db.from('members').select('member_no,tg_id').eq('tg_id', body.offboard).limit(1);
+    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    await db.from('members').update({ status: 'paused', updated_at: new Date().toISOString() }).eq('tg_id', body.offboard);
+    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'disconnect', status: 'pending', done_by: who, detail: { reason: 'off-board (client left)' } as never });
+    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: '⛔ off-boarded — client left. Also remove them from the VIP Telegram channel.' } as never });
+    return NextResponse.json({ ok: true });
   }
   if (body.done) {
     // Le support a appliqué l'action dans Social Trade Hub → on la clôt ; un 'connect' fait passer le membre en LIVE.
