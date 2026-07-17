@@ -67,9 +67,11 @@ export function sthDisconnect(userId: string) {
 export async function sthConnectAndJoin(o: {
   userId: string; login: string | number; password: string; server: string; isMt4: boolean; lots: number;
 }): Promise<{ ok: boolean; error: string }> {
-  // 1) connecter le compte au copieur (rend l'utilisateur « connu » de STH)
+  // 1) connecter le compte au copieur (rend l'utilisateur « connu » de STH).
+  //    RETRY-SAFE : si le compte est DÉJÀ connecté (re-clic après un join échoué), on continue vers le join
+  //    au lieu de bloquer — l'erreur « already connected » n'est pas un échec pour nous.
   const c = await sthConnectCustomer(o);
-  if (!c.ok) return { ok: false, error: c.errorMessage };
+  if (!c.ok && !/already/i.test(c.errorMessage)) return { ok: false, error: c.errorMessage };
   // 2) master id : env prioritaire, sinon auto-découverte maintenant que l'utilisateur existe
   let masterId = MASTER_ID;
   if (!masterId) {
