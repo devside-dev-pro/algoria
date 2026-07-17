@@ -7,7 +7,7 @@ import { postVip, vipReady } from './telegram';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
 import { manageBreakeven, rememberManagement } from './metaapi/manage';
 import { DealRecorder } from './metaapi/trades';
-import { narrate, narrateRecap, narrationReady, deskMeta, type DeskKind } from './llm/narrate';
+import { narrate, narrateRecap, narrateLossReview, narrationReady, deskMeta, type DeskKind } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
 import { checkRisk } from '../lib/engine/risk';
 import { breakoutSignal } from '../lib/engine/breakout';
@@ -51,6 +51,14 @@ interface Engine {
 }
 
 type ManualOpts = { lot?: number; sl?: number; tp?: number; tight?: boolean; ultraTight?: boolean };
+
+/** Courte lecture marché (anglais) pour l'analyse de perte VIP — dérivée du régime + de la volatilité. */
+function marketRead(ctx: import('../lib/engine/types').MarketContext): string {
+  const vol = ctx.atrPercentile >= 0.7 ? 'a very volatile' : ctx.atrPercentile <= 0.3 ? 'a slow, tricky' : 'a';
+  return ctx.regime === 'range'
+    ? `${vol} choppy market with no clean direction — the toughest backdrop for a momentum system`
+    : `${vol} session that kept reversing — the trend flipped right after entries`;
+}
 
 async function main() {
   console.log('[algoria] runner démarre…');
@@ -314,7 +322,19 @@ async function main() {
           if (!state.dayDone) vipDayDoneAnnounced = false; // ré-armé au reset quotidien
           else if (!vipDayDoneAnnounced) {
             vipDayDoneAnnounced = true;
-            void postVip("✅ Algoria a bouclé sa journée.\nIl passe en MODE ANALYSE : les prochains setups sont pour toi, à prendre en manuel si tu le sens. Gestion du risque = la tienne. 👇");
+            if (state.dayDoneReason === 'loss') {
+              // ANALYSE DE PERTE — rassurer les VIP : pourquoi c'était dur (marché) + discipline/contrôle.
+              const why = marketRead(context);
+              const stats = await fetchDayTradeStats().catch(() => null);
+              const clause = narrationReady()
+                ? await narrateLossReview({ trades: stats?.trades ?? 0, wins: stats?.wins ?? 0, net: stats?.net ?? 0, regime: context.regime, adx: context.adx, atrPct: context.atrPercentile })
+                : null;
+              void postVip(
+                `🛡️ Algoria hit its daily safety limit and stopped for the day.\nWhy: ${why} — a cluster of stops, not a drift. The cap did its job: your downside is bounded for the day.${clause ? `\n\n${clause}` : ''}\nWe never force trades. Fresh start tomorrow. 🔁`,
+              );
+            } else {
+              void postVip("✅ Algoria hit its daily target and wrapped up.\nNow in ANALYSIS MODE: the next setups are yours to take manually if you want. Your risk, your call. 👇");
+            }
           }
           const blockedForDay = state.dayDone && blocked && (blockedReasons?.some((r) => r.includes('day closed')) ?? false);
           if (blockedForDay && blocked) {
@@ -324,7 +344,7 @@ async function main() {
               lastVipSetup = { dir: blocked.direction, at: now };
               const arrow = blocked.direction === 'long' ? '🔼 LONG' : '🔽 SHORT';
               void postVip(
-                `🎯 SETUP MANUEL — ${DISPLAY}\n${arrow} · conviction ${(blocked.confidence * 100) | 0}%\nEntrée ~ ${blocked.entry}\n🛑 SL ${blocked.stopLoss}\n🎯 TP ${blocked.takeProfits[0]}\n\nAlgoria a fini sa journée — à toi de jouer. Niveaux indicatifs, ton risque, ton choix.`,
+                `🎯 MANUAL SETUP — ${DISPLAY}\n${arrow} · conviction ${(blocked.confidence * 100) | 0}%\nEntry ~ ${blocked.entry}\n🛑 SL ${blocked.stopLoss}\n🎯 TP ${blocked.takeProfits[0]}\n\nAlgoria's done for the day — over to you. Indicative levels, your risk, your call.`,
               );
             }
           }
@@ -428,7 +448,7 @@ async function main() {
             if (ticket) {
               rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, ladder: SW.ladder, riskDist: Math.abs(sig.entry - sig.stopLoss) });
               await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at 1R, ${SW.trailDist}R trailing)`, 'order');
-              if (vipReady()) void postVip(`📈 Algoria ouvre une position de FOND — ${DISPLAY} ${sig.direction.toUpperCase()}\nEntrée ~ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]}\nUne position qui peut courir plusieurs jours. Copiée sur ton compte.`);
+              if (vipReady()) void postVip(`📈 Algoria just opened a CORE position — ${DISPLAY} ${sig.direction.toUpperCase()}\nEntry ~ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]}\nThis one can ride for days. Copied to your account.`);
             }
           }
         } catch (e) {
@@ -540,13 +560,14 @@ async function main() {
   if (process.env.VIP_DEMO === '1' && vipReady()) {
     void (async () => {
       const demo = [
-        "✅ Canal VIP Algoria connecté. Aperçu de ce que tu recevras 👇 (messages de DÉMO)",
-        "🟢 Algoria bosse · 24 trades · 83% win aujourd'hui",
-        "📈 Algoria ouvre une position de FOND — GOLD LONG\nEntrée ~ 4021.5 · SL 4009.0 · TP 4085.0\nUne position qui peut courir plusieurs jours. Copiée sur ton compte.",
-        "✅ Algoria a bouclé sa journée.\nIl passe en MODE ANALYSE : les prochains setups sont pour toi, à prendre en manuel si tu le sens. 👇",
-        "🎯 SETUP MANUEL — GOLD\n🔽 SHORT · conviction 78%\nEntrée ~ 4021.5\n🛑 SL 4028.0\n🎯 TP 4014.0\n\nAlgoria a fini sa journée — à toi de jouer. Niveaux indicatifs, ton risque, ton choix.",
-        "📊 BILAN DU JOUR\n31 trades · 79% win · journée verte 🟢\nTout est copié sur ton compte. À demain. 👊",
-        "— Fin de la démo. Retire VIP_DEMO des variables Railway pour passer en mode réel. —",
+        "✅ Algoria VIP channel connected. Here's a preview of what you'll get 👇 (DEMO messages)",
+        "🟢 Algoria's working · 24 trades · 83% win today",
+        "📈 Algoria just opened a CORE position — GOLD LONG\nEntry ~ 4021.5 · SL 4009.0 · TP 4085.0\nThis one can ride for days. Copied to your account.",
+        "✅ Algoria hit its daily target and wrapped up.\nNow in ANALYSIS MODE: the next setups are yours to take manually if you want. 👇",
+        "🎯 MANUAL SETUP — GOLD\n🔽 SHORT · conviction 78%\nEntry ~ 4021.5\n🛑 SL 4028.0\n🎯 TP 4014.0\n\nAlgoria's done for the day — over to you. Indicative levels, your risk, your call.",
+        "🛡️ Algoria hit its daily safety limit and stopped for the day.\nWhy: a very volatile session that kept reversing — a cluster of stops, not a drift. The cap did its job: your downside is bounded.\nDays like today's chop are the hardest for any momentum system; we protect capital and never force trades. Fresh start tomorrow. 🔁",
+        "📊 DAILY WRAP\n31 trades · 79% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊",
+        "— End of demo. Remove VIP_DEMO from Railway variables to go live. —",
       ];
       for (const m of demo) await postVip(m);
       console.log('[algoria] VIP demo posté');
@@ -704,8 +725,10 @@ async function main() {
         // le P&L $ du master (≠ celui du client → éviterait la confusion). Gaté par l'env.
         if (vipReady()) {
           const wr = Math.round((stats.wins / stats.trades) * 100);
-          if (h === 21) void postVip(`📊 BILAN DU JOUR\n${stats.trades} trades · ${wr}% win · journée ${stats.net >= 0 ? 'verte 🟢' : 'rouge 🔴'}\nTout est copié sur ton compte. À demain. 👊`);
-          else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} Algoria bosse · ${stats.trades} trades · ${wr}% win aujourd'hui`);
+          if (h === 21) {
+            if (stats.net >= 0) void postVip(`📊 DAILY WRAP\n${stats.trades} trades · ${wr}% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊`);
+            else void postVip(`📊 DAILY WRAP — red day today · ${stats.trades} trades · ${wr}% win\nRed days are part of the game — they're all in our public track record. Your risk stayed capped and the desk stays disciplined. We go again tomorrow. 🔁`);
+          } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} Algoria's working · ${stats.trades} trades · ${wr}% win today`);
         }
         // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
         if (h === 21 && stats.net > 0) {
