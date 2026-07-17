@@ -3,6 +3,7 @@ import './env-check'; // valide les variables d'env et arrête net avec un messa
 import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
+import { postVip, vipReady } from './telegram';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
 import { manageBreakeven, rememberManagement } from './metaapi/manage';
 import { DealRecorder } from './metaapi/trades';
@@ -123,6 +124,10 @@ async function main() {
 
     const seed = await loadHistory(account, BROKER, TF, 300);
     let state: EngineState = readState(terminal, BROKER, { dayStartBalance: terminal.accountInformation?.balance });
+
+    // Canal VIP : mémoire locale pour ne pas spammer — dernière direction de setup publiée + annonce "journée finie".
+    let lastVipSetup = { dir: '', at: 0 };
+    let vipDayDoneAnnounced = false;
 
     /** Chemin d'exécution PARTAGÉ (auto + manuel + action) pour CET instrument. Retourne le ticket, ou undefined si échec. */
     const executeSignal = async (signal: Signal): Promise<string | undefined> => {
@@ -284,7 +289,7 @@ async function main() {
         const cfg = mode === 'scalp' ? inst.config : DEFAULT_CONFIG;
         // SCALP : on injecte le contexte propre à l'instrument (session asia, gate vol élargi, roundStep) + le spread live.
         const ctxOpts = mode === 'scalp' ? { spread: state.spread, ...inst.ctx } : { spread: state.spread };
-        const { signal, events, context, confluence, threshold } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts }, FEATURES, cfg);
+        const { signal, events, context, confluence, threshold, blocked, blockedReasons } = runTick({ symbol: DISPLAY, bars, mode, state, ctxOpts }, FEATURES, cfg);
         lastCtx = context;
         await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
         // WATCH-ONLY (ex. BTC) : le desk lit et raconte le marché, mais l'auto ne tire JAMAIS — aucun edge
@@ -299,6 +304,29 @@ async function main() {
             if (isPrimary) await logNote(`${DISPLAY}: trade bloqué — ${veto}`, 'veto');
           } else {
             await executeSignal(autoSignal);
+          }
+        }
+
+        // ===== CANAL VIP : une fois la journée d'Algoria bouclée (dayDone : objectif +4% ou stop -4% touché),
+        // il continue de VOIR des setups mais ne les prend plus → on les PUBLIE aux VIP, à prendre en manuel.
+        // + une annonce unique au moment où la journée se termine. Primaire, hors watch-only, gaté par l'env.
+        if (isPrimary && !inst.watchOnly && vipReady()) {
+          if (!state.dayDone) vipDayDoneAnnounced = false; // ré-armé au reset quotidien
+          else if (!vipDayDoneAnnounced) {
+            vipDayDoneAnnounced = true;
+            void postVip("✅ Algoria a bouclé sa journée.\nIl passe en MODE ANALYSE : les prochains setups sont pour toi, à prendre en manuel si tu le sens. Gestion du risque = la tienne. 👇");
+          }
+          const blockedForDay = state.dayDone && blocked && (blockedReasons?.some((r) => r.includes('day closed')) ?? false);
+          if (blockedForDay && blocked) {
+            const now = Date.now();
+            // anti-spam : un post seulement si la direction change OU 30 min se sont écoulées depuis le dernier
+            if (blocked.direction !== lastVipSetup.dir || now - lastVipSetup.at > 30 * 60_000) {
+              lastVipSetup = { dir: blocked.direction, at: now };
+              const arrow = blocked.direction === 'long' ? '🔼 LONG' : '🔽 SHORT';
+              void postVip(
+                `🎯 SETUP MANUEL — ${DISPLAY}\n${arrow} · conviction ${(blocked.confidence * 100) | 0}%\nEntrée ~ ${blocked.entry}\n🛑 SL ${blocked.stopLoss}\n🎯 TP ${blocked.takeProfits[0]}\n\nAlgoria a fini sa journée — à toi de jouer. Niveaux indicatifs, ton risque, ton choix.`,
+              );
+            }
           }
         }
 
@@ -400,6 +428,7 @@ async function main() {
             if (ticket) {
               rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, ladder: SW.ladder, riskDist: Math.abs(sig.entry - sig.stopLoss) });
               await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at 1R, ${SW.trailDist}R trailing)`, 'order');
+              if (vipReady()) void postVip(`📈 Algoria ouvre une position de FOND — ${DISPLAY} ${sig.direction.toUpperCase()}\nEntrée ~ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]}\nUne position qui peut courir plusieurs jours. Copiée sur ton compte.`);
             }
           }
         } catch (e) {
@@ -652,6 +681,13 @@ async function main() {
         const clause = narrationReady() ? await narrateRecap(stats) : null;
         await logNarration(clause ?? '', Date.now(), meta);
         console.log(`[algoria] recap ${h}h : ${stats.trades} trades · ${stats.wins} wins · ${Math.round(stats.net)}$`);
+        // Canal VIP : « pulse » preuve-de-vie toutes les 4 h + bilan du soir (21h UTC). En % / win rate, jamais
+        // le P&L $ du master (≠ celui du client → éviterait la confusion). Gaté par l'env.
+        if (vipReady()) {
+          const wr = Math.round((stats.wins / stats.trades) * 100);
+          if (h === 21) void postVip(`📊 BILAN DU JOUR\n${stats.trades} trades · ${wr}% win · journée ${stats.net >= 0 ? 'verte 🟢' : 'rouge 🔴'}\nTout est copié sur ton compte. À demain. 👊`);
+          else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} Algoria bosse · ${stats.trades} trades · ${wr}% win aujourd'hui`);
+        }
         // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
         if (h === 21 && stats.net > 0) {
           const { pushToAll } = await import('../lib/push/send');

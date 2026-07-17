@@ -20,6 +20,8 @@ export interface TickResult {
   events: EngineEvent[];
   confluence: Confluence | null; // état de confluence (même sans trade) → desk "opportunité"
   threshold: number;
+  blocked?: Signal | null; // setup CONSTRUIT mais refusé par le risk (ex. journée finie) → publiable au canal VIP
+  blockedReasons?: string[]; // raisons du veto (permet de ne publier que les blocages « day closed »)
 }
 
 /** One pass of the engine. Returns a signal (or null) + the terminal event stream. */
@@ -75,7 +77,7 @@ export function runTick(input: TickInput, features: Feature[], cfg: EngineConfig
   const verdict = checkRisk(draft, input.state, cfg);
   if (!verdict.ok) {
     emit('veto', `blocked: ${verdict.reasons.join(', ')}`);
-    return { context: ctx, signal: null, events, confluence, threshold };
+    return { context: ctx, signal: null, blocked: draft, blockedReasons: verdict.reasons, events, confluence, threshold };
   }
 
   emit('order', `order.send(master) → ${draft.symbol} ${draft.direction} ${draft.lot} lot`);
