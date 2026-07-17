@@ -4,9 +4,24 @@ import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, nextMilestone } from
 
 const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
 
+// Familles d'actions dont seul le DERNIER état compte : une nouvelle demande REMPLACE les précédentes en attente.
+// pause/resume/disconnect = même interrupteur (l'état de la copie) ; risk_change = le dernier tier demandé.
+// Sans ça, un membre qui clique pause→resume→pause noie la file de cartes déjà obsolètes (spam constaté).
+const SUPERSEDES: Record<string, string[]> = {
+  pause: ['pause', 'resume'],
+  resume: ['pause', 'resume'],
+  disconnect: ['pause', 'resume', 'disconnect'],
+  risk_change: ['risk_change'],
+};
+
 /** Pousse une action dans la file copieur (appliquée dans STH par le support, puis par l'API quand elle arrivera). */
 async function queueAction(tgId: number, kind: string, detail: Record<string, unknown>) {
   const db = sdb();
+  const family = SUPERSEDES[kind];
+  if (family) {
+    await db.from('member_actions').update({ status: 'superseded', done_at: new Date().toISOString(), done_by: 'auto (newer request)' })
+      .eq('tg_id', tgId).eq('status', 'pending').in('kind', family);
+  }
   const { data } = await db.from('members').select('member_no').eq('tg_id', tgId).limit(1);
   await db.from('member_actions').insert({ tg_id: tgId, member_no: data?.[0]?.member_no ?? null, kind, detail: detail as never });
 }

@@ -311,7 +311,7 @@ export default function AdminCRM() {
   // les coms de dépôt EN ATTENTE comptent dans le travail à faire : confirmer quand le broker a payé
   const depPending = deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending');
   const todo = actions.length + (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) + depPending.length;
-  const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', referral_reward: '💰 PAY REFERRAL REWARD (legacy)', kyc: '🪪 BROKER DETAILS', deposit: '🏦 DEPOSIT', note: '📝 NOTE' };
+  const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', disconnect: '⛔ DISCONNECT (remove from copier)', referral_reward: '💰 PAY REFERRAL REWARD (legacy)', kyc: '🪪 BROKER DETAILS', deposit: '🏦 DEPOSIT', note: '📝 NOTE' };
   const TABS: { key: Tab; label: string; badge?: number }[] = [
     { key: 'dashboard', label: 'DASHBOARD' },
     { key: 'queue', label: 'QUEUE', badge: actions.length },
@@ -401,13 +401,21 @@ export default function AdminCRM() {
             {actions.map((a) => (
               <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 40 }}>#{a.member_no ?? '—'}</span>
+                  {/* QUI : @username cliquable (ouvre la fiche) — un #numéro seul ne dit rien à personne */}
+                  <button
+                    onClick={() => { const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id)); if (m) { openMember(m); setTab('members'); } }}
+                    title="open this member's card"
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, minWidth: 96, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+                  >
+                    <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12 }}>#{a.member_no ?? '—'}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--cyan)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>{nameOf(a.tg_id)}</span>
+                  </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')}`}
-                      {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')})`}
-                      {(a.kind === 'pause' || a.kind === 'resume') && new Date(a.created_at).toLocaleString('en-GB')}
+                      {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')} · `}
+                      {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')}) · `}
+                      {new Date(a.created_at).toLocaleString('en-GB')}
                     </div>
                     {/* la ligne VÉRIFICATION : tout ce qu'il faut contrôler chez le broker AVANT d'approuver.
                         Anciennes demandes (sans les nouveaux champs) : broker/@ récupérés de la fiche membre + ⚠ sur le manquant */}
@@ -434,6 +442,7 @@ export default function AdminCRM() {
                   {a.kind === 'connect' && (
                     <button disabled={busy} onClick={() => rejectConnect(a.id)} title="verification failed → member goes back to the wizard with your reason, can resubmit" style={dangerBtn}>REJECT</button>
                   )}
+                  <button disabled={busy} onClick={() => post({ dismiss: a.id })} title="dismiss without applying anything (stale/spam card — no side effects)" style={miniBtn}>✕</button>
                 </div>
                 {creds[a.id] && (
                   <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.06)' }}>
@@ -493,7 +502,7 @@ export default function AdminCRM() {
               {selActs == null && <p style={dimP}>loading history…</p>}
               {selActs?.length === 0 && <p style={dimP}>No activity yet — this member signed up and stopped there.</p>}
               {selActs?.map((a) => {
-                const stC = a.status === 'pending' ? 'var(--gold)' : a.status === 'rejected' ? '#ff6b8a' : 'var(--up)';
+                const stC = a.status === 'pending' ? 'var(--gold)' : a.status === 'rejected' ? '#ff6b8a' : (a.status === 'superseded' || a.status === 'dismissed') ? 'var(--dim)' : 'var(--up)';
                 return (
                   <div key={a.id} style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: a.kind === 'note' ? 'rgba(245,194,74,.05)' : 'rgba(10,17,31,.5)' }}>
                     <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{new Date(a.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>

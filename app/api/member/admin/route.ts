@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; offboard?: number; connectSth?: string;
+    revealMember?: number; offboard?: number; connectSth?: string; dismiss?: string;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -332,6 +332,14 @@ export async function POST(req: NextRequest) {
     const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots})` } as never });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.dismiss) {
+    // ÉCARTER une carte obsolète (spam pause/resume, doublon…) SANS rien appliquer : contrairement à `done`,
+    // aucun effet de bord (un connect dismissé ne passe PAS le membre en live). Tracé pour l'audit.
+    const { data: act } = await db.from('member_actions').select('id').eq('id', body.dismiss).eq('status', 'pending').limit(1);
+    if (!act?.length) return NextResponse.json({ error: 'action not found (already processed?)' }, { status: 404 });
+    await db.from('member_actions').update({ status: 'dismissed', done_at: new Date().toISOString(), done_by: who }).eq('id', body.dismiss);
     return NextResponse.json({ ok: true });
   }
   if (body.done) {
