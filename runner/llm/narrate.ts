@@ -153,6 +153,21 @@ export async function narrateRecap(s: { trades: number; wins: number; net: numbe
   }
 }
 
+/** Note de PERTE rassurante pour le canal VIP (anglais), quand le cap de perte du jour a coupé la séance.
+ *  Voix = chef de desk calme et en contrôle. Honnête (jamais de promesse de reprise), pédagogique, humain. */
+export async function narrateLossReview(s: { trades: number; wins: number; net: number; regime?: string; adx?: number; atrPct?: number }): Promise<string | null> {
+  if (!client) return null;
+  const prompt = `You are the calm, in-control head of the ALGORIA AI trading desk, writing a SHORT note (English) to VIP members after a losing day where the daily safety cap stopped trading. Context: ${s.trades} trades, ${s.wins} wins, market regime "${s.regime ?? 'unclear'}"${s.adx != null ? `, ADX ${Math.round(s.adx)}` : ''}${s.atrPct != null ? `, volatility ${Math.round(s.atrPct * 100)}th percentile` : ''}.
+Write 1-2 short sentences that (a) explain WHY today was hard in market terms (choppy/whipsaw range vs a sharp reversal, volatility), and (b) reassure by showing DISCIPLINE and CONTROL — the loss is bounded by the cap, it's within the strategy's normal drawdown, we don't force trades. Be honest: NEVER promise recovery or guarantee anything. Human, composed, no hype, no markdown, no emoji, do not restate specific numbers.`;
+  try {
+    const res = await client.messages.create({ model: MODEL, max_tokens: 180, messages: [{ role: 'user', content: prompt }] });
+    return res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join(' ').trim() || null;
+  } catch (e) {
+    console.error('[algoria] loss review narration failed:', (e as { message?: string })?.message ?? e);
+    return null;
+  }
+}
+
 // ===== Champs STRUCTURÉS du desk (lus par components/Desk.tsx). Tout dérivé de ctx/signal/confluence — 0 calcul moteur. =====
 const CHIP_LABEL: Record<string, string> = {
   emaStack: 'EMA stack', macd: 'MACD', rsiPullback: 'RSI pull', srZone: 'S/R zone', divergence: 'divergence', liquiditySweep: 'liq sweep', roundLevel: 'round lvl',

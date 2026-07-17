@@ -34,6 +34,8 @@ export function readState(
   const hitTarget = dayCaps?.targetPct != null && dayPnlPct >= dayCaps.targetPct;
   const hitLoss = dayCaps?.lossPct != null && dayPnlPct <= -dayCaps.lossPct;
   const dayDone = rollover ? false : ((prev.dayDone ?? false) || hitTarget || hitLoss);
+  // la RAISON latch avec le dayDone (première limite touchée) — perte prioritaire si les deux (cas théorique).
+  const dayDoneReason = rollover ? undefined : (prev.dayDoneReason ?? (hitLoss ? 'loss' : hitTarget ? 'target' : undefined));
 
   return {
     balance,
@@ -49,5 +51,6 @@ export function readState(
     killed: prev.killed ?? false,
     dayStamp: today,
     dayDone,
+    dayDoneReason,
   };
 }
