@@ -534,6 +534,25 @@ async function main() {
   const primary = engines[0];
   console.log(`[algoria] ${engines.length} moteur(s) actif(s) · primaire=${primary.inst.display}`);
 
+  // ===== DÉMO CANAL VIP : pose VIP_DEMO=1 sur Railway (+ TELEGRAM_VIP_CHAT) → au boot, une salve de messages
+  // d'exemple part dans le canal (un de chaque type) pour vérifier la connexion sans attendre le marché.
+  // À RETIRER ensuite (sinon la démo se re-poste à chaque redéploiement).
+  if (process.env.VIP_DEMO === '1' && vipReady()) {
+    void (async () => {
+      const demo = [
+        "✅ Canal VIP Algoria connecté. Aperçu de ce que tu recevras 👇 (messages de DÉMO)",
+        "🟢 Algoria bosse · 24 trades · 83% win aujourd'hui",
+        "📈 Algoria ouvre une position de FOND — GOLD LONG\nEntrée ~ 4021.5 · SL 4009.0 · TP 4085.0\nUne position qui peut courir plusieurs jours. Copiée sur ton compte.",
+        "✅ Algoria a bouclé sa journée.\nIl passe en MODE ANALYSE : les prochains setups sont pour toi, à prendre en manuel si tu le sens. 👇",
+        "🎯 SETUP MANUEL — GOLD\n🔽 SHORT · conviction 78%\nEntrée ~ 4021.5\n🛑 SL 4028.0\n🎯 TP 4014.0\n\nAlgoria a fini sa journée — à toi de jouer. Niveaux indicatifs, ton risque, ton choix.",
+        "📊 BILAN DU JOUR\n31 trades · 79% win · journée verte 🟢\nTout est copié sur ton compte. À demain. 👊",
+        "— Fin de la démo. Retire VIP_DEMO des variables Railway pour passer en mode réel. —",
+      ];
+      for (const m of demo) await postVip(m);
+      console.log('[algoria] VIP demo posté');
+    })();
+  }
+
   // ===== Commandes du cockpit. mode + kill sont GLOBAUX ; manuel/action/rafale visent le primaire (l'or). =====
   watchCommands((cmd) => {
     void (async () => {
