@@ -472,7 +472,9 @@ export default function AdminCRM() {
             {/* actions fiche : voir les identifiants à tout moment + off-board d'un client parti */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {sel.mt5_login && <button disabled={busy} onClick={() => showCreds(sel.tg_id)} title="decrypt this member's MT5 login/server/password (timestamped)" style={goldBtn}>🔑 SHOW CREDENTIALS</button>}
-              {sel.status !== 'paused' && <button disabled={busy} onClick={() => offboard(sel)} title="client left → status paused + copier disconnect queued (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>}
+              {/* TOUJOURS visible : « paused » peut venir du membre lui-même (bouton pause copy) — masquer
+                  l'off-board sur un membre en pause bloquait pile le cas « il a retiré, je veux le sortir » */}
+              <button disabled={busy} onClick={() => offboard(sel)} title="client left → status paused + copier disconnect (STH or queued) + timeline note (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>
               {selCreds && (
                 <span className="mono" style={{ display: 'inline-flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', fontSize: 11.5, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)' }}>
                   <span>login <b style={{ color: 'var(--text)' }}>{selCreds.login}</b></span>
