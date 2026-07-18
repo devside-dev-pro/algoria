@@ -42,6 +42,7 @@ export default function AdminCRM() {
   // ===== registre des dépôts : mois affiché + formulaire de saisie =====
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [pushTgIds, setPushTgIds] = useState<number[]>([]); // tg_id ayant au moins 1 appareil abonné aux alertes
+  const [nudges, setNudges] = useState<{ tg_id: number; created_at: string; done_by?: string }[]>([]); // historique des relances (auto + manuelles)
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
   const [depBroker, setDepBroker] = useState('');
@@ -72,13 +73,14 @@ export default function AdminCRM() {
       // se reconnecte, se refait renvoyer en 403, et ne voit jamais le CRM. Sécurité intacte, porte ajoutée.
       if (r.status === 401) return setState('anon');
       if (r.status === 403) return setState('forbidden');
-      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[] };
+      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[] };
       setWl(d.whitelist);
       setRows(d.members);
       setActions(d.actions ?? []);
       setAff(d.affiliate ?? null);
       setDeposits(d.deposits ?? []);
       setPushTgIds(d.pushTgIds ?? []);
+      setNudges(d.nudges ?? []);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -390,6 +392,37 @@ export default function AdminCRM() {
             ) : (
               <section className="panel" style={{ padding: 22, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>All clear — nothing waiting on you. 🎉</section>
             )}
+            {/* ===== RELANCES DU JOUR — la file de leads à toucher EN PERSONNE (message/vocal Mathieu).
+                Prospects en onboarding 1-21 j, pas touchés depuis 3 j (relances auto comprises). Le bot
+                filet passe à 10h UTC derrière — mais TON vocal convertit mieux : déroule cette liste d'abord. */}
+            {(() => {
+              const now = Date.now();
+              const lastNudge = new Map<number, number>();
+              for (const n of nudges) { const t = Number(n.tg_id); const at = Date.parse(n.created_at); if ((lastNudge.get(t) ?? 0) < at) lastNudge.set(t, at); }
+              const queue = rows
+                .filter((r) => r.status === 'onboarding')
+                .map((r) => ({ r, days: Math.floor((now - Date.parse(r.created_at)) / 86_400_000), touched: lastNudge.get(Number(r.tg_id)) }))
+                .filter((x) => x.days >= 1 && x.days <= 21 && (!x.touched || now - x.touched > 3 * 86_400_000))
+                .sort((a, b) => a.days - b.days);
+              if (queue.length === 0) return <section className="panel" style={{ padding: 16, color: 'var(--dim)', fontSize: 12.5 }}>📞 Relance queue clear — every recent lead was touched in the last 3 days.</section>;
+              return (
+                <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <h2 style={secH}>📞 RELANCES DU JOUR · {queue.length} — your personal DM/voice beats any bot</h2>
+                  {queue.slice(0, 15).map(({ r, days, touched }) => (
+                    <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)' }}>
+                      <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{r.member_no}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
+                      <span className="mono" style={{ fontSize: 10, fontWeight: 800, color: days >= 5 ? '#ff8a5c' : 'var(--gold)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 6px' }}>J+{days}</span>
+                      {touched && <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>last touch {Math.floor((now - touched) / 86_400_000)}d ago</span>}
+                      <span style={{ flex: 1 }} />
+                      {r.tg_username && <a href={`https://t.me/${r.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
+                      <button disabled={busy} onClick={() => post({ nudged: r.tg_id })} title="I sent my personal message/voice note — remove from the queue for 3 days" style={okBtn}>✓ FAIT</button>
+                    </div>
+                  ))}
+                  {queue.length > 15 && <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)' }}>+{queue.length - 15} more — the 10:00 UTC auto-nudge (push + bot DM) catches whoever you don&rsquo;t reach.</p>}
+                </section>
+              );
+            })()}
           </>
         )}
 

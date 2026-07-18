@@ -20,7 +20,7 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from '.
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment, fetchNudgeCandidates, recordNudge } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -719,6 +719,33 @@ async function main() {
 
   // ===== RECAP HORAIRE du desk : à chaque heure pleine, une carte "SESSION RECAP" (stats réelles du jour,
   // hors BEAST) + une clause IA d'ambiance. Rythme le stream et rappelle le track record sans intervention. =====
+  // ===== RELANCE AUTO onboarding (filet de la longue traîne — le vocal perso de Mathieu reste l'arme n°1,
+  // organisé par la file « RELANCES » de l'admin). Chaque jour à 10h UTC : prospects en onboarding depuis
+  // 1-21 j, pas touchés depuis 3 j → push + DM bot (assumé bot, le texte RAMÈNE vers Mathieu). Cap 20/jour.
+  let lastNudgeDay = ''; // relance déjà faite ce jour ? (survit au tick horaire, pas au reboot — recordNudge dédup en base)
+  const maybeNudge = async () => {
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    if (now.getUTCHours() !== 10 || lastNudgeDay === today) return;
+    lastNudgeDay = today;
+    try {
+      const { sendDm } = await import('./telegram');
+      const { pushToUser } = await import('../lib/push/send');
+      const candidates = (await fetchNudgeCandidates()).slice(0, 20);
+      let sent = 0;
+      for (const c of candidates) {
+        const dm = await sendDm(c.tg_id, "Hey — Algoria here 🤖 Your access is still 2 minutes from ready: connect your account and the AI starts working for you.\n\n👉 app.algoria.tech/member/onboarding\n\nStuck on something? Reply here — Mathieu reads these personally and will get back to you.");
+        const push = await pushToUser(c.tg_id, { title: '🚀 Your Algoria access is 2 minutes from ready', body: 'Finish your setup and the AI starts trading for you. Need a hand? We got you.', url: '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
+        await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`);
+        if (dm || push) sent++;
+      }
+      if (candidates.length) console.log(`[algoria] relance auto : ${sent}/${candidates.length} prospect(s) touché(s)`);
+    } catch (e) {
+      console.error('[algoria] relance auto échouée:', e);
+    }
+  };
+  setInterval(() => void maybeNudge(), 3600_000);
+
   let lastRecapHour = new Date().getUTCHours(); // pas de recap au démarrage — on attend la prochaine heure pleine
   setInterval(() => {
     void (async () => {
