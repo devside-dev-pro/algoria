@@ -8,6 +8,22 @@ const VIP = process.env.TELEGRAM_VIP_CHAT ?? '';
 /** Le canal VIP est-il configuré ? (sinon tous les posts sont des no-op silencieux). */
 export const vipReady = (): boolean => Boolean(TOKEN && VIP);
 
+/** DM direct du bot à UN utilisateur (relance onboarding…). Ne marche que si la personne a déjà ouvert le
+ *  chat du bot (login natif /start → oui). Renvoie true si envoyé — 403 = chat jamais ouvert, on l'accepte. */
+export async function sendDm(tgId: number, text: string): Promise<boolean> {
+  if (!TOKEN) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: tgId, text, disable_web_page_preview: true }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Poste un message texte dans le canal VIP. No-op si non configuré. Ne throw JAMAIS (best-effort). */
 export async function postVip(text: string): Promise<void> {
   if (!TOKEN || !VIP) return;

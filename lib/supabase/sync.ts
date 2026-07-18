@@ -138,6 +138,34 @@ export async function fetchCandles(symbol: string, timeframe: string, sinceMs: n
   return out;
 }
 
+/** Candidats à la RELANCE AUTO : prospects en onboarding depuis 1 à 21 jours, pas touchés (nudge) depuis 3 jours.
+ *  Le vocal perso de Mathieu reste l'arme n°1 (file manuelle dans l'admin) — ceci est le FILET pour la longue
+ *  traîne qu'il n'a pas le temps de toucher. Cap appliqué par l'appelant. */
+export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; member_no: number | null; tg_username: string | null; days: number }>> {
+  const now = Date.now();
+  // tables « membre » hors du schéma typé du runner (comme edge_health) → cast assumé
+  const raw = db as unknown as { from: (t: string) => any };
+  const { data: members } = await raw
+    .from('members').select('tg_id,member_no,tg_username,created_at')
+    .eq('status', 'onboarding')
+    .gte('created_at', new Date(now - 21 * 86_400_000).toISOString())
+    .lte('created_at', new Date(now - 1 * 86_400_000).toISOString());
+  if (!members?.length) return [];
+  const { data: nudges } = await raw
+    .from('member_actions').select('tg_id')
+    .eq('kind', 'nudge')
+    .gte('created_at', new Date(now - 3 * 86_400_000).toISOString());
+  const touched = new Set(((nudges ?? []) as Array<{ tg_id: number }>).map((n) => Number(n.tg_id)));
+  return (members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string }>)
+    .filter((m) => !touched.has(Number(m.tg_id)))
+    .map((m) => ({ tg_id: Number(m.tg_id), member_no: m.member_no, tg_username: m.tg_username, days: Math.floor((now - Date.parse(m.created_at)) / 86_400_000) }));
+}
+
+/** Trace une relance (auto ou manuelle) → kind='nudge', status='done' (jamais dans la file support). */
+export async function recordNudge(tgId: number, memberNo: number | null, via: 'auto' | 'manual', note: string) {
+  await (db as unknown as { from: (t: string) => any }).from('member_actions').insert({ tg_id: tgId, member_no: memberNo, kind: 'nudge', status: 'done', done_by: via, detail: { via, note } });
+}
+
 /** Bulletin de santé d'un edge (sentinelle hebdo) → table edge_health. */
 export async function recordEdgeHealth(row: { strategy: string; windowDays: number; trades: number; winRate: number | null; profitFactor: number | null; net: number; status: string }) {
   const { error } = await (db as any).from('edge_health').insert({

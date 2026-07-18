@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const s = guard(req);
   if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   const db = sdb();
-  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ] = await Promise.all([
+  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by').order('member_no', { ascending: false }).limit(200),
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
@@ -28,6 +28,8 @@ export async function GET(req: NextRequest) {
     db.from('member_actions').select('*').eq('kind', 'deposit').order('created_at', { ascending: false }).limit(500),
     // ABONNEMENTS PUSH : qui a activé les alertes (au moins 1 appareil). Sert au tableau « qui relancer ».
     db.from('member_push_subs').select('tg_id'),
+    // RELANCES (kind='nudge', auto + manuelles) : nourrit la file « RELANCES DU JOUR » (qui a été touché quand).
+    db.from('member_actions').select('tg_id,created_at,done_by').eq('kind', 'nudge').order('created_at', { ascending: false }).limit(500),
   ]);
   const pushTgIds = [...new Set((pushQ.data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
   // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
@@ -46,7 +48,7 @@ export async function GET(req: NextRequest) {
     owedUsd: [...balances.values()].filter((v) => v > 0).reduce((a, v) => a + v, 0), // ta dette totale envers les parrains
     flagged: [...balances.entries()].filter(([, v]) => v < 0).map(([tg, v]) => ({ tg_id: tg, balance: v, username: byTg.get(tg)?.tg_username ?? null, member_no: byTg.get(tg)?.member_no ?? null })),
   };
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [] });
 }
 
 export async function POST(req: NextRequest) {
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; offboard?: number; connectSth?: string; dismiss?: string;
+    revealMember?: number; offboard?: number; connectSth?: string; dismiss?: string; nudged?: number;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -332,6 +334,14 @@ export async function POST(req: NextRequest) {
     const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots})` } as never });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.nudged) {
+    // « ✓ FAIT » de la file RELANCES : Mathieu a envoyé son message/vocal perso → on trace (kind='nudge',
+    // via manual) pour sortir le lead de la file 3 jours et mesurer la conversion post-contact.
+    const { data: m } = await db.from('members').select('member_no').eq('tg_id', body.nudged).limit(1);
+    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    await db.from('member_actions').insert({ tg_id: body.nudged, member_no: m[0].member_no, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'manual', note: `personal DM/voice by ${who}` } as never });
     return NextResponse.json({ ok: true });
   }
   if (body.dismiss) {
