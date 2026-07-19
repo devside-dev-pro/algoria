@@ -1,5 +1,5 @@
 {
   "crons": [
-    { "path": "/api/cron/runner-health", "schedule": "*/15 * * * *" }
+    { "path": "/api/cron/runner-health", "schedule": "0 6 * * *" }
   ]
 }
