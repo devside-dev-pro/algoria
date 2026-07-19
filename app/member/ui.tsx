@@ -15,6 +15,7 @@ export interface Member {
   status: 'onboarding' | 'pending_copier' | 'live' | 'paused';
   broker: string | null;
   risk_tier: 'low' | 'balanced' | 'high';
+  strategy?: number; // 1=Steady · 2=Balanced (défaut) · 3=Turbo — le levier de risque du membre
   onboarding_step: number;
   created_at: string;
   mt5_login: string | null;
@@ -385,6 +386,52 @@ export const RISK_TIERS = [
   { key: 'balanced', label: 'BALANCED', lot: '0.05', blurb: 'The recommended setting — visible rhythm, contained risk.' },
   { key: 'high', label: 'AGGRESSIVE', lot: '0.10', blurb: 'For funded accounts only — bigger swings both ways.' },
 ] as const;
+
+// ===== STRATÉGIES — le levier de risque du membre (le lot copieur est FIXE 0.01, plus de sélecteur de lot).
+// AVAILABLE : seules les stratégies dont le master EXISTE sont sélectionnables — flipper la liste quand
+// les masters S1/S3 seront créés (Phase 2 infra). Les autres s'affichent en « COMING SOON » (teasing honnête).
+export const STRATEGY_AVAILABLE = [2];
+export const STRATEGY_UI = [
+  { id: 1, icon: '🛡️', name: 'STEADY', tag: 'Small daily target, tight caps', blurb: 'Hunts a small profit every day, then stops. Daily loss capped tight. No overnight positions.' },
+  { id: 2, icon: '⚖️', name: 'BALANCED', tag: 'The reference engine', blurb: 'The strategy behind our track record — scalp + core positions, balanced daily caps.' },
+  { id: 3, icon: '🔥', name: 'TURBO', tag: 'More trades, more variance', blurb: 'Aggressive: more trades, wider caps. For those who accept bigger swings both ways.' },
+] as const;
+
+export function StrategyPicker({ value, onPick, busy }: { value: number; onPick: (id: number) => void; busy?: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+      {STRATEGY_UI.map((s) => {
+        const available = STRATEGY_AVAILABLE.includes(s.id);
+        const active = value === s.id;
+        return (
+          <button
+            key={s.id}
+            disabled={busy || !available}
+            onClick={() => onPick(s.id)}
+            style={{
+              textAlign: 'left', display: 'flex', alignItems: 'center', gap: 13, padding: '13px 15px', borderRadius: 12, cursor: available ? 'pointer' : 'default',
+              border: `1px solid ${active ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
+              background: active ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)',
+              boxShadow: active ? '0 0 16px rgba(43,227,245,.12)' : undefined,
+              color: 'var(--text)', opacity: busy ? 0.6 : available ? 1 : 0.45,
+            }}
+          >
+            <span style={{ fontSize: 21, minWidth: 34 }}>{s.icon}</span>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1 }}>
+                {s.name}
+                {s.id === 2 && <span style={{ color: 'var(--dim)', fontWeight: 500 }}> · default</span>}
+                {!available && <span className="mono" style={{ marginLeft: 8, fontSize: 8.5, letterSpacing: 1, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 4, padding: '1px 5px' }}>COMING SOON</span>}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>{s.tag} — {s.blurb}</span>
+            </span>
+            {active && <span style={{ marginLeft: 'auto', color: 'var(--cyan)', fontSize: 15 }}>✓</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function RiskPicker({ value, onPick, busy }: { value: string; onPick: (k: 'low' | 'balanced' | 'high') => void; busy?: boolean }) {
   return (

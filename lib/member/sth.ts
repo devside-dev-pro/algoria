@@ -5,6 +5,13 @@
 const BASE = process.env.STH_BASE_URL ?? 'https://socialtradehubapp.com';
 const LICENSE = process.env.STH_PARTNER_LICENSE ?? '';
 const MASTER_ID = process.env.STH_MASTER_ID ?? ''; // id du master Algoria dans STH ; sinon auto-découvert via get-user-status
+// MULTI-STRATÉGIES : un master par stratégie (S1 Steady / S2 Balanced / S3 Turbo). S2 retombe sur
+// STH_MASTER_ID (le master historique). Stratégie sans master configuré → repli MASTER_ID/auto-découverte.
+const MASTER_BY_STRATEGY: Record<number, string> = {
+  1: process.env.STH_MASTER_ID_S1 ?? '',
+  2: process.env.STH_MASTER_ID_S2 ?? process.env.STH_MASTER_ID ?? '',
+  3: process.env.STH_MASTER_ID_S3 ?? '',
+};
 
 export const sthReady = (): boolean => Boolean(LICENSE);
 
@@ -65,15 +72,15 @@ export function sthDisconnect(userId: string) {
  *  découverte du master ne marche donc qu'APRÈS connect-customer-copier.
  *  Renvoie {ok, error} — error non vide = à AFFICHER au support (ex. « MetaTrader Server not found »). */
 export async function sthConnectAndJoin(o: {
-  userId: string; login: string | number; password: string; server: string; isMt4: boolean; lots: number;
+  userId: string; login: string | number; password: string; server: string; isMt4: boolean; lots: number; strategy?: number;
 }): Promise<{ ok: boolean; error: string }> {
   // 1) connecter le compte au copieur (rend l'utilisateur « connu » de STH).
   //    RETRY-SAFE : si le compte est DÉJÀ connecté (re-clic après un join échoué), on continue vers le join
   //    au lieu de bloquer — l'erreur « already connected » n'est pas un échec pour nous.
   const c = await sthConnectCustomer(o);
   if (!c.ok && !/already/i.test(c.errorMessage)) return { ok: false, error: c.errorMessage };
-  // 2) master id : env prioritaire, sinon auto-découverte maintenant que l'utilisateur existe
-  let masterId = MASTER_ID;
+  // 2) master id : celui de la STRATÉGIE du membre d'abord, sinon env global, sinon auto-découverte
+  let masterId = (o.strategy != null ? MASTER_BY_STRATEGY[o.strategy] : '') || MASTER_ID;
   if (!masterId) {
     const st = await sthStatus(o.userId);
     if (!st.ok) return { ok: false, error: `connected, but master lookup failed: ${st.errorMessage}` };
