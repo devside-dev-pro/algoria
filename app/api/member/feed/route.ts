@@ -45,5 +45,23 @@ export async function GET(req: NextRequest) {
   // Leçon churn : un client à 500$ qui voit « −1291$ » (le master à 70k en lot 1) retire immédiatement —
   // son vrai chiffre était −13$. On affiche SON échelle en premier, le master en petit.
   const clientLot = ({ low: 0.01, balanced: 0.05, high: 0.1 } as Record<string, number>)[String(memberQ.data?.[0]?.risk_tier ?? '')] ?? 0.01;
-  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot });
+
+  // PREUVE SOCIALE (prospects) — agrégats ANONYMES (numéros de membre uniquement, jamais de nom) :
+  // inscrits 48h, activations récentes (<72h pour ne jamais montrer du « figé »), compteurs. Le Home
+  // les affiche en bandeau rotatif — vivant tant qu'il y a du volume, muet sinon (jamais de stale).
+  const { data: socialRows } = await db.from('members').select('member_no,status,created_at,updated_at').order('created_at', { ascending: false }).limit(200);
+  const nowMs = Date.now();
+  const all = socialRows ?? [];
+  const lastLive = all
+    .filter((m) => ['live', 'paused'].includes(String(m.status)) && m.updated_at)
+    .sort((a, b) => Date.parse(String(b.updated_at)) - Date.parse(String(a.updated_at)))[0];
+  const lastLiveHours = lastLive ? Math.floor((nowMs - Date.parse(String(lastLive.updated_at))) / 3_600_000) : null;
+  const social = {
+    members: all.length,
+    live: all.filter((m) => String(m.status) === 'live').length,
+    joins48h: all.filter((m) => nowMs - Date.parse(String(m.created_at)) < 48 * 3_600_000).length,
+    lastLiveNo: lastLive && lastLiveHours != null && lastLiveHours < 72 ? Number(lastLive.member_no) : null,
+    lastLiveHours: lastLive && lastLiveHours != null && lastLiveHours < 72 ? lastLiveHours : null,
+  };
+  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social });
 }

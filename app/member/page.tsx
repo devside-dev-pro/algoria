@@ -15,13 +15,19 @@ export default function MemberHome() {
   const [clientLot, setClientLot] = useState(0.01);
   const [busy, setBusy] = useState(false);
   const [paywall, setPaywall] = useState(false);
+  interface Social { members: number; live: number; joins48h: number; lastLiveNo: number | null; lastLiveHours: number | null }
+  const [social, setSocial] = useState<Social | null>(null);
+  const [tick, setTick] = useState(0); // rotation du bandeau preuve sociale
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => {
       if (!r.ok) return;
-      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number };
+      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; social?: Social };
       setTrades(d.trades.slice(0, 8));
       if (d.clientLot) setClientLot(d.clientLot);
+      if (d.social) setSocial(d.social);
     });
+    const iv = setInterval(() => setTick((t) => t + 1), 4000);
+    return () => clearInterval(iv);
   }, []);
   // ÉCHELLE CLIENT (voir History) : « −1291$ » du master ($70k, lot 1) = −13$ pour un copieur en 0.01 —
   // afficher le chiffre du master en premier fait fuir ; on montre le SIEN, master en note.
@@ -97,6 +103,25 @@ export default function MemberHome() {
           )}
         </section>
       )}
+
+      {/* PREUVE SOCIALE (prospects) — bandeau ROTATIF (4 s), uniquement du FRAIS : inscrits 48h,
+          activation < 72h, compteurs. Seuils mini pour ne jamais afficher un chiffre faible ou figé. */}
+      {!unlocked && social && (() => {
+        const msgs: string[] = [];
+        if (social.joins48h >= 3) msgs.push(`🔥 ${social.joins48h} traders joined in the last 48h`);
+        if (social.lastLiveNo != null) msgs.push(`⚡ Member #${social.lastLiveNo} just went LIVE${social.lastLiveHours ? ` — ${social.lastLiveHours}h ago` : ''}`);
+        if (social.live >= 3) msgs.push(`🟢 ${social.live} accounts copying Algoria right now`);
+        if (social.members >= 20) msgs.push(`👥 ${social.members} members inside`);
+        if (msgs.length === 0) return null;
+        return (
+          <div className="panel" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, borderColor: 'rgba(43,227,245,.3)', overflow: 'hidden' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--up)', boxShadow: '0 0 8px var(--up)', flexShrink: 0 }} />
+            <span key={tick % msgs.length} className="mono" style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text)', letterSpacing: 0.3, animation: 'cardIn .45s ease' }}>
+              {msgs[tick % msgs.length]}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Derniers trades d'Algoria — pour les prospects le serveur n'envoie QUE les gains (bande-annonce
           assumée : "LATEST WINS") ; le flux complet et honnête arrive avec l'accès débloqué */}

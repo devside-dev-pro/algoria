@@ -43,6 +43,7 @@ export default function AdminCRM() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [pushTgIds, setPushTgIds] = useState<number[]>([]); // tg_id ayant au moins 1 appareil abonné aux alertes
   const [nudges, setNudges] = useState<{ tg_id: number; created_at: string; done_by?: string }[]>([]); // historique des relances (auto + manuelles)
+  const [runnerLastSeen, setRunnerLastSeen] = useState<number | null>(null); // heartbeat runner (dernière bougie écrite)
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
   const [depBroker, setDepBroker] = useState('');
@@ -81,6 +82,7 @@ export default function AdminCRM() {
       setDeposits(d.deposits ?? []);
       setPushTgIds(d.pushTgIds ?? []);
       setNudges(d.nudges ?? []);
+      setRunnerLastSeen((d as { runnerLastSeen?: number | null }).runnerLastSeen ?? null);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -355,6 +357,13 @@ export default function AdminCRM() {
 
       <div style={{ flex: 1, width: '100%', maxWidth: 1240, margin: '0 auto', padding: '18px 22px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
+        {/* WATCHDOG — visible sur TOUS les onglets : si le runner n'écrit plus de bougie depuis > 20 min
+            (BTC 24/7 → il devrait toujours en écrire), quelque chose est mort côté Railway. */}
+        {runnerLastSeen != null && Date.now() - runnerLastSeen > 20 * 60_000 && (
+          <div style={{ ...warnBox, borderColor: 'rgba(255,90,60,.6)', background: 'rgba(255,90,60,.1)', color: '#ff8a5c', fontWeight: 800 }}>
+            🚨 RUNNER SILENT — no candle written for {Math.floor((Date.now() - runnerLastSeen) / 60_000)} min. Check Railway (the cron also pushes this alert to your phone).
+          </div>
+        )}
         {/* ===== DASHBOARD — les chiffres qui comptent, toujours en tête ===== */}
         {tab === 'dashboard' && (
           <>
