@@ -44,6 +44,7 @@ export default function AdminCRM() {
   const [pushTgIds, setPushTgIds] = useState<number[]>([]); // tg_id ayant au moins 1 appareil abonné aux alertes
   const [nudges, setNudges] = useState<{ tg_id: number; created_at: string; done_by?: string }[]>([]); // historique des relances (auto + manuelles)
   const [runnerLastSeen, setRunnerLastSeen] = useState<number | null>(null); // heartbeat runner (dernière bougie écrite)
+  const [legalNames, setLegalNames] = useState<Record<string, string>>({}); // tg_id → nom légal broker (kyc) : LE pont entre les 3 identités
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
   const [depBroker, setDepBroker] = useState('');
@@ -83,6 +84,7 @@ export default function AdminCRM() {
       setPushTgIds(d.pushTgIds ?? []);
       setNudges(d.nudges ?? []);
       setRunnerLastSeen((d as { runnerLastSeen?: number | null }).runnerLastSeen ?? null);
+      setLegalNames((d as { legalNames?: Record<string, string> }).legalNames ?? {});
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -170,10 +172,12 @@ export default function AdminCRM() {
     const m = rows.find((r) => Number(r.tg_id) === Number(tg));
     return m ? (m.tg_username ? '@' + m.tg_username : `#${m.member_no}`) : tg == null ? '—' : String(tg);
   };
+  // nom légal (compte broker) d'un membre — la clé pour rapprocher Telegram ↔ admin ↔ broker/STH
+  const legalOf = (tg: number | null | undefined) => (tg != null ? legalNames[String(tg)] ?? null : null);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), r.status].some((v) => String(v ?? '').toLowerCase().includes(q)));
+    return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), r.status, legalOf(r.tg_id)].some((v) => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, search]);
 
   // ===== ALERTES PUSH : qui a activé, qui relancer (Telegram) =====
@@ -421,6 +425,7 @@ export default function AdminCRM() {
                     <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)' }}>
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{r.member_no}</span>
                       <span style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
+                      {legalOf(r.tg_id) && <span className="mono" style={{ fontSize: 10, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }} title="name on the broker account">🏦 {legalOf(r.tg_id)}</span>}
                       <span className="mono" style={{ fontSize: 10, fontWeight: 800, color: days >= 5 ? '#ff8a5c' : 'var(--gold)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 6px' }}>J+{days}</span>
                       {touched && <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>last touch {Math.floor((now - touched) / 86_400_000)}d ago</span>}
                       <span style={{ flex: 1 }} />
@@ -451,6 +456,7 @@ export default function AdminCRM() {
                   >
                     <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12 }}>#{a.member_no ?? '—'}</span>
                     <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--cyan)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>{nameOf(a.tg_id)}</span>
+                    {legalOf(a.tg_id) && <span style={{ fontSize: 9.5, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }} title="name on the broker account">🏦 {legalOf(a.tg_id)}</span>}
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
@@ -507,6 +513,7 @@ export default function AdminCRM() {
               <span className="mono goldText" style={{ fontWeight: 800, fontSize: 15 }}>#{sel.member_no}</span>
               <span style={{ fontSize: 15, fontWeight: 800 }}>{sel.tg_username ? '@' + sel.tg_username : (sel.tg_name ?? '—')}</span>
               {sel.tg_username && sel.tg_name && <span style={{ fontSize: 12, color: 'var(--dim)' }}>{sel.tg_name}</span>}
+              {legalOf(sel.tg_id) && <span className="mono" style={{ fontSize: 11, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.35)', borderRadius: 6, padding: '2px 8px' }} title="name on the broker account">🏦 {legalOf(sel.tg_id)}</span>}
               <StatusChip status={sel.status} />
               {sel.tg_username && <a href={`https://t.me/${sel.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
               <span style={{ flex: 1 }} />
@@ -613,6 +620,7 @@ export default function AdminCRM() {
                       <td style={{ ...td, maxWidth: 190 }}>
                         <div style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</div>
                         {r.tg_username && r.tg_name && <div style={{ fontSize: 9.5, color: 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.tg_name}</div>}
+                        {legalOf(r.tg_id) && <div style={{ fontSize: 9.5, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="name on the broker account (what you see in STH / deposits)">🏦 {legalOf(r.tg_id)}</div>}
                       </td>
                       <td style={td}><StatusChip status={r.status} /></td>
                       <td style={{ ...td, color: 'var(--muted)' }}>{r.broker ?? '—'}</td>
@@ -687,6 +695,7 @@ export default function AdminCRM() {
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12 }}>#{d.member_no ?? '—'}</span>
                       {/* pas nameOf : sans @username il renvoie #no, déjà affiché juste avant → doublon */}
                       <span style={{ fontSize: 12, color: 'var(--text)' }}>{(() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? '—'); })()}</span>
+                      {legalOf(d.tg_id) && <span className="mono" style={{ fontSize: 10.5, color: 'var(--gold)' }} title="name on the broker account">🏦 {legalOf(d.tg_id)}</span>}
                       <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{(d.detail?.broker ?? '—').toUpperCase()}</span>
                       <span className="mono" style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--cyan)' }}>${Number(d.detail?.amount_usd ?? 0)}</span>
                       <span style={{ color: 'var(--dim)', fontSize: 11 }}>→ com</span>
