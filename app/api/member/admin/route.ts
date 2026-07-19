@@ -323,7 +323,7 @@ export async function POST(req: NextRequest) {
     const { data: act } = await db.from('member_actions').select('id,tg_id,detail').eq('id', body.connectSth).eq('kind', 'connect').limit(1);
     if (!act?.length) return NextResponse.json({ error: 'connect request not found (already processed?)' }, { status: 404 });
     const detail = (act[0].detail as Record<string, unknown>) ?? {};
-    const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier').eq('tg_id', act[0].tg_id).limit(1);
+    const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier,strategy').eq('tg_id', act[0].tg_id).limit(1);
     if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
     if (!m[0].mt5_login || !m[0].mt5_server) return NextResponse.json({ error: 'missing MT5 login/server' }, { status: 400 });
     let password: string;
@@ -333,7 +333,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
     }
     const lots = Number(detail.lot ?? { low: 0.01, balanced: 0.05, high: 0.1 }[String(m[0].risk_tier)] ?? 0.01) || 0.01;
-    const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots });
+    // multi-stratégies : le client rejoint le master de SA stratégie (carte connect, sinon fiche membre)
+    const strategy = Number(detail.strategy ?? (m[0] as { strategy?: number }).strategy ?? 2) || 2;
+    const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots, strategy });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots})` } as never });
     return NextResponse.json({ ok: true });

@@ -12,6 +12,7 @@ const SUPERSEDES: Record<string, string[]> = {
   resume: ['pause', 'resume'],
   disconnect: ['pause', 'resume', 'disconnect'],
   risk_change: ['risk_change'],
+  strategy_change: ['strategy_change'],
 };
 
 /** Pousse une action dans la file copieur (appliquée dans STH par le support, puis par l'API quand elle arrivera). */
@@ -30,7 +31,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // Champs SÛRS renvoyés au client — jamais les identifiants MT5 (même chiffrés).
-const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,onboarding_step,created_at,mt5_login,mt5_server,referral_code,usdt_trc20';
+const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,strategy,onboarding_step,created_at,mt5_login,mt5_server,referral_code,usdt_trc20';
 
 async function me(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -123,6 +124,31 @@ export async function POST(req: NextRequest) {
       tg_id: s.tgId, member_no: mn?.[0]?.member_no ?? null, kind: 'kyc', status: 'done', done_by: 'member',
       detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4' } as never,
     });
+  } else if (body.action === 'strategy') {
+    // CHOIX DE STRATÉGIE (remplace le sélecteur de lot — le lot copieur est FIXE 0.01, le levier de risque
+    // du membre est la stratégie). Fin du wizard OU changement depuis le profil (→ file : move de master STH).
+    const choice = Number(body.choice ?? 0);
+    if (![1, 2, 3].includes(choice)) return NextResponse.json({ error: 'invalid strategy' }, { status: 400 });
+    patch.strategy = choice;
+    if (cur.status === 'onboarding') {
+      patch.onboarding_step = 3;
+      patch.status = 'pending_copier';
+      const [{ data: mrow }, { data: kyc }] = await Promise.all([
+        db.from('members').select('mt5_login,mt5_server,broker,tg_username').eq('tg_id', s.tgId).limit(1),
+        db.from('member_actions').select('detail').eq('tg_id', s.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
+      ]);
+      await queueAction(s.tgId, 'connect', {
+        login: mrow?.[0]?.mt5_login ?? null,
+        server: mrow?.[0]?.mt5_server ?? null,
+        strategy: choice,
+        lot: '0.01', // lot copieur FIXE pour tous — plus de tier
+        broker: mrow?.[0]?.broker ?? null,
+        username: mrow?.[0]?.tg_username ?? null,
+        ...(kyc?.[0]?.detail as Record<string, unknown> | undefined),
+      });
+    } else {
+      await queueAction(s.tgId, 'strategy_change', { to: choice }); // → le support déplace le compte vers le master de la stratégie dans STH
+    }
   } else if (body.action === 'risk') {
     const tier = String(body.tier ?? '');
     if (!['low', 'balanced', 'high'].includes(tier)) return NextResponse.json({ error: 'invalid tier' }, { status: 400 });

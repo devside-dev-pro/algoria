@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { useMe, StatusPill, RiskPicker, Locked, UnlockSheet, type Member, type Referral } from '../ui';
+import { useMe, StatusPill, StrategyPicker, Locked, UnlockSheet, type Member, type Referral } from '../ui';
 import { TRC20_RE } from '@/lib/member/affiliate';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
 
@@ -64,9 +64,9 @@ export default function Profile() {
     void fetch('/api/member/me').then(async (r) => { const d = (await r.json()) as { referral?: Referral }; if (d.referral) setReferral(d.referral); });
   if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
 
-  const act = (action: 'pause' | 'resume' | 'risk', tier?: string) => {
+  const act = (action: 'pause' | 'resume' | 'strategy', choice?: number) => {
     setBusy(true);
-    void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...(tier ? { tier } : {}) }) })
+    void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...(choice ? { choice } : {}) }) })
       .then(async (r) => { const d = (await r.json()) as { member?: Member }; if (d.member) setMember(d.member); })
       .finally(() => setBusy(false));
   };
@@ -225,12 +225,12 @@ export default function Profile() {
         />
       )}
 
-      {/* Risk Studio — grisé pour les prospects (le réglage n'a de sens qu'avec la copie active) */}
-      <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="RISK STUDIO — MEMBERS ONLY">
+      {/* Strategy Studio — le levier de risque du membre (lot copieur fixe : la stratégie fait le risque) */}
+      <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="STRATEGY — MEMBERS ONLY">
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>RISK PROFILE</h2>
-          <RiskPicker value={member.risk_tier} busy={busy || !unlocked} onPick={(t) => act('risk', t)} />
-          <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Changes are applied by the team within a few hours — you&apos;ll see it reflected on your MT5.</p>
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>YOUR STRATEGY</h2>
+          <StrategyPicker value={member.strategy ?? 2} busy={busy || !unlocked} onPick={(id) => act('strategy', id)} />
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Switches are applied by the team within a few hours — your account moves to the strategy&apos;s master.</p>
         </section>
       </Locked>
 

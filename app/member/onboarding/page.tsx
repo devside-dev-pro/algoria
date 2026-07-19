@@ -3,7 +3,7 @@
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, RiskPicker } from '../ui';
+import { useMe, StrategyPicker } from '../ui';
 import { BROKERS } from '@/lib/member/brokers';
 
 const FEATURED = BROKERS.find((b) => b.featured) ?? BROKERS[0];
@@ -30,7 +30,7 @@ export default function Onboarding() {
   // titulaire et le dépôt déclaré, la file admin était aveugle (n'importe qui pouvait raconter n'importe quoi)
   const [fullName, setFullName] = useState('');
   const [deposit, setDeposit] = useState('');
-  const [tier, setTier] = useState<'low' | 'balanced' | 'high'>('balanced');
+  const [strategy, setStrategy] = useState(2); // 1=Steady · 2=Balanced (défaut) · 3=Turbo — lot copieur fixe 0.01
   const [brokerPick, setBrokerPick] = useState<string | null>(null); // broker cliqué (le lien ouvre un onglet, on retient le choix)
   const [showOthers, setShowOthers] = useState(false);
 
@@ -167,10 +167,10 @@ export default function Onboarding() {
 
       {cur === 2 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h2 style={{ fontSize: 15, margin: 0 }}>3 · Choose your risk profile</h2>
-          <p style={pMuted}>This sets the lot size copied to your account for every Algoria trade. You can change it anytime from Home.</p>
-          <RiskPicker value={tier} onPick={setTier} busy={busy} />
-          <button disabled={busy} onClick={() => run({ action: 'risk', tier }, 'done')} style={ctaMain}>{busy ? 'SAVING…' : '⚡ START COPYING ALGORIA'}</button>
+          <h2 style={{ fontSize: 15, margin: 0 }}>3 · Choose your strategy</h2>
+          <p style={pMuted}>Every strategy copies at the same fixed size — your risk lever is the strategy itself. You can switch anytime from your Profile.</p>
+          <StrategyPicker value={strategy} onPick={setStrategy} busy={busy} />
+          <button disabled={busy} onClick={() => run({ action: 'strategy', choice: strategy }, 'done')} style={ctaMain}>{busy ? 'SAVING…' : '⚡ START COPYING ALGORIA'}</button>
           <button onClick={() => setStep(1)} style={linkBtn}>← Back to MT5 details</button>
         </section>
       )}
