@@ -236,6 +236,17 @@ export default function Profile() {
 
       <PushCard />
 
+      {/* SUPPORT direct — un membre (ou prospect) qui a une question doit toujours avoir une porte humaine */}
+      <a href="https://t.me/mathieu_algoria" target="_blank" rel="noreferrer" className="panel"
+        style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: 'var(--text)', borderColor: 'rgba(43,227,245,.28)' }}>
+        <span style={{ fontSize: 20 }}>💬</span>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>Need help? Talk to Mathieu</span>
+          <span className="mono" style={{ fontSize: 11.5, color: 'var(--cyan)' }}>@mathieu_algoria — direct Telegram, real human</span>
+        </span>
+        <span style={{ color: 'var(--cyan)', fontSize: 18 }}>›</span>
+      </a>
+
       {/* compte — grisé tant que l'accès n'est pas activé */}
       <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="TRADING ACCOUNT — MEMBERS ONLY">
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>

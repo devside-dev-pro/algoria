@@ -176,6 +176,16 @@ export default function Onboarding() {
       )}
 
       {err && <p style={{ fontSize: 12.5, color: 'rgba(210,150,165,.9)', margin: 0 }}>⚠ {err}</p>}
+
+      {/* porte de sortie humaine — l'onboarding est LÀ où les gens bloquent (broker, dépôt, serveur…) */}
+      <a href="https://t.me/mathieu_algoria" target="_blank" rel="noreferrer"
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 15px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: '1px solid rgba(43,227,245,.3)', background: 'rgba(43,227,245,.05)' }}>
+        <span style={{ fontSize: 17 }}>💬</span>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 800 }}>Stuck on a step? Message Mathieu directly</span>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--cyan)' }}>@mathieu_algoria — real human, fast answers</span>
+        </span>
+      </a>
     </main>
   );
 }
