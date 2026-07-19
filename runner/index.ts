@@ -734,7 +734,7 @@ async function main() {
       const candidates = (await fetchNudgeCandidates()).slice(0, 20);
       let sent = 0;
       for (const c of candidates) {
-        const dm = await sendDm(c.tg_id, "Hey — Algoria here 🤖 Your access is still 2 minutes from ready: connect your account and the AI starts working for you.\n\n👉 app.algoria.tech/member/onboarding\n\nStuck on something? Reply here — Mathieu reads these personally and will get back to you.");
+        const dm = await sendDm(c.tg_id, "Hey — Algoria here 🤖 Your access is still 2 minutes from ready: connect your account and the AI starts working for you.\n\n👉 app.algoria.tech/member/onboarding\n\nStuck on something? Message Mathieu directly → @mathieu_algoria — he'll walk you through it.");
         const push = await pushToUser(c.tg_id, { title: '🚀 Your Algoria access is 2 minutes from ready', body: 'Finish your setup and the AI starts trading for you. Need a hand? We got you.', url: '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
         await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`);
         if (dm || push) sent++;
