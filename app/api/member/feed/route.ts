@@ -15,9 +15,10 @@ export async function GET(req: NextRequest) {
   if (!s) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
   const [memberQ, desk, tradesQ, signalsQ] = await Promise.all([
-    db.from('members').select('status,risk_tier').eq('tg_id', s.tgId).limit(1),
+    db.from('members').select('status,risk_tier,strategy').eq('tg_id', s.tgId).limit(1),
     db.from('events').select('id,ts,msg,data').eq('level', 'ai').order('ts', { ascending: false }).limit(24),
-    db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot').not('closed_at', 'is', null).not('pnl', 'is', null).order('closed_at', { ascending: false }).limit(60),
+    // MULTI-STRATÉGIES : le membre voit les trades de SA stratégie (défaut 2 = Balanced, historique inclus).
+    db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot,strategy').not('closed_at', 'is', null).not('pnl', 'is', null).order('closed_at', { ascending: false }).limit(90),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
   ]);
   // même règle que /api/member/me : admin OU copie activée OU whitelist VIP/équipe (CM…)
@@ -26,7 +27,9 @@ export async function GET(req: NextRequest) {
   // (marché retiré : STH ne l'a jamais copié — ses pertes n'existent que sur le compte maître,
   // les montrer aux membres serait un rouge qui n'est pas le leur)
   const rafale = new Set((signalsQ.data ?? []).filter((x) => JSON.stringify(x.rationale ?? '').includes('RAFALE') || JSON.stringify(x.rationale ?? '').includes('ACTION mode')).map((x) => String(x.ticket)));
-  let trades = (tradesQ.data ?? []).filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100');
+  const memberStrategy = Number((memberQ.data?.[0] as { strategy?: number } | undefined)?.strategy ?? 2) || 2;
+  let trades = (tradesQ.data ?? []).filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100')
+    .filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === memberStrategy);
   // PROSPECTS : la BANDE-ANNONCE, pas le flux brut — un curieux qui arrive sur 2 SL d'affilée ne rejoint
   // jamais, même après des semaines vertes. On ne montre que les GAINS (l'UI l'assume : "highlights") ;
   // l'historique complet, honnête, s'ouvre avec l'accès débloqué.
