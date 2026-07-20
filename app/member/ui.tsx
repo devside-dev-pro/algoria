@@ -388,9 +388,9 @@ export const RISK_TIERS = [
 ] as const;
 
 // ===== STRATÉGIES — le levier de risque du membre (le lot copieur est FIXE 0.01, plus de sélecteur de lot).
-// AVAILABLE : seules les stratégies dont le master EXISTE sont sélectionnables — flipper la liste quand
-// les masters S1/S3 seront créés (Phase 2 infra). Les autres s'affichent en « COMING SOON » (teasing honnête).
-export const STRATEGY_AVAILABLE = [2];
+// AVAILABLE : seules les stratégies dont le master EXISTE sont sélectionnables. Les 3 masters $70k tournent
+// (runners S1/S2/S3 + STH) depuis le 20/07 → tout est ouvert. Les membres existants restent en S2 (défaut).
+export const STRATEGY_AVAILABLE = [1, 2, 3];
 export const STRATEGY_UI = [
   { id: 1, icon: '🛡️', name: 'STEADY', tag: 'Small daily target, tight caps', blurb: 'Hunts a small profit every day, then stops. Daily loss capped tight. No overnight positions.' },
   { id: 2, icon: '⚖️', name: 'BALANCED', tag: 'The reference engine', blurb: 'The strategy behind our track record — scalp + core positions, balanced daily caps.' },
