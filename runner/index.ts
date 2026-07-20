@@ -4,6 +4,7 @@ import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
 import { postVip, vipReady } from './telegram';
+import { SECONDARY } from '../lib/supabase/sync';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
 import { manageBreakeven, rememberManagement } from './metaapi/manage';
 import { DealRecorder } from './metaapi/trades';
@@ -318,7 +319,7 @@ async function main() {
         // ===== CANAL VIP : une fois la journée d'Algoria bouclée (dayDone : objectif +4% ou stop -4% touché),
         // il continue de VOIR des setups mais ne les prend plus → on les PUBLIE aux VIP, à prendre en manuel.
         // + une annonce unique au moment où la journée se termine. Primaire, hors watch-only, gaté par l'env.
-        if (isPrimary && !inst.watchOnly && vipReady()) {
+        if (isPrimary && !inst.watchOnly && vipReady() && !SECONDARY) {
           if (!state.dayDone) vipDayDoneAnnounced = false; // ré-armé au reset quotidien
           else if (!vipDayDoneAnnounced) {
             vipDayDoneAnnounced = true;
@@ -448,7 +449,7 @@ async function main() {
             if (ticket) {
               rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, ladder: SW.ladder, riskDist: Math.abs(sig.entry - sig.stopLoss) });
               await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at 1R, ${SW.trailDist}R trailing)`, 'order');
-              if (vipReady()) void postVip(`📈 Algoria just opened a CORE position — ${DISPLAY} ${sig.direction.toUpperCase()}\nEntry ~ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]}\nThis one can ride for days. Copied to your account.`);
+              if (vipReady() && !SECONDARY) void postVip(`📈 Algoria just opened a CORE position — ${DISPLAY} ${sig.direction.toUpperCase()}\nEntry ~ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]}\nThis one can ride for days. Copied to your account.`);
             }
           }
         } catch (e) {
@@ -568,7 +569,7 @@ async function main() {
   // ===== DÉMO CANAL VIP : pose VIP_DEMO=1 sur Railway (+ TELEGRAM_VIP_CHAT) → au boot, une salve de messages
   // d'exemple part dans le canal (un de chaque type) pour vérifier la connexion sans attendre le marché.
   // À RETIRER ensuite (sinon la démo se re-poste à chaque redéploiement).
-  if (process.env.VIP_DEMO === '1' && vipReady()) {
+  if (process.env.VIP_DEMO === '1' && vipReady() && !SECONDARY) {
     void (async () => {
       const demo = [
         "✅ Algoria VIP channel connected. Here's a preview of what you'll get 👇 (DEMO messages)",
@@ -714,8 +715,8 @@ async function main() {
       sentinelRunning = false;
     }
   };
-  setTimeout(() => void maybeSentinel(), 3 * 60_000); // au boot (après la synchro), rattrape un check manqué
-  setInterval(() => void maybeSentinel(), 3600_000); // check horaire → ne déclenche que dimanche 12h UTC
+  if (!SECONDARY) setTimeout(() => void maybeSentinel(), 3 * 60_000); // au boot (après la synchro), rattrape un check manqué
+  if (!SECONDARY) setInterval(() => void maybeSentinel(), 3600_000); // check horaire → ne déclenche que dimanche 12h UTC
 
   // ===== RECAP HORAIRE du desk : à chaque heure pleine, une carte "SESSION RECAP" (stats réelles du jour,
   // hors BEAST) + une clause IA d'ambiance. Rythme le stream et rappelle le track record sans intervention. =====
@@ -744,10 +745,10 @@ async function main() {
       console.error('[algoria] relance auto échouée:', e);
     }
   };
-  setInterval(() => void maybeNudge(), 3600_000);
+  if (!SECONDARY) setInterval(() => void maybeNudge(), 3600_000); // relances = un seul runner (S2), sinon triple envoi
 
   let lastRecapHour = new Date().getUTCHours(); // pas de recap au démarrage — on attend la prochaine heure pleine
-  setInterval(() => {
+  if (!SECONDARY) setInterval(() => {
     void (async () => {
       const h = new Date().getUTCHours();
       if (h === lastRecapHour) return;

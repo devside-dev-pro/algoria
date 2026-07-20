@@ -9,6 +9,14 @@ const db = createClient<Database>(process.env.SUPABASE_URL!, process.env.SUPABAS
   realtime: { transport: ws as unknown as typeof WebSocket },
 });
 
+// ===== MULTI-RUNNERS (un runner = un master = une stratégie) =====
+// STRAT_ID tague chaque trade/signal écrit en base (colonne strategy) → le feed membre filtre par SA stratégie.
+// SECONDARY (stratégie ≠ 2) = runner « silencieux » : il TRADE et enregistre trades/signaux, mais n'écrit PAS
+// le cockpit (events/desk/narration/candles/ticks/state) — sinon 3 runners écrivent le même flux en triple.
+// Le cockpit/live reste la voix du master de référence (S2) tant qu'on n'a pas un cockpit par stratégie.
+export const STRAT_ID = Number(process.env.ALGORIA_STRATEGY ?? '2') || 2;
+export const SECONDARY = STRAT_ID !== 2;
+
 // Canal Realtime "broadcast" pour le prix live (éphémère, aucune écriture DB) → alimente le firehose du cockpit.
 const tickCh = db.channel('algoria-ticks');
 let tickReady = false;
@@ -18,11 +26,13 @@ tickCh.subscribe((status) => {
 
 /** Diffuse un tick de prix au cockpit, TAGUÉ par symbole (le cockpit multi-symbole filtre dessus). No-op tant que le canal n'est pas prêt. */
 export function broadcastTick(symbol: string, bid: number, ask: number) {
+  if (SECONDARY) return; // runner secondaire : pas de firehose cockpit
   if (!tickReady) return;
   void tickCh.send({ type: 'broadcast', event: 'tick', payload: { symbol, bid, ask, t: Date.now() } });
 }
 
 export async function logEvents(events: EngineEvent[]) {
+  if (SECONDARY) return; // cockpit = voix du master S2 uniquement
   if (!events.length) return;
   await db.from('events').insert(
     events.map((e) => ({ ts: new Date(e.t).toISOString(), level: e.level, msg: e.msg, data: (e.data ?? null) as never })),
@@ -31,22 +41,26 @@ export async function logEvents(events: EngineEvent[]) {
 
 /** Commentaire desk Claude (niveau 'ai'). `meta` = { kind, direction, confidence, entry, sl, tp } → badge/couleur côté cockpit. */
 export async function logNarration(text: string, t?: number, meta?: Record<string, unknown>) {
+  if (SECONDARY) return;
   await db.from('events').insert({ ts: new Date(t ?? Date.now()).toISOString(), level: 'ai', msg: text, data: (meta ?? null) as never });
 }
 
 /** Commentaire du live TikTok (mode Autopilot) → le cockpit les lit en temps réel. Best-effort. */
 export async function recordLiveComment(username: string, text: string) {
+  if (SECONDARY) return;
   await (db as unknown as { from: (t: string) => { insert: (r: unknown) => PromiseLike<unknown> } }).from('live_comments').insert({ username, text });
 }
 
 /** Note générique → terminal (ex. breakeven sécurisé). */
 export async function logNote(msg: string, level: 'scan' | 'info' | 'signal' | 'order' | 'veto' | 'ai' = 'info') {
+  if (SECONDARY) return;
   await db.from('events').insert({ ts: new Date().toISOString(), level, msg, data: null as never });
 }
 
 /** Persiste le signal — qu'il ait été exécuté OU rejeté. `status` distingue 'placed' (ordre parti) de 'rejected' (échec d'envoi). */
 export async function logSignal(s: Signal, res: { ticket?: string; code?: string; status?: string }) {
   const { error } = await db.from('signals').insert({
+    strategy: STRAT_ID as never, // colonne ajoutée par migration — types générés pas régénérés
     ref: s.id,
     symbol: s.symbol,
     direction: s.direction,
@@ -80,6 +94,7 @@ export interface TradeOpen {
 /** Trade ouvert → ligne dans `trades` (clôture renseignée plus tard par recordTradeClose). */
 export async function recordTradeOpen(t: TradeOpen) {
   const { error } = await db.from('trades').insert({
+    strategy: STRAT_ID as never,
     ticket: t.ticket,
     signal_ref: t.signalRef,
     symbol: t.symbol,
@@ -118,7 +133,7 @@ export async function recordTradeClose(ticket: string, symbol: string, c: TradeC
     // aucune ligne ouverte à mettre à jour → soit ce ticket est DÉJÀ clôturé (deal livré 2×), soit position ouverte avant ce process.
     const { data: already } = await db.from('trades').select('id').eq('ticket', ticket).not('closed_at', 'is', null).limit(1);
     if (already && already.length > 0) return; // déjà enregistrée comme clôturée → on ignore le doublon (plus de ligne en double)
-    const { error: insErr } = await db.from('trades').insert({ ticket, symbol, ...patch }); // ligne close-only honnête
+    const { error: insErr } = await db.from('trades').insert({ strategy: STRAT_ID as never, ticket, symbol, ...patch }); // ligne close-only honnête
     if (insErr) console.error('[sync] recordTradeClose (insert close-only) échoué:', insErr.message);
   }
 }
@@ -240,7 +255,7 @@ export async function fetchDayTradeStats(): Promise<{ trades: number; wins: numb
   dayStart.setUTCHours(0, 0, 0, 0);
   const iso = dayStart.toISOString();
   const [tr, sg] = await Promise.all([
-    db.from('trades').select('ticket,pnl').gte('closed_at', iso).not('pnl', 'is', null),
+    db.from('trades').select('ticket,pnl').gte('closed_at', iso).not('pnl', 'is', null).eq('strategy' as never, STRAT_ID as never),
     db.from('signals').select('ticket,rationale').gte('created_at', iso),
   ]);
   if (tr.error || !tr.data) return null;
@@ -252,6 +267,7 @@ export async function fetchDayTradeStats(): Promise<{ trades: number; wins: numb
 }
 
 export async function pushState(ctx: MarketContext, state: EngineState, mode: Mode = 'normal') {
+  if (SECONDARY) return; // le cockpit affiche l'état du master S2 uniquement
   await db.from('state_snapshots').insert({
     session: ctx.session,
     regime: ctx.regime,
@@ -272,6 +288,7 @@ export async function pushState(ctx: MarketContext, state: EngineState, mode: Mo
 
 /** Persiste une bougie (upsert sur symbol+timeframe+time) → alimente le chart. */
 export async function logCandle(symbol: string, bar: Bar, timeframe = 'M5') {
+  if (SECONDARY) return; // S2 écrit déjà les mêmes bougies (même broker) — pas de doublons
   await db.from('candles').upsert(
     { symbol, timeframe, time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume },
     { onConflict: 'symbol,timeframe,time' },
@@ -280,6 +297,7 @@ export async function logCandle(symbol: string, bar: Bar, timeframe = 'M5') {
 
 /** Upsert en masse (backfill d'historique). Découpé en lots pour encaisser un gros backfill (ex. 20k bougies M1). */
 export async function logCandles(symbol: string, bars: Bar[], timeframe = 'M5') {
+  if (SECONDARY) return;
   if (!bars.length) return;
   const CHUNK = 2000;
   for (let i = 0; i < bars.length; i += CHUNK) {
