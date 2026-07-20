@@ -109,7 +109,7 @@ export async function recordTradeOpen(t: TradeOpen) {
 
 /** SL COURANT d'une position ouverte (breakeven/trailing) → le cockpit redessine la zone SL en direct. */
 export async function updateTradeStop(ticket: string, sl: number) {
-  const { error } = await db.from('trades').update({ sl }).eq('ticket', ticket).is('closed_at', null);
+  const { error } = await db.from('trades').update({ sl }).eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
   if (error) console.error('[sync] updateTradeStop échoué:', error.message);
 }
 
@@ -124,14 +124,14 @@ export interface TradeClose {
 /** Clôture d'un trade : met à jour la ligne ouverte (match sur ticket). Idempotent : ignore les deals de clôture livrés en double. */
 export async function recordTradeClose(ticket: string, symbol: string, c: TradeClose) {
   const patch = { exit: c.exit, pnl: c.pnl, r: c.r, reason: c.reason, closed_at: new Date(c.closedAt).toISOString() };
-  const { data, error } = await db.from('trades').update(patch).eq('ticket', ticket).is('closed_at', null).select('id');
+  const { data, error } = await db.from('trades').update(patch).eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).is('closed_at', null).select('id');
   if (error) {
     console.error('[sync] recordTradeClose (update) échoué:', error.message);
     return;
   }
   if (!data || data.length === 0) {
     // aucune ligne ouverte à mettre à jour → soit ce ticket est DÉJÀ clôturé (deal livré 2×), soit position ouverte avant ce process.
-    const { data: already } = await db.from('trades').select('id').eq('ticket', ticket).not('closed_at', 'is', null).limit(1);
+    const { data: already } = await db.from('trades').select('id').eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).not('closed_at', 'is', null).limit(1);
     if (already && already.length > 0) return; // déjà enregistrée comme clôturée → on ignore le doublon (plus de ligne en double)
     const { error: insErr } = await db.from('trades').insert({ strategy: STRAT_ID as never, ticket, symbol, ...patch }); // ligne close-only honnête
     if (insErr) console.error('[sync] recordTradeClose (insert close-only) échoué:', insErr.message);
@@ -198,7 +198,7 @@ export async function lastEdgeHealthCheck(): Promise<number | null> {
 
 /** Une position SWING est-elle déjà ouverte sur ce symbole ? (slot swing = 1 position de fond max, survit aux reboots). */
 export async function hasOpenSwingTrade(symbol: string): Promise<boolean> {
-  const { data } = await db.from('trades').select('id').eq('symbol', symbol).is('closed_at', null).ilike('signal_ref', '%-swing-%').limit(1);
+  const { data } = await db.from('trades').select('id').eq('symbol', symbol).eq('strategy' as never, STRAT_ID as never).is('closed_at', null).ilike('signal_ref', '%-swing-%').limit(1);
   return !!data?.length;
 }
 
@@ -210,7 +210,9 @@ export async function latestCandleTime(symbol: string, timeframe = 'M5'): Promis
 
 /** Tickets des trades OUVERTS en base depuis > graceMs qui n'existent plus chez le broker (candidats fantômes). */
 export async function listGhostOpenTrades(symbol: string, liveTickets: string[], graceMs = 120_000): Promise<string[]> {
-  const { data, error } = await db.from('trades').select('ticket,opened_at').eq('symbol', symbol).is('closed_at', null);
+  // SCOPE STRATÉGIE : sans ce filtre, chaque runner voyait les trades ouverts des AUTRES stratégies,
+  // ne trouvait pas leurs tickets chez SON broker → les fermait en « reconcile » (P&L perdu). Bug constaté 20/07.
+  const { data, error } = await db.from('trades').select('ticket,opened_at').eq('symbol', symbol).eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
   if (error || !data?.length) return [];
   const live = new Set(liveTickets.map(String));
   const cutoff = Date.now() - graceMs;
@@ -220,7 +222,7 @@ export async function listGhostOpenTrades(symbol: string, liveTickets: string[],
 /** Fallback : ferme des fantômes SANS données de clôture (reason='reconcile', P&L inconnu). */
 export async function closeGhostTrades(tickets: string[]): Promise<number> {
   if (!tickets.length) return 0;
-  const { error } = await db.from('trades').update({ closed_at: new Date().toISOString(), reason: 'reconcile' }).in('ticket', tickets).is('closed_at', null);
+  const { error } = await db.from('trades').update({ closed_at: new Date().toISOString(), reason: 'reconcile' }).in('ticket', tickets).eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
   if (error) {
     console.error('[sync] closeGhostTrades échoué:', error.message);
     return 0;
@@ -235,7 +237,9 @@ export async function closeGhostTrades(tickets: string[]): Promise<number> {
  * Retourne le nombre de fantômes nettoyés.
  */
 export async function reconcileOpenTrades(symbol: string, liveTickets: string[], graceMs = 120_000): Promise<number> {
-  const { data, error } = await db.from('trades').select('ticket,opened_at').eq('symbol', symbol).is('closed_at', null);
+  // SCOPE STRATÉGIE : sans ce filtre, chaque runner voyait les trades ouverts des AUTRES stratégies,
+  // ne trouvait pas leurs tickets chez SON broker → les fermait en « reconcile » (P&L perdu). Bug constaté 20/07.
+  const { data, error } = await db.from('trades').select('ticket,opened_at').eq('symbol', symbol).eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
   if (error || !data?.length) return 0;
   const live = new Set(liveTickets.map(String));
   const cutoff = Date.now() - graceMs;
