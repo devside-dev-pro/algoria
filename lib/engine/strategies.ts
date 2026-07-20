@@ -16,6 +16,11 @@ export interface StrategyProfile {
   label: string;
   thresholdScalp: number; // seuil de confiance scalp (plus haut = plus sélectif)
   targetRR: number; // TP en multiple du SL
+  // R:R MINIMUM accepté après le clamp structure (TP posé sur le premier mur S/R). Étude 2/6→20/7 (robuste
+  // sur les DEUX moitiés) : à 0.2, les trades « +197$ pour risquer 800$ » saignent les mois difficiles
+  // (juillet −8 814$) ; à 0.75, juillet passe POSITIF (+2 621$) et le net total ×4.5 (+1 999→+9 174$).
+  // S1 garde 0.2 : son design EST le petit TP rapide (targetRR 0.4 validé tel quel). S3 : étude à part.
+  minRR: number;
   tradeAsia: boolean; // trader la session Asie ?
   dailyProfitTargetPct: number; // objectif du jour → latch dayDone
   maxDailyLossPct: number; // plancher du jour → latch dayDone
@@ -24,9 +29,9 @@ export interface StrategyProfile {
 }
 
 export const STRATEGIES: Record<string, StrategyProfile> = {
-  '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 0.4, tradeAsia: false, dailyProfitTargetPct: 0.01, maxDailyLossPct: 0.03, swing: false, breakout: false },
-  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, swing: true, breakout: true },
-  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — more trades, more variance (validate before selling)', thresholdScalp: 0.2, targetRR: 1.0, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, swing: true, breakout: true },
+  '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 0.4, minRR: 0.2, tradeAsia: false, dailyProfitTargetPct: 0.01, maxDailyLossPct: 0.03, swing: false, breakout: false },
+  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, swing: true, breakout: true },
+  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — more trades, more variance (validate before selling)', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.2, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, swing: true, breakout: true },
 };
 
 /** Stratégie du runner courant (env ALGORIA_STRATEGY, défaut 2 = comportement actuel). */

@@ -38,6 +38,7 @@ const XAUUSD_SCALP: EngineConfig = {
   fixedLot: 1,
   emaGate: 'notOpposed',
   targetRR: STRAT.targetRR,
+  minRR: STRAT.minRR, // S2 0.75 : refuse les TP clampés trop proches (l'hémorragie des mois difficiles)
   threshold: { ...SCALP_CONFIG.threshold, scalp: STRAT.thresholdScalp },
   risk: { ...SCALP_CONFIG.risk, dailyProfitTargetPct: STRAT.dailyProfitTargetPct, maxDailyLossPct: STRAT.maxDailyLossPct },
 };
