@@ -590,6 +590,10 @@ async function main() {
   watchCommands((cmd) => {
     void (async () => {
       try {
+        // MULTI-RUNNERS : le cockpit pilote le master S2. Les runners secondaires (S1/S3) IGNORENT les
+        // commandes de show/trade manuel — sinon un « manual trade » partirait sur les 3 masters à la fois.
+        // Exception SÉCURITÉ : kill/resume restent GLOBAUX (un kill coupe tout, partout, toujours).
+        if (SECONDARY && cmd.type !== 'kill' && cmd.type !== 'resume') return;
         if (cmd.type === 'set_mode' && (cmd.payload as any)?.mode) {
           mode = (cmd.payload as any).mode;
         } else if (cmd.type === 'kill') {
