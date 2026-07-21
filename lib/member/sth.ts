@@ -47,7 +47,7 @@ export function sthConnectCustomer(o: { userId: string; login: string | number; 
     UserID: o.userId,
     MetatraderLogin: Number(o.login),
     MetatraderPassword: o.password,
-    Server: o.server,
+    MetatraderServer: o.server, // nom EXACT du champ doc STH — « Server » était ignoré → compte enregistré SANS serveur, jamais connectable
     IsMT4: o.isMt4,
     Lots: o.lots,
   });
