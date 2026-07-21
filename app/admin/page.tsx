@@ -161,6 +161,16 @@ export default function AdminCRM() {
       .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return window.alert(d.error); post({ done: id }, () => setCreds((c) => { const n = { ...c }; delete n[id]; return n; })); })
       .catch(() => setBusy(false));
   };
+  // RE-connexion STH depuis la fiche membre (ex. déconnecté par erreur sur le dashboard STH) : identifiants
+  // déjà en base — rien à ressaisir, ne touche pas au statut du membre.
+  const reconnectSth = (r: Row) => {
+    const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
+    if (!window.confirm(`Re-connect ${who} to the STH copier?\n\nUses the credentials on file — nothing to retype. Their account re-joins their strategy's master.`)) return;
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reconnectSth: r.tg_id }) })
+      .then(async (res) => { const d = (await res.json()) as { ok?: boolean; error?: string }; window.alert(d.error ?? '✓ re-connected to the copier'); })
+      .finally(() => setBusy(false));
+  };
   // off-board : le client est parti → paused + déconnexion copieur + note (le kick du canal Telegram reste manuel)
   const offboard = (r: Row) => {
     const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
@@ -522,6 +532,7 @@ export default function AdminCRM() {
             {/* actions fiche : voir les identifiants à tout moment + off-board d'un client parti */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {sel.mt5_login && <button disabled={busy} onClick={() => showCreds(sel.tg_id)} title="decrypt this member's MT5 login/server/password (timestamped)" style={goldBtn}>🔑 SHOW CREDENTIALS</button>}
+              {sel.mt5_login && <button disabled={busy} onClick={() => reconnectSth(sel)} title="re-connect this member to the STH copier with the credentials on file (e.g. after an accidental disconnect on the STH dashboard)" style={goldBtn}>🔗 RECONNECT STH</button>}
               {/* TOUJOURS visible : « paused » peut venir du membre lui-même (bouton pause copy) — masquer
                   l'off-board sur un membre en pause bloquait pile le cas « il a retiré, je veux le sortir » */}
               <button disabled={busy} onClick={() => offboard(sel)} title="client left → status paused + copier disconnect (STH or queued) + timeline note (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>

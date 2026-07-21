@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; offboard?: number; connectSth?: string; dismiss?: string; nudged?: number;
+    revealMember?: number; offboard?: number; connectSth?: string; reconnectSth?: number; dismiss?: string; nudged?: number;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -349,6 +349,29 @@ export async function POST(req: NextRequest) {
     const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots, strategy });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots})` } as never });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.reconnectSth) {
+    // RE-CONNEXION directe depuis la FICHE MEMBRE (ex. déconnecté par erreur sur le dashboard STH) — pas
+    // besoin d'une carte connect en file : identifiants déjà en base, lot/plateforme repris de sa dernière
+    // carte connect (sinon kyc, sinon défauts). Ne touche PAS au statut du membre (déjà live en général).
+    if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
+    const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier,strategy').eq('tg_id', body.reconnectSth).limit(1);
+    if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
+    if (!m[0].mt5_login || !m[0].mt5_server) return NextResponse.json({ error: 'missing MT5 login/server' }, { status: 400 });
+    let password: string;
+    try {
+      password = decryptSecret(m[0].mt5_password_enc as string);
+    } catch {
+      return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
+    }
+    const { data: acts } = await db.from('member_actions').select('kind,detail').eq('tg_id', body.reconnectSth).in('kind', ['connect', 'kyc']).order('created_at', { ascending: false }).limit(10);
+    const detail = ((acts?.find((a) => a.kind === 'connect') ?? acts?.find((a) => a.kind === 'kyc'))?.detail as Record<string, unknown>) ?? {};
+    const lots = Number(detail.lot ?? { low: 0.01, balanced: 0.05, high: 0.1 }[String(m[0].risk_tier)] ?? 0.01) || 0.01;
+    const strategy = Number((m[0] as { strategy?: number }).strategy ?? 2) || 2;
+    const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots, strategy });
+    if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
+    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier RE-connected via STH from the member sheet (lots ${lots} · S${strategy})` } as never });
     return NextResponse.json({ ok: true });
   }
   if (body.nudged) {
