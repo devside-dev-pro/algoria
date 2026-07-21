@@ -171,6 +171,17 @@ export default function AdminCRM() {
       .then(async (res) => { const d = (await res.json()) as { ok?: boolean; error?: string }; window.alert(d.error ?? '✓ re-connected to the copier'); })
       .finally(() => setBusy(false));
   };
+  // vérité STH (diagnostic) : compte MT connecté au copieur ? masters visibles + abonnements — direct depuis leur API
+  const sthCheck = (tgId: number) => {
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthStatusCheck: tgId }) })
+      .then(async (r) => {
+        const d = (await r.json()) as { connected?: boolean; masters?: Array<Record<string, unknown>>; error?: string };
+        if (d.error) return window.alert(d.error);
+        window.alert(`STH status (live from their API)\n\nMT account connected: ${d.connected ? '✅ YES' : '❌ NO'}\n\nMasters:\n${(d.masters ?? []).map((m) => '• ' + JSON.stringify(m)).join('\n') || '(none visible)'}`);
+      })
+      .finally(() => setBusy(false));
+  };
   // off-board : le client est parti → paused + déconnexion copieur + note (le kick du canal Telegram reste manuel)
   const offboard = (r: Row) => {
     const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
@@ -533,6 +544,7 @@ export default function AdminCRM() {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {sel.mt5_login && <button disabled={busy} onClick={() => showCreds(sel.tg_id)} title="decrypt this member's MT5 login/server/password (timestamped)" style={goldBtn}>🔑 SHOW CREDENTIALS</button>}
               {sel.mt5_login && <button disabled={busy} onClick={() => reconnectSth(sel)} title="re-connect this member to the STH copier with the credentials on file (e.g. after an accidental disconnect on the STH dashboard)" style={goldBtn}>🔗 RECONNECT STH</button>}
+              {sel.mt5_login && <button disabled={busy} onClick={() => sthCheck(sel.tg_id)} title="ask the STH API directly: is this member's MT account connected to the copier, and which masters does it see?" style={goldBtn}>🔍 STH STATUS</button>}
               {/* TOUJOURS visible : « paused » peut venir du membre lui-même (bouton pause copy) — masquer
                   l'off-board sur un membre en pause bloquait pile le cas « il a retiré, je veux le sortir » */}
               <button disabled={busy} onClick={() => offboard(sel)} title="client left → status paused + copier disconnect (STH or queued) + timeline note (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>
