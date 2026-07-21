@@ -5,6 +5,7 @@ import { sthReady, sthConnectAndJoin, sthDisconnect } from '@/lib/member/sth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // le CONNECT STH peut poller ~25 s (connexion MT asynchrone côté STH)
 
 // Gestion de la liste VIP (support) : seuls les @ de ADMIN_TG_USERNAMES passent.
 function guard(req: NextRequest) {
