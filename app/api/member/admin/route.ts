@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret } from '@/lib/member/server';
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
-import { sthReady, sthConnectAndJoin, sthDisconnect } from '@/lib/member/sth';
+import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus } from '@/lib/member/sth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; offboard?: number; connectSth?: string; reconnectSth?: number; dismiss?: string; nudged?: number;
+    revealMember?: number; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; dismiss?: string; nudged?: number;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -373,6 +373,14 @@ export async function POST(req: NextRequest) {
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier RE-connected via STH from the member sheet (lots ${lots} · S${strategy})` } as never });
     return NextResponse.json({ ok: true });
+  }
+  if (body.sthStatusCheck) {
+    // DIAGNOSTIC STH — la vérité directement depuis leur API : compte MT connecté ? abonné à quels masters ?
+    // (les comptes branchés via la Partner API ne s'affichent pas toujours dans le dashboard STH classique)
+    if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
+    const st = await sthStatus(String(body.sthStatusCheck));
+    if (!st.ok) return NextResponse.json({ error: `STH: ${st.errorMessage}` }, { status: 400 });
+    return NextResponse.json({ connected: st.data.tradingAccountConnected === true, masters: st.data.masterAccountsList ?? [], raw: st.data });
   }
   if (body.nudged) {
     // « ✓ FAIT » de la file RELANCES : Mathieu a envoyé son message/vocal perso → on trace (kind='nudge',
