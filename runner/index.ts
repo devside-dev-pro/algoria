@@ -312,7 +312,16 @@ async function main() {
             await logSignal(autoSignal, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' });
             if (isPrimary) await logNote(`${DISPLAY}: trade bloqué — ${veto}`, 'veto');
           } else {
-            await executeSignal(autoSignal);
+            const ticket = await executeSignal(autoSignal);
+            // TRAILING LOCK scalp (S2/S3) : gestion custom avec riskDist FIGÉ à l'entrée (après un BE,
+            // |open−SL| ne mesure plus le risque initial — même raison que le breakout).
+            if (ticket && cfg.trailActivate != null && cfg.trailDist != null && autoSignal.stopLoss > 0)
+              rememberManagement(ticket, {
+                beTrigger: cfg.beTrigger ?? 0,
+                trailActivate: cfg.trailActivate,
+                trailDist: cfg.trailDist,
+                riskDist: Math.abs(autoSignal.entry - autoSignal.stopLoss),
+              });
           }
         }
 

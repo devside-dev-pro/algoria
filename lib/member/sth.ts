@@ -89,8 +89,27 @@ export async function sthConnectAndJoin(o: {
     else if (list.length === 0) return { ok: false, error: 'connected, but NO master visible under this license — ask STH to attach your master account to the Partner license (or set STH_MASTER_ID)' };
     else return { ok: false, error: `connected, but ${list.length} masters under this license — set STH_MASTER_ID to pick the right one (${list.map((m) => m.id).join(', ')})` };
   }
-  // 3) abonner au master Algoria
-  const j = await sthJoinMaster({ userId: o.userId, masterId, lots: o.lots });
+  // 3) abonner au master Algoria.
+  //    La connexion MT côté STH est ASYNCHRONE : connect-customer-copier rend la main avant que le bridge
+  //    MetaTrader soit établi → un join immédiat peut échouer « MetaTrader account not connected ». Dans ce
+  //    cas on POLL get-user-status (jusqu'à ~25 s) en attendant tradingAccountConnected, puis on re-join.
+  //    Si le compte ne se connecte jamais, c'est presque toujours login/mot de passe/serveur incorrects.
+  let j = await sthJoinMaster({ userId: o.userId, masterId, lots: o.lots });
+  if (!j.ok && /not connected/i.test(j.errorMessage)) {
+    let connected = false;
+    for (let attempt = 0; attempt < 8 && !connected; attempt++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const st = await sthStatus(o.userId);
+      connected = st.ok && st.data.tradingAccountConnected === true;
+    }
+    if (!connected)
+      return {
+        ok: false,
+        error:
+          "account saved but STH can't reach the MetaTrader account (after ~25s). Either STH is still connecting — retry CONNECT in 1-2 min — or the login/password/server is wrong (check it's the MAIN password, not investor, and the exact server name).",
+      };
+    j = await sthJoinMaster({ userId: o.userId, masterId, lots: o.lots });
+  }
   if (!j.ok) return { ok: false, error: `connected, but join failed: ${j.errorMessage}` };
   return { ok: true, error: '' };
 }

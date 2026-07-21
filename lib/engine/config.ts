@@ -31,6 +31,12 @@ export interface EngineConfig {
   minRR: number;
   emaGate?: 'off' | 'align' | 'notOpposed'; // filtre d'entrée sur la tendance EMA : 'align' = EMA doit soutenir le sens ; 'notOpposed' = refuse seulement si l'EMA s'oppose (plat OK). Défaut off.
   beTrigger?: number; // breakeven : déplace le SL à ~entrée quand le profit ≥ beTrigger × riskDist (gestion post-entrée, appliquée par le runner & le backtest)
+  // TRAILING LOCK (gestion post-entrée, au-delà du BE) : dès que le meilleur prix atteint trailActivate × riskDist,
+  // le SL suit à peak − trailDist × riskDist. Convertit les « touché +0.6R puis retourné » (scratch BE ~0$) en
+  // gains verrouillés (~+0.25R). Étude 2/6→20/7 S2 (mode scalp, robuste sur les DEUX moitiés, plateau 24/24
+  // combinaisons act 0.45-0.7 × dist 0.3-0.45) : net +9 174→+14 957$, juillet −1 722→+1 885$, jours verts 61→63%.
+  trailActivate?: number;
+  trailDist?: number;
   risk: RiskLimits;
 }
 
