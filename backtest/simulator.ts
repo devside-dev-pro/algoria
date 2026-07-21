@@ -14,6 +14,7 @@ export interface SimParams {
   window?: number; // si défini, le moteur ne voit que les N dernières bougies (= comportement live après un restart). 0/undefined = tout l'historique.
   // Gestion de trade dynamique (optionnelle) :
   beTrigger?: number; // déplace le SL à ~breakeven quand le profit ≥ beTrigger × riskDist
+  beOffset?: number; // niveau du SL breakeven en × riskDist AU-DESSUS de l'entrée (défaut 0.05 = BE+ couvre les coûts)
   trailActivate?: number; // active le trailing quand le profit ≥ trailActivate × riskDist
   trailDist?: number; // distance du trailing en × riskDist (le SL suit à peak − trailDist)
   ignoreTp?: boolean; // ignore le TP fixe → on ne sort que sur le stop (trailing) ou en fin de données
@@ -64,6 +65,8 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
   const trades: SimTrade[] = [];
   const equity: EquityPoint[] = [];
   const beTrig = p.beTrigger ?? cfg.beTrigger ?? 0; // breakeven piloté par la config moteur (override possible via SimParams)
+  const trailAct = p.trailActivate ?? cfg.trailActivate; // trailing lock piloté par la config moteur (même logique)
+  const trailD = p.trailDist ?? cfg.trailDist;
 
   const close = (pos: OpenPos, px: number, time: number, reason: SimTrade['reason']) => {
     const dir = pos.signal.direction === 'long' ? 1 : -1;
@@ -113,11 +116,11 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       pos.peak = long ? Math.max(pos.peak, bar.high) : Math.min(pos.peak, bar.low);
       const fav = dir * (pos.peak - pos.entryPrice); // distance favorable max atteinte
       if (beTrig && fav >= beTrig * pos.riskDist) {
-        const be = pos.entryPrice + dir * 0.05 * pos.riskDist; // BE+ : couvre les coûts
+        const be = pos.entryPrice + dir * (p.beOffset ?? 0.05) * pos.riskDist; // BE+ : couvre les coûts
         pos.stop = long ? Math.max(pos.stop, be) : Math.min(pos.stop, be);
       }
-      if (p.trailActivate && p.trailDist && fav >= p.trailActivate * pos.riskDist) {
-        const trail = pos.peak - dir * p.trailDist * pos.riskDist;
+      if (trailAct && trailD && fav >= trailAct * pos.riskDist) {
+        const trail = pos.peak - dir * trailD * pos.riskDist;
         pos.stop = long ? Math.max(pos.stop, trail) : Math.min(pos.stop, trail);
       }
     }
