@@ -119,5 +119,6 @@ export interface EngineState {
   killed: boolean;
   dayStamp?: string; // jour UTC (YYYY-MM-DD) courant — sert au reset journalier des compteurs/plafonds
   dayDone?: boolean; // LATCH : plafond de gain OU de perte du jour atteint → plus de nouvelles entrées jusqu'au lendemain
-  dayDoneReason?: 'target' | 'loss'; // pourquoi la journée s'est terminée : objectif atteint (vert) vs cap de perte (rouge)
+  dayDoneReason?: 'target' | 'loss' | 'lock'; // objectif atteint (vert) · cap de perte (rouge) · ratchet : gains du jour verrouillés
+  dayPeak?: number; // meilleure equity du jour (pilote le RATCHET journalier — voir readState)
 }

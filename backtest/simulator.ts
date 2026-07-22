@@ -15,6 +15,10 @@ export interface SimParams {
   // Gestion de trade dynamique (optionnelle) :
   beTrigger?: number; // déplace le SL à ~breakeven quand le profit ≥ beTrigger × riskDist
   beOffset?: number; // niveau du SL breakeven en × riskDist AU-DESSUS de l'entrée (défaut 0.05 = BE+ couvre les coûts)
+  // RATCHET JOURNALIER (étude) : une fois le pic du jour ≥ dayLockTrigger (fraction du solde), la journée se
+  // coupe si l'equity retombe à dayLockFloor — le « +1600 qui finit à 0 » devient « +1600 qui finit ≥ floor ».
+  dayLockTrigger?: number;
+  dayLockFloor?: number;
   trailActivate?: number; // active le trailing quand le profit ≥ trailActivate × riskDist
   trailDist?: number; // distance du trailing en × riskDist (le SL suit à peak − trailDist)
   ignoreTp?: boolean; // ignore le TP fixe → on ne sort que sur le stop (trailing) ou en fin de données
@@ -58,6 +62,7 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
   let balance = p.startBalance;
   let dayStart = balance;
   let dayKilled = false;
+  let dayPeakEq = balance;
   let tradesToday = 0;
   let lastTradeTime: number | undefined;
   let lastDay = dayOf(bars[p.warmup].time);
@@ -132,6 +137,7 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       dayStart = balance;
       dayKilled = false;
       tradesToday = 0;
+      dayPeakEq = balance;
     }
 
     // 3) equity mark-to-market + kill switch journalier
@@ -142,6 +148,10 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
     const eq = balance + floating;
     equity.push({ time: bar.time, equity: eq });
     if ((dayStart - eq) / dayStart >= cfg.risk.maxDailyLossPct) dayKilled = true;
+    dayPeakEq = Math.max(dayPeakEq, eq);
+    const lockTrig = p.dayLockTrigger ?? cfg.risk.dayLockTriggerPct; // piloté par la config moteur (comme le trailing)
+    const lockFloor = p.dayLockFloor ?? cfg.risk.dayLockFloorPct;
+    if (lockTrig && lockFloor != null && (dayPeakEq - dayStart) / dayStart >= lockTrig && (eq - dayStart) / dayStart <= lockFloor) dayKilled = true;
 
     // 4) moteur sur clôture de i (fenêtre causale : rien après i)
     const state: EngineState = {

@@ -42,7 +42,7 @@ const XAUUSD_SCALP: EngineConfig = {
   trailActivate: STRAT.trailActivate, // trailing lock scalp (S2/S3) — voir strategies.ts
   trailDist: STRAT.trailDist,
   threshold: { ...SCALP_CONFIG.threshold, scalp: STRAT.thresholdScalp },
-  risk: { ...SCALP_CONFIG.risk, dailyProfitTargetPct: STRAT.dailyProfitTargetPct, maxDailyLossPct: STRAT.maxDailyLossPct },
+  risk: { ...SCALP_CONFIG.risk, dailyProfitTargetPct: STRAT.dailyProfitTargetPct, maxDailyLossPct: STRAT.maxDailyLossPct, dayLockTriggerPct: STRAT.dayLockTriggerPct, dayLockFloorPct: STRAT.dayLockFloorPct },
 };
 
 // BTC — config de LECTURE seulement (seuils du desk, spread max) : l'auto ne tire jamais (watchOnly).
