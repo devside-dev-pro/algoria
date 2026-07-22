@@ -42,6 +42,7 @@ const XAUUSD_SCALP: EngineConfig = {
   trailActivate: STRAT.trailActivate, // trailing lock scalp (S2/S3) — voir strategies.ts
   trailDist: STRAT.trailDist,
   regimeGate: STRAT.regimeGate, // S3 'trend' : décorrélation + juillet ×2.4 — voir strategies.ts
+  maxStopAtr: STRAT.maxStopAtr ?? SCALP_CONFIG.maxStopAtr, // S2/S3 2.8 : refuse les setups à stop monstre — voir strategies.ts
   threshold: { ...SCALP_CONFIG.threshold, scalp: STRAT.thresholdScalp },
   risk: { ...SCALP_CONFIG.risk, dailyProfitTargetPct: STRAT.dailyProfitTargetPct, maxDailyLossPct: STRAT.maxDailyLossPct, dayLockTriggerPct: STRAT.dayLockTriggerPct, dayLockFloorPct: STRAT.dayLockFloorPct },
 };
