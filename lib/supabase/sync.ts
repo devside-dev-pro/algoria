@@ -204,6 +204,26 @@ export async function saveDayAnchor(a: DayAnchor) {
   if (error) console.error('[sync] saveDayAnchor échoué:', error.message);
 }
 
+/** SCOREBOARD du jour : P&L par stratégie (toutes) + drapeaux runner_day — le wrap VIP montre LA FLOTTE,
+ *  pas une seule stratégie (un client S2 rouge voit S1/S3 vertes → « c'est le portefeuille qui compte »). */
+export async function fetchDayScoreboard(): Promise<Array<{ strategy: number; net: number; trades: number; done: boolean; reason: string | null }>> {
+  const today = new Date().toISOString().slice(0, 10);
+  const raw = db as unknown as { from: (t: string) => any };
+  const { data: rows } = await raw.from('trades').select('strategy,pnl').gte('closed_at', today).not('pnl', 'is', null);
+  const { data: anchors } = await raw.from('runner_day').select('strategy,day_done,reason').eq('day', today);
+  const by = new Map<number, { net: number; trades: number }>();
+  for (const r of (rows ?? []) as Array<{ strategy: number | null; pnl: number }>) {
+    const s = Number(r.strategy ?? 2);
+    const cur = by.get(s) ?? { net: 0, trades: 0 };
+    cur.net += Number(r.pnl);
+    cur.trades++;
+    by.set(s, cur);
+  }
+  const flags = new Map<number, { done: boolean; reason: string | null }>();
+  for (const a of (anchors ?? []) as Array<{ strategy: number; day_done: boolean; reason: string | null }>) flags.set(Number(a.strategy), { done: Boolean(a.day_done), reason: a.reason ?? null });
+  return [1, 2, 3].map((s) => ({ strategy: s, net: by.get(s)?.net ?? 0, trades: by.get(s)?.trades ?? 0, done: flags.get(s)?.done ?? false, reason: flags.get(s)?.reason ?? null }));
+}
+
 /** Bulletin de santé d'un edge (sentinelle hebdo) → table edge_health. */
 export async function recordEdgeHealth(row: { strategy: string; windowDays: number; trades: number; winRate: number | null; profitFactor: number | null; net: number; status: string }) {
   const { error } = await (db as any).from('edge_health').insert({

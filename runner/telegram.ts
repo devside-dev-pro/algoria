@@ -2,11 +2,16 @@
 // les setups qu'il voit mais ne prend plus → les VIP tradent en manuel s'ils le veulent.
 // GATÉ : no-op tant que TELEGRAM_BOT_TOKEN + TELEGRAM_VIP_CHAT ne sont pas posés (Railway).
 // TELEGRAM_VIP_CHAT = l'id du canal (ex. "-1001234567890") — le bot doit y être ADMIN.
+import { ACTIVE_STRATEGY } from '../lib/engine/strategies';
+
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
 const VIP = process.env.TELEGRAM_VIP_CHAT ?? '';
 
 /** Le canal VIP est-il configuré ? (sinon tous les posts sont des no-op silencieux). */
 export const vipReady = (): boolean => Boolean(TOKEN && VIP);
+
+/** Étiquette de LA stratégie de ce runner — chaque message VIP dit QUI parle (les 3 runners postent). */
+export const VIP_TAG: string = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' }[ACTIVE_STRATEGY.id] ?? `S${ACTIVE_STRATEGY.id}`;
 
 /** DM direct du bot à UN utilisateur (relance onboarding…). Ne marche que si la personne a déjà ouvert le
  *  chat du bot (login natif /start → oui). Renvoie true si envoyé — 403 = chat jamais ouvert, on l'accepte. */
