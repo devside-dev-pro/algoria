@@ -30,6 +30,13 @@ export interface StrategyProfile {
   // S1 non concernée : son TP à 0.4R est atteint avant tout déclenchement à 0.6R.
   trailActivate?: number;
   trailDist?: number;
+  // GATE RÉGIME (décorrélation, étude 22/7) : la stratégie ne scalpe que SON régime de marché.
+  //   S3 'trend' : net +26 313→+27 155$, juillet +1 910→+4 569$, trades partagés avec S2 168→135. ✅
+  //   S1 'range' TESTÉ ET TUÉ : −10 806$ (les deux moitiés rouges) — les rejets en range seuls n'ont pas
+  //   d'edge ; S1 reste non-gatée (déjà la moins corrélée : 0.31-0.37 via sessions + TP court).
+  //   Constat honnête : S2×S3 restent frères (corr 0.89) tant qu'ils partagent le même générateur de
+  //   signaux — la VRAIE décorrélation demandera une famille de signaux différente (labo à venir).
+  regimeGate?: 'trend' | 'range';
   tradeAsia: boolean; // trader la session Asie ?
   dailyProfitTargetPct: number; // objectif du jour → latch dayDone
   maxDailyLossPct: number; // plancher du jour → latch dayDone
@@ -48,7 +55,7 @@ export const STRATEGIES: Record<string, StrategyProfile> = {
   '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: true },
   // S3 : étude dédiée faite (20-21/7) — minRR 0.2 saignait juillet (−8 929$ au backtest) ; 0.75 + trailing
   // rendent les deux moitiés positives. Reste TURBO par son seuil bas (0.20 → ~2× plus de trades que S2) et ses caps larges.
-  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — more trades, more variance', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: true },
+  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — more trades, more variance', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, regimeGate: 'trend', tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: true },
 };
 
 /** Stratégie du runner courant (env ALGORIA_STRATEGY, défaut 2 = comportement actuel). */

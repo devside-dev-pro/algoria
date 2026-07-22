@@ -54,6 +54,12 @@ export function runTick(input: TickInput, features: Feature[], cfg: EngineConfig
     return { context: ctx, signal: null, events, confluence, threshold };
   }
 
+  // Stage 3a-bis — GATE RÉGIME (décorrélation) : cette stratégie ne joue que SA famille de marché.
+  if (cfg.regimeGate && ctx.regime !== cfg.regimeGate) {
+    emit('veto', `regime gate: ${ctx.regime} ≠ ${cfg.regimeGate}`);
+    return { context: ctx, signal: null, events, confluence, threshold };
+  }
+
   // Stage 3b — filtre tendance EMA (optionnel) : ne pas chasser une poussée quand l'EMA ne soutient pas le sens.
   const gate = cfg.emaGate ?? 'off';
   if (gate !== 'off') {
