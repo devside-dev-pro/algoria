@@ -8,7 +8,7 @@ export function readState(
   terminal: any,
   symbol: string,
   prev: Partial<EngineState> = {},
-  dayCaps?: { targetPct?: number; lossPct?: number },
+  dayCaps?: { targetPct?: number; lossPct?: number; lockTriggerPct?: number; lockFloorPct?: number },
 ): EngineState {
   const info = terminal.accountInformation ?? {};
   const positions = (terminal.positions ?? []).filter((p: any) => p.symbol === symbol);
@@ -33,9 +33,15 @@ export function readState(
   const dayPnlPct = dayStartBalance > 0 ? (equity - dayStartBalance) / dayStartBalance : 0;
   const hitTarget = dayCaps?.targetPct != null && dayPnlPct >= dayCaps.targetPct;
   const hitLoss = dayCaps?.lossPct != null && dayPnlPct <= -dayCaps.lossPct;
-  const dayDone = rollover ? false : ((prev.dayDone ?? false) || hitTarget || hitLoss);
+  // RATCHET JOURNALIER : une fois le pic du jour ≥ lockTriggerPct, la journée se coupe si l'equity retombe à
+  // lockFloorPct — le « +1 600$ à 6h qui finit à 0 » devient « journée verrouillée en profit ». Étude 2/6→20/7
+  // (split-half ✅, AUCUNE cellule de la grille ne fait pire que sans) : S2 +14 957→+19 701$, S3 +22 619→+26 313$.
+  const dayPeak = rollover ? equity : Math.max(prev.dayPeak ?? equity, equity);
+  const peakPct = dayStartBalance > 0 ? (dayPeak - dayStartBalance) / dayStartBalance : 0;
+  const hitLock = dayCaps?.lockTriggerPct != null && dayCaps?.lockFloorPct != null && peakPct >= dayCaps.lockTriggerPct && dayPnlPct <= dayCaps.lockFloorPct;
+  const dayDone = rollover ? false : ((prev.dayDone ?? false) || hitTarget || hitLoss || hitLock);
   // la RAISON latch avec le dayDone (première limite touchée) — perte prioritaire si les deux (cas théorique).
-  const dayDoneReason = rollover ? undefined : (prev.dayDoneReason ?? (hitLoss ? 'loss' : hitTarget ? 'target' : undefined));
+  const dayDoneReason = rollover ? undefined : (prev.dayDoneReason ?? (hitLoss ? 'loss' : hitTarget ? 'target' : hitLock ? 'lock' : undefined));
 
   return {
     balance,
@@ -52,5 +58,6 @@ export function readState(
     dayStamp: today,
     dayDone,
     dayDoneReason,
+    dayPeak,
   };
 }

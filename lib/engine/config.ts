@@ -12,6 +12,9 @@ export interface RiskLimits {
   newsLockoutBeforeSec: number;
   newsLockoutAfterSec: number;
   dailyProfitTargetPct?: number; // option : stop quand vert
+  // RATCHET JOURNALIER (option) : pic du jour ≥ trigger → journée coupée si l'equity retombe au floor.
+  dayLockTriggerPct?: number;
+  dayLockFloorPct?: number;
 }
 
 export interface EngineConfig {

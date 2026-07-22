@@ -291,7 +291,7 @@ async function main() {
     // ===== Boucle MOTEUR : à chaque bougie M5 clôturée, on fait tourner la confluence sur CET instrument =====
     const onClosed = async (bars: Bar[]) => {
       try {
-        state = readState(terminal, BROKER, state, { targetPct: inst.config.risk.dailyProfitTargetPct, lossPct: inst.config.risk.maxDailyLossPct });
+        state = readState(terminal, BROKER, state, { targetPct: inst.config.risk.dailyProfitTargetPct, lossPct: inst.config.risk.maxDailyLossPct, lockTriggerPct: inst.config.risk.dayLockTriggerPct, lockFloorPct: inst.config.risk.dayLockFloorPct });
         state.killed = killed; // le kill switch global gèle l'auto sur tous les instruments
         state.newsWindows = newsWindows(); // annonces éco USD fort impact → checkRisk refuse les entrées autour
         // mode scalp = config scalp VALIDÉE de l'instrument (l'or et le Nasdaq n'ont pas la même). NORMAL → DEFAULT strict.
@@ -342,6 +342,9 @@ async function main() {
               void postVip(
                 `🛡️ Algoria hit its daily safety limit and stopped for the day.\nWhy: ${why} — a cluster of stops, not a drift. The cap did its job: your downside is bounded for the day.${clause ? `\n\n${clause}` : ''}\nWe never force trades. Fresh start tomorrow. 🔁`,
               );
+            } else if (state.dayDoneReason === 'lock') {
+              // RATCHET : journée verrouillée EN PROFIT après un pic — message positif (on protège les gains).
+              void postVip("🔒 Algoria locked in today's gains and wrapped up.\nThe day peaked, gave a little back, and the safety ratchet closed the book while still green — profits protected, no give-back spiral.\nNow in ANALYSIS MODE: the next setups are yours to take manually if you want. 👇");
             } else {
               void postVip("✅ Algoria hit its daily target and wrapped up.\nNow in ANALYSIS MODE: the next setups are yours to take manually if you want. Your risk, your call. 👇");
             }
