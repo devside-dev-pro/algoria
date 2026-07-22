@@ -37,6 +37,12 @@ export interface StrategyProfile {
   //   Constat honnête : S2×S3 restent frères (corr 0.89) tant qu'ils partagent le même générateur de
   //   signaux — la VRAIE décorrélation demandera une famille de signaux différente (labo à venir).
   regimeGate?: 'trend' | 'range';
+  // PLAFOND DES STOPS (× ATR) — étude 22/7 : les stops « monstres » (800-1000$+) effraient les VIP. Serrer la
+  // LARGEUR (slAtrMult) tue l'edge (re-confirmé : tout ≤1.0/cap 2.5 casse juillet), mais REFUSER les setups à
+  // stop extrême paie : cap 3.2→2.8 sur S2 : net +19 701→+23 336$, verts 66→71%, perte moyenne −13%, pire
+  // trade −2 425→−2 036$ (ligne cap 2.8 robuste sur mult 1.05-1.2). S3 : +25 910→+28 681$, verts 64→72%.
+  // S1 : cap 2.8 la DÉGRADE (7 622→6 071$) — son TP court vit des setups à stop large → garde 3.2 (défaut).
+  maxStopAtr?: number;
   tradeAsia: boolean; // trader la session Asie ?
   dailyProfitTargetPct: number; // objectif du jour → latch dayDone
   maxDailyLossPct: number; // plancher du jour → latch dayDone
@@ -52,10 +58,10 @@ export interface StrategyProfile {
 
 export const STRATEGIES: Record<string, StrategyProfile> = {
   '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 0.4, minRR: 0.2, tradeAsia: false, dailyProfitTargetPct: 0.01, maxDailyLossPct: 0.03, swing: false, breakout: false },
-  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: true },
+  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: true },
   // S3 : étude dédiée faite (20-21/7) — minRR 0.2 saignait juillet (−8 929$ au backtest) ; 0.75 + trailing
   // rendent les deux moitiés positives. Reste TURBO par son seuil bas (0.20 → ~2× plus de trades que S2) et ses caps larges.
-  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — more trades, more variance', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, regimeGate: 'trend', tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: true },
+  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — more trades, more variance', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, regimeGate: 'trend', maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: true },
 };
 
 /** Stratégie du runner courant (env ALGORIA_STRATEGY, défaut 2 = comportement actuel). */
