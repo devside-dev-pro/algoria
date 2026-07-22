@@ -21,7 +21,7 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from '.
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment, fetchNudgeCandidates, recordNudge } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -133,6 +133,20 @@ async function main() {
 
     const seed = await loadHistory(account, BROKER, TF, 300);
     let state: EngineState = readState(terminal, BROKER, { dayStartBalance: terminal.accountInformation?.balance });
+    // RESTAURATION du jour : le latch « journée terminée » + le pic du jour survivent aux redémarrages.
+    // Sans ça, un redeploy re-anchore dayStartBalance sur le solde courant → S1 re-trade après son objectif
+    // (vécu 22/07 10:00 UTC) et le ratchet oublie le pic du matin.
+    try {
+      const anchor = await fetchDayAnchor();
+      if (anchor && anchor.day === state.dayStamp) {
+        state = { ...state, dayStartBalance: anchor.dayStartBalance, dayPnL: state.equity - anchor.dayStartBalance, dayPeak: anchor.dayPeak ?? state.dayPeak, dayDone: anchor.dayDone || state.dayDone, dayDoneReason: (anchor.reason as EngineState['dayDoneReason']) ?? state.dayDoneReason };
+        console.log(`[algoria] ancre du jour restaurée — dayStart=${anchor.dayStartBalance} done=${anchor.dayDone}${anchor.reason ? ` (${anchor.reason})` : ''}`);
+      }
+    } catch (e) {
+      console.error('[algoria] restauration ancre du jour échouée:', e);
+    }
+    // dernière ancre écrite (dédup) — persistée par le moteur PRIMAIRE uniquement (état compte global)
+    let savedAnchor = '';
 
     // Canal VIP : mémoire locale pour ne pas spammer — dernière direction de setup publiée + annonce "journée finie".
     let lastVipSetup = { dir: '', at: 0 };
@@ -292,6 +306,15 @@ async function main() {
     const onClosed = async (bars: Bar[]) => {
       try {
         state = readState(terminal, BROKER, state, { targetPct: inst.config.risk.dailyProfitTargetPct, lossPct: inst.config.risk.maxDailyLossPct, lockTriggerPct: inst.config.risk.dayLockTriggerPct, lockFloorPct: inst.config.risk.dayLockFloorPct });
+        // PERSISTANCE de l'ancre du jour (primaire = état compte global) : rollover, latch, ou pic qui monte (pas de 0.1%).
+        if (isPrimary && state.dayStamp) {
+          const peakBucket = state.dayPeak != null && state.dayStartBalance ? Math.floor(((state.dayPeak - state.dayStartBalance) / state.dayStartBalance) * 1000) : 0;
+          const key = `${state.dayStamp}|${Math.round(state.dayStartBalance)}|${state.dayDone}|${state.dayDoneReason ?? ''}|${peakBucket}`;
+          if (key !== savedAnchor) {
+            savedAnchor = key;
+            void saveDayAnchor({ day: state.dayStamp, dayStartBalance: state.dayStartBalance, dayPeak: state.dayPeak ?? null, dayDone: state.dayDone ?? false, reason: state.dayDoneReason ?? null });
+          }
+        }
         state.killed = killed; // le kill switch global gèle l'auto sur tous les instruments
         state.newsWindows = newsWindows(); // annonces éco USD fort impact → checkRisk refuse les entrées autour
         // mode scalp = config scalp VALIDÉE de l'instrument (l'or et le Nasdaq n'ont pas la même). NORMAL → DEFAULT strict.
@@ -542,7 +565,7 @@ async function main() {
     // même un snapshot minimal — sinon la balance du cockpit reste FIGÉE sur vendredi soir tout le week-end.
     const pushAccount = async () => {
       if (!isPrimary) return;
-      state = readState(terminal, BROKER, state, { targetPct: inst.config.risk.dailyProfitTargetPct, lossPct: inst.config.risk.maxDailyLossPct });
+      state = readState(terminal, BROKER, state, { targetPct: inst.config.risk.dailyProfitTargetPct, lossPct: inst.config.risk.maxDailyLossPct, lockTriggerPct: inst.config.risk.dayLockTriggerPct, lockFloorPct: inst.config.risk.dayLockFloorPct });
       state.killed = killed;
       const ctx: MarketContext = lastCtx ?? {
         symbol: DISPLAY, time: Date.now(), price: 0, session: 'closed', regime: 'range',
