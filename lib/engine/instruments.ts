@@ -41,6 +41,7 @@ const XAUUSD_SCALP: EngineConfig = {
   minRR: STRAT.minRR, // S2/S3 0.75 : refuse les TP clampés trop proches (l'hémorragie des mois difficiles)
   trailActivate: STRAT.trailActivate, // trailing lock scalp (S2/S3) — voir strategies.ts
   trailDist: STRAT.trailDist,
+  regimeGate: STRAT.regimeGate, // S3 'trend' : décorrélation + juillet ×2.4 — voir strategies.ts
   threshold: { ...SCALP_CONFIG.threshold, scalp: STRAT.thresholdScalp },
   risk: { ...SCALP_CONFIG.risk, dailyProfitTargetPct: STRAT.dailyProfitTargetPct, maxDailyLossPct: STRAT.maxDailyLossPct, dayLockTriggerPct: STRAT.dayLockTriggerPct, dayLockFloorPct: STRAT.dayLockFloorPct },
 };

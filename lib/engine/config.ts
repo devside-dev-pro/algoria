@@ -33,6 +33,10 @@ export interface EngineConfig {
   maxStopAtr: number;
   minRR: number;
   emaGate?: 'off' | 'align' | 'notOpposed'; // filtre d'entrée sur la tendance EMA : 'align' = EMA doit soutenir le sens ; 'notOpposed' = refuse seulement si l'EMA s'oppose (plat OK). Défaut off.
+  // GATE RÉGIME (décorrélation) : ne trade que dans CE régime de marché (context.regime). 'range' = rejets
+  // de niveaux uniquement · 'trend' = poussées uniquement. Deux stratégies gatées sur des régimes opposés ne
+  // peuvent PAS prendre le même trade — c'est la partition des familles de signaux. Défaut : off (tout régime).
+  regimeGate?: 'trend' | 'range';
   beTrigger?: number; // breakeven : déplace le SL à ~entrée quand le profit ≥ beTrigger × riskDist (gestion post-entrée, appliquée par le runner & le backtest)
   // TRAILING LOCK (gestion post-entrée, au-delà du BE) : dès que le meilleur prix atteint trailActivate × riskDist,
   // le SL suit à peak − trailDist × riskDist. Convertit les « touché +0.6R puis retourné » (scratch BE ~0$) en
