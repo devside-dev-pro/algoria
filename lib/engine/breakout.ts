@@ -17,8 +17,12 @@ export interface BreakoutConfig {
   trailDist: number; // distance du trailing en × riskDist
 }
 
-/** Config OR validée par le labo — voir l'en-tête. */
-export const GOLD_BREAKOUT: BreakoutConfig = { N: 96, confirmAtr: 0.1, slAtr: 1.5, tpAtr: 3, lot: 1, beTrigger: 0.8, trailActivate: 1.2, trailDist: 1.2 };
+/** Config OR validée par le labo — voir l'en-tête.
+ *  SORTIES RESSERRÉES (étude 2/6→20/7, split-half) : l'ancien trailing 1.2R@1.2R laissait un trou entre le BE
+ *  (0.8R) et 1.2R — un trade à +1.1R qui se retournait finissait ~0$ (vécu en live le 22/7 : +1 100$ → BE).
+ *  BE 0.7 · trail 0.5R dès 0.8R : net ×3.6 (+740→+2 698$), juillet −451→+437$, et les 48 combinaisons
+ *  voisines (be 0.7-0.9 × act 0.7-1.0 × dist 0.45-0.6) DOMINENT toutes l'ancienne config sur les DEUX moitiés. */
+export const GOLD_BREAKOUT: BreakoutConfig = { N: 96, confirmAtr: 0.1, slAtr: 1.5, tpAtr: 3, lot: 1, beTrigger: 0.7, trailActivate: 0.8, trailDist: 0.5 };
 
 const atr14 = (bars: Bar[]): number => {
   const n = bars.length;
