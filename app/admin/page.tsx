@@ -182,6 +182,15 @@ export default function AdminCRM() {
       })
       .finally(() => setBusy(false));
   };
+  // changement de stratégie en un clic : join STH déclaratif → le receiver bascule sur le master de la nouvelle
+  // stratégie, puis `done` clôt la carte. Membres ajoutés à la main dans STH → erreur explicite (à faire à la main).
+  const moveViaSth = (id: string) => {
+    if (!window.confirm("Move this member to their NEW strategy's master via STH now?\n\nWorks for API-connected members. Manually-added receivers must be moved in the STH dashboard (the card shows their STH id).")) return;
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveSth: id }) })
+      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return window.alert(d.error); post({ done: id }); })
+      .catch(() => setBusy(false));
+  };
   // off-board : le client est parti → paused + déconnexion copieur + note (le kick du canal Telegram reste manuel)
   const offboard = (r: Row) => {
     const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
@@ -486,6 +495,8 @@ export default function AdminCRM() {
                       {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')}${a.detail?.strategy ? ` · S${String(a.detail.strategy)}` : ''} · `}
                       {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')}) · `}
                       {a.kind === 'strategy_change' && `→ S${String(a.detail?.to ?? '?')} · `}
+                      {/* l'ID que STH affiche pour ce membre (UserID = tg_id) — pour le retrouver dans le dashboard STH */}
+                      {['strategy_change', 'pause', 'resume', 'disconnect'].includes(a.kind) && `STH id ${String(a.tg_id)} · `}
                       {new Date(a.created_at).toLocaleString('en-GB')}
                     </div>
                     {/* la ligne VÉRIFICATION : tout ce qu'il faut contrôler chez le broker AVANT d'approuver.
@@ -508,6 +519,9 @@ export default function AdminCRM() {
                   )}
                   {a.kind === 'connect' && (
                     <button disabled={busy} onClick={() => connectViaSth(a.id)} title="connect this account to the copier via STH now, then go LIVE (one click, no manual STH entry)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔗 CONNECT (STH)</button>
+                  )}
+                  {a.kind === 'strategy_change' && (
+                    <button disabled={busy} onClick={() => moveViaSth(a.id)} title="move this member's receiver to their new strategy's master via the STH API (API-connected members only — manually-added receivers must be moved in the STH dashboard)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔀 MOVE (STH)</button>
                   )}
                   <button disabled={busy} onClick={() => post({ done: a.id }, () => setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }))} title="mark done manually (if you connected the account in STH yourself)" style={okBtn}>✓ DONE</button>
                   {a.kind === 'connect' && (

@@ -66,6 +66,20 @@ export function sthDisconnect(userId: string) {
   return sthPost('/Partner/disconnect', { UserID: userId });
 }
 
+/** DÉPLACE un utilisateur API vers le master d'une AUTRE stratégie — join-master-account est DÉCLARATIF
+ *  (la liste envoyée REMPLACE les abonnements) : un seul appel = changement de master. Ne marche que pour
+ *  les membres connectés via l'API ; les receivers ajoutés à la main dans le dashboard STH sont invisibles
+ *  ici → erreur explicite pour que le support les déplace à la main. */
+export async function sthMoveMaster(userId: string, strategy: number, lots: number): Promise<{ ok: boolean; error: string }> {
+  const masterId = MASTER_BY_STRATEGY[strategy] || MASTER_ID;
+  if (!masterId) return { ok: false, error: `no master configured for S${strategy} (set STH_MASTER_ID_S${strategy})` };
+  const st = await sthStatus(userId);
+  if (st.ok && st.data.tradingAccountConnected !== true)
+    return { ok: false, error: 'this member is not API-connected (manually-added receiver?) — move them in the STH dashboard instead' };
+  const j = await sthJoinMaster({ userId, masterId, lots });
+  return j.ok ? { ok: true, error: '' } : { ok: false, error: j.errorMessage };
+}
+
 /** Flux complet « brancher un client » : connect PUIS join master (id via env ou auto-découverte si unique).
  *  ORDRE IMPORTANT : get-user-status sur un utilisateur JAMAIS connecté renvoie une liste de masters VIDE
  *  (doc STH : « un utilisateur inconnu renvoie tradingAccountConnected: false et une liste vide ») — la
