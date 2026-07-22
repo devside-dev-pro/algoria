@@ -181,6 +181,29 @@ export async function recordNudge(tgId: number, memberNo: number | null, via: 'a
   await (db as unknown as { from: (t: string) => any }).from('member_actions').insert({ tg_id: tgId, member_no: memberNo, kind: 'nudge', status: 'done', done_by: via, detail: { via, note } });
 }
 
+// ===== ÉTAT JOURNALIER PERSISTANT (table runner_day) — le latch « journée terminée » et le pic du jour
+// survivent aux redémarrages. Chaque runner écrit SA stratégie (pas gaté SECONDARY : c'est un état de
+// trading, pas du contenu cockpit). Vécu le 22/07 : un redeploy a fait re-trader S1 après son objectif.
+export interface DayAnchor { day: string; dayStartBalance: number; dayPeak: number | null; dayDone: boolean; reason: string | null }
+
+/** Ancre du JOUR COURANT (UTC) pour ce runner — null si première lecture du jour. */
+export async function fetchDayAnchor(): Promise<DayAnchor | null> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await (db as any).from('runner_day').select('day,day_start_balance,day_peak,day_done,reason').eq('strategy', STRAT_ID).eq('day', today).limit(1);
+  if (!data?.length) return null;
+  const r = data[0];
+  return { day: String(r.day), dayStartBalance: Number(r.day_start_balance), dayPeak: r.day_peak != null ? Number(r.day_peak) : null, dayDone: Boolean(r.day_done), reason: r.reason ?? null };
+}
+
+/** Upsert de l'ancre du jour (appelé à chaque changement notable : rollover, latch, pic qui monte). */
+export async function saveDayAnchor(a: DayAnchor) {
+  const { error } = await (db as any).from('runner_day').upsert({
+    strategy: STRAT_ID, day: a.day, day_start_balance: a.dayStartBalance, day_peak: a.dayPeak,
+    day_done: a.dayDone, reason: a.reason, updated_at: new Date().toISOString(),
+  });
+  if (error) console.error('[sync] saveDayAnchor échoué:', error.message);
+}
+
 /** Bulletin de santé d'un edge (sentinelle hebdo) → table edge_health. */
 export async function recordEdgeHealth(row: { strategy: string; windowDays: number; trades: number; winRate: number | null; profitFactor: number | null; net: number; status: string }) {
   const { error } = await (db as any).from('edge_health').insert({
