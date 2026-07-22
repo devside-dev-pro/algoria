@@ -3,7 +3,7 @@ import './env-check'; // valide les variables d'env et arrête net avec un messa
 import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
-import { postVip, vipReady } from './telegram';
+import { postVip, vipReady, VIP_TAG } from './telegram';
 import { SECONDARY } from '../lib/supabase/sync';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
 import { manageBreakeven, rememberManagement } from './metaapi/manage';
@@ -21,7 +21,7 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from '.
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -348,10 +348,10 @@ async function main() {
           }
         }
 
-        // ===== CANAL VIP : une fois la journée d'Algoria bouclée (dayDone : objectif +4% ou stop -4% touché),
-        // il continue de VOIR des setups mais ne les prend plus → on les PUBLIE aux VIP, à prendre en manuel.
-        // + une annonce unique au moment où la journée se termine. Primaire, hors watch-only, gaté par l'env.
-        if (isPrimary && !inst.watchOnly && vipReady() && !SECONDARY) {
+        // ===== CANAL VIP : une fois la journée d'une stratégie bouclée (dayDone : objectif / cap / ratchet),
+        // CHAQUE runner annonce SA fin de journée (étiquetée) — le canal montre la vie des 3 stratégies.
+        // Les setups manuels restent S2 uniquement (sinon 3× le même spam).
+        if (isPrimary && !inst.watchOnly && vipReady()) {
           if (!state.dayDone) vipDayDoneAnnounced = false; // ré-armé au reset quotidien
           else if (!vipDayDoneAnnounced) {
             vipDayDoneAnnounced = true;
@@ -363,16 +363,16 @@ async function main() {
                 ? await narrateLossReview({ trades: stats?.trades ?? 0, wins: stats?.wins ?? 0, net: stats?.net ?? 0, regime: context.regime, adx: context.adx, atrPct: context.atrPercentile })
                 : null;
               void postVip(
-                `🛡️ Algoria hit its daily safety limit and stopped for the day.\nWhy: ${why} — a cluster of stops, not a drift. The cap did its job: your downside is bounded for the day.${clause ? `\n\n${clause}` : ''}\nWe never force trades. Fresh start tomorrow. 🔁`,
+                `🛡️ ${VIP_TAG} hit its daily safety limit and stopped for the day.\nWhy: ${why} — a cluster of stops, not a drift. The cap did its job: your downside is bounded for the day.${clause ? `\n\n${clause}` : ''}\nWe never force trades. Fresh start tomorrow. 🔁`,
               );
             } else if (state.dayDoneReason === 'lock') {
               // RATCHET : journée verrouillée EN PROFIT après un pic — message positif (on protège les gains).
-              void postVip("🔒 Algoria locked in today's gains and wrapped up.\nThe day peaked, gave a little back, and the safety ratchet closed the book while still green — profits protected, no give-back spiral.\nNow in ANALYSIS MODE: the next setups are yours to take manually if you want. 👇");
+              void postVip(`🔒 ${VIP_TAG} locked in today's gains and wrapped up.\nThe day peaked, gave a little back, and the safety ratchet closed the book while still green — profits protected, no give-back spiral.`);
             } else {
-              void postVip("✅ Algoria hit its daily target and wrapped up.\nNow in ANALYSIS MODE: the next setups are yours to take manually if you want. Your risk, your call. 👇");
+              void postVip(`✅ ${VIP_TAG} hit its daily target and wrapped up for the day.\nSmall consistent days — that's the plan working.`);
             }
           }
-          const blockedForDay = state.dayDone && blocked && (blockedReasons?.some((r) => r.includes('day closed')) ?? false);
+          const blockedForDay = !SECONDARY && state.dayDone && blocked && (blockedReasons?.some((r) => r.includes('day closed')) ?? false);
           if (blockedForDay && blocked) {
             const now = Date.now();
             // anti-spam : un post seulement si la direction change OU 30 min se sont écoulées depuis le dernier
@@ -804,7 +804,15 @@ async function main() {
         if (vipReady()) {
           const wr = Math.round((stats.wins / stats.trades) * 100);
           if (h === 21) {
-            if (stats.net >= 0) void postVip(`📊 DAILY WRAP\n${stats.trades} trades · ${wr}% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊`);
+            // WRAP DE LA FLOTTE : les 3 stratégies côte à côte — un client dont la stratégie est rouge voit
+            // que d'autres sont vertes (et inversement) : c'est le portefeuille de stratégies qu'on vend.
+            const board = await fetchDayScoreboard().catch(() => null);
+            const TAGS: Record<number, string> = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' };
+            const FLAG: Record<string, string> = { target: '✅ day target hit', lock: '🔒 gains locked', loss: '🛡️ daily cap — downside protected' };
+            const lines = (board ?? []).filter((b) => b.trades > 0 || b.done).map((b) => `${TAGS[b.strategy]} · ${b.net >= 0 ? '🟢 +' : '🔴 −'}$${Math.abs(Math.round(b.net))}${b.reason && FLAG[b.reason] ? ' · ' + FLAG[b.reason] : ''}`);
+            if (lines.length)
+              void postVip(`📊 DAILY WRAP — the Algoria fleet (master-account scale)\n${lines.join('\n')}\n\nThree strategies, three personalities — a red day on one is rarely a red day on all. Yours is set in the app. 👊`);
+            else if (stats.net >= 0) void postVip(`📊 DAILY WRAP\n${stats.trades} trades · ${wr}% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊`);
             else void postVip(`📊 DAILY WRAP — red day today · ${stats.trades} trades · ${wr}% win\nRed days are part of the game — they're all in our public track record. Your risk stayed capped and the desk stays disciplined. We go again tomorrow. 🔁`);
           } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} Algoria's working · ${stats.trades} trades · ${wr}% win today`);
         }

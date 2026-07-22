@@ -1,6 +1,7 @@
 import * as Sdk from 'metaapi.cloud-sdk/esm-node';
 import { recordTradeClose } from '../../lib/supabase/sync';
 import { pushToAll } from '../../lib/push/send';
+import { postVip, VIP_TAG } from '../telegram';
 import type { Signal } from '../../lib/engine/types';
 
 // Push "WIN" vers les membres (PWA) — 70/30 : jamais de push sur une perte. Anti-spam : seuil $ + cooldown.
@@ -16,6 +17,32 @@ function maybePushWin(displaySymbol: string, pnl: number) {
     url: '/member',
     tag: 'algoria-win',
   }).then((n) => n && console.log(`[algoria] push win +$${Math.round(pnl)} → ${n} appareil(s)`)).catch(() => {});
+}
+
+// ===== ANNONCES VIP PAR TRADE — le canal VIT : chaque runner poste SES clôtures avec son étiquette.
+// Gains : dès VIP_WIN_MIN (les scratchs BE ne spamment pas). Pertes : pédagogie « le stop a fait son travail »,
+// max 3/jour/stratégie (au-delà, le message « journée coupée » du latch prend le relais).
+const VIP_WIN_MIN = Number(process.env.VIP_WIN_MIN_USD ?? 150);
+const VIP_SL_MAX_PER_DAY = 3;
+let vipSlDay = '';
+let vipSlCount = 0;
+const SL_NOTES = [
+  "The stop was set before entry — that's the max this trade could ever lose. Losses are capped, winners run.",
+  'Defined risk did its job: one controlled loss, capital protected, on to the next setup.',
+  'No stop-loss would mean unlimited risk. This is the cost of doing business — bounded and planned.',
+];
+function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry?: number, exit?: number) {
+  const px = entry != null && exit ? ` · ${entry} → ${exit}` : '';
+  if (pnl >= VIP_WIN_MIN) {
+    const how = reason === 'tp' ? 'target hit' : reason === 'trail' ? 'profit locked by the trailing stop' : 'banked';
+    void postVip(`✅ ${VIP_TAG} — +$${Math.round(pnl)} on ${displaySymbol} (${how})${px}\nMaster-account scale · copied to your size automatically.`);
+  } else if (reason === 'sl' && pnl < 0) {
+    const day = new Date().toISOString().slice(0, 10);
+    if (day !== vipSlDay) { vipSlDay = day; vipSlCount = 0; }
+    if (vipSlCount >= VIP_SL_MAX_PER_DAY) return;
+    vipSlCount++;
+    void postVip(`🛡️ ${VIP_TAG} — stopped out $${Math.round(pnl)} on ${displaySymbol}${px}\n${SL_NOTES[vipSlCount % SL_NOTES.length]}`);
+  }
 }
 
 // La classe de base (toutes ses méthodes sont des no-op) est exposée en named export sur la build esm-node.
@@ -72,15 +99,20 @@ export class DealRecorder extends Base {
 
     await recordTradeClose(ticket, this.displaySymbol, { exit, pnl, r, reason, closedAt: when });
     if (pnl > 0) maybePushWin(this.displaySymbol, pnl);
+    vipTradeClose(this.displaySymbol, pnl, reason, c?.entry, exit);
   }
 
-  /** Raison de sortie par proximité : TP, SL, ou breakeven (sortie près de l'entrée). */
+  /** Raison de sortie par proximité : TP, SL, breakeven — ou TRAIL (stop verrouillé NET au-dessus de l'entrée,
+   *  même convention que le simulateur : > 0.1 × risque en profit). */
   private inferReason(exit: number, c: TradeCtx): string {
     const dEntry = Math.abs(exit - c.entry);
     const dTp = Math.abs(exit - c.tp);
     const dSl = Math.abs(exit - c.sl);
     const min = Math.min(dEntry, dTp, dSl);
     if (min === dTp) return 'tp';
+    const dir = c.direction === 'long' ? 1 : -1;
+    const riskDist = Math.abs(c.entry - c.sl);
+    if (riskDist && (dir * (exit - c.entry)) / riskDist > 0.1) return 'trail';
     if (min === dEntry) return 'be';
     return 'sl';
   }
