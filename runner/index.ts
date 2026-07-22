@@ -149,8 +149,10 @@ async function main() {
     let savedAnchor = '';
 
     // Canal VIP : mémoire locale pour ne pas spammer — dernière direction de setup publiée + annonce "journée finie".
+    // Un dayDone RESTAURÉ depuis l'ancre est déjà annoncé (vécu 23/07 00h : S1 a ré-annoncé « daily target hit »
+    // d'HIER après un restart — vrai fait, mauvais moment) → on arme le drapeau si le latch vient de la base.
     let lastVipSetup = { dir: '', at: 0 };
-    let vipDayDoneAnnounced = false;
+    let vipDayDoneAnnounced = Boolean(state.dayDone);
 
     /** Chemin d'exécution PARTAGÉ (auto + manuel + action) pour CET instrument. Retourne le ticket, ou undefined si échec. */
     const executeSignal = async (signal: Signal): Promise<string | undefined> => {
