@@ -73,8 +73,11 @@ export function sthDisconnect(userId: string) {
 export async function sthMoveMaster(userId: string, strategy: number, lots: number): Promise<{ ok: boolean; error: string }> {
   const masterId = MASTER_BY_STRATEGY[strategy] || MASTER_ID;
   if (!masterId) return { ok: false, error: `no master configured for S${strategy} (set STH_MASTER_ID_S${strategy})` };
+  // « connu de l'API » = liste de masters NON VIDE (un utilisateur inconnu renvoie une liste vide — doc STH).
+  // NE PAS gater sur tradingAccountConnected : ce flag reflète l'état instantané du bridge MT et peut être
+  // false pour un membre parfaitement abonné (vécu 23/07 : userIsSubscribed:true avec connected:false).
   const st = await sthStatus(userId);
-  if (st.ok && st.data.tradingAccountConnected !== true)
+  if (st.ok && (st.data.masterAccountsList ?? []).length === 0)
     return { ok: false, error: 'this member is not API-connected (manually-added receiver?) — move them in the STH dashboard instead' };
   const j = await sthJoinMaster({ userId, masterId, lots });
   return j.ok ? { ok: true, error: '' } : { ok: false, error: j.errorMessage };
