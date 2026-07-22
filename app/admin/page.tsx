@@ -198,7 +198,8 @@ export default function AdminCRM() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), r.status, legalOf(r.tg_id)].some((v) => String(v ?? '').toLowerCase().includes(q)));
+    // tg_id inclus : c'est l'ID que STH affiche pour les receivers API — coller « 7557770646 » retrouve le membre
+    return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), String(r.tg_id), r.status, legalOf(r.tg_id)].some((v) => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, search]);
 
   // ===== ALERTES PUSH : qui a activé, qui relancer (Telegram) =====
@@ -562,6 +563,9 @@ export default function AdminCRM() {
               <span>broker <b style={{ color: 'var(--text)' }}>{sel.broker ?? '—'}</b></span>
               <span>risk <b style={{ color: 'var(--text)' }}>{sel.risk_tier}</b></span>
               <span>MT5 <b style={{ color: 'var(--text)' }}>{sel.mt5_login ? `${sel.mt5_login} @ ${sel.mt5_server ?? '?'}` : '—'}</b></span>
+              {/* l'ID que STH affiche pour les receivers connectés via l'API (UserID = tg_id) — la clé pour
+                  rapprocher « 7557770646 » vu dans STH ↔ le bon membre ici. Copiable en un clic. */}
+              <span>STH id <b style={{ color: 'var(--gold)' }}>{sel.tg_id}</b> <button onClick={() => void navigator.clipboard?.writeText(String(sel.tg_id))} style={miniBtn}>copy</button></span>
               <span>USDT <b style={{ color: 'var(--text)' }}>{sel.usdt_trc20 ? sel.usdt_trc20.slice(0, 8) + '…' : '—'}</b></span>
               <span>since <b style={{ color: 'var(--text)' }}>{new Date(sel.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</b></span>
               <span>referred by <b style={{ color: 'var(--text)' }}>{sel.referred_by ? nameOf(sel.referred_by) : '—'}</b></span>
