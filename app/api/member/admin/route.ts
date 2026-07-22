@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret } from '@/lib/member/server';
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
-import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus } from '@/lib/member/sth';
+import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } from '@/lib/member/sth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; dismiss?: string; nudged?: number;
+    revealMember?: number; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -372,6 +372,21 @@ export async function POST(req: NextRequest) {
     const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots, strategy });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier RE-connected via STH from the member sheet (lots ${lots} · S${strategy})` } as never });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.moveSth) {
+    // CHANGEMENT DE STRATÉGIE en un clic : join-master-account déclaratif → le receiver passe sur le master
+    // de sa nouvelle stratégie. Le front enchaîne `done` si OK. Membres connectés à la main → erreur explicite.
+    if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
+    const { data: act } = await db.from('member_actions').select('id,tg_id,member_no,detail').eq('id', body.moveSth).eq('kind', 'strategy_change').limit(1);
+    if (!act?.length) return NextResponse.json({ error: 'strategy change request not found (already processed?)' }, { status: 404 });
+    const to = Number((act[0].detail as Record<string, unknown>)?.to ?? 0);
+    if (![1, 2, 3].includes(to)) return NextResponse.json({ error: 'invalid target strategy on the card' }, { status: 400 });
+    const { data: lastConnect } = await db.from('member_actions').select('detail').eq('tg_id', act[0].tg_id).eq('kind', 'connect').order('created_at', { ascending: false }).limit(1);
+    const lots = Number((lastConnect?.[0]?.detail as Record<string, unknown>)?.lot ?? 0.01) || 0.01;
+    const r = await sthMoveMaster(String(act[0].tg_id), to, lots);
+    if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
+    await db.from('member_actions').insert({ tg_id: act[0].tg_id, member_no: act[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔀 moved to the S${to} master via STH (lots ${lots})` } as never });
     return NextResponse.json({ ok: true });
   }
   if (body.sthStatusCheck) {
