@@ -25,10 +25,19 @@ tickCh.subscribe((status) => {
 });
 
 /** Diffuse un tick de prix au cockpit, TAGUÉ par symbole (le cockpit multi-symbole filtre dessus). No-op tant que le canal n'est pas prêt. */
+// THROTTLE DU FIREHOSE : Supabase Realtime facture CHAQUE message × CHAQUE écran qui écoute — à 1 tick/s
+// par marché (BTC 24/7), on a explosé le quota Free (4.7M msgs/mois, vécu 23/07). 1 msg/2s par symbole,
+// et jamais deux fois le même prix : le HUD reste vivant, la facture retombe de ~70%.
+const lastTickSent = new Map<string, { t: number; bid: number; ask: number }>();
 export function broadcastTick(symbol: string, bid: number, ask: number) {
   if (SECONDARY) return; // runner secondaire : pas de firehose cockpit
   if (!tickReady) return;
-  void tickCh.send({ type: 'broadcast', event: 'tick', payload: { symbol, bid, ask, t: Date.now() } });
+  const prev = lastTickSent.get(symbol);
+  const now = Date.now();
+  if (prev && prev.bid === bid && prev.ask === ask) return; // prix inchangé → rien à dire (nuits calmes)
+  if (prev && now - prev.t < 2000) return; // au plus un message toutes les 2 s par marché
+  lastTickSent.set(symbol, { t: now, bid, ask });
+  void tickCh.send({ type: 'broadcast', event: 'tick', payload: { symbol, bid, ask, t: now } });
 }
 
 export async function logEvents(events: EngineEvent[]) {
