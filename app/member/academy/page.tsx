@@ -15,12 +15,15 @@ const svg = (d: string) => (
     <path d={d} />
   </svg>
 );
+// `gated` : réservé aux membres connectés (Telegram). Welcome est l'appât PUBLIC ; le reste est le contenu
+// « déjà à l'intérieur » — un prospect anonyme voit la vignette verrouillée → connexion Telegram pour débloquer.
 const SECTIONS = [
-  { key: 'welcome', icon: svg('M8 5.5v13l11-6.5L8 5.5z'), title: 'Welcome to Algoria', blurb: 'What you just joined, and what happens next.', url: WELCOME },
-  { key: 'strategy', icon: svg('M12 3v18M12 6l6 2-2.5 6a4 4 0 0 1-7 0L6 8l6-2zM6 8l-2.5 6a4 4 0 0 0 7 0'), title: 'Choosing your strategy', blurb: '🌱 Steady, ⚖️ Balanced or 🚀 Turbo — which profile fits you.', url: STRATEGY },
-  { key: 'how', icon: svg('M4 17l4-6 3 3.5L16 8l4 5M4 21h16'), title: 'How Algoria trades', blurb: 'Confluence, breakouts, and why the AI stands aside around news.', url: '' },
-  { key: 'mt5', icon: svg('M4 4h16v14H4zM4 22h16M8 12l2.5-3 2 2.5L16 8'), title: 'Reading your MT5', blurb: 'Follow your copies like a pro.', url: '' },
+  { key: 'welcome', icon: svg('M8 5.5v13l11-6.5L8 5.5z'), title: 'Welcome to Algoria', blurb: 'What you just joined, and what happens next.', url: WELCOME, gated: false },
+  { key: 'strategy', icon: svg('M12 3v18M12 6l6 2-2.5 6a4 4 0 0 1-7 0L6 8l6-2zM6 8l-2.5 6a4 4 0 0 0 7 0'), title: 'Choosing your strategy', blurb: '🌱 Steady, ⚖️ Balanced or 🚀 Turbo — which profile fits you.', url: STRATEGY, gated: true },
+  { key: 'how', icon: svg('M4 17l4-6 3 3.5L16 8l4 5M4 21h16'), title: 'How Algoria trades', blurb: 'Confluence, breakouts, and why the AI stands aside around news.', url: '', gated: true },
+  { key: 'mt5', icon: svg('M4 4h16v14H4zM4 22h16M8 12l2.5-3 2 2.5L16 8'), title: 'Reading your MT5', blurb: 'Follow your copies like a pro.', url: '', gated: true },
 ];
+const lockIcon = svg('M6 10V8a6 6 0 0 1 12 0v2M5 10h14v10H5zM12 14v3');
 
 export default function Academy() {
   // Auth TOLÉRANTE : on veut juste savoir si la personne est connectée (pour le CTA), jamais la rediriger.
@@ -30,11 +33,21 @@ export default function Academy() {
     void fetch('/api/member/me').then((r) => setAnon(r.status === 401)).catch(() => setAnon(true));
   }, []);
   const current = SECTIONS.find((s) => s.key === active && s.url) ?? SECTIONS.find((s) => s.url) ?? SECTIONS[0];
+  // verrou : une section gated regardée par un ANONYME → on affiche l'écran de déblocage à la place de la vidéo.
+  const locked = Boolean(current.gated) && anon === true;
 
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
-      <section className="panel" style={{ padding: 0, overflow: 'hidden', maxWidth: current.url && isFile(current.url) ? 430 : undefined, margin: current.url && isFile(current.url) ? '0 auto' : undefined, width: '100%' }}>
-        {current.url ? (
+      <section className="panel" style={{ padding: 0, overflow: 'hidden', maxWidth: !locked && current.url && isFile(current.url) ? 430 : undefined, margin: !locked && current.url && isFile(current.url) ? '0 auto' : undefined, width: '100%' }}>
+        {locked ? (
+          // ÉCRAN VERROUILLÉ — le prospect anonyme touche à une vidéo membre : connexion Telegram pour débloquer.
+          <div style={{ aspectRatio: '16/9', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 20, textAlign: 'center', background: 'radial-gradient(80% 90% at 50% 20%, #12213e 0%, #0a1425 100%)' }}>
+            <span style={{ width: 46, height: 46, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--cyan)', background: 'rgba(43,227,245,.08)', border: '1px solid rgba(43,227,245,.3)' }}>{lockIcon}</span>
+            <div style={{ fontWeight: 800, letterSpacing: 0.4, fontSize: 15 }}>Members only — {current.title}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', maxWidth: 320, lineHeight: 1.5 }}>Connect with Telegram (2 minutes) to unlock this and everything else inside.</div>
+            <a href="/member/login" style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '11px 18px', borderRadius: 10, textDecoration: 'none', fontWeight: 800, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>🔓 Continue with Telegram</a>
+          </div>
+        ) : current.url ? (
           isFile(current.url) ? (
             // Tournage PORTRAIT : la carte ÉPOUSE la vidéo (largeur = vidéo, ratio 9:16, cover) → zéro bande latérale.
             <video key={current.key} src={current.url} controls playsInline preload="metadata" style={{ width: '100%', aspectRatio: '9 / 16', maxHeight: '76vh', objectFit: 'cover', display: 'block', background: '#0a1425', borderRadius: 'inherit' }} />
@@ -51,8 +64,8 @@ export default function Academy() {
           </div>
         )}
       </section>
-      {/* CTA prospect : visible UNIQUEMENT hors connexion — la vidéo vend, le bouton encaisse. */}
-      {anon === true && (
+      {/* CTA prospect : visible hors connexion, SAUF si l'écran verrouillé montre déjà son propre bouton. */}
+      {anon === true && !locked && (
         <a href="/member/login" className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '13px 15px', textDecoration: 'none', fontWeight: 800, letterSpacing: 0.4, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>
           🚀 Ready? Continue with Telegram — 2 minutes to set up
         </a>
@@ -70,7 +83,12 @@ export default function Academy() {
               <div style={{ fontSize: 13.5, fontWeight: 750 }}>{s.title}</div>
               <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>{s.blurb}</div>
             </div>
-            <span className="mono" style={{ fontSize: 9, letterSpacing: 1, color: s.url ? 'var(--up)' : 'var(--dim)' }}>{s.url ? (active === s.key ? 'PLAYING' : 'WATCH') : 'SOON'}</span>
+            {(() => {
+              const secLocked = Boolean(s.gated) && anon === true;
+              const label = !s.url ? 'SOON' : secLocked ? '🔒 LOCKED' : active === s.key ? 'PLAYING' : 'WATCH';
+              const col = !s.url ? 'var(--dim)' : secLocked ? 'var(--gold)' : 'var(--up)';
+              return <span className="mono" style={{ fontSize: 9, letterSpacing: 1, color: col }}>{label}</span>;
+            })()}
           </button>
         ))}
       </section>
