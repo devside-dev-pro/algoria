@@ -20,7 +20,8 @@ export async function GET(req: NextRequest) {
   const db = sdb();
   const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
-    db.from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by').order('member_no', { ascending: false }).limit(200),
+    // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
+    (db as any).from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country').order('member_no', { ascending: false }).limit(200) as Promise<{ data: Array<{ tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>> | null }>,
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
     revealMember?: number; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
+    setCountry?: { tg_id: number; country: string };
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -372,6 +374,14 @@ export async function POST(req: NextRequest) {
     const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots, strategy });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier RE-connected via STH from the member sheet (lots ${lots} · S${strategy})` } as never });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.setCountry) {
+    // PAYS du membre (compta fin de mois + ciblage pubs) — saisie manuelle, chaîne vide = effacer.
+    const country = String(body.setCountry.country ?? '').trim().slice(0, 60) || null;
+    if (!Number(body.setCountry.tg_id)) return NextResponse.json({ error: 'tg_id required' }, { status: 400 });
+    const { error } = await db.from('members').update({ country, updated_at: new Date().toISOString() } as never).eq('tg_id', body.setCountry.tg_id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }
   if (body.moveSth) {

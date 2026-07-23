@@ -14,6 +14,7 @@ interface Row {
   member_no: number; tg_id: number; tg_username: string | null; tg_name: string | null; status: string;
   broker: string | null; risk_tier: string; created_at: string; updated_at: string | null; onboarding_step: number;
   mt5_login: string | null; mt5_server: string | null; usdt_trc20: string | null; referred_by: number | null;
+  country: string | null;
 }
 interface Action { id: string; tg_id?: number; member_no: number | null; kind: string; status?: string; done_by?: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
@@ -185,6 +186,29 @@ export default function AdminCRM() {
       })
       .finally(() => setBusy(false));
   };
+  // PAYS du membre (compta fin de mois + ciblage pubs) — dropdown des pays principaux + « other… » libre.
+  // Le pays vit sur le MEMBRE (les dépôts l'héritent) ; éditable depuis la fiche ET les lignes DEPOSITS (rattrapage).
+  const COUNTRIES = ['UAE', 'UK', 'Germany', 'Australia', 'France'];
+  const setCountry = (tgId: number, value: string) => {
+    const country = value === '__other' ? (window.prompt('Country?') ?? '').trim() : value;
+    if (value === '__other' && !country) return;
+    post({ setCountry: { tg_id: tgId, country } });
+  };
+  const countrySelect = (tgId: number, current: string | null) => (
+    <select
+      disabled={busy}
+      value={current && !COUNTRIES.includes(current) ? '__custom' : (current ?? '')}
+      onChange={(e) => { if (e.target.value !== '__custom') setCountry(tgId, e.target.value); }}
+      className="mono"
+      title="member's country (for the monthly accounting export + ads targeting)"
+      style={{ fontSize: 10.5, padding: '3px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: current ? 'var(--text)' : 'var(--dim)', cursor: 'pointer' }}
+    >
+      <option value="">🌍 country…</option>
+      {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+      {current && !COUNTRIES.includes(current) && <option value="__custom">{current}</option>}
+      <option value="__other">other…</option>
+    </select>
+  );
   // changement de stratégie en un clic : join STH déclaratif → le receiver bascule sur le master de la nouvelle
   // stratégie, puis `done` clôt la carte. Membres ajoutés à la main dans STH → erreur explicite (à faire à la main).
   const moveViaSth = (id: string) => {
@@ -211,7 +235,7 @@ export default function AdminCRM() {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     // tg_id inclus : c'est l'ID que STH affiche pour les receivers API — coller « 7557770646 » retrouve le membre
-    return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), String(r.tg_id), r.status, legalOf(r.tg_id)].some((v) => String(v ?? '').toLowerCase().includes(q)));
+    return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), String(r.tg_id), r.status, r.country, legalOf(r.tg_id)].some((v) => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, search]);
 
   // ===== ALERTES PUSH : qui a activé, qui relancer (Telegram) =====
@@ -318,11 +342,12 @@ export default function AdminCRM() {
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = [
-      ['date', 'member', 'username', 'broker', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
+      ['date', 'member', 'username', 'country', 'broker', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
       ...monthDeps.map((d) => [
         depDateOf(d).slice(0, 10),
         d.member_no != null ? `#${d.member_no}` : '',
         (() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? ''); })(),
+        rows.find((r) => Number(r.tg_id) === Number(d.tg_id))?.country ?? '',
         d.detail?.broker ?? '',
         Number(d.detail?.amount_usd ?? 0),
         Number(d.detail?.commission_usd ?? 0),
@@ -583,6 +608,7 @@ export default function AdminCRM() {
               {/* l'ID que STH affiche pour les receivers connectés via l'API (UserID = tg_id) — la clé pour
                   rapprocher « 7557770646 » vu dans STH ↔ le bon membre ici. Copiable en un clic. */}
               <span>STH id <b style={{ color: 'var(--gold)' }}>{sel.tg_id}</b> <button onClick={() => void navigator.clipboard?.writeText(String(sel.tg_id))} style={miniBtn}>copy</button></span>
+              <span>country {countrySelect(sel.tg_id, sel.country)}</span>
               <span>USDT <b style={{ color: 'var(--text)' }}>{sel.usdt_trc20 ? sel.usdt_trc20.slice(0, 8) + '…' : '—'}</b></span>
               <span>since <b style={{ color: 'var(--text)' }}>{new Date(sel.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</b></span>
               <span>referred by <b style={{ color: 'var(--text)' }}>{sel.referred_by ? nameOf(sel.referred_by) : '—'}</b></span>
@@ -740,6 +766,8 @@ export default function AdminCRM() {
                       {/* pas nameOf : sans @username il renvoie #no, déjà affiché juste avant → doublon */}
                       <span style={{ fontSize: 12, color: 'var(--text)' }}>{(() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? '—'); })()}</span>
                       {legalOf(d.tg_id) && <span className="mono" style={{ fontSize: 10.5, color: 'var(--gold)' }} title="name on the broker account">🏦 {legalOf(d.tg_id)}</span>}
+                      {/* pays : hérité du membre — éditable ICI pour rattraper les dépôts déjà saisis en 2 clics */}
+                      {countrySelect(d.tg_id, rows.find((r) => Number(r.tg_id) === Number(d.tg_id))?.country ?? null)}
                       <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{(d.detail?.broker ?? '—').toUpperCase()}</span>
                       <span className="mono" style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--cyan)' }}>${Number(d.detail?.amount_usd ?? 0)}</span>
                       <span style={{ color: 'var(--dim)', fontSize: 11 }}>→ com</span>
