@@ -382,7 +382,7 @@ async function main() {
               lastVipSetup = { dir: blocked.direction, at: now };
               const arrow = blocked.direction === 'long' ? '🔼 LONG' : '🔽 SHORT';
               void postVip(
-                `🎯 MANUAL SETUP — ${DISPLAY}\n${arrow} · conviction ${(blocked.confidence * 100) | 0}%\nEntry ~ ${blocked.entry}\n🛑 SL ${blocked.stopLoss}\n🎯 TP ${blocked.takeProfits[0]}\n\nAlgoria's done for the day — over to you. Indicative levels, your risk, your call.`,
+                `🎯 MANUAL SETUP — ${DISPLAY}\n${arrow} · conviction ${(blocked.confidence * 100) | 0}%\nEntry ~ ${blocked.entry}\n🛑 SL ${blocked.stopLoss}\n🎯 TP ${blocked.takeProfits[0]}\n\n${VIP_TAG} is done for the day (other strategies may still be running) — this one's over to you. Indicative levels, your risk, your call.`,
               );
             }
           }
