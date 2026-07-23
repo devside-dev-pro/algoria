@@ -486,7 +486,7 @@ async function main() {
             if (ticket) {
               rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, ladder: SW.ladder, riskDist: Math.abs(sig.entry - sig.stopLoss) });
               await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at 1R, ${SW.trailDist}R trailing)`, 'order');
-              if (vipReady() && !SECONDARY) void postVip(`📈 Algoria just opened a CORE position — ${DISPLAY} ${sig.direction.toUpperCase()}\nEntry ~ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]}\nThis one can ride for days. Copied to your account.`);
+              if (vipReady() && !SECONDARY) void postVip(`📈 ${VIP_TAG} just opened a CORE position — ${DISPLAY} ${sig.direction.toUpperCase()}\nEntry ~ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]}\nThis one can ride for days. Copied to your account.`);
             }
           }
         } catch (e) {
@@ -814,9 +814,9 @@ async function main() {
             const lines = (board ?? []).filter((b) => b.trades > 0 || b.done).map((b) => `${TAGS[b.strategy]} · ${b.net >= 0 ? '🟢 +' : '🔴 −'}$${Math.abs(Math.round(b.net))}${b.reason && FLAG[b.reason] ? ' · ' + FLAG[b.reason] : ''}`);
             if (lines.length)
               void postVip(`📊 DAILY WRAP — the Algoria fleet (master-account scale)\n${lines.join('\n')}\n\nThree strategies, three personalities — a red day on one is rarely a red day on all. Yours is set in the app. 👊`);
-            else if (stats.net >= 0) void postVip(`📊 DAILY WRAP\n${stats.trades} trades · ${wr}% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊`);
-            else void postVip(`📊 DAILY WRAP — red day today · ${stats.trades} trades · ${wr}% win\nRed days are part of the game — they're all in our public track record. Your risk stayed capped and the desk stays disciplined. We go again tomorrow. 🔁`);
-          } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} Algoria's working · ${stats.trades} trades · ${wr}% win today`);
+            else if (stats.net >= 0) void postVip(`📊 DAILY WRAP — ${VIP_TAG}\n${stats.trades} trades · ${wr}% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊`);
+            else void postVip(`📊 DAILY WRAP — ${VIP_TAG} · red day · ${stats.trades} trades · ${wr}% win\nRed days are part of the game — they're all in our public track record. Your risk stayed capped and the desk stays disciplined. We go again tomorrow. 🔁`);
+          } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} ${VIP_TAG} working · ${stats.trades} trades · ${wr}% win today`);
         }
         // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
         if (h === 21 && stats.net > 0) {

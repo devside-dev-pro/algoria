@@ -23,13 +23,16 @@ const symSpec = (k: string) => SYMS.find((s) => s.key === k) ?? SYMS[0];
 
 export function Cockpit() {
   const [symbol, setSymbol] = useState('XAUUSD'); // marché affiché/piloté par le cockpit
+  // STRATÉGIE affichée (S1/S2/S3) : filtre trades + signaux + stats + recap. Le chart/desk/balance restent
+  // la voix du master S2 (les runners S1/S3 sont silencieux côté cockpit) — S2 par défaut, donc cohérent.
+  const [strat, setStrat] = useState(2);
   const spec = symSpec(symbol);
   // NAS100 RETIRÉ du produit : ses vieux trades/signaux/cartes sont filtrés À LA SOURCE — les stats
   // (win rate, wins today, tape, recap) et le desk ne parlent plus que de ce qu'Algoria trade : gold + BTC.
   const noNas = <T extends { symbol?: string }>(rows: T[]): T[] => rows.filter((r) => r.symbol !== 'NAS100');
-  const signals = noNas(useSignals(60) as any[]);
+  const signals = noNas(useSignals(60, strat) as any[]);
   const st = useLatestState() as any;
-  const trades = noNas(useTrades(120) as any[]);
+  const trades = noNas(useTrades(120, strat) as any[]);
   const deskItems = (useDesk(24) as any[]).filter((e) => e?.data?.symbol !== 'NAS100'); // desk multi-marché — levé ici pour aussi nourrir le header
   const symCtx = (deskItems as any[]).find((e) => ((e?.data?.symbol as string | undefined) ?? 'XAUUSD') === symbol)?.data; // dernier contexte structuré du symbole sélectionné
   const dayStartEq = useDayStartEquity();
@@ -61,7 +64,7 @@ export function Cockpit() {
   const [recapDay, setRecapDay] = useState<string>('week'); // 'week' | jour UTC 'YYYY-MM-DD'
   const [focus, setFocus] = useState<number | null>(null); // instant du chart à cadrer (clic sur un trade)
   const [replayTicket, setReplayTicket] = useState<string | null>(null); // trade dont on rejoue le WHY
-  const hist = useWeekHistory(8, recap); // chargé uniquement quand le recap s'ouvre
+  const hist = useWeekHistory(8, recap, strat); // chargé uniquement quand le recap s'ouvre
   const toggleRecap = () =>
     setRecap((r) => {
       const n = !r;
@@ -261,6 +264,14 @@ export function Cockpit() {
           <strong style={{ fontSize: 15, letterSpacing: 0.5, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;AI</strong>
           <FeedStatus symbol={symbol} />
           <MarketRail selected={symbol} onSelect={setSymbol} openBySym={openBySym} />
+          {/* sélecteur de STRATÉGIE : filtre tape/signaux/stats/recap. Le chart + la balance restent le master S2. */}
+          <span style={{ display: 'inline-flex', gap: 4 }} title="strategy shown in the trade tape, signals and stats (chart & account = S2 master)">
+            {[1, 2, 3].map((s) => (
+              <button key={s} onClick={() => setStrat(s)} className="mono" style={{ ...pill(strat === s), padding: '4px 9px', fontSize: 11, fontWeight: strat === s ? 800 : 600 }}>
+                {s === 1 ? '🌱S1' : s === 2 ? '⚖️S2' : '🚀S3'}
+              </button>
+            ))}
+          </span>
           <MarketStatus symbol={symbol} session={(symCtx?.session as string | undefined) ?? (st?.session as string | undefined)} regime={(symCtx?.regime as string | undefined) ?? (st?.regime as string | undefined)} tradable={st?.tradable !== false} />
           {tradesTodayCount > 0 && (
             <span className="mono" style={{ fontSize: 11, color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 4 }} title="trades executed today (excl. BEAST)">

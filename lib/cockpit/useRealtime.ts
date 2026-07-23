@@ -34,7 +34,11 @@ export function useEvents(limit = 60) {
 }
 
 /** Cartes de signaux. */
-export function useSignals(limit = 12) {
+// MULTI-STRATÉGIES : le cockpit affiche UNE stratégie à la fois (sélecteur S1/S2/S3, défaut S2 = le master
+// du chart/desk/balance). Les lignes historiques sans colonne strategy (null) comptent comme S2.
+const strategyMatch = (row: Row, strategy: number) => Number((row as { strategy?: number | null }).strategy ?? 2) === strategy;
+
+export function useSignals(limit = 12, strategy = 2) {
   const [signals, setSignals] = useState<Row[]>([]);
   useEffect(() => {
     let alive = true;
@@ -42,21 +46,21 @@ export function useSignals(limit = 12) {
       .from('signals')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(limit)
+      .limit(limit * 3) // marge : on filtre côté client (les vieilles lignes strategy=null comptent S2)
       .then(({ data }) => {
-        if (alive && data) setSignals(data);
+        if (alive && data) setSignals(data.filter((s) => strategyMatch(s, strategy)).slice(0, limit));
       });
     const ch = supabase
       .channel('rt-signals')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'signals' }, ({ new: s }) =>
-        setSignals((p) => [s as Row, ...p].slice(0, limit)),
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'signals' }, ({ new: s }) => {
+        if (strategyMatch(s as Row, strategy)) setSignals((p) => [s as Row, ...p].slice(0, limit));
+      })
       .subscribe();
     return () => {
       alive = false;
       supabase.removeChannel(ch);
     };
-  }, [limit]);
+  }, [limit, strategy]);
   return signals;
 }
 
@@ -146,7 +150,7 @@ export function usePrice(symbol = 'XAUUSD') {
 }
 
 /** Trades (ouvertures + clôtures) → corrélés aux signaux : statut ouvert/fermé, P&L, raison. Refetch sur tout changement. */
-export function useTrades(limit = 60) {
+export function useTrades(limit = 60, strategy = 2) {
   const [trades, setTrades] = useState<Row[]>([]);
   useEffect(() => {
     let alive = true;
@@ -155,9 +159,9 @@ export function useTrades(limit = 60) {
         .from('trades')
         .select('*')
         .order('opened_at', { ascending: false, nullsFirst: false })
-        .limit(limit)
+        .limit(limit * 3) // marge : filtre stratégie côté client (les vieilles lignes strategy=null comptent S2)
         .then(({ data }) => {
-          if (alive && data) setTrades(data);
+          if (alive && data) setTrades(data.filter((t) => strategyMatch(t, strategy)).slice(0, limit));
         });
     void load();
     const ch = supabase
@@ -168,13 +172,13 @@ export function useTrades(limit = 60) {
       alive = false;
       supabase.removeChannel(ch);
     };
-  }, [limit]);
+  }, [limit, strategy]);
   return trades;
 }
 
 /** MODE RECAP : l'HISTOIRE des N derniers jours — trades clôturés + signaux complets (confluence incluse).
  * Chargé UNIQUEMENT quand le recap est ouvert (enabled) : volumes faibles (~40 lignes/semaine), une requête suffit. */
-export function useWeekHistory(days = 8, enabled = false) {
+export function useWeekHistory(days = 8, enabled = false, strategy = 2) {
   const [trades, setTrades] = useState<Row[]>([]);
   const [signals, setSignals] = useState<Row[]>([]);
   useEffect(() => {
@@ -189,7 +193,7 @@ export function useWeekHistory(days = 8, enabled = false) {
       .order('closed_at', { ascending: false })
       .limit(500)
       .then(({ data }) => {
-        if (alive && data) setTrades(data);
+        if (alive && data) setTrades(data.filter((t) => strategyMatch(t, strategy)));
       });
     supabase
       .from('signals')
@@ -198,12 +202,12 @@ export function useWeekHistory(days = 8, enabled = false) {
       .order('created_at', { ascending: false })
       .limit(500)
       .then(({ data }) => {
-        if (alive && data) setSignals(data);
+        if (alive && data) setSignals(data.filter((s) => strategyMatch(s, strategy)));
       });
     return () => {
       alive = false;
     };
-  }, [days, enabled]);
+  }, [days, enabled, strategy]);
   return { trades, signals };
 }
 
