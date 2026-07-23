@@ -33,13 +33,11 @@ export default function Academy() {
 
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
-      <section className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+      <section className="panel" style={{ padding: 0, overflow: 'hidden', maxWidth: current.url && isFile(current.url) ? 430 : undefined, margin: current.url && isFile(current.url) ? '0 auto' : undefined, width: '100%' }}>
         {current.url ? (
           isFile(current.url) ? (
-            // Tournage PORTRAIT : lecteur natif centré, hauteur bornée — pas de barres noires plein écran.
-            <div style={{ display: 'flex', justifyContent: 'center', background: 'radial-gradient(80% 90% at 50% 20%, #12213e 0%, #0a1425 100%)' }}>
-              <video key={current.key} src={current.url} controls playsInline preload="metadata" style={{ width: '100%', maxWidth: 430, maxHeight: '74vh', objectFit: 'contain', display: 'block' }} />
-            </div>
+            // Tournage PORTRAIT : la carte ÉPOUSE la vidéo (largeur = vidéo, ratio 9:16, cover) → zéro bande latérale.
+            <video key={current.key} src={current.url} controls playsInline preload="metadata" style={{ width: '100%', aspectRatio: '9 / 16', maxHeight: '76vh', objectFit: 'cover', display: 'block', background: '#0a1425', borderRadius: 'inherit' }} />
           ) : (
             <div style={{ position: 'relative', paddingTop: '56.25%' }}>
               <iframe key={current.key} src={current.url} title={current.title} allowFullScreen style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }} />
