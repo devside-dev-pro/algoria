@@ -131,20 +131,24 @@ export interface TradeClose {
 }
 
 /** Clôture d'un trade : met à jour la ligne ouverte (match sur ticket). Idempotent : ignore les deals de clôture livrés en double. */
-export async function recordTradeClose(ticket: string, symbol: string, c: TradeClose) {
+// Retourne TRUE seulement si cette clôture est NEUVE (ligne ouverte fermée à l'instant, ou insert close-only) —
+// FALSE si c'était un doublon (deal MetaApi rélivré, ou 2e instance runner) ou une erreur. L'appelant s'en sert
+// comme UNIQUE verrou d'idempotence pour les effets de bord (carte VIP, push win) : la base fait foi, une seule
+// annonce par trade même si onDealAdded se déclenche plusieurs fois.
+export async function recordTradeClose(ticket: string, symbol: string, c: TradeClose): Promise<boolean> {
   const patch = { exit: c.exit, pnl: c.pnl, r: c.r, reason: c.reason, closed_at: new Date(c.closedAt).toISOString() };
   const { data, error } = await db.from('trades').update(patch).eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).is('closed_at', null).select('id');
   if (error) {
     console.error('[sync] recordTradeClose (update) échoué:', error.message);
-    return;
+    return false;
   }
-  if (!data || data.length === 0) {
-    // aucune ligne ouverte à mettre à jour → soit ce ticket est DÉJÀ clôturé (deal livré 2×), soit position ouverte avant ce process.
-    const { data: already } = await db.from('trades').select('id').eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).not('closed_at', 'is', null).limit(1);
-    if (already && already.length > 0) return; // déjà enregistrée comme clôturée → on ignore le doublon (plus de ligne en double)
-    const { error: insErr } = await db.from('trades').insert({ strategy: STRAT_ID as never, ticket, symbol, ...patch }); // ligne close-only honnête
-    if (insErr) console.error('[sync] recordTradeClose (insert close-only) échoué:', insErr.message);
-  }
+  if (data && data.length > 0) return true; // une ligne ouverte vient d'être clôturée → clôture NEUVE
+  // aucune ligne ouverte à mettre à jour → soit ce ticket est DÉJÀ clôturé (deal livré 2×), soit position ouverte avant ce process.
+  const { data: already } = await db.from('trades').select('id').eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).not('closed_at', 'is', null).limit(1);
+  if (already && already.length > 0) return false; // déjà enregistrée comme clôturée → on ignore le doublon (plus de ligne en double)
+  const { error: insErr } = await db.from('trades').insert({ strategy: STRAT_ID as never, ticket, symbol, ...patch }); // ligne close-only honnête
+  if (insErr) { console.error('[sync] recordTradeClose (insert close-only) échoué:', insErr.message); return false; }
+  return true; // clôture close-only insérée → NEUVE
 }
 
 /** Bougies stockées depuis sinceMs (ordre chronologique) — nourrit la SENTINELLE (re-validation hebdo des edges). */

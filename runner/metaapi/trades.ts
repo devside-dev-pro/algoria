@@ -103,7 +103,11 @@ export class DealRecorder extends Base {
       reason = pnl >= 0 ? 'win' : 'loss'; // position ouverte avant ce process → on ne connaît pas le SL initial
     }
 
-    await recordTradeClose(ticket, this.displaySymbol, { exit, pnl, r, reason, closedAt: when });
+    // La base est l'UNIQUE verrou : si la clôture n'est pas neuve (deal rélivré par MetaApi sur reconnexion/resync,
+    // ou plusieurs instanceIndex), recordTradeClose renvoie false → on NE reposte PAS la carte VIP ni le push.
+    // (Cause du bug 24/07 : mêmes gains postés 2× dans le VIP — onDealAdded se déclenchait plusieurs fois.)
+    const fresh = await recordTradeClose(ticket, this.displaySymbol, { exit, pnl, r, reason, closedAt: when });
+    if (!fresh) return;
     if (pnl > 0) maybePushWin(this.displaySymbol, pnl);
     vipTradeClose(this.displaySymbol, pnl, reason, c?.entry, exit);
   }
