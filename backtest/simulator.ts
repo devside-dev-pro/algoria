@@ -15,6 +15,7 @@ export interface SimParams {
   // Gestion de trade dynamique (optionnelle) :
   beTrigger?: number; // déplace le SL à ~breakeven quand le profit ≥ beTrigger × riskDist
   beOffset?: number; // niveau du SL breakeven en × riskDist AU-DESSUS de l'entrée (défaut 0.05 = BE+ couvre les coûts)
+  hardCap?: boolean; // cap de perte DUR : ferme les positions ouvertes dès que le plancher du jour latche
   // RATCHET JOURNALIER (étude) : une fois le pic du jour ≥ dayLockTrigger (fraction du solde), la journée se
   // coupe si l'equity retombe à dayLockFloor — le « +1600 qui finit à 0 » devient « +1600 qui finit ≥ floor ».
   dayLockTrigger?: number;
@@ -147,11 +148,17 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
     );
     const eq = balance + floating;
     equity.push({ time: bar.time, equity: eq });
+    const wasKilled = dayKilled;
     if ((dayStart - eq) / dayStart >= cfg.risk.maxDailyLossPct) dayKilled = true;
     dayPeakEq = Math.max(dayPeakEq, eq);
     const lockTrig = p.dayLockTrigger ?? cfg.risk.dayLockTriggerPct; // piloté par la config moteur (comme le trailing)
     const lockFloor = p.dayLockFloor ?? cfg.risk.dayLockFloorPct;
     if (lockTrig && lockFloor != null && (dayPeakEq - dayStart) / dayStart >= lockTrig && (eq - dayStart) / dayStart <= lockFloor) dayKilled = true;
+    // CAP DUR (option) : au moment PRÉCIS où le cap latche, on FERME les positions ouvertes au close de la bougie
+    // (au lieu de les laisser courir jusqu'à leur stop). Borne la journée rouge ~au cap au lieu de saigner au-delà.
+    if (p.hardCap && dayKilled && !wasKilled && open.length) {
+      for (let k = open.length - 1; k >= 0; k--) { close(open[k], bar.close, bar.time, 'sl'); open.splice(k, 1); }
+    }
 
     // 4) moteur sur clôture de i (fenêtre causale : rien après i)
     const state: EngineState = {

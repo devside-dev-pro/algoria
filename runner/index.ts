@@ -148,6 +148,7 @@ async function main() {
     }
     // dernière ancre écrite (dédup) — persistée par le moteur PRIMAIRE uniquement (état compte global)
     let savedAnchor = '';
+    let hardClosedDay = ''; // CAP DUR : jour où on a déjà fermé les positions au cap de perte (une seule fois/jour)
 
     // Canal VIP : mémoire locale pour ne pas spammer — dernière direction de setup publiée + annonce "journée finie".
     // Un dayDone RESTAURÉ depuis l'ancre est déjà annoncé (vécu 23/07 00h : S1 a ré-annoncé « daily target hit »
@@ -319,6 +320,18 @@ async function main() {
           }
         }
         state.killed = killed; // le kill switch global gèle l'auto sur tous les instruments
+        // CAP DUR : à l'instant où la journée latche sur le CAP DE PERTE, on FERME les positions ouvertes de cet
+        // instrument (au lieu de les laisser courir jusqu'à leur stop, au-delà du cap). Filet live contre le
+        // « la journée saigne bien au-delà de −4% » (vécu le 15/07). Une seule fois par jour. Sur objectif/ratchet
+        // (target/lock) on NE ferme PAS — les gagnants sont déjà protégés par leur trailing, et le swing peut courir.
+        if (state.dayDone && state.dayDoneReason === 'loss' && hardClosedDay !== state.dayStamp) {
+          hardClosedDay = state.dayStamp ?? '';
+          const openHere = ((terminal.positions ?? []) as any[]).filter((p) => p.symbol === BROKER);
+          if (openHere.length) {
+            try { await closeAll(stream, BROKER); await logNote(`🛑 daily loss cap hit — closed ${openHere.length} open position(s) to bound the day`, 'veto'); }
+            catch (e) { console.error('[algoria] hard-cap close échec:', e); }
+          }
+        }
         state.newsWindows = newsWindows(); // annonces éco USD fort impact → checkRisk refuse les entrées autour
         // mode scalp = config scalp VALIDÉE de l'instrument (l'or et le Nasdaq n'ont pas la même). NORMAL → DEFAULT strict.
         const cfg = mode === 'scalp' ? inst.config : DEFAULT_CONFIG;
