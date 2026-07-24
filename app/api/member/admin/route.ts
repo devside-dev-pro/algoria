@@ -38,6 +38,10 @@ export async function GET(req: NextRequest) {
     // (nom Telegram ≠ @pseudo ≠ nom sur le compte broker) — affiché partout + cherchable dans l'admin.
     db.from('member_actions').select('tg_id,detail,created_at').eq('kind', 'kyc').order('created_at', { ascending: false }).limit(500),
   ]);
+  // COMPTES SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut)
+  const { data: extraAccounts } = await (db as any).from('member_accounts')
+    .select('id,tg_id,member_no,account_no,broker,strategy,status,mt5_login,mt5_server,declared_deposit,holder_name,created_at')
+    .order('created_at', { ascending: false }).limit(300) as { data: Array<Record<string, unknown>> | null };
   const pushTgIds = [...new Set((pushQ.data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
   // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
   // Une balance NÉGATIVE (commission annulée APRÈS retrait) est le signal d'abus n°1 → flag rouge.
@@ -62,7 +66,7 @@ export async function GET(req: NextRequest) {
     const n = String((k.detail as { broker_name?: string })?.broker_name ?? '').trim();
     if (n && !legalNames[t]) legalNames[t] = n;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [] });
 }
 
 export async function POST(req: NextRequest) {
@@ -77,7 +81,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
+    revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
     setCountry?: { tg_id: number; country: string };
   };
   const db = sdb();
@@ -200,13 +204,19 @@ export async function POST(req: NextRequest) {
       done_by: who,
       detail: { ...(act.detail as Record<string, unknown> | null ?? {}), reject_reason: reason } as never,
     }).eq('id', act.id);
-    await db.from('members').update({ status: 'onboarding', onboarding_step: 1, updated_at: new Date().toISOString() })
-      .eq('tg_id', act.tg_id).eq('status', 'pending_copier');
+    const rejAccountId = (act.detail as { account_id?: string } | null)?.account_id;
+    if (rejAccountId) {
+      // COMPTE SUPPLÉMENTAIRE refusé → seul le compte est marqué rejected, le membre reste live sur son principal.
+      await (db as any).from('member_accounts').update({ status: 'rejected', updated_at: new Date().toISOString() }).eq('id', String(rejAccountId));
+    } else {
+      await db.from('members').update({ status: 'onboarding', onboarding_step: 1, updated_at: new Date().toISOString() })
+        .eq('tg_id', act.tg_id).eq('status', 'pending_copier');
+    }
     const { pushToUser } = await import('@/lib/push/send');
     void pushToUser(Number(act.tg_id), {
       title: 'Connection request declined',
       body: `${reason} — open the app to fix your details and resubmit.`,
-      url: '/member/onboarding',
+      url: rejAccountId ? '/member/add-strategy' : '/member/onboarding',
       tag: 'algoria-connect',
     });
     return NextResponse.json({ ok: true });
@@ -280,9 +290,18 @@ export async function POST(req: NextRequest) {
   if (body.reveal) {
     // RÉVÉLATION des identifiants MT5 (admin uniquement) : nécessaire pour brancher le compte dans STH.
     // Déchiffré à la volée côté serveur, jamais stocké en clair ; la révélation est HORODATÉE sur l'action (audit).
+    // Carte portant account_id (multi-comptes) → identifiants du COMPTE SUPPLÉMENTAIRE, pas de la fiche membre.
     const { data: act } = await db.from('member_actions').select('id,tg_id,detail').eq('id', body.reveal).limit(1);
     if (!act?.length) return NextResponse.json({ error: 'action not found' }, { status: 404 });
-    const { data: m } = await db.from('members').select('mt5_login,mt5_server,mt5_password_enc').eq('tg_id', act[0].tg_id).limit(1);
+    const actAccountId = (act[0].detail as { account_id?: string } | null)?.account_id;
+    let m: Array<{ mt5_login: unknown; mt5_server: unknown; mt5_password_enc: unknown }> | null;
+    if (actAccountId) {
+      const { data } = await (db as any).from('member_accounts').select('mt5_login,mt5_server,mt5_password_enc').eq('id', String(actAccountId)).limit(1) as { data: Array<{ mt5_login: unknown; mt5_server: unknown; mt5_password_enc: unknown }> | null };
+      m = data;
+    } else {
+      const { data } = await db.from('members').select('mt5_login,mt5_server,mt5_password_enc').eq('tg_id', act[0].tg_id).limit(1);
+      m = data;
+    }
     if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
     let password: string;
     try {
@@ -309,6 +328,20 @@ export async function POST(req: NextRequest) {
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔑 credentials revealed by ${who}` } as never });
     return NextResponse.json({ login: m[0].mt5_login, server: m[0].mt5_server, password });
   }
+  if (body.revealAccount) {
+    // RÉVÉLATION des identifiants d'un COMPTE SUPPLÉMENTAIRE (multi-stratégies) — même contrat que revealMember.
+    const { data: acc } = await (db as any).from('member_accounts').select('tg_id,member_no,account_no,mt5_login,mt5_server,mt5_password_enc').eq('id', String(body.revealAccount)).limit(1) as { data: Array<Record<string, unknown>> | null };
+    if (!acc?.length) return NextResponse.json({ error: 'account not found' }, { status: 404 });
+    if (!acc[0].mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
+    let password: string;
+    try {
+      password = decryptSecret(acc[0].mt5_password_enc as string);
+    } catch {
+      return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
+    }
+    await db.from('member_actions').insert({ tg_id: Number(acc[0].tg_id), member_no: acc[0].member_no != null ? Number(acc[0].member_no) : null, kind: 'note', status: 'done', done_by: who, detail: { text: `🔑 credentials revealed by ${who} (account #${acc[0].account_no})` } as never });
+    return NextResponse.json({ login: acc[0].mt5_login, server: acc[0].mt5_server, password });
+  }
   if (body.offboard) {
     // OFF-BOARD : le client est parti (retrait). Statut → paused (sort du compte "actifs", fiche + creds conservés),
     // déconnexion copieur (via STH si configuré, sinon empilée dans la file support), et note timeline explicite.
@@ -332,25 +365,34 @@ export async function POST(req: NextRequest) {
   if (body.connectSth) {
     // CONNEXION AUTO via STH (option B) : le support clique « connect » sur la demande → on branche le compte
     // dans le copieur (connect + join master) SANS ressaisie. Succès → le front enchaîne `done` (passage LIVE).
+    // MULTI-COMPTES : une carte portant account_id branche le compte SUPPLÉMENTAIRE (member_accounts) —
+    // identifiants du compte, userId STH distinct "{tg_id}-{account_no}" (chaque compte est un client STH à part).
     if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
     const { data: act } = await db.from('member_actions').select('id,tg_id,detail').eq('id', body.connectSth).eq('kind', 'connect').limit(1);
     if (!act?.length) return NextResponse.json({ error: 'connect request not found (already processed?)' }, { status: 404 });
     const detail = (act[0].detail as Record<string, unknown>) ?? {};
-    const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier,strategy').eq('tg_id', act[0].tg_id).limit(1);
-    if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
-    if (!m[0].mt5_login || !m[0].mt5_server) return NextResponse.json({ error: 'missing MT5 login/server' }, { status: 400 });
+    const accountId = detail.account_id ? String(detail.account_id) : null;
+    let creds: { login: unknown; server: unknown; enc: unknown; sthUser: string; strategy: number; memberNo: number | null };
+    if (accountId) {
+      const { data: acc } = await (db as any).from('member_accounts').select('account_no,member_no,mt5_login,mt5_server,mt5_password_enc,strategy').eq('id', accountId).limit(1) as { data: Array<Record<string, unknown>> | null };
+      if (!acc?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file for this extra account' }, { status: 404 });
+      creds = { login: acc[0].mt5_login, server: acc[0].mt5_server, enc: acc[0].mt5_password_enc, sthUser: `${act[0].tg_id}-${acc[0].account_no}`, strategy: Number(acc[0].strategy) || 2, memberNo: acc[0].member_no != null ? Number(acc[0].member_no) : null };
+    } else {
+      const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier,strategy').eq('tg_id', act[0].tg_id).limit(1);
+      if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
+      creds = { login: m[0].mt5_login, server: m[0].mt5_server, enc: m[0].mt5_password_enc, sthUser: String(m[0].tg_id), strategy: Number(detail.strategy ?? (m[0] as { strategy?: number }).strategy ?? 2) || 2, memberNo: m[0].member_no != null ? Number(m[0].member_no) : null };
+    }
+    if (!creds.login || !creds.server) return NextResponse.json({ error: 'missing MT5 login/server' }, { status: 400 });
     let password: string;
     try {
-      password = decryptSecret(m[0].mt5_password_enc as string);
+      password = decryptSecret(creds.enc as string);
     } catch {
       return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
     }
-    const lots = Number(detail.lot ?? { low: 0.01, balanced: 0.05, high: 0.1 }[String(m[0].risk_tier)] ?? 0.01) || 0.01;
-    // multi-stratégies : le client rejoint le master de SA stratégie (carte connect, sinon fiche membre)
-    const strategy = Number(detail.strategy ?? (m[0] as { strategy?: number }).strategy ?? 2) || 2;
-    const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots, strategy });
+    const lots = Number(detail.lot ?? 0.01) || 0.01;
+    const r = await sthConnectAndJoin({ userId: creds.sthUser, login: creds.login as number, password, server: String(creds.server), isMt4: Boolean(detail.is_mt4), lots, strategy: creds.strategy });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
-    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots})` } as never });
+    await db.from('member_actions').insert({ tg_id: act[0].tg_id, member_no: creds.memberNo, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots} · S${creds.strategy}${accountId ? ` · account #${detail.account_no}` : ''})` } as never });
     return NextResponse.json({ ok: true });
   }
   if (body.reconnectSth) {
@@ -425,10 +467,23 @@ export async function POST(req: NextRequest) {
   }
   if (body.done) {
     // Le support a appliqué l'action dans Social Trade Hub → on la clôt ; un 'connect' fait passer le membre en LIVE.
-    const { data: act } = await db.from('member_actions').select('id,tg_id,kind').eq('id', body.done).eq('status', 'pending').limit(1);
+    const { data: act } = await db.from('member_actions').select('id,tg_id,kind,detail').eq('id', body.done).eq('status', 'pending').limit(1);
     if (!act?.length) return NextResponse.json({ error: 'action not found' }, { status: 404 });
     await db.from('member_actions').update({ status: 'done', done_at: new Date().toISOString(), done_by: s.username ?? String(s.tgId) }).eq('id', body.done);
-    if (act[0].kind === 'connect') {
+    const doneAccountId = (act[0].detail as { account_id?: string } | null)?.account_id;
+    if (act[0].kind === 'connect' && doneAccountId) {
+      // COMPTE SUPPLÉMENTAIRE (multi-stratégies) → c'est le COMPTE qui passe live, le membre est déjà live.
+      // Pas de commission parrainage ici : elle n'existe que pour la PREMIÈRE activation d'un filleul.
+      await (db as any).from('member_accounts').update({ status: 'live', updated_at: new Date().toISOString() }).eq('id', String(doneAccountId));
+      const { pushToUser: pushAcc } = await import('@/lib/push/send');
+      const stratName = { 1: 'S1 STEADY', 2: 'S2 BALANCED', 3: 'S3 TURBO' }[Number((act[0].detail as { strategy?: number } | null)?.strategy ?? 0)] ?? 'your new strategy';
+      void pushAcc(Number(act[0].tg_id), {
+        title: `🎉 ${stratName} is LIVE on your second account`,
+        body: 'Your new account is connected — you now run multiple Algoria strategies in parallel.',
+        url: '/member',
+        tag: 'algoria-connect',
+      });
+    } else if (act[0].kind === 'connect') {
       // .in et non .eq('pending_copier') : un membre repassé en onboarding (rejet puis DONE sur l'ancienne
       // demande) doit quand même passer LIVE — l'ancien garde-fou no-opait en silence et le membre restait
       // grisé alors que le support croyait l'avoir activé. live/paused restent intouchés.

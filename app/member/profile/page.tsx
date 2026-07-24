@@ -156,7 +156,7 @@ export default function Profile() {
             <p style={{ margin: 0, fontSize: 11.5, color: 'var(--gold)' }}>🏆 PARTNER status — you earn ${referral.rewardUsd} per activated referral.</p>
           )}
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-            You earn <b className="goldText">${referral.rewardUsd}</b> for every friend whose account is <b style={{ color: 'var(--text)' }}>activated</b> (min $500 deposit verified). Paid in USDT, straight to your wallet.
+            You earn <b className="goldText">${referral.rewardUsd}</b> for every friend whose account is <b style={{ color: 'var(--text)' }}>activated</b> (minimum deposit verified). Paid in USDT, straight to your wallet.
           </p>
 
           {/* lien de partage */}

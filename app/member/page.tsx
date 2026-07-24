@@ -4,13 +4,14 @@
 // « Algoria trade en ce moment, toi tu regardes de dehors » + UNLOCK (paywall broker) + support Telegram.
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
-import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, BOOK_CALL_URL, type Member, type Referral } from './ui';
+import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount, type Referral } from './ui';
 import { tgHref } from '@/lib/telegram';
+import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string; lot?: number }
 
 export default function MemberHome() {
-  const { member, setMember, referral, unlocked, loading } = useMe();
+  const { member, setMember, accounts, referral, unlocked, loading } = useMe();
   const [trades, setTrades] = useState<FeedTrade[]>([]);
   const [clientLot, setClientLot] = useState(0.01);
   const [busy, setBusy] = useState(false);
@@ -155,6 +156,12 @@ export default function MemberHome() {
         </p>
       </section>
 
+      {/* ➕ MULTI-STRATÉGIES — l'upsell de continuité : le membre live voit dans le VIP les wins des
+          stratégies qu'il n'a PAS ("+$571 S1 STEADY" alors qu'il est en S2)… cette carte est la réponse.
+          Argument honnête : la décorrélation est réelle (quand une stratégie a un jour rouge, les autres
+          compensent souvent). Un compte par stratégie, chez un nouveau broker. */}
+      {unlocked && ['live', 'paused'].includes(member.status) && <AddStrategyCard member={member} accounts={accounts} />}
+
       {/* PARRAINAGE — sur le Home, là où le membre regarde ses gains chaque jour = le moment où il est
           content. On surfe sur la dopamine des wins juste au-dessus : "Algoria vient de te faire gagner,
           amène ton crew et touche $50 par ami financé". La mécanique complète (retrait, historique,
@@ -163,6 +170,47 @@ export default function MemberHome() {
 
       <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />
     </main>
+  );
+}
+
+const STRAT_LABEL: Record<number, { icon: string; name: string }> = { 1: { icon: '🛡️', name: 'S1 STEADY' }, 2: { icon: '⚖️', name: 'S2 BALANCED' }, 3: { icon: '🔥', name: 'S3 TURBO' } };
+
+function AddStrategyCard({ member, accounts }: { member: Member; accounts: MemberAccount[] }) {
+  const active = accounts.filter((a) => a.status !== 'rejected');
+  const used = new Set<number>([Number(member.strategy ?? 2), ...active.map((a) => a.strategy)]);
+  const missing = [1, 2, 3].filter((id) => !used.has(id));
+  const pending = active.filter((a) => a.status === 'pending');
+  if (missing.length === 0 && pending.length === 0) return null; // flotte complète → rien à vendre
+  return (
+    <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'rgba(43,227,245,.3)' }}>
+      {pending.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--gold)' }}>
+          <span>⧗</span>
+          <span><b>{STRAT_LABEL[pending[0].strategy]?.name}</b> — new account under review, unlocks automatically.</span>
+        </div>
+      )}
+      {missing.length > 0 && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <span style={{ fontSize: 16 }}>➕</span>
+            <h2 style={{ margin: 0, fontSize: 15 }}>Run {missing.length > 1 ? 'more strategies' : 'the missing strategy'} in parallel</h2>
+          </div>
+          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.6 }}>
+            You&rsquo;re on <b style={{ color: 'var(--text)' }}>{STRAT_LABEL[Number(member.strategy ?? 2)]?.name}</b>. Members running several strategies get real diversification — when one has a red day, the others often cover it.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {missing.map((id) => (
+              <span key={id} className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 9px', background: 'rgba(10,17,31,.55)' }}>
+                {STRAT_LABEL[id].icon} {STRAT_LABEL[id].name} · from ${STRATEGY_MIN_DEPOSIT[id]}
+              </span>
+            ))}
+          </div>
+          <a href="/member/add-strategy" style={{ padding: '12px 16px', borderRadius: 11, textAlign: 'center', textDecoration: 'none', fontWeight: 800, letterSpacing: 0.5, fontSize: 12.5, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>
+            ➕ ADD A STRATEGY
+          </a>
+        </>
+      )}
+    </section>
   );
 }
 

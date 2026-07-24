@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker } from '../ui';
 import { BROKERS } from '@/lib/member/brokers';
+import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
@@ -112,16 +113,20 @@ export default function Onboarding() {
           <h2 style={{ fontSize: 15, margin: 0 }}>1 · Open your broker account</h2>
           <p style={pMuted}>{FEATURED.note ?? 'Open your account with one of our partner brokers.'}</p>
           <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(FEATURED.key)} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
-          <div style={{ borderLeft: '3px solid var(--gold)', background: 'rgba(245,194,74,.06)', borderRadius: 8, padding: '11px 13px' }}>
+          <div style={{ borderLeft: '3px solid var(--gold)', background: 'rgba(245,194,74,.06)', borderRadius: 8, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
             <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
-              <strong style={{ color: 'var(--gold)' }}>Minimum deposit: $500.</strong> Below that, position sizing doesn&apos;t work even at the lowest risk — trades simply won&apos;t run. Don&apos;t fund less.
+              <strong style={{ color: 'var(--gold)' }}>Minimum deposit: from $200</strong> — it depends on the strategy you&apos;ll pick at the last step. Fund for the one you want:
             </p>
+            <p className="mono" style={{ margin: 0, fontSize: 11, color: 'var(--muted)', letterSpacing: 0.3 }}>
+              🛡️ STEADY <b style={{ color: 'var(--text)' }}>$200</b> · ⚖️ BALANCED <b style={{ color: 'var(--text)' }}>$500</b> · 🔥 TURBO <b style={{ color: 'var(--text)' }}>$1,000</b>
+            </p>
+            <p style={{ ...pMuted, margin: 0, fontSize: 11.5, color: 'var(--dim)' }}>Below the minimum, position sizing doesn&apos;t work — trades simply won&apos;t run.</p>
           </div>
           {!othersOpen ? (
             <button onClick={() => setShowOthers(true)} style={linkBtn}>I&apos;d rather use another broker</button>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>OTHER PARTNER BROKERS — SAME $500 MINIMUM</span>
+              <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>OTHER PARTNER BROKERS — SAME MINIMUMS</span>
               {OTHERS.map((b) => (
                 <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(b.key)}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${picked === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: picked === b.key ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)' }}>
@@ -184,7 +189,7 @@ export default function Onboarding() {
           <div style={grp}>
             <span style={grpLbl}>FOR VERIFICATION</span>
             <label style={lbl}>Full name on your broker account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
-            <label style={lbl}>Amount deposited ($ — min 500)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="500" style={inp} /></label>
+            <label style={lbl}>Amount deposited ($ — min 200)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="500" style={inp} /></label>
             <span style={hint}>Accurate name &amp; deposit = faster approval — the team checks them with the broker before switching the copy on.</span>
           </div>
 
@@ -200,8 +205,9 @@ export default function Onboarding() {
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h2 style={{ fontSize: 15, margin: 0 }}>3 · Choose your strategy</h2>
           <p style={pMuted}>Every strategy copies at the same fixed size — your risk lever is the strategy itself. You can switch anytime from your Profile.</p>
-          <StrategyPicker value={strategy} onPick={setStrategy} busy={busy} />
-          <button disabled={busy} onClick={() => run({ action: 'strategy', choice: strategy }, 'done')} style={ctaMain}>{busy ? 'SAVING…' : '⚡ START COPYING ALGORIA'}</button>
+          {/* budget = dépôt déclaré à l'étape 2 : les stratégies au-dessus sont grisées avec le minimum affiché */}
+          <StrategyPicker value={strategy} onPick={setStrategy} busy={busy} budget={Number(deposit) > 0 ? Number(deposit) : undefined} />
+          <button disabled={busy || (Number(deposit) > 0 && Number(deposit) < (STRATEGY_MIN_DEPOSIT[strategy] ?? 500))} onClick={() => run({ action: 'strategy', choice: strategy }, 'done')} style={ctaMain}>{busy ? 'SAVING…' : '⚡ START COPYING ALGORIA'}</button>
           <button onClick={() => setStep(1)} style={linkBtn}>← Back to MT5 details</button>
         </section>
       )}

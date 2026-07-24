@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { tgHref } from '@/lib/telegram';
 import { pushState, enablePush } from '@/lib/push/client';
+import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 
 export interface Member {
   member_no: number;
@@ -23,6 +24,9 @@ export interface Member {
   referral_code: string | null;
   usdt_trc20: string | null;
 }
+
+// Compte SUPPLÉMENTAIRE (multi-stratégies) — le compte principal reste la fiche Member elle-même.
+export interface MemberAccount { account_no: number; broker: string | null; strategy: number; status: 'pending' | 'live' | 'paused' | 'rejected'; mt5_login: string | null; created_at: string }
 
 export interface RefCommission { id: string; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
 export interface RefPayout { id: string; amount: number; address: string; status: string; tx_hash: string | null; reason: string | null; created_at: string }
@@ -49,6 +53,7 @@ export interface Referral {
  *  `unlocked` = admin OU copie activée (live/paused) — c'est LE drapeau que les pages consultent. */
 export function useMe() {
   const [member, setMember] = useState<Member | null>(null);
+  const [accounts, setAccounts] = useState<MemberAccount[]>([]);
   const [referral, setReferral] = useState<Referral | null>(null);
   const [rejection, setRejection] = useState<{ reason: string; at: string | null } | null>(null);
   const [admin, setAdmin] = useState(false);
@@ -61,11 +66,12 @@ export function useMe() {
       void fetch('/api/member/me')
         .then(async (r) => {
           if (r.status === 401) { router.replace('/member/login'); return null; }
-          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null };
+          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null; accounts?: MemberAccount[] };
         })
         .then((d) => {
           if (!alive || !d?.member) return;
           setMember(d.member);
+          setAccounts(d.accounts ?? []);
           setReferral(d.referral ?? null);
           setRejection(d.rejection ?? null);
           setAdmin(!!d.admin);
@@ -86,7 +92,7 @@ export function useMe() {
   }, []);
   // le serveur fait foi (il connaît la whitelist VIP/équipe) — repli local pour les vieux payloads
   const unlocked = srvUnlocked ?? (admin || member?.status === 'live' || member?.status === 'paused');
-  return { member, setMember, referral, rejection, admin, unlocked, loading };
+  return { member, setMember, accounts, referral, rejection, admin, unlocked, loading };
 }
 
 // ===== MODE TEASER (prospects) — le paywall qui donne envie =====
@@ -171,7 +177,7 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
-                ['1', 'Open your account with the partner broker (min $500 deposit)'],
+                ['1', 'Open your account with the partner broker (from $200 deposit)'],
                 ['2', 'Connect it — encrypted, takes 2 minutes'],
                 ['3', 'Algoria copies every trade to your account, hands-free'],
               ].map(([n, t]) => (
@@ -397,11 +403,16 @@ export const STRATEGY_UI = [
   { id: 3, icon: '🔥', name: 'TURBO', tag: 'More trades, more variance', blurb: 'Aggressive: more trades, wider caps. For those who accept bigger swings both ways.' },
 ] as const;
 
-export function StrategyPicker({ value, onPick, busy }: { value: number; onPick: (id: number) => void; busy?: boolean }) {
+/** budget (optionnel) = dépôt déclaré : les stratégies au-dessus du budget sont grisées avec le minimum
+ *  affiché — le membre voit tout de suite pourquoi et combien il faudrait. exclude = stratégies déjà prises
+ *  (multi-comptes : on ne propose que celles qu'il n'a pas). */
+export function StrategyPicker({ value, onPick, busy, budget, exclude }: { value: number; onPick: (id: number) => void; busy?: boolean; budget?: number; exclude?: number[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      {STRATEGY_UI.map((s) => {
-        const available = STRATEGY_AVAILABLE.includes(s.id);
+      {STRATEGY_UI.filter((s) => !exclude?.includes(s.id)).map((s) => {
+        const min = STRATEGY_MIN_DEPOSIT[s.id] ?? 500;
+        const underBudget = budget != null && budget > 0 && budget < min;
+        const available = STRATEGY_AVAILABLE.includes(s.id) && !underBudget;
         const active = value === s.id;
         return (
           <button
@@ -420,10 +431,12 @@ export function StrategyPicker({ value, onPick, busy }: { value: number; onPick:
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1 }}>
                 {s.name}
+                <span className="mono" style={{ marginLeft: 8, fontSize: 9, letterSpacing: 0.8, color: underBudget ? 'var(--gold)' : 'var(--dim)', fontWeight: 700 }}>min ${min}</span>
                 {s.id === 2 && <span style={{ color: 'var(--dim)', fontWeight: 500 }}> · default</span>}
-                {!available && <span className="mono" style={{ marginLeft: 8, fontSize: 8.5, letterSpacing: 1, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 4, padding: '1px 5px' }}>COMING SOON</span>}
+                {!STRATEGY_AVAILABLE.includes(s.id) && <span className="mono" style={{ marginLeft: 8, fontSize: 8.5, letterSpacing: 1, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 4, padding: '1px 5px' }}>COMING SOON</span>}
               </span>
               <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>{s.tag} — {s.blurb}</span>
+              {underBudget && <span style={{ fontSize: 10.5, color: 'var(--gold)' }}>needs a ${min}+ deposit — fund more to unlock this profile</span>}
             </span>
             {active && <span style={{ marginLeft: 'auto', color: 'var(--cyan)', fontSize: 15 }}>✓</span>}
           </button>
