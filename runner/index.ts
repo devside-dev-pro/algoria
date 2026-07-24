@@ -811,9 +811,20 @@ async function main() {
             const board = await fetchDayScoreboard().catch(() => null);
             const TAGS: Record<number, string> = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' };
             const FLAG: Record<string, string> = { target: '✅ day target hit', lock: '🔒 gains locked', loss: '🛡️ daily cap — downside protected' };
-            const lines = (board ?? []).filter((b) => b.trades > 0 || b.done).map((b) => `${TAGS[b.strategy]} · ${b.net >= 0 ? '🟢 +' : '🔴 −'}$${Math.abs(Math.round(b.net))}${b.reason && FLAG[b.reason] ? ' · ' + FLAG[b.reason] : ''}`);
+            const active = (board ?? []).filter((b) => b.trades > 0 || b.done);
+            const lines = active.map((b) => `${TAGS[b.strategy]} · ${b.net >= 0 ? '🟢 +' : '🔴 −'}$${Math.abs(Math.round(b.net))}${b.reason && FLAG[b.reason] ? ' · ' + FLAG[b.reason] : ''}`);
+            // PHRASE DE CLÔTURE ADAPTATIVE — jamais le mot « rouge » quand tout est vert (com du canal public).
+            // Tout vert → positif franc. Mixte → le vrai argument portefeuille (le rouge de l'un ≠ rouge de tous).
+            // Tout rouge → discipline (caps + track record public). Le mot « red » n'apparaît QUE s'il y a du rouge.
+            const anyRed = active.some((b) => b.net < 0);
+            const allGreen = active.length > 0 && active.every((b) => b.net >= 0);
+            const tagline = allGreen
+              ? "Every strategy green today. 🟢 This is the fleet working — your profile is set in the app. 👊"
+              : anyRed
+                ? "Three strategies, three personalities — a red day on one is rarely a red day on all. Yours is set in the app. 👊"
+                : "Risk stayed capped across the board and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁";
             if (lines.length)
-              void postVip(`📊 DAILY WRAP — the Algoria fleet (master-account scale)\n${lines.join('\n')}\n\nThree strategies, three personalities — a red day on one is rarely a red day on all. Yours is set in the app. 👊`);
+              void postVip(`📊 DAILY WRAP — the Algoria fleet (master-account scale)\n${lines.join('\n')}\n\n${tagline}`);
             else if (stats.net >= 0) void postVip(`📊 DAILY WRAP — ${VIP_TAG}\n${stats.trades} trades · ${wr}% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊`);
             else void postVip(`📊 DAILY WRAP — ${VIP_TAG} · red day · ${stats.trades} trades · ${wr}% win\nRed days are part of the game — they're all in our public track record. Your risk stayed capped and the desk stays disciplined. We go again tomorrow. 🔁`);
           } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} ${VIP_TAG} working · ${stats.trades} trades · ${wr}% win today`);
