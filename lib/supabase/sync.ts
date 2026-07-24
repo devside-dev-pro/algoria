@@ -165,12 +165,12 @@ export async function fetchCandles(symbol: string, timeframe: string, sinceMs: n
 /** Candidats à la RELANCE AUTO : prospects en onboarding depuis 1 à 21 jours, pas touchés (nudge) depuis 3 jours.
  *  Le vocal perso de Mathieu reste l'arme n°1 (file manuelle dans l'admin) — ceci est le FILET pour la longue
  *  traîne qu'il n'a pas le temps de toucher. Cap appliqué par l'appelant. */
-export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; member_no: number | null; tg_username: string | null; days: number }>> {
+export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; member_no: number | null; tg_username: string | null; days: number; step: number }>> {
   const now = Date.now();
   // tables « membre » hors du schéma typé du runner (comme edge_health) → cast assumé
   const raw = db as unknown as { from: (t: string) => any };
   const { data: members } = await raw
-    .from('members').select('tg_id,member_no,tg_username,created_at')
+    .from('members').select('tg_id,member_no,tg_username,created_at,onboarding_step')
     .eq('status', 'onboarding')
     .gte('created_at', new Date(now - 21 * 86_400_000).toISOString())
     .lte('created_at', new Date(now - 1 * 86_400_000).toISOString());
@@ -180,9 +180,9 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
     .eq('kind', 'nudge')
     .gte('created_at', new Date(now - 3 * 86_400_000).toISOString());
   const touched = new Set(((nudges ?? []) as Array<{ tg_id: number }>).map((n) => Number(n.tg_id)));
-  return (members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string }>)
+  return (members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string; onboarding_step: number | null }>)
     .filter((m) => !touched.has(Number(m.tg_id)))
-    .map((m) => ({ tg_id: Number(m.tg_id), member_no: m.member_no, tg_username: m.tg_username, days: Math.floor((now - Date.parse(m.created_at)) / 86_400_000) }));
+    .map((m) => ({ tg_id: Number(m.tg_id), member_no: m.member_no, tg_username: m.tg_username, days: Math.floor((now - Date.parse(m.created_at)) / 86_400_000), step: Number(m.onboarding_step ?? 0) }));
 }
 
 /** Trace une relance (auto ou manuelle) → kind='nudge', status='done' (jamais dans la file support). */

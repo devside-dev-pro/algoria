@@ -763,9 +763,29 @@ async function main() {
 
   // ===== RECAP HORAIRE du desk : à chaque heure pleine, une carte "SESSION RECAP" (stats réelles du jour,
   // hors BEAST) + une clause IA d'ambiance. Rythme le stream et rappelle le track record sans intervention. =====
-  // ===== RELANCE AUTO onboarding (filet de la longue traîne — le vocal perso de Mathieu reste l'arme n°1,
-  // organisé par la file « RELANCES » de l'admin). Chaque jour à 10h UTC : prospects en onboarding depuis
-  // 1-21 j, pas touchés depuis 3 j → push + DM bot (assumé bot, le texte RAMÈNE vers Mathieu). Cap 20/jour.
+  // ===== MACHINE D'ACTIVATION (relance auto onboarding) — le levier n°1 : 84% des inscrits ne financent jamais.
+  // SÉQUENCE MULTI-TOUCH adaptée à (étape, ancienneté) au lieu d'un ping unique répété. Le vocal perso de
+  // Mathieu reste l'arme ultime (file RELANCES admin) ; ceci touche automatiquement toute la longue traîne.
+  // Étape 0 = mur du dépôt (broker + $500) → réchauffer par la PREUVE (vidéo académie) + réassurance.
+  // Étape 1 = connexion MT5 → « tu y es presque, un pas ». Chaque jour à 10h UTC, dédup 3 j, cap 20/j.
+  const ACADEMY = 'app.algoria.tech/academy';
+  // Séquence par ancienneté (bucket) × étape. Touche 1 douce → preuve → adresse le mur → perso → dernier appel.
+  const nudgeMessage = (step: number, days: number): { dm: string; title: string; body: string } => {
+    const s0 = step <= 0; // pas encore commencé (mur du dépôt) vs étape 1 (connexion MT5)
+    if (days <= 2)
+      return s0
+        ? { dm: `Hey — welcome to Algoria 👋\nBefore anything, watch this 2-min video from the founder — it shows exactly what you just joined and how it works:\n\n🎥 ${ACADEMY}\n\nNo rush. When you're ready, your AI is waiting.`, title: '🎥 Start here — 2 min from the founder', body: 'See what Algoria is and how it trades for you. Watch the welcome video.' }
+        : { dm: `You're literally one step from live 🚀 — just connect your MT5 and Algoria starts trading for you.\n\n👉 app.algoria.tech/member/onboarding\n\nStuck? Message @mathieu_algoria, he'll walk you through it in 2 min.`, title: '🚀 One step from live', body: 'Connect your MT5 and the AI takes over. Need a hand? We got you.' };
+    if (days <= 5)
+      return { dm: `Quick proof while you decide 👇\nAlgoria runs 3 strategies live every day — wins, stops and the daily wrap are all posted transparently. This is the engine that would be copying to YOUR account.\n\n🎥 See how it works: ${ACADEMY}\n\nWhenever you're ready.`, title: '📊 Real trades, every day', body: '3 strategies working live. See the proof, then decide.' };
+    if (days <= 9)
+      return s0
+        ? { dm: `The only thing left is opening your broker account and a starting deposit — that's the part people overthink 🙂\nTwo things to know:\n• You keep FULL control of your money — you can withdraw anytime.\n• Algoria trades a fixed, capped size — your risk is bounded every single day.\n\nHere's exactly how, step by step: 👉 app.algoria.tech/member/onboarding\nWant me to walk you through it live? → @mathieu_algoria`, title: "💡 The last step, made simple", body: 'You keep full control, withdraw anytime, risk is capped. Here’s how.' }
+        : { dm: `You're SO close — the MT5 connection is the final step and it takes 60 seconds.\n👉 app.algoria.tech/member/onboarding\n\nIf the broker step is tripping you up, message @mathieu_algoria — he does this all day.`, title: '⏱️ 60 seconds to live', body: 'Just the MT5 connection left. Need help? Message Mathieu.' };
+    if (days <= 14)
+      return { dm: `Hey, it's worth 2 minutes of your time 🙂\nIf anything held you back — the broker, the deposit, a doubt — just tell me. Message @mathieu_algoria directly and I'll sort it with you personally. No pressure, no sales pitch.`, title: '👋 Anything holding you back?', body: 'Message Mathieu directly — he’ll sort it with you personally.' };
+    return { dm: `Last note from me 🤝\nYour Algoria access is still open. When you're ready to let the AI work for you, everything's a couple of clicks away:\n👉 app.algoria.tech/member/onboarding\n\nAnd @mathieu_algoria is one message away if you want a hand.`, title: '🤝 Your access is still open', body: 'Whenever you’re ready, the AI is waiting. Mathieu’s one message away.' };
+  };
   let lastNudgeDay = ''; // relance déjà faite ce jour ? (survit au tick horaire, pas au reboot — recordNudge dédup en base)
   const maybeNudge = async () => {
     const now = new Date();
@@ -778,12 +798,13 @@ async function main() {
       const candidates = (await fetchNudgeCandidates()).slice(0, 20);
       let sent = 0;
       for (const c of candidates) {
-        const dm = await sendDm(c.tg_id, "Hey — Algoria here 🤖 Your access is still 2 minutes from ready: connect your account and the AI starts working for you.\n\n👉 app.algoria.tech/member/onboarding\n\nStuck on something? Message Mathieu directly → @mathieu_algoria — he'll walk you through it.");
-        const push = await pushToUser(c.tg_id, { title: '🚀 Your Algoria access is 2 minutes from ready', body: 'Finish your setup and the AI starts trading for you. Need a hand? We got you.', url: '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
-        await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`);
+        const m = nudgeMessage(c.step, c.days);
+        const dm = await sendDm(c.tg_id, m.dm);
+        const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: c.step <= 0 ? '/member/academy' : '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
+        await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} step${c.step} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`);
         if (dm || push) sent++;
       }
-      if (candidates.length) console.log(`[algoria] relance auto : ${sent}/${candidates.length} prospect(s) touché(s)`);
+      if (candidates.length) console.log(`[algoria] activation : ${sent}/${candidates.length} prospect(s) touché(s)`);
     } catch (e) {
       console.error('[algoria] relance auto échouée:', e);
     }
