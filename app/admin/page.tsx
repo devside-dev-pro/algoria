@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { openTelegram } from '@/lib/telegram';
+import { BROKERS } from '@/lib/member/brokers';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -786,7 +787,14 @@ export default function AdminCRM() {
                     <option key={r.tg_id} value={String(r.tg_id)}>#{r.member_no} {r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '')}</option>
                   ))}
                 </select>
-                <input value={depBroker} onChange={(e) => setDepBroker(e.target.value)} placeholder="broker" style={{ ...inp, width: 150 }} />
+                {/* liste déroulante des 5 brokers partenaires (fini la saisie à la main) — pré-remplie avec le
+                    broker principal du membre au choix du membre ; PENSER à la changer pour le dépôt d'un
+                    2e compte (multi-stratégies). Valeur legacy hors liste conservée en option pour l'édition. */}
+                <select value={depBroker} onChange={(e) => setDepBroker(e.target.value)} style={{ ...inp, width: 160 }}>
+                  <option value="">broker…</option>
+                  {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
+                  {depBroker && !BROKERS.some((b) => b.key === depBroker) && <option value={depBroker}>{depBroker}</option>}
+                </select>
                 <input value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder="deposit $" inputMode="decimal" style={{ ...inp, width: 110 }} />
                 <input value={depCom} onChange={(e) => setDepCom(e.target.value)} placeholder="expected com $" inputMode="decimal" style={{ ...inp, width: 140 }} />
                 <input type="date" value={depDate} onChange={(e) => setDepDate(e.target.value)} style={{ ...inp, width: 150 }} />
