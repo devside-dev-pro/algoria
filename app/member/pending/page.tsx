@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 
 const CHECKS = [
   'Broker account opened through the Algoria link',
-  'Minimum $500 deposit confirmed',
+  'Minimum deposit confirmed ($200–$1,000 depending on your strategy)',
   'Account linked to the Algoria copier',
 ];
 

@@ -46,6 +46,8 @@ export default function AdminCRM() {
   const [nudges, setNudges] = useState<{ tg_id: number; created_at: string; done_by?: string }[]>([]); // historique des relances (auto + manuelles)
   const [runnerLastSeen, setRunnerLastSeen] = useState<number | null>(null); // heartbeat runner (dernière bougie écrite)
   const [legalNames, setLegalNames] = useState<Record<string, string>>({}); // tg_id → nom légal broker (kyc) : LE pont entre les 3 identités
+  // comptes SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut + STH id)
+  const [extraAccounts, setExtraAccounts] = useState<Array<{ id: string; tg_id: number; account_no: number; broker: string | null; strategy: number; status: string; mt5_login: string | null; declared_deposit: number | null }>>([]);
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
   const [depBroker, setDepBroker] = useState('');
@@ -86,6 +88,7 @@ export default function AdminCRM() {
       setNudges(d.nudges ?? []);
       setRunnerLastSeen((d as { runnerLastSeen?: number | null }).runnerLastSeen ?? null);
       setLegalNames((d as { legalNames?: Record<string, string> }).legalNames ?? {});
+      setExtraAccounts(((d as unknown as { extraAccounts?: typeof extraAccounts }).extraAccounts) ?? []);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -559,7 +562,7 @@ export default function AdminCRM() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')}${a.detail?.strategy ? ` · S${String(a.detail.strategy)}` : ''} · `}
+                      {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')}${a.detail?.strategy ? ` · S${String(a.detail.strategy)}` : ''}${a.detail?.add_strategy ? ` · ➕ EXTRA ACCOUNT #${String(a.detail?.account_no ?? '?')} (STH id ${String(a.tg_id)}-${String(a.detail?.account_no ?? '?')})` : ''} · `}
                       {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')}) · `}
                       {a.kind === 'strategy_change' && `→ S${String(a.detail?.to ?? '?')} · `}
                       {/* l'ID que STH affiche pour ce membre (UserID = tg_id) — pour le retrouver dans le dashboard STH */}
@@ -653,6 +656,21 @@ export default function AdminCRM() {
               <span>referred by <b style={{ color: 'var(--text)' }}>{sel.referred_by ? nameOf(sel.referred_by) : '—'}</b></span>
               <span>invited <b style={{ color: 'var(--text)' }}>{rows.filter((r) => Number(r.referred_by) === Number(sel.tg_id)).length}</b></span>
             </div>
+            {/* ➕ COMPTES SUPPLÉMENTAIRES (multi-stratégies) — chaque compte a SON STH id ({tg_id}-{n}) */}
+            {extraAccounts.filter((a) => Number(a.tg_id) === Number(sel.tg_id)).length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid rgba(43,227,245,.25)', borderRadius: 10, padding: '10px 12px', background: 'rgba(43,227,245,.04)' }}>
+                <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--cyan)', fontWeight: 800 }}>➕ EXTRA ACCOUNTS (MULTI-STRATEGY)</span>
+                {extraAccounts.filter((a) => Number(a.tg_id) === Number(sel.tg_id)).map((a) => (
+                  <div key={a.id} className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 11, color: 'var(--muted)', alignItems: 'center' }}>
+                    <b style={{ color: a.status === 'live' ? 'var(--up)' : a.status === 'pending' ? 'var(--gold)' : 'var(--dim)' }}>S{a.strategy} · {a.status}</b>
+                    <span>{a.broker ?? '—'}</span>
+                    <span>MT {a.mt5_login ?? '—'}</span>
+                    {a.declared_deposit != null && <span>${Number(a.declared_deposit)}</span>}
+                    <span>STH id <b style={{ color: 'var(--gold)' }}>{sel.tg_id}-{a.account_no}</b> <button onClick={() => void navigator.clipboard?.writeText(`${sel.tg_id}-${a.account_no}`)} style={miniBtn}>copy</button></span>
+                  </div>
+                ))}
+              </div>
+            )}
             {/* notes privées — le réflexe CRM avant/après chaque appel */}
             <div style={{ display: 'flex', gap: 8 }}>
               <input value={noteText} onChange={(e) => setNoteText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addNote(); }} placeholder="private note — e.g. called on the 12th, waiting for his salary…" style={{ ...inp, flex: 1 }} />

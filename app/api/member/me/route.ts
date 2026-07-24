@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin, isVip } from '@/lib/member/server';
 import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, nextMilestone } from '@/lib/member/affiliate';
+import { minDepositFor } from '@/lib/member/minimums';
+import { BROKERS } from '@/lib/member/brokers';
 
 const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
 
@@ -46,12 +48,14 @@ export async function GET(req: NextRequest) {
   const ctx = await me(req);
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
-  const [refs, commsQ, payoutsQ, rejQ] = await Promise.all([
+  const [refs, commsQ, payoutsQ, rejQ, accountsQ] = await Promise.all([
     db.from('members').select('status').eq('referred_by', ctx.session.tgId),
     db.from('referral_commissions').select('id,kind,amount,status,reason,detail,created_at').eq('referrer_tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
     db.from('referral_payouts').select('id,amount,address,status,tx_hash,reason,created_at').eq('tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
     // dernière connexion REFUSÉE (vérification broker) — affichée dans le wizard pour corriger et re-soumettre
     db.from('member_actions').select('detail,done_at').eq('tg_id', ctx.session.tgId).eq('kind', 'connect').eq('status', 'rejected').order('done_at', { ascending: false }).limit(1),
+    // comptes SUPPLÉMENTAIRES (multi-stratégies) — champs sûrs uniquement, jamais les identifiants
+    (db as any).from('member_accounts').select('account_no,broker,strategy,status,mt5_login,created_at').eq('tg_id', ctx.session.tgId).order('account_no', { ascending: true }) as Promise<{ data: Array<Record<string, unknown>> | null }>,
   ]);
   const rejection = (ctx.member as { status?: string }).status === 'onboarding' && rejQ.data?.[0]
     ? { reason: String((rejQ.data[0].detail as { reject_reason?: string })?.reject_reason ?? 'verification failed'), at: rejQ.data[0].done_at }
@@ -82,7 +86,7 @@ export async function GET(req: NextRequest) {
   const admin = isAdmin(ctx.session.username);
   const status = String((ctx.member as { status?: string }).status ?? '');
   const unlocked = admin || ['live', 'paused'].includes(status) || (await isVip(ctx.session.username));
-  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection });
+  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [] });
 }
 
 /** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'risk'|'pause'|'resume', ... } */
@@ -131,12 +135,17 @@ export async function POST(req: NextRequest) {
     if (![1, 2, 3].includes(choice)) return NextResponse.json({ error: 'invalid strategy' }, { status: 400 });
     patch.strategy = choice;
     if (cur.status === 'onboarding') {
-      patch.onboarding_step = 3;
-      patch.status = 'pending_copier';
       const [{ data: mrow }, { data: kyc }] = await Promise.all([
         db.from('members').select('mt5_login,mt5_server,broker,tg_username').eq('tg_id', s.tgId).limit(1),
         db.from('member_actions').select('detail').eq('tg_id', s.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
       ]);
+      // MINIMUM PAR STRATÉGIE ($200/$500/$1000) : recoupé avec le dépôt déclaré au wizard — un membre à
+      // $200 ne peut pas prendre TURBO ; le front grise déjà, ceci est le verrou serveur.
+      const declared = Number((kyc?.[0]?.detail as { declared_deposit?: number })?.declared_deposit ?? 0);
+      if (declared > 0 && declared < minDepositFor(choice))
+        return NextResponse.json({ error: `this strategy needs a $${minDepositFor(choice)}+ deposit (you declared $${declared}) — pick another strategy or fund more` }, { status: 400 });
+      patch.onboarding_step = 3;
+      patch.status = 'pending_copier';
       await queueAction(s.tgId, 'connect', {
         login: mrow?.[0]?.mt5_login ?? null,
         server: mrow?.[0]?.mt5_server ?? null,
@@ -176,6 +185,53 @@ export async function POST(req: NextRequest) {
     } else {
       await queueAction(s.tgId, 'risk_change', { to: tier, lot: TIER_LOT[tier] }); // → le support règle le lot dans STH
     }
+  } else if (body.action === 'add_account') {
+    // ➕ AJOUTER UNE STRATÉGIE (multi-comptes) — la CONTINUITÉ d'un VIP : un membre déjà live ajoute un
+    // 2e/3e compte sur une stratégie qu'il n'a pas, chez un broker qu'il n'a pas (nouveau broker = nouvelle
+    // commission). Le compte vit dans member_accounts, la fiche members reste le compte principal.
+    if (!['live', 'paused'].includes(cur.status)) return NextResponse.json({ error: 'available once your first account is live' }, { status: 403 });
+    const strat = Number(body.strategy ?? 0);
+    if (![1, 2, 3].includes(strat)) return NextResponse.json({ error: 'invalid strategy' }, { status: 400 });
+    const broker = String(body.broker ?? '').trim().slice(0, 40);
+    if (!BROKERS.some((b) => b.key === broker)) return NextResponse.json({ error: 'pick a partner broker' }, { status: 400 });
+    const platform = String(body.platform ?? 'mt5') === 'mt4' ? 'mt4' : 'mt5';
+    const login = String(body.login ?? '').trim().slice(0, 40);
+    const server = String(body.server ?? '').trim().slice(0, 80);
+    const password = String(body.password ?? '');
+    const fullName = String(body.name ?? '').trim().slice(0, 80);
+    const deposit = Math.round(Number(body.deposit ?? 0));
+    if (!login || !server || !password) return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 });
+    if (fullName.length < 3) return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 });
+    if (!Number.isFinite(deposit) || deposit < minDepositFor(strat))
+      return NextResponse.json({ error: `this strategy needs a $${minDepositFor(strat)}+ deposit` }, { status: 400 });
+    const raw = db as unknown as { from: (t: string) => any };
+    const { data: mrow } = await db.from('members').select('member_no,broker,strategy,tg_username').eq('tg_id', s.tgId).limit(1);
+    const { data: extras } = (await raw.from('member_accounts').select('account_no,broker,strategy,status').eq('tg_id', s.tgId)) as { data: Array<{ account_no: number; broker: string | null; strategy: number; status: string }> | null };
+    const activeExtras = (extras ?? []).filter((a) => a.status !== 'rejected');
+    // une stratégie = un seul compte ; un broker = un seul compte (le doublon broker ne génère pas de commission)
+    const usedStrategies = new Set<number>([Number(mrow?.[0]?.strategy ?? 2), ...activeExtras.map((a) => a.strategy)]);
+    const usedBrokers = new Set<string>([String(mrow?.[0]?.broker ?? ''), ...activeExtras.map((a) => String(a.broker ?? ''))].filter(Boolean));
+    if (usedStrategies.has(strat)) return NextResponse.json({ error: 'you already run this strategy — pick another one' }, { status: 400 });
+    if (usedBrokers.has(broker)) return NextResponse.json({ error: 'you already have an account with this broker — open one with a different partner broker' }, { status: 400 });
+    const accountNo = Math.max(1, ...(extras ?? []).map((a) => a.account_no)) + 1;
+    const { data: inserted, error: insErr } = (await raw.from('member_accounts').insert({
+      tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, account_no: accountNo, broker, strategy: strat,
+      platform, mt5_login: login, mt5_server: server, mt5_password_enc: encryptSecret(password),
+      holder_name: fullName, declared_deposit: deposit,
+    }).select('id')) as { data: Array<{ id: string }> | null; error: { message: string } | null };
+    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+    // carte CONNECT dans la file admin — account_id à bord : le support voit que c'est un compte n°2/3,
+    // le CONNECT STH utilisera les identifiants du COMPTE (userId STH = "{tg_id}-{account_no}").
+    await queueAction(s.tgId, 'connect', {
+      account_id: inserted?.[0]?.id ?? null,
+      account_no: accountNo,
+      login, server, strategy: strat, lot: '0.01', broker,
+      username: mrow?.[0]?.tg_username ?? null,
+      broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4',
+      add_strategy: true, // affichage file : "compte supplémentaire", pas une premières connexion
+    });
+    const { data: fresh } = (await raw.from('member_accounts').select('account_no,broker,strategy,status,mt5_login,created_at').eq('tg_id', s.tgId).order('account_no', { ascending: true })) as { data: Array<Record<string, unknown>> | null };
+    return NextResponse.json({ ok: true, accounts: fresh ?? [] });
   } else if (body.action === 'trc20') {
     // adresse de retrait USDT TRC20 — une seule par membre, format vérifié, changement horodaté (audit)
     const address = String(body.address ?? '').trim();

@@ -121,7 +121,7 @@ export default function Funnel() {
           <h2 style={{ fontSize: 12, letterSpacing: 1.6, color: 'var(--muted)', margin: '0 0 2px', textAlign: 'center' }}>HOW IT WORKS</h2>
           {[
             ['1', 'Watch the AI trade — free', 'The Telegram channel and the app show every analysis and every result, live. No payment, no card, ever.'],
-            ['2', 'Open your account when ready', 'One account with a partner broker (min $500 — your money stays yours, in your name). That single step unlocks everything.'],
+            ['2', 'Open your account when ready', 'One account with a partner broker (from $200 — your money stays yours, in your name). That single step unlocks everything.'],
             ['3', 'The AI trades for you, automatically', 'Every trade you watch live is copied to your account with strict risk control. Watch your balance from the app — pause anytime.'],
           ].map(([n, t, d]) => (
             <div key={n} style={{ display: 'flex', gap: 12, padding: '12px 14px', borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)' }}>
@@ -140,7 +140,7 @@ export default function Funnel() {
           {[
             ['Is it really free? What’s the catch?', 'Yes — the channel, the app and the live are 100% free. Algoria is paid by its partner brokers when members open accounts. You never pay us anything; that’s the whole model, in the open.'],
             ['Where does my money sit?', 'In YOUR broker account, under YOUR name. We never hold or touch your funds — the copier only mirrors trades onto your account. You can pause the copy or withdraw from your broker anytime.'],
-            ['How do I actually start?', 'Join the Telegram channel (free), talk to us, then open an account with a partner broker with $500 or more. Once verified, every AI trade copies to your account automatically.'],
+            ['How do I actually start?', 'Join the Telegram channel (free), talk to us, then open an account with a partner broker — from $200 depending on the strategy you pick. Once verified, every AI trade copies to your account automatically.'],
             ['What are the risks?', 'Trading is risky — period. Every trade has a stop-loss and the AI enforces a daily loss kill-switch, but losing days exist. Never fund with money you can’t afford to lose.'],
             ['Can I see the results before joining?', 'Yes. Everything runs in public: the TikTok lives, the channel, and the app in free mode show the wins as they happen, on a real account.'],
           ].map(([q, a]) => (
