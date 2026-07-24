@@ -1,8 +1,10 @@
 import * as Sdk from 'metaapi.cloud-sdk/esm-node';
-import { recordTradeClose } from '../../lib/supabase/sync';
+import { recordTradeClose, SECONDARY } from '../../lib/supabase/sync';
 import { pushToAll } from '../../lib/push/send';
 import { postVip, VIP_TAG, usd } from '../telegram';
 import type { Signal } from '../../lib/engine/types';
+
+const px2 = (x: number): string => (Math.round(Number(x) * 100) / 100).toString(); // prix propre (coupe le bruit flottant)
 
 // Push "WIN" vers les membres (PWA) — 70/30 : jamais de push sur une perte. Anti-spam : seuil $ + cooldown.
 const WIN_PUSH_MIN = Number(process.env.PUSH_WIN_MIN_USD ?? 100); // en dessous, pas de notif (sinon ~20/jour)
@@ -19,11 +21,12 @@ function maybePushWin(displaySymbol: string, pnl: number) {
   }).then((n) => n && console.log(`[algoria] push win +$${Math.round(pnl)} → ${n} appareil(s)`)).catch(() => {});
 }
 
-// ===== ANNONCES VIP PAR TRADE — le canal VIT : chaque runner poste SES clôtures avec son étiquette.
-// Gains : dès VIP_WIN_MIN (les scratchs BE ne spamment pas). Pertes : pédagogie « le stop a fait son travail »,
-// max 3/jour/stratégie (au-delà, le message « journée coupée » du latch prend le relais).
+// ===== ANNONCES VIP PAR TRADE — le canal VIT : chaque runner poste SES GAINS (3 verts d'un coup = rassurant).
+// PERTES : postées UNIQUEMENT par le primaire (S2) et au plus 1/jour → JAMAIS le mur de 3-9 cartes rouges
+// simultanées quand les 3 stratégies stoppent le même trade corrélé (vécu 24/07 : effet panique). Les pertes
+// de S1/S3 restent visibles, calmement, dans le WRAP du soir + l'analyse de perte au cap journalier.
 const VIP_WIN_MIN = Number(process.env.VIP_WIN_MIN_USD ?? 150);
-const VIP_SL_MAX_PER_DAY = 3;
+const VIP_SL_MAX_PER_DAY = 1;
 let vipSlDay = '';
 let vipSlCount = 0;
 const SL_NOTES = [
@@ -32,17 +35,18 @@ const SL_NOTES = [
   'No stop-loss would mean unlimited risk. This is the cost of doing business — bounded and planned.',
 ];
 function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry?: number, exit?: number) {
-  const px = entry != null && exit ? `<i>${displaySymbol} · ${entry} → ${exit}</i>\n` : `<i>${displaySymbol}</i>\n`;
+  const px = entry != null && exit ? `<i>${displaySymbol} · ${px2(entry)} → ${px2(exit)}</i>\n` : `<i>${displaySymbol}</i>\n`;
   if (pnl >= VIP_WIN_MIN) {
     const how = reason === 'tp' ? 'target hit' : reason === 'trail' ? 'profit locked by trailing stop' : 'banked';
-    // Carte GAIN — titre chiffré en gras, contexte en italique, promesse de copie en clôture.
+    // Carte GAIN — titre chiffré en gras, contexte en italique, promesse de copie en clôture. TOUTES stratégies.
     void postVip(`✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nMaster-account scale — copied to your size automatically.`);
   } else if (reason === 'sl' && pnl < 0) {
+    if (SECONDARY) return; // pertes = le primaire (S2) seul → pas de mur de cartes rouges simultanées
     const day = new Date().toISOString().slice(0, 10);
     if (day !== vipSlDay) { vipSlDay = day; vipSlCount = 0; }
-    if (vipSlCount >= VIP_SL_MAX_PER_DAY) return;
+    if (vipSlCount >= VIP_SL_MAX_PER_DAY) return; // au plus 1 note de stop calme par jour
     vipSlCount++;
-    // Carte STOP — perte bornée, note pédagogique tournante en italique (« le stop a fait son travail »).
+    // Carte STOP — perte bornée, note pédagogique en italique (« le stop a fait son travail »). RARE et posée.
     void postVip(`🛡️ <b>−${usd(pnl)}</b> · ${VIP_TAG}\n${px}\n<i>${SL_NOTES[vipSlCount % SL_NOTES.length]}</i>`);
   }
 }
