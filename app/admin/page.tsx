@@ -444,6 +444,45 @@ export default function AdminCRM() {
             {(aff?.flagged.length ?? 0) > 0 && (
               <div style={{ ...warnBox }}>⚠ negative balances: {aff!.flagged.map((f) => `${f.username ? '@' + f.username : '#' + f.member_no} (${Math.floor(f.balance)}$)`).join(' · ')}</div>
             )}
+            {/* ===== ENTONNOIR D'ACTIVATION — où fuit l'argent. Le levier n°1 : la plupart des inscrits ne
+                financent jamais. On voit la marche qui saigne + la relance auto la travaille chaque jour. */}
+            {(() => {
+              const signups = rows.length;
+              const depositors = new Set(deposits.map((d) => Number(d.tg_id))).size;
+              const liveN = rows.filter((r) => r.status === 'live').length;
+              const started = rows.filter((r) => !(r.status === 'onboarding' && (r.onboarding_step ?? 0) === 0)).length; // a dépassé l'écran broker
+              const step0 = rows.filter((r) => r.status === 'onboarding' && (r.onboarding_step ?? 0) === 0).length;
+              const step1 = rows.filter((r) => r.status === 'onboarding' && (r.onboarding_step ?? 0) >= 1).length;
+              const stages: Array<{ label: string; n: number; col: string }> = [
+                { label: 'signed up', n: signups, col: 'var(--cyan)' },
+                { label: 'started setup', n: started, col: '#7aa2f7' },
+                { label: 'funded', n: depositors, col: 'var(--gold)' },
+                { label: 'copying live', n: liveN, col: 'var(--up)' },
+              ];
+              const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
+              return (
+                <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <h2 style={secH}>🎯 ACTIVATION FUNNEL — where the money leaks</h2>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    {stages.map((s, i) => (
+                      <div key={s.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'center' }}>
+                        <span className="mono" style={{ fontSize: 19, fontWeight: 800, color: s.col }}>{s.n}</span>
+                        <div style={{ width: '100%', height: 8, borderRadius: 5, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}>
+                          <div style={{ width: `${pct(s.n, signups)}%`, height: '100%', background: s.col }} />
+                        </div>
+                        <span style={{ fontSize: 10.5, color: 'var(--muted)', letterSpacing: 0.4, textAlign: 'center' }}>{s.label}</span>
+                        {i > 0 && <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{pct(s.n, stages[i - 1].n)}% of prev</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--muted)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+                    <span>🧱 stuck at <b style={{ color: 'var(--text)' }}>deposit wall</b> (step 0): <b style={{ color: '#ff8a5c' }}>{step0}</b></span>
+                    <span>🔌 stuck at <b style={{ color: 'var(--text)' }}>MT5 connect</b> (step 1): <b style={{ color: 'var(--gold)' }}>{step1}</b></span>
+                    <span style={{ color: 'var(--dim)' }}>· auto-sequence works these daily — your voice notes close them (see below)</span>
+                  </div>
+                </section>
+              );
+            })()}
             {/* le travail en attente, cliquable — le dashboard est un cockpit, pas un tableau mort */}
             {todo > 0 ? (
               <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
