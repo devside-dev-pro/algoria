@@ -13,6 +13,11 @@ export const vipReady = (): boolean => Boolean(TOKEN && VIP);
 /** Étiquette de LA stratégie de ce runner — chaque message VIP dit QUI parle (les 3 runners postent). */
 export const VIP_TAG: string = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' }[ACTIVE_STRATEGY.id] ?? `S${ACTIVE_STRATEGY.id}`;
 
+/** Montant formaté propre : $1,632 (séparateur de milliers) — signe géré par l'appelant. */
+export const usd = (n: number): string => '$' + Math.round(Math.abs(n)).toLocaleString('en-US');
+/** Filet de séparation léger pour aérer les cartes VIP. */
+export const VIP_RULE = '━━━━━━━━━━━━━';
+
 /** DM direct du bot à UN utilisateur (relance onboarding…). Ne marche que si la personne a déjà ouvert le
  *  chat du bot (login natif /start → oui). Renvoie true si envoyé — 403 = chat jamais ouvert, on l'accepte. */
 export async function sendDm(tgId: number, text: string): Promise<boolean> {
@@ -29,14 +34,15 @@ export async function sendDm(tgId: number, text: string): Promise<boolean> {
   }
 }
 
-/** Poste un message texte dans le canal VIP. No-op si non configuré. Ne throw JAMAIS (best-effort). */
+/** Poste dans le canal VIP en HTML (gras/italique/mono → cartes soignées). No-op si non configuré. Ne throw JAMAIS.
+ *  Les messages sont composés en interne (aucune entrée utilisateur) → pas d'échappement nécessaire côté appelant. */
 export async function postVip(text: string): Promise<void> {
   if (!TOKEN || !VIP) return;
   try {
     const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: VIP, text, disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: VIP, text, parse_mode: 'HTML', disable_web_page_preview: true }),
     });
     if (!res.ok) console.error('[algoria] postVip HTTP', res.status, (await res.text()).slice(0, 200));
   } catch (e) {

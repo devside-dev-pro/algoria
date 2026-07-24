@@ -1,7 +1,7 @@
 import * as Sdk from 'metaapi.cloud-sdk/esm-node';
 import { recordTradeClose } from '../../lib/supabase/sync';
 import { pushToAll } from '../../lib/push/send';
-import { postVip, VIP_TAG } from '../telegram';
+import { postVip, VIP_TAG, usd } from '../telegram';
 import type { Signal } from '../../lib/engine/types';
 
 // Push "WIN" vers les membres (PWA) — 70/30 : jamais de push sur une perte. Anti-spam : seuil $ + cooldown.
@@ -32,16 +32,18 @@ const SL_NOTES = [
   'No stop-loss would mean unlimited risk. This is the cost of doing business — bounded and planned.',
 ];
 function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry?: number, exit?: number) {
-  const px = entry != null && exit ? ` · ${entry} → ${exit}` : '';
+  const px = entry != null && exit ? `<i>${displaySymbol} · ${entry} → ${exit}</i>\n` : `<i>${displaySymbol}</i>\n`;
   if (pnl >= VIP_WIN_MIN) {
-    const how = reason === 'tp' ? 'target hit' : reason === 'trail' ? 'profit locked by the trailing stop' : 'banked';
-    void postVip(`✅ ${VIP_TAG} — +$${Math.round(pnl)} on ${displaySymbol} (${how})${px}\nMaster-account scale · copied to your size automatically.`);
+    const how = reason === 'tp' ? 'target hit' : reason === 'trail' ? 'profit locked by trailing stop' : 'banked';
+    // Carte GAIN — titre chiffré en gras, contexte en italique, promesse de copie en clôture.
+    void postVip(`✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nMaster-account scale — copied to your size automatically.`);
   } else if (reason === 'sl' && pnl < 0) {
     const day = new Date().toISOString().slice(0, 10);
     if (day !== vipSlDay) { vipSlDay = day; vipSlCount = 0; }
     if (vipSlCount >= VIP_SL_MAX_PER_DAY) return;
     vipSlCount++;
-    void postVip(`🛡️ ${VIP_TAG} — stopped out $${Math.round(pnl)} on ${displaySymbol}${px}\n${SL_NOTES[vipSlCount % SL_NOTES.length]}`);
+    // Carte STOP — perte bornée, note pédagogique tournante en italique (« le stop a fait son travail »).
+    void postVip(`🛡️ <b>−${usd(pnl)}</b> · ${VIP_TAG}\n${px}\n<i>${SL_NOTES[vipSlCount % SL_NOTES.length]}</i>`);
   }
 }
 
