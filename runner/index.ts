@@ -21,7 +21,7 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from '.
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -788,12 +788,38 @@ async function main() {
   };
   if (!SECONDARY) setInterval(() => void maybeNudge(), 3600_000); // relances = un seul runner (S2), sinon triple envoi
 
+  // ===== CONTENU VIP À VALEUR (au-delà des trades) : briefing du matin + pédagogie tournante — pour que le
+  // canal VIT et donne des messages « forwardables » vers le public. Postés par le SEUL runner primaire (S2).
+  const VIP_TAGS: Record<number, string> = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' };
+  const VIP_TIPS = [
+    "🎓 <b>Why the stop moves</b>\nWhen a trade goes our way, Algoria trails the stop up — first to breakeven, then behind price. A trade that reverses exits <b>in profit</b> instead of at zero. Winners protected, not cut short.",
+    "🎓 <b>Why we stand aside around news</b>\nHigh-impact releases turn spreads into a casino. Algoria simply doesn't trade the minutes around them — no edge, no trade. Discipline over FOMO.",
+    "🎓 <b>What the daily cap means</b>\nEach strategy has a hard floor for the day. Hit it and Algoria stops — your downside is bounded <b>before the session even starts</b>. No revenge trading, ever.",
+    "🎓 <b>Why small wins compound</b>\nAlgoria banks many small high-probability wins rather than swinging for heroes. Boring by design — because boring survives, and survivors compound.",
+    "🎓 <b>Three strategies, one engine</b>\n🌱 Steady books quick daily targets · ⚖️ Balanced runs the reference edge · 🚀 Turbo trades more for more variance. Pick the temperament that fits you.",
+    "🎓 <b>The ratchet</b>\nOnce a day is nicely green, Algoria locks it and stops — a strong morning can't be given back by an afternoon. Protecting a good day is half the game.",
+  ];
+  const briefing = (c: { regime: string; adx: number; atrPct: number; price: number }): string => {
+    const regime = c.regime === 'trend' ? '📈 TREND' : '📊 RANGE';
+    const vol = c.atrPct >= 0.66 ? 'high' : c.atrPct <= 0.33 ? 'quiet' : 'normal';
+    const read = c.adx >= 25 ? 'strong directional pressure' : c.adx >= 18 ? 'building direction' : 'no clear trend yet';
+    return `🌅 <b>MORNING BRIEFING</b> · gold\n${VIP_RULE}\nMarket <b>${regime}</b>  ·  volatility <b>${vol}</b>\nRead: ${read} (ADX ${Math.round(c.adx)})${c.price ? `\nGold  <code>~ ${c.price}</code>` : ''}\n${VIP_RULE}\n<i>Algoria only fires on confluence and stands aside when the tape is unclear. Every copy lands in your account automatically.</i>`;
+  };
+
   let lastRecapHour = new Date().getUTCHours(); // pas de recap au démarrage — on attend la prochaine heure pleine
   if (!SECONDARY) setInterval(() => {
     void (async () => {
       const h = new Date().getUTCHours();
       if (h === lastRecapHour) return;
       lastRecapHour = h;
+      // CONTENU PROGRAMMÉ (indépendant du nombre de trades du jour) : briefing 06h UTC (avant Londres),
+      // pédagogie 14h UTC (rotation déterministe par jour). Gaté par l'env VIP.
+      if (vipReady()) {
+        try {
+          if (h === 6) { const c = await fetchLatestContext(); if (c) void postVip(briefing(c)); }
+          else if (h === 14) void postVip(VIP_TIPS[Math.floor(Date.now() / 86_400_000) % VIP_TIPS.length]);
+        } catch (e) { console.error('[algoria] contenu VIP programmé échoué:', e); }
+      }
       try {
         const stats = await fetchDayTradeStats();
         if (!stats || stats.trades === 0) return; // rien à raconter
@@ -828,6 +854,32 @@ async function main() {
               void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · master-account scale</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}`);
             else if (stats.net >= 0) void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  green day 🟢\n\nAll copied to your account. See you tomorrow. 👊`);
             else void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  ${wr}% win\n\nRisk stayed capped and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁`);
+
+            // 🏆 TRADE DU JOUR (le meilleur gagnant flotte, ≥ $200) — LE forward parfait vers le public.
+            const dayStartIso = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+            const top = await fetchTopTrade(dayStartIso).catch(() => null);
+            if (top && top.pnl >= 200)
+              void postVip(`🏆 <b>TRADE OF THE DAY</b>\n${VIP_RULE}\n${VIP_TAGS[top.strategy] ?? `S${top.strategy}`}\n<b>+${usd(top.pnl)}</b> on ${top.symbol}\n${VIP_RULE}\n<i>Cleanly executed and copied to every account on this strategy.</i>`);
+            // dimanche : 🏆 TRADE DE LA SEMAINE
+            if (new Date().getUTCDay() === 0) {
+              const wtop = await fetchTopTrade(new Date(Date.now() - 7 * 86_400_000).toISOString()).catch(() => null);
+              if (wtop && wtop.pnl >= 300)
+                void postVip(`🏆 <b>TRADE OF THE WEEK</b>\n${VIP_RULE}\n${VIP_TAGS[wtop.strategy] ?? `S${wtop.strategy}`}\n<b>+${usd(wtop.pnl)}</b> on ${wtop.symbol}\n${VIP_RULE}\n<i>Seven days, one standout — and everyone on this strategy caught it.</i>`);
+            }
+
+            // 🔥 SÉRIES & RECORDS — preuve sociale « forwardable ». Net flotte par jour → série de jours verts + record.
+            const nets = await fetchFleetDailyNets(14).catch(() => [] as Array<{ day: string; net: number }>);
+            if (nets.length) {
+              const today = nets[nets.length - 1];
+              let streak = 0;
+              for (let i = nets.length - 1; i >= 0 && nets[i].net >= 0; i--) streak++;
+              const isRecord = nets.length >= 3 && today.net > 0 && today.net === Math.max(...nets.map((n) => n.net));
+              const badges: string[] = [];
+              if (allGreen && active.length >= 2) badges.push(`🟢 <b>FLEET ALL-GREEN</b> — ${active.length}/${active.length} strategies green today`);
+              if (streak >= 3) badges.push(`🔥 <b>${streak} green days in a row</b> across the fleet`);
+              if (isRecord) badges.push(`⚡ <b>New record day</b> — +${usd(today.net)}, our best since launch`);
+              if (badges.length) void postVip(`${badges.join('\n')}\n\n<i>This is the track record building in real time. 👊</i>`);
+            }
           } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} ${VIP_TAG} <b>working</b> · ${stats.trades} trades · ${wr}% win today`);
         }
         // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
