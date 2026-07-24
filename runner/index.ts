@@ -3,7 +3,7 @@ import './env-check'; // valide les variables d'env et arrête net avec un messa
 import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
-import { postVip, vipReady, VIP_TAG } from './telegram';
+import { postVip, vipReady, VIP_TAG, usd, VIP_RULE } from './telegram';
 import { SECONDARY } from '../lib/supabase/sync';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
 import { manageBreakeven, rememberManagement } from './metaapi/manage';
@@ -365,13 +365,13 @@ async function main() {
                 ? await narrateLossReview({ trades: stats?.trades ?? 0, wins: stats?.wins ?? 0, net: stats?.net ?? 0, regime: context.regime, adx: context.adx, atrPct: context.atrPercentile })
                 : null;
               void postVip(
-                `🛡️ ${VIP_TAG} hit its daily safety limit and stopped for the day.\nWhy: ${why} — a cluster of stops, not a drift. The cap did its job: your downside is bounded for the day.${clause ? `\n\n${clause}` : ''}\nWe never force trades. Fresh start tomorrow. 🔁`,
+                `🛡️ <b>${VIP_TAG} — day closed, downside protected</b>\n\n${why} — a cluster of stops, not a drift. The daily cap did its job: your loss is bounded for the day.${clause ? `\n\n<i>${clause}</i>` : ''}\n\nWe never force trades. Fresh start tomorrow. 🔁`,
               );
             } else if (state.dayDoneReason === 'lock') {
               // RATCHET : journée verrouillée EN PROFIT après un pic — message positif (on protège les gains).
-              void postVip(`🔒 ${VIP_TAG} locked in today's gains and wrapped up.\nThe day peaked, gave a little back, and the safety ratchet closed the book while still green — profits protected, no give-back spiral.`);
+              void postVip(`🔒 <b>${VIP_TAG} — gains locked, wrapped for the day</b>\n\nThe day peaked, gave a little back, and the safety ratchet closed the book <b>while still green</b>. Profit protected — no give-back spiral.`);
             } else {
-              void postVip(`✅ ${VIP_TAG} hit its daily target and wrapped up for the day.\nSmall consistent days — that's the plan working.`);
+              void postVip(`✅ <b>${VIP_TAG} — daily target hit</b>\n\nWrapped up for the day. Small consistent days — that's the plan working. 👊`);
             }
           }
           const blockedForDay = !SECONDARY && state.dayDone && blocked && (blockedReasons?.some((r) => r.includes('day closed')) ?? false);
@@ -382,7 +382,7 @@ async function main() {
               lastVipSetup = { dir: blocked.direction, at: now };
               const arrow = blocked.direction === 'long' ? '🔼 LONG' : '🔽 SHORT';
               void postVip(
-                `🎯 MANUAL SETUP — ${DISPLAY}\n${arrow} · conviction ${(blocked.confidence * 100) | 0}%\nEntry ~ ${blocked.entry}\n🛑 SL ${blocked.stopLoss}\n🎯 TP ${blocked.takeProfits[0]}\n\n${VIP_TAG} is done for the day (other strategies may still be running) — this one's over to you. Indicative levels, your risk, your call.`,
+                `🎯 <b>MANUAL SETUP</b> · ${DISPLAY}\n${VIP_RULE}\n${arrow}  ·  conviction <b>${(blocked.confidence * 100) | 0}%</b>\nEntry  <code>~ ${blocked.entry}</code>\n🛑 SL  <code>${blocked.stopLoss}</code>\n🎯 TP  <code>${blocked.takeProfits[0]}</code>\n${VIP_RULE}\n<i>${VIP_TAG} is done for the day (other strategies may still be running) — this one's over to you. Indicative levels, your risk, your call.</i>`,
               );
             }
           }
@@ -486,7 +486,7 @@ async function main() {
             if (ticket) {
               rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, ladder: SW.ladder, riskDist: Math.abs(sig.entry - sig.stopLoss) });
               await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at 1R, ${SW.trailDist}R trailing)`, 'order');
-              if (vipReady() && !SECONDARY) void postVip(`📈 ${VIP_TAG} just opened a CORE position — ${DISPLAY} ${sig.direction.toUpperCase()}\nEntry ~ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]}\nThis one can ride for days. Copied to your account.`);
+              if (vipReady() && !SECONDARY) void postVip(`📈 <b>CORE position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction.toUpperCase()}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n🎯 TP  <code>${sig.takeProfits[0]}</code>\n${VIP_RULE}\n<i>This one can ride for days. Copied to your account.</i>`);
             }
           }
         } catch (e) {
@@ -812,7 +812,8 @@ async function main() {
             const TAGS: Record<number, string> = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' };
             const FLAG: Record<string, string> = { target: '✅ day target hit', lock: '🔒 gains locked', loss: '🛡️ daily cap — downside protected' };
             const active = (board ?? []).filter((b) => b.trades > 0 || b.done);
-            const lines = active.map((b) => `${TAGS[b.strategy]} · ${b.net >= 0 ? '🟢 +' : '🔴 −'}$${Math.abs(Math.round(b.net))}${b.reason && FLAG[b.reason] ? ' · ' + FLAG[b.reason] : ''}`);
+            // chaque stratégie = 2 lignes aérées : nom en gras, puis le net + drapeau (bloc lisible, pas empilé serré).
+            const lines = active.map((b) => `${TAGS[b.strategy].replace(/^(\S+)\s(.+)$/, '$1 <b>$2</b>')}\n   ${b.net >= 0 ? '🟢 +' : '🔴 −'}<b>${usd(b.net)}</b>${b.reason && FLAG[b.reason] ? '  ·  ' + FLAG[b.reason] : ''}`);
             // PHRASE DE CLÔTURE ADAPTATIVE — jamais le mot « rouge » quand tout est vert (com du canal public).
             // Tout vert → positif franc. Mixte → le vrai argument portefeuille (le rouge de l'un ≠ rouge de tous).
             // Tout rouge → discipline (caps + track record public). Le mot « red » n'apparaît QUE s'il y a du rouge.
@@ -824,10 +825,10 @@ async function main() {
                 ? "Three strategies, three personalities — a red day on one is rarely a red day on all. Yours is set in the app. 👊"
                 : "Risk stayed capped across the board and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁";
             if (lines.length)
-              void postVip(`📊 DAILY WRAP — the Algoria fleet (master-account scale)\n${lines.join('\n')}\n\n${tagline}`);
-            else if (stats.net >= 0) void postVip(`📊 DAILY WRAP — ${VIP_TAG}\n${stats.trades} trades · ${wr}% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊`);
-            else void postVip(`📊 DAILY WRAP — ${VIP_TAG} · red day · ${stats.trades} trades · ${wr}% win\nRed days are part of the game — they're all in our public track record. Your risk stayed capped and the desk stays disciplined. We go again tomorrow. 🔁`);
-          } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} ${VIP_TAG} working · ${stats.trades} trades · ${wr}% win today`);
+              void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · master-account scale</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}`);
+            else if (stats.net >= 0) void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  green day 🟢\n\nAll copied to your account. See you tomorrow. 👊`);
+            else void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  ${wr}% win\n\nRisk stayed capped and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁`);
+          } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} ${VIP_TAG} <b>working</b> · ${stats.trades} trades · ${wr}% win today`);
         }
         // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
         if (h === 21 && stats.net > 0) {
