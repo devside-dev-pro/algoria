@@ -233,6 +233,35 @@ export async function fetchDayScoreboard(): Promise<Array<{ strategy: number; ne
   return [1, 2, 3].map((s) => ({ strategy: s, net: by.get(s)?.net ?? 0, trades: by.get(s)?.trades ?? 0, done: flags.get(s)?.done ?? false, reason: flags.get(s)?.reason ?? null }));
 }
 
+/** MEILLEUR trade gagnant depuis `sinceIso` (toutes stratégies) — pour « Trade du jour / de la semaine ». */
+export async function fetchTopTrade(sinceIso: string): Promise<{ symbol: string; pnl: number; strategy: number } | null> {
+  const { data } = await db.from('trades').select('symbol,pnl,strategy' as never).gte('closed_at', sinceIso).not('pnl', 'is', null).order('pnl', { ascending: false }).limit(1);
+  const t = data?.[0] as { symbol?: string; pnl?: number; strategy?: number } | undefined;
+  if (!t || Number(t.pnl) <= 0) return null;
+  return { symbol: String(t.symbol ?? 'XAUUSD'), pnl: Number(t.pnl), strategy: Number(t.strategy ?? 2) };
+}
+
+/** Net FLOTTE (toutes stratégies) par jour UTC sur N jours — pour séries de jours verts + records. */
+export async function fetchFleetDailyNets(days = 14): Promise<Array<{ day: string; net: number }>> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data } = await db.from('trades').select('closed_at,pnl').gte('closed_at', since).not('pnl', 'is', null).not('closed_at', 'is', null);
+  const by = new Map<string, number>();
+  for (const r of (data ?? []) as Array<{ closed_at: string; pnl: number }>) {
+    const day = new Date(r.closed_at).toISOString().slice(0, 10);
+    by.set(day, (by.get(day) ?? 0) + Number(r.pnl));
+  }
+  return [...by.entries()].map(([day, net]) => ({ day, net })).sort((a, b) => a.day.localeCompare(b.day));
+}
+
+/** Dernier contexte marché (régime/vol/force) + prix or — pour le briefing du matin. */
+export async function fetchLatestContext(): Promise<{ regime: string; adx: number; atrPct: number; price: number } | null> {
+  const { data: s } = await db.from('state_snapshots').select('regime,adx,atr_percentile').order('ts', { ascending: false }).limit(1);
+  const { data: c } = await db.from('candles').select('close').eq('symbol', 'XAUUSD').eq('timeframe', 'M5').order('time', { ascending: false }).limit(1);
+  if (!s?.[0]) return null;
+  const row = s[0] as { regime?: string; adx?: number; atr_percentile?: number };
+  return { regime: String(row.regime ?? 'range'), adx: Number(row.adx ?? 0), atrPct: Number(row.atr_percentile ?? 0), price: Number((c?.[0] as { close?: number } | undefined)?.close ?? 0) };
+}
+
 /** Bulletin de santé d'un edge (sentinelle hebdo) → table edge_health. */
 export async function recordEdgeHealth(row: { strategy: string; windowDays: number; trades: number; winRate: number | null; profitFactor: number | null; net: number; status: string }) {
   const { error } = await (db as any).from('edge_health').insert({
