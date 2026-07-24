@@ -4,13 +4,13 @@
 // « Algoria trade en ce moment, toi tu regardes de dehors » + UNLOCK (paywall broker) + support Telegram.
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
-import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, BOOK_CALL_URL, type Member } from './ui';
+import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, BOOK_CALL_URL, type Member, type Referral } from './ui';
 import { tgHref } from '@/lib/telegram';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string; lot?: number }
 
 export default function MemberHome() {
-  const { member, setMember, unlocked, loading } = useMe();
+  const { member, setMember, referral, unlocked, loading } = useMe();
   const [trades, setTrades] = useState<FeedTrade[]>([]);
   const [clientLot, setClientLot] = useState(0.01);
   const [busy, setBusy] = useState(false);
@@ -155,8 +155,58 @@ export default function MemberHome() {
         </p>
       </section>
 
+      {/* PARRAINAGE — sur le Home, là où le membre regarde ses gains chaque jour = le moment où il est
+          content. On surfe sur la dopamine des wins juste au-dessus : "Algoria vient de te faire gagner,
+          amène ton crew et touche $50 par ami financé". La mécanique complète (retrait, historique,
+          paliers) reste dans le Profil ; ici c'est le déclencheur en un tap. */}
+      {unlocked && referral?.code && <InviteCard referral={referral} hasWins={wins.length > 0} />}
+
       <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />
     </main>
+  );
+}
+
+function InviteCard({ referral, hasWins }: { referral: Referral; hasWins: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const reward = referral.rewardUsd || 50;
+  const link = `https://app.algoria.tech/r/${referral.code}`;
+  const share = () => {
+    const text = 'Algoria is the AI that trades gold & Bitcoin for me on autopilot — my account just copies it. Get in with my link 👇';
+    if (typeof navigator !== 'undefined' && navigator.share) void navigator.share({ title: 'Join Algoria', text, url: link }).catch(() => {});
+    else { void navigator.clipboard?.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1600); }
+  };
+  const earned = referral.totalEarnedUsd || 0;
+  return (
+    <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, borderColor: 'rgba(245,194,74,.4)', boxShadow: '0 0 22px rgba(245,194,74,.07)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <span style={{ fontSize: 17 }}>💸</span>
+        <h2 style={{ margin: 0, fontSize: 15.5 }}>Invite friends — earn <span className="goldText">${reward}</span> each</h2>
+      </div>
+      <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+        {hasWins
+          ? <>Algoria&rsquo;s on a roll right now — the perfect moment to bring someone in. You pocket <b className="goldText">${reward}</b> for every friend who funds their account, paid in USDT.</>
+          : <>Every friend whose account gets funded pays you <b className="goldText">${reward}</b>, straight to your wallet in USDT. Share once, earn on repeat.</>}
+      </p>
+      <button onClick={share} style={{ padding: '13px 16px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)', boxShadow: '0 8px 24px rgba(245,166,35,.24)' }}>
+        {copied ? '✓ LINK COPIED — paste it anywhere' : '🚀 SHARE MY INVITE LINK'}
+      </button>
+      {(referral.activated > 0 || earned > 0) ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5 }}>
+          <span style={{ color: 'var(--muted)' }}><b style={{ color: 'var(--up)' }}>{referral.activated}</b> activated</span>
+          <span style={{ color: 'var(--dim)' }}>·</span>
+          <span className="goldText" style={{ fontWeight: 800 }}>${earned} earned</span>
+          {referral.nextMilestone && (
+            <>
+              <span style={{ flex: 1 }} />
+              <span style={{ color: 'var(--dim)', fontSize: 10.5 }}>{referral.nextMilestone.remaining} more → +${referral.nextMilestone.bonus}</span>
+            </>
+          )}
+          <a href="/member/profile" style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--cyan)', textDecoration: 'none', fontWeight: 700 }}>track →</a>
+        </div>
+      ) : (
+        <a href="/member/profile" style={{ margin: 0, fontSize: 11.5, color: 'var(--cyan)', textDecoration: 'none', fontWeight: 700 }}>See how it works & track your earnings →</a>
+      )}
+    </section>
   );
 }
 
