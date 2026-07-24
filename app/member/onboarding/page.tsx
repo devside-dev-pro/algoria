@@ -1,10 +1,39 @@
 'use client';
 // Wizard d'adhésion en 3 étapes : broker (Raise en avant, minimum 500$) → connexion MT5 (chiffrée) → profil de risque.
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker } from '../ui';
 import { BROKERS } from '@/lib/member/brokers';
+
+// PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
+// le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
+// et la vidéo du fondateur à un clic. Données via /api/public/proof (public, caché, always-green).
+function ConfidencePanel() {
+  const [week, setWeek] = useState<{ count: number; best: number } | null>(null);
+  useEffect(() => {
+    void fetch('/api/public/proof').then((r) => r.json()).then((d: { week?: { count: number; best: number } }) => setWeek(d.week ?? null)).catch(() => {});
+  }, []);
+  return (
+    <section className="panel cardIn" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, border: '1px solid rgba(43,227,245,.28)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 20 }}>⚡</span>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 750 }}>You&apos;re joining a system that&apos;s already working</div>
+          {week && week.count > 0 && (
+            <div className="mono" style={{ fontSize: 11.5, color: 'var(--up)' }}>this week: <b>{week.count} wins</b> · best trade <b>+${week.best}</b></div>
+          )}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', fontSize: 11.5, color: 'var(--muted)' }}>
+        <span>🔒 <b style={{ color: 'var(--text)' }}>You keep full control</b> of your funds</span>
+        <span>💸 <b style={{ color: 'var(--text)' }}>Withdraw anytime</b></span>
+        <span>🛡️ <b style={{ color: 'var(--text)' }}>Risk capped</b> every single day</span>
+      </div>
+      <a href="/member/academy" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, textDecoration: 'none', fontWeight: 750, fontSize: 12.5, color: 'var(--cyan)', border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)' }}>▶ New here? Watch the 2-min founder intro</a>
+    </section>
+  );
+}
 
 const FEATURED = BROKERS.find((b) => b.featured) ?? BROKERS[0];
 const OTHERS = BROKERS.filter((b) => !b.featured);
@@ -75,6 +104,8 @@ export default function Onboarding() {
           </div>
         </div>
       )}
+
+      {cur === 0 && <ConfidencePanel />}
 
       {cur === 0 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
