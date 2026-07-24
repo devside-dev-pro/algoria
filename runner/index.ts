@@ -15,6 +15,7 @@ import { breakoutSignal } from '../lib/engine/breakout';
 import { swingSignal, swingMinBars } from '../lib/engine/swing';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
+import { ACTIVE_STRATEGY } from '../lib/engine/strategies';
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
 import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from './news';
@@ -328,7 +329,9 @@ async function main() {
         await logCandle(DISPLAY, bars[bars.length - 1], 'M5');
         // WATCH-ONLY (ex. BTC) : le desk lit et raconte le marché, mais l'auto ne tire JAMAIS — aucun edge
         // validé. Le signal éventuel devient une simple « opportunity » à l'écran (le manuel reste possible).
-        const autoSignal = inst.watchOnly ? null : signal;
+        // S3 (intraday='breakout') : le scalp de confluence est ÉTEINT → le breakout devient le moteur principal
+        // (le bloc breakout ci-dessous tire dès que autoSignal est null). Décorrélation phase 2 — voir strategies.ts.
+        const autoSignal = inst.watchOnly || ACTIVE_STRATEGY.intraday === 'breakout' ? null : signal;
         if (autoSignal) {
           // Garde-fou PORTEFEUILLE (global) au-dessus des limites par-symbole : on ne laisse pas l'or + le Nasdaq
           // (+ Forex à venir) empiler des positions corrélées. N'affecte que l'auto (manuel/show restent libres).
@@ -594,8 +597,7 @@ async function main() {
 
   // Diagnostic STRATÉGIE au boot — chaque runner/master tourne UN profil (env ALGORIA_STRATEGY, défaut S2).
   {
-    const { ACTIVE_STRATEGY } = await import('../lib/engine/strategies');
-    console.log(`[algoria] strategy: ${ACTIVE_STRATEGY.label} · thr ${ACTIVE_STRATEGY.thresholdScalp} · RR ${ACTIVE_STRATEGY.targetRR} · asia ${ACTIVE_STRATEGY.tradeAsia ? 'on' : 'OFF'} · caps +${ACTIVE_STRATEGY.dailyProfitTargetPct * 100}%/−${ACTIVE_STRATEGY.maxDailyLossPct * 100}% · swing ${ACTIVE_STRATEGY.swing ? 'on' : 'off'} · breakout ${ACTIVE_STRATEGY.breakout ? 'on' : 'off'}`);
+    console.log(`[algoria] strategy: ${ACTIVE_STRATEGY.label} · intraday ${ACTIVE_STRATEGY.intraday ?? 'scalp'}${ACTIVE_STRATEGY.intraday === 'breakout' ? ` N${ACTIVE_STRATEGY.breakoutN ?? 96}` : ` thr ${ACTIVE_STRATEGY.thresholdScalp} · RR ${ACTIVE_STRATEGY.targetRR}`} · asia ${ACTIVE_STRATEGY.tradeAsia ? 'on' : 'OFF'} · caps +${ACTIVE_STRATEGY.dailyProfitTargetPct * 100}%/−${ACTIVE_STRATEGY.maxDailyLossPct * 100}% · swing ${ACTIVE_STRATEGY.swing ? 'on' : 'off'} · breakout ${ACTIVE_STRATEGY.breakout ? 'on' : 'off'}`);
   }
 
   // Diagnostic canal VIP au boot — dit dans les logs Railway pourquoi ça ne poste pas (token/chat manquant).

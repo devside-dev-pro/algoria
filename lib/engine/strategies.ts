@@ -37,6 +37,15 @@ export interface StrategyProfile {
   //   Constat honnête : S2×S3 restent frères (corr 0.89) tant qu'ils partagent le même générateur de
   //   signaux — la VRAIE décorrélation demandera une famille de signaux différente (labo à venir).
   regimeGate?: 'trend' | 'range';
+  // DÉCORRÉLATION PHASE 2 (étude 24/7) — famille de signaux INTRADAY de la stratégie :
+  //   'scalp' (défaut) = confluence sur les REJETS de niveaux · 'breakout' = cassures Donchian.
+  // Le scalp et le breakout ne peuvent PAS tirer au même instant (un niveau tient→rejet OU casse→breakout) :
+  // basculer S3 en 'breakout' N32 fait CHUTER sa corrélation avec S2 de 0.89→0.15 et les trades partagés de
+  // ~135→25, en RESTANT robuste (deux moitiés vertes, tout le voisinage N26-44) et fréquent (8.7 trades/j → S3
+  // garde son identité TURBO). Quand intraday='breakout', le scalp de confluence s'éteint et le breakout devient
+  // le moteur intraday principal (au lieu de couche additive). breakoutN = fenêtre Donchian (défaut 96).
+  intraday?: 'scalp' | 'breakout';
+  breakoutN?: number;
   // PLAFOND DES STOPS (× ATR) — étude 22/7 : les stops « monstres » (800-1000$+) effraient les VIP. Serrer la
   // LARGEUR (slAtrMult) tue l'edge (re-confirmé : tout ≤1.0/cap 2.5 casse juillet), mais REFUSER les setups à
   // stop extrême paie : cap 3.2→2.8 sur S2 : net +19 701→+23 336$, verts 66→71%, perte moyenne −13%, pire
@@ -61,7 +70,11 @@ export const STRATEGIES: Record<string, StrategyProfile> = {
   '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: true },
   // S3 : étude dédiée faite (20-21/7) — minRR 0.2 saignait juillet (−8 929$ au backtest) ; 0.75 + trailing
   // rendent les deux moitiés positives. Reste TURBO par son seuil bas (0.20 → ~2× plus de trades que S2) et ses caps larges.
-  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — more trades, more variance', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, regimeGate: 'trend', maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: true },
+  // S3 : moteur intraday = CASSURES (breakout Donchian N32) — décorrélé de S2 (corr 0.89→0.15). Le scalp
+  // (thresholdScalp/regimeGate) devient inerte ; targetRR/minRR/trailing/maxStopAtr ne pilotent plus que
+  // l'éventuel scalp — le breakout a ses propres sorties (GOLD_BREAKOUT : BE 0.7 · trail 0.8/0.5). Reste TURBO
+  // par sa fréquence (8.7 trades/j) et ses caps larges (±8/−6). Swing de fond conservé.
+  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — breakout-driven, decorrelated', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, intraday: 'breakout', breakoutN: 32, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: true },
 };
 
 /** Stratégie du runner courant (env ALGORIA_STRATEGY, défaut 2 = comportement actuel). */

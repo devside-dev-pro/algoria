@@ -65,7 +65,9 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     // 2ᵉ cerveau : cassures Donchian 8h — EN PLUS du scalp (labo 30.5j : PF 1.50, +$2248, ~3.6 setups/j,
     // tiers ✅✅✅). Le scalp joue les rejets, le breakout joue les cassures. Cap 1 position/symbole partagé.
     // S1 les coupe : une position tenue des heures/jours casse la promesse « objectif du jour puis stop ».
-    breakout: STRAT.breakout ? GOLD_BREAKOUT : undefined,
+    // S3 (intraday='breakout') : le breakout est le MOTEUR principal, fenêtre N32 (plus fréquente, décorrélée).
+    // S2 : couche additive N96 (défaut). breakoutN pilote la fenêtre Donchian par stratégie.
+    breakout: STRAT.breakout ? { ...GOLD_BREAKOUT, N: STRAT.breakoutN ?? GOLD_BREAKOUT.N } : undefined,
     // 3ᵉ couche : SWING de fond H1 (labo 1.75 an : PF 2.21, +88%, tenue moy 3.5 j, en position 67% du temps).
     swing: STRAT.swing ? GOLD_SWING : undefined,
   },
