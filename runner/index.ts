@@ -842,6 +842,18 @@ async function main() {
     return `🌅 <b>MORNING BRIEFING</b> · gold\n${VIP_RULE}\nMarket <b>${regime}</b>  ·  volatility <b>${vol}</b>\nRead: ${read} (ADX ${Math.round(c.adx)})${c.price ? `\nGold  <code>~ ${c.price}</code>` : ''}\n${VIP_RULE}\n<i>Algoria only fires on confluence and stands aside when the tape is unclear. Every copy lands in your account automatically.</i>`;
   };
 
+  // HEURES D'OUVERTURE DU GOLD : fermé du vendredi 21:00 UTC au dimanche 22:00 UTC (+ pause quotidienne
+  // 21h→22h). Le contenu VIP PROGRAMMÉ se TAIT marché fermé — un « morning briefing » posté un samedi qui
+  // analyse un marché figé décrédibilise le canal (vécu 25/07 : brief gold envoyé pendant le week-end).
+  // Le reste (pulse/wrap/scoreboard) est déjà protégé par « 0 trade → silence ».
+  const goldOpen = (d = new Date()): boolean => {
+    const day = d.getUTCDay(), h = d.getUTCHours();
+    if (day === 6) return false; // samedi
+    if (day === 0) return h >= 22; // dimanche avant la réouverture
+    if (day === 5 && h >= 21) return false; // vendredi après la clôture hebdo
+    if (h === 21) return false; // pause quotidienne 21→22h UTC
+    return true;
+  };
   let lastRecapHour = new Date().getUTCHours(); // pas de recap au démarrage — on attend la prochaine heure pleine
   if (!SECONDARY) setInterval(() => {
     void (async () => {
@@ -849,8 +861,8 @@ async function main() {
       if (h === lastRecapHour) return;
       lastRecapHour = h;
       // CONTENU PROGRAMMÉ (indépendant du nombre de trades du jour) : briefing 06h UTC (avant Londres),
-      // pédagogie 14h UTC (rotation déterministe par jour). Gaté par l'env VIP.
-      if (vipReady()) {
+      // pédagogie 14h UTC (rotation déterministe par jour). Gaté par l'env VIP + marché OUVERT.
+      if (vipReady() && goldOpen()) {
         try {
           if (h === 6) { const c = await fetchLatestContext(); if (c) void postVip(briefing(c)); }
           else if (h === 14) void postVip(VIP_TIPS[Math.floor(Date.now() / 86_400_000) % VIP_TIPS.length]);
