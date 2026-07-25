@@ -111,7 +111,10 @@ export default function MemberHome() {
         const msgs: string[] = [];
         if (social.joins48h >= 3) msgs.push(`🔥 ${social.joins48h} traders joined in the last 48h`);
         if (social.lastLiveNo != null) msgs.push(`⚡ Member #${social.lastLiveNo} just went LIVE${social.lastLiveHours ? ` — ${social.lastLiveHours}h ago` : ''}`);
-        if (social.live >= 3) msgs.push(`🟢 ${social.live} accounts copying Algoria right now`);
+        // JAMAIS de petit compte absolu de copieurs : « 7 accounts copying » = anti-preuve (le prospect lit
+        // « presque personne n'a testé »). Le compteur ne s'affiche qu'à partir de 25 — d'ici là, les
+        // signaux qui marchent à petite échelle (inscriptions 48h, dernier LIVE, total membres) font le travail.
+        if (social.live >= 25) msgs.push(`🟢 ${social.live} accounts copying Algoria right now`);
         if (social.members >= 20) msgs.push(`👥 ${social.members} members inside`);
         if (msgs.length === 0) return null;
         return (
