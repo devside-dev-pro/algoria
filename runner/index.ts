@@ -855,6 +855,7 @@ async function main() {
     return true;
   };
   let lastRecapHour = new Date().getUTCHours(); // pas de recap au démarrage — on attend la prochaine heure pleine
+  let lastPulseKey = ''; // dédup du pulse 4h : "jour:nbTrades" — on ne reposte que si le compteur a bougé
   if (!SECONDARY) setInterval(() => {
     void (async () => {
       const h = new Date().getUTCHours();
@@ -928,7 +929,17 @@ async function main() {
               if (isRecord) badges.push(`⚡ <b>New record day</b> — +${usd(today.net)}, our best since launch`);
               if (badges.length) void postVip(`${badges.join('\n')}\n\n<i>This is the track record building in real time. 👊</i>`);
             }
-          } else if (h % 4 === 0) void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} ${VIP_TAG} <b>working</b> · ${stats.trades} trades · ${wr}% win today`);
+          } else if (h % 4 === 0) {
+            // PULSE preuve-de-vie — SEULEMENT s'il y a du NOUVEAU depuis le dernier pulse (compteur de
+            // trades du jour). Sans ce verrou : 5 messages identiques « 2 trades · 100% win » en boucle
+            // toute la journée (vécu le samedi 26/07 — les 2 clôtures BTC passaient la garde 0-trade et
+            // le pulse répétait la même info toutes les 4 h). Un pulse qui ne dit rien de neuf se tait.
+            const pulseKey = `${new Date().toISOString().slice(0, 10)}:${stats.trades}`;
+            if (pulseKey !== lastPulseKey) {
+              lastPulseKey = pulseKey;
+              void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} ${VIP_TAG} <b>working</b> · ${stats.trades} trades · ${wr}% win today`);
+            }
+          }
         }
         // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
         if (h === 21 && stats.net > 0) {
