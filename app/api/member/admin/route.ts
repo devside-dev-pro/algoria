@@ -400,7 +400,7 @@ export async function POST(req: NextRequest) {
     // besoin d'une carte connect en file : identifiants déjà en base, lot/plateforme repris de sa dernière
     // carte connect (sinon kyc, sinon défauts). Ne touche PAS au statut du membre (déjà live en général).
     if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
-    const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier,strategy').eq('tg_id', body.reconnectSth).limit(1);
+    const { data: m } = await (db as any).from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier,strategy,lot').eq('tg_id', body.reconnectSth).limit(1) as { data: Array<Record<string, unknown>> | null };
     if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
     if (!m[0].mt5_login || !m[0].mt5_server) return NextResponse.json({ error: 'missing MT5 login/server' }, { status: 400 });
     let password: string;
@@ -411,7 +411,9 @@ export async function POST(req: NextRequest) {
     }
     const { data: acts } = await db.from('member_actions').select('kind,detail').eq('tg_id', body.reconnectSth).in('kind', ['connect', 'kyc']).order('created_at', { ascending: false }).limit(10);
     const detail = ((acts?.find((a) => a.kind === 'connect') ?? acts?.find((a) => a.kind === 'kyc'))?.detail as Record<string, unknown>) ?? {};
-    const lots = Number(detail.lot ?? { low: 0.01, balanced: 0.05, high: 0.1 }[String(m[0].risk_tier)] ?? 0.01) || 0.01;
+    // le lot CHOISI par le membre (colonne lot) prime sur la vieille carte connect — sinon une reconnexion
+    // écraserait silencieusement une taille de copie changée depuis
+    const lots = Number(m[0].lot ?? detail.lot ?? 0.01) || 0.01;
     const strategy = Number((m[0] as { strategy?: number }).strategy ?? 2) || 2;
     const r = await sthConnectAndJoin({ userId: String(m[0].tg_id), login: m[0].mt5_login as number, password, server: String(m[0].mt5_server), isMt4: Boolean(detail.is_mt4), lots, strategy });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
@@ -434,8 +436,10 @@ export async function POST(req: NextRequest) {
     if (!act?.length) return NextResponse.json({ error: 'strategy change request not found (already processed?)' }, { status: 404 });
     const to = Number((act[0].detail as Record<string, unknown>)?.to ?? 0);
     if (![1, 2, 3].includes(to)) return NextResponse.json({ error: 'invalid target strategy on the card' }, { status: 400 });
+    // le lot CHOISI par le membre (colonne lot) prime sur la vieille carte connect
+    const { data: mlot } = await (db as any).from('members').select('lot').eq('tg_id', act[0].tg_id).limit(1) as { data: Array<{ lot: number | null }> | null };
     const { data: lastConnect } = await db.from('member_actions').select('detail').eq('tg_id', act[0].tg_id).eq('kind', 'connect').order('created_at', { ascending: false }).limit(1);
-    const lots = Number((lastConnect?.[0]?.detail as Record<string, unknown>)?.lot ?? 0.01) || 0.01;
+    const lots = Number(mlot?.[0]?.lot ?? (lastConnect?.[0]?.detail as Record<string, unknown>)?.lot ?? 0.01) || 0.01;
     const r = await sthMoveMaster(String(act[0].tg_id), to, lots);
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: act[0].tg_id, member_no: act[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔀 moved to the S${to} master via STH (lots ${lots})` } as never });

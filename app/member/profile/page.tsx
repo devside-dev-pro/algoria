@@ -70,6 +70,12 @@ export default function Profile() {
       .then(async (r) => { const d = (await r.json()) as { member?: Member }; if (d.member) setMember(d.member); })
       .finally(() => setBusy(false));
   };
+  const setLot = (lot: number) => {
+    setBusy(true);
+    void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'lot', lot }) })
+      .then(async (r) => { const d = (await r.json()) as { member?: Member; error?: string }; if (d.member) setMember(d.member); })
+      .finally(() => setBusy(false));
+  };
   // DÉCONNECTER le compte de trading : coupe la copie (queue une action pour STH) et repasse en onboarding
   // pour reconnecter / changer de broker. Confirmation obligatoire (destructif).
   const disconnect = () => {
@@ -225,12 +231,38 @@ export default function Profile() {
         />
       )}
 
-      {/* Strategy Studio — le levier de risque du membre (lot copieur fixe : la stratégie fait le risque) */}
+      {/* Strategy Studio — le levier de risque du membre (stratégie + taille de copie) */}
       <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="STRATEGY — MEMBERS ONLY">
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>YOUR STRATEGY</h2>
           <StrategyPicker value={member.strategy ?? 2} busy={busy || !unlocked} onPick={(id) => act('strategy', id)} />
           <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Switches are applied by the team within a few hours — your account moves to the strategy&apos;s master.</p>
+        </section>
+      </Locked>
+
+      {/* COPY SIZE — le VRAI lot copieur, choisi par le membre. Auto-appliqué via STH quand le compte est
+          API-connecté ; sinon la demande part en file support. Recommandation affichée : 0.01 par ~$500. */}
+      <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="COPY SIZE — MEMBERS ONLY">
+        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>COPY SIZE</h2>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {[0.01, 0.02, 0.03, 0.05, 0.1].map((l) => {
+              const active = Number(member.lot ?? 0.01) === l;
+              return (
+                <button key={l} disabled={busy || !unlocked || active} onClick={() => setLot(l)}
+                  style={{ flex: '1 1 56px', padding: '11px 8px', borderRadius: 10, cursor: active ? 'default' : 'pointer', fontWeight: 800, fontSize: 13,
+                    border: `1px solid ${active ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
+                    background: active ? 'rgba(43,227,245,.1)' : 'rgba(10,17,31,.55)',
+                    color: active ? 'var(--cyan)' : 'var(--muted)' }}>
+                  {l.toFixed(2)}
+                </button>
+              );
+            })}
+          </div>
+          <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+            Every trade copies to your account at this fixed size. <b style={{ color: 'var(--text)' }}>Recommended: 0.01 per ~$500 of balance</b> — bigger moves both your wins <i>and</i> your losses up.
+          </p>
+          <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Applied instantly when your account is API-connected — otherwise the team applies it within a few hours.</p>
         </section>
       </Locked>
 
