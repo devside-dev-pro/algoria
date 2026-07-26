@@ -1,8 +1,11 @@
 import * as Sdk from 'metaapi.cloud-sdk/esm-node';
-import { recordTradeClose, SECONDARY } from '../../lib/supabase/sync';
+import { recordTradeClose, SECONDARY, STRAT_ID } from '../../lib/supabase/sync';
 import { pushToAll } from '../../lib/push/send';
-import { postVip, VIP_TAG, usd } from '../telegram';
+import { postVip, postVipPhoto, VIP_TAG, usd } from '../telegram';
 import type { Signal } from '../../lib/engine/types';
+
+// Base publique de l'app membre — héberge /api/card/win (la carte de gain servie à Telegram).
+const APP_BASE = process.env.MEMBER_APP_URL ?? 'https://app.algoria.tech';
 
 const px2 = (x: number): string => (Math.round(Number(x) * 100) / 100).toString(); // prix propre (coupe le bruit flottant)
 
@@ -34,12 +37,19 @@ const SL_NOTES = [
   'Defined risk did its job: one controlled loss, capital protected, on to the next setup.',
   'No stop-loss would mean unlimited risk. This is the cost of doing business — bounded and planned.',
 ];
-function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry?: number, exit?: number) {
+function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry?: number, exit?: number, ticket?: string) {
   const px = entry != null && exit ? `<i>${displaySymbol} · ${px2(entry)} → ${px2(exit)}</i>\n` : `<i>${displaySymbol}</i>\n`;
   if (pnl >= VIP_WIN_MIN) {
     const how = reason === 'tp' ? 'target hit' : reason === 'trail' ? 'profit locked by trailing stop' : 'banked';
-    // Carte GAIN — titre chiffré en gras, contexte en italique, promesse de copie en clôture. TOUTES stratégies.
-    void postVip(`✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nMaster-account scale — copied to your size automatically.`);
+    // Carte GAIN — VISUELLE : la win card (style Binance, QR algoria.tech) rendue par l'app, postée en
+    // photo — « forwardable » telle quelle vers le public. Repli TEXTE si le rendu/le post échoue : un TP
+    // ne se perd jamais. La carte lit le trade en BASE (anti-falsification) → il est déjà enregistré ici.
+    const text = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nMaster-account scale — copied to your size automatically.`;
+    if (ticket) {
+      const cardUrl = `${APP_BASE}/api/card/win?ticket=${encodeURIComponent(ticket)}&strategy=${STRAT_ID}`;
+      const caption = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG} · <i>${how}</i>\n${px}<i>Copied to your size automatically.</i>`;
+      void postVipPhoto(cardUrl, caption).then((ok) => { if (!ok) void postVip(text); });
+    } else void postVip(text);
   } else if (reason === 'sl' && pnl < 0) {
     if (SECONDARY) return; // pertes = le primaire (S2) seul → pas de mur de cartes rouges simultanées
     const day = new Date().toISOString().slice(0, 10);
@@ -109,7 +119,7 @@ export class DealRecorder extends Base {
     const fresh = await recordTradeClose(ticket, this.displaySymbol, { exit, pnl, r, reason, closedAt: when });
     if (!fresh) return;
     if (pnl > 0) maybePushWin(this.displaySymbol, pnl);
-    vipTradeClose(this.displaySymbol, pnl, reason, c?.entry, exit);
+    vipTradeClose(this.displaySymbol, pnl, reason, c?.entry, exit, ticket);
   }
 
   /** Raison de sortie par proximité : TP, SL, breakeven — ou TRAIL (stop verrouillé NET au-dessus de l'entrée,
