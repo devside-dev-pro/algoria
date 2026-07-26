@@ -51,6 +51,7 @@ export default function AdminCRM() {
   const [extraAccounts, setExtraAccounts] = useState<Array<{ id: string; tg_id: number; account_no: number; broker: string | null; strategy: number; status: string; mt5_login: string | null; declared_deposit: number | null }>>([]);
   // 🤖 BOT ACTIVITY : fil envoyé (nudge, texte du DM) / reçu (bot_reply) — visibilité totale sur le bot
   const [botActivity, setBotActivity] = useState<Array<{ id: string; tg_id: number; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }>>([]);
+  const [tgInboxOn, setTgInboxOn] = useState(false); // état réel du webhook Telegram (getWebhookInfo)
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
   const [depBroker, setDepBroker] = useState('');
@@ -93,6 +94,7 @@ export default function AdminCRM() {
       setLegalNames((d as { legalNames?: Record<string, string> }).legalNames ?? {});
       setExtraAccounts(((d as unknown as { extraAccounts?: typeof extraAccounts }).extraAccounts) ?? []);
       setBotActivity(((d as unknown as { botActivity?: typeof botActivity }).botActivity) ?? []);
+      setTgInboxOn(!!(d as unknown as { tgInboxOn?: boolean }).tgInboxOn);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -550,8 +552,10 @@ export default function AdminCRM() {
                 <h2 style={secH}>🤖 BOT ACTIVITY</h2>
                 <span style={{ fontSize: 11, color: 'var(--dim)' }}>sent → and received ← by the Telegram bot</span>
                 <span style={{ flex: 1 }} />
-                {!botActivity.some((b) => b.kind === 'bot_reply') && (
-                  <button disabled={busy} onClick={() => { setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ setupTgWebhook: true }) }).then(async (r) => { const d = (await r.json()) as { error?: string }; window.alert(d.error ? `⚠ ${d.error}` : '✓ Bot inbox enabled — replies to the bot now land here.'); }).finally(() => setBusy(false)); }}
+                {tgInboxOn ? (
+                  <span className="mono" style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--up)', border: '1px solid rgba(31,216,176,.4)', borderRadius: 7, padding: '4px 9px' }}>✓ INBOX ON</span>
+                ) : (
+                  <button disabled={busy} onClick={() => { setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ setupTgWebhook: true }) }).then(async (r) => { const d = (await r.json()) as { error?: string }; if (d.error) window.alert(`⚠ ${d.error}`); else { setTgInboxOn(true); window.alert('✓ Bot inbox enabled — replies to the bot now land here.'); } }).finally(() => setBusy(false)); }}
                     title="one-time setup: point the Telegram webhook at the app so replies to the bot are recorded here (+ auto-acknowledgement routing people to you)" style={goldBtn}>🔌 ENABLE INBOX</button>
                 )}
               </div>
@@ -570,7 +574,7 @@ export default function AdminCRM() {
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                           <span style={{ fontSize: 12, fontWeight: 750, color: 'var(--text)' }}>{label}</span>
                           {who?.member_no != null && <span className="mono goldText" style={{ fontSize: 10, fontWeight: 800 }}>#{who.member_no}</span>}
-                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{incoming ? 'replied to the bot' : 'auto-nudge sent'}</span>
+                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{incoming ? 'replied to the bot' : (d as { via?: string }).via === 'manual' ? '👤 your personal touch (logged)' : 'auto-nudge sent'}</span>
                           <span style={{ flex: 1 }} />
                           <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{new Date(b.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                           {who?.tg_username && incoming && <a href={`https://t.me/${who.tg_username}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', color: 'var(--cyan)', fontWeight: 700, fontSize: 10.5 }}>💬 REPLY</a>}

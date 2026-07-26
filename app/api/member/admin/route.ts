@@ -45,6 +45,17 @@ export async function GET(req: NextRequest) {
   // 🤖 BOT ACTIVITY : fil unifié envoyé (nudge, avec le texte du DM) / reçu (bot_reply) — le plus récent d'abord
   const { data: botActivity } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by')
     .in('kind', ['nudge', 'bot_reply']).order('created_at', { ascending: false }).limit(120);
+  // état RÉEL de la boîte de réception (getWebhookInfo) — le bouton ENABLE ne s'affiche que si le webhook
+  // n'est pas branché (avant : il restait affiché après activation tant qu'aucune réponse n'était arrivée)
+  let tgInboxOn = false;
+  try {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (token) {
+      const wh = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`, { signal: AbortSignal.timeout(3000) });
+      const wd = (await wh.json().catch(() => ({}))) as { result?: { url?: string } };
+      tgInboxOn = String(wd.result?.url ?? '').includes('/api/tg/webhook');
+    }
+  } catch { /* Telegram injoignable → on laisse le bouton visible */ }
   const pushTgIds = [...new Set((pushQ.data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
   // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
   // Une balance NÉGATIVE (commission annulée APRÈS retrait) est le signal d'abus n°1 → flag rouge.
@@ -69,7 +80,7 @@ export async function GET(req: NextRequest) {
     const n = String((k.detail as { broker_name?: string })?.broker_name ?? '').trim();
     if (n && !legalNames[t]) legalNames[t] = n;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [] });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn });
 }
 
 export async function POST(req: NextRequest) {
