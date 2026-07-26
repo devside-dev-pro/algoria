@@ -45,6 +45,17 @@ export async function GET(req: NextRequest) {
   // 🤖 BOT ACTIVITY : fil unifié envoyé (nudge, avec le texte du DM) / reçu (bot_reply) — le plus récent d'abord
   const { data: botActivity } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by')
     .in('kind', ['nudge', 'bot_reply']).order('created_at', { ascending: false }).limit(120);
+  // état RÉEL de la boîte de réception (getWebhookInfo) — le bouton ENABLE ne s'affiche que si le webhook
+  // n'est pas branché (avant : il restait affiché après activation tant qu'aucune réponse n'était arrivée)
+  let tgInboxOn = false;
+  try {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (token) {
+      const wh = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`, { signal: AbortSignal.timeout(3000) });
+      const wd = (await wh.json().catch(() => ({}))) as { result?: { url?: string } };
+      tgInboxOn = String(wd.result?.url ?? '').includes('/api/tg/webhook');
+    }
+  } catch { /* Telegram injoignable → on laisse le bouton visible */ }
   const pushTgIds = [...new Set((pushQ.data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
   // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
   // Une balance NÉGATIVE (commission annulée APRÈS retrait) est le signal d'abus n°1 → flag rouge.
@@ -69,7 +80,7 @@ export async function GET(req: NextRequest) {
     const n = String((k.detail as { broker_name?: string })?.broker_name ?? '').trim();
     if (n && !legalNames[t]) legalNames[t] = n;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [] });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn });
 }
 
 export async function POST(req: NextRequest) {
@@ -85,7 +96,7 @@ export async function POST(req: NextRequest) {
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
     revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
-    setupTgWebhook?: boolean;
+    setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
     setCountry?: { tg_id: number; country: string };
   };
   const db = sdb();
@@ -473,6 +484,28 @@ export async function POST(req: NextRequest) {
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
     if (!d.ok) return NextResponse.json({ error: `Telegram: ${d.description ?? 'setWebhook failed'}` }, { status: 400 });
     return NextResponse.json({ ok: true, description: d.description ?? 'webhook set' });
+  }
+  if (body.botDm) {
+    // 💬 RÉPONDRE VIA LE BOT — depuis le fil BOT ACTIVITY : la réponse part DANS la conversation que la
+    // personne a déjà ouverte avec le bot (le lien t.me/@username ne marche pas quand la personne n'a pas
+    // de pseudo public — vécu 27/07 : Telegram s'ouvrait sur rien). Tracée comme message sortant du fil.
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured (Vercel)' }, { status: 400 });
+    const text = String(body.botDm.text ?? '').trim().slice(0, 1500);
+    const dmTg = Number(body.botDm.tg_id);
+    if (!text || !dmTg) return NextResponse.json({ error: 'tg_id and text required' }, { status: 400 });
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: dmTg, text, disable_web_page_preview: true }),
+    });
+    if (!r.ok) {
+      const err = (await r.json().catch(() => ({}))) as { description?: string };
+      return NextResponse.json({ error: `Telegram: ${err.description ?? `HTTP ${r.status}`}` }, { status: 400 });
+    }
+    const { data: mrow } = await db.from('members').select('member_no').eq('tg_id', dmTg).limit(1);
+    await db.from('member_actions').insert({ tg_id: dmTg, member_no: mrow?.[0]?.member_no ?? null, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'admin', note: `reply via bot by ${who}`, text } as never });
+    return NextResponse.json({ ok: true });
   }
   if (body.nudged) {
     // « ✓ FAIT » de la file RELANCES : Mathieu a envoyé son message/vocal perso → on trace (kind='nudge',
