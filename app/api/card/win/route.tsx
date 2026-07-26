@@ -11,7 +11,11 @@ import { sdb } from '@/lib/member/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const STRAT_NAME: Record<number, string> = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' };
+// PAS d'emoji ni de symboles ▲▼ sur la carte : Satori ne rend que les glyphes présents dans la police
+// chargée (Space Grotesk) — un caractère absent devient un « ? » (vécu 26/07 : ▲ et 🌱 cassés). Flèche =
+// triangle CSS, tag stratégie = texte + puce colorée.
+const STRAT_NAME: Record<number, string> = { 1: 'S1 STEADY', 2: 'S2 BALANCED', 3: 'S3 TURBO' };
+const STRAT_DOT: Record<number, string> = { 1: '#22e0a6', 2: '#2be3f5', 3: '#f5a623' };
 const symLabel = (s: string) => (s === 'XAUUSD' ? 'GOLD' : s === 'BTCUSD' ? 'BITCOIN' : s);
 const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 
@@ -83,31 +87,41 @@ export async function GET(req: NextRequest) {
           </div>
         </div>
 
-        {/* le trade + le P&L héros */}
-        <div style={{ position: 'absolute', left: 60, top: 186, display: 'flex', flexDirection: 'column' }}>
-          <span style={{ fontSize: 46, fontWeight: 700, color: isLong ? '#22e0a6' : '#ff6b8a', letterSpacing: 3 }}>
-            {isLong ? '▲ LONG' : '▼ SHORT'}  {symLabel(String(t.symbol))}
-          </span>
-          <span style={{ fontSize: 150, fontWeight: 700, color: '#22e0a6', marginTop: -6, textShadow: '0 0 45px rgba(34,224,166,.5)' }}>+${pnl.toLocaleString('en-US')}</span>
-          <span style={{ fontSize: 24, color: '#f5c24a', letterSpacing: 3, marginTop: 2 }}>PROFIT BANKED AUTOMATICALLY</span>
+        {/* le trade + le P&L héros — lineHeight:1 PARTOUT (sinon la ligne du gros chiffre déborde et
+            chevauche le bloc QR — vécu au premier rendu) */}
+        <div style={{ position: 'absolute', left: 60, top: 178, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            {/* flèche = triangle CSS (aucun glyphe de police) */}
+            <div style={isLong
+              ? { width: 0, height: 0, borderLeft: '20px solid transparent', borderRight: '20px solid transparent', borderBottom: '34px solid #22e0a6' }
+              : { width: 0, height: 0, borderLeft: '20px solid transparent', borderRight: '20px solid transparent', borderTop: '34px solid #ff6b8a' }} />
+            <span style={{ fontSize: 46, fontWeight: 700, color: isLong ? '#22e0a6' : '#ff6b8a', letterSpacing: 3, lineHeight: 1, marginLeft: 22 }}>
+              {isLong ? 'LONG' : 'SHORT'}  {symLabel(String(t.symbol))}
+            </span>
+          </div>
+          <span style={{ fontSize: 138, fontWeight: 700, color: '#22e0a6', lineHeight: 1, marginTop: 18, textShadow: '0 0 45px rgba(34,224,166,.5)' }}>+${pnl.toLocaleString('en-US')}</span>
+          <span style={{ fontSize: 24, color: '#f5c24a', letterSpacing: 3, lineHeight: 1, marginTop: 20 }}>PROFIT BANKED AUTOMATICALLY</span>
         </div>
 
         {/* QR + pitch (bloc « parrainage » Binance) */}
-        <div style={{ position: 'absolute', left: 60, bottom: 56, display: 'flex', alignItems: 'flex-start' }}>
-          <div style={{ display: 'flex', backgroundColor: '#ffffff', borderRadius: 22, padding: 14 }}>
-            <img src={qrUri} width={150} height={150} />
+        <div style={{ position: 'absolute', left: 60, bottom: 44, display: 'flex', alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', backgroundColor: '#ffffff', borderRadius: 20, padding: 12 }}>
+            <img src={qrUri} width={138} height={138} />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', marginLeft: 40, marginTop: 22 }}>
-            <span style={{ fontSize: 26, fontWeight: 700, color: '#e8f0ff' }}>Watch the AI trade live — free.</span>
-            <span style={{ fontSize: 22, color: 'rgba(147,165,196,.9)', marginTop: 8 }}>Scan to get in.</span>
-            <span style={{ fontSize: 26, fontWeight: 700, color: '#2be3f5', marginTop: 16 }}>algoria.tech</span>
+          <div style={{ display: 'flex', flexDirection: 'column', marginLeft: 38, marginTop: 16 }}>
+            <span style={{ fontSize: 26, fontWeight: 700, color: '#e8f0ff', lineHeight: 1 }}>Watch the AI trade live — free.</span>
+            <span style={{ fontSize: 22, color: 'rgba(147,165,196,.9)', lineHeight: 1, marginTop: 12 }}>Scan to get in.</span>
+            <span style={{ fontSize: 26, fontWeight: 700, color: '#2be3f5', lineHeight: 1, marginTop: 18 }}>algoria.tech</span>
           </div>
         </div>
 
-        {/* stratégie (clarté multi-stratégies) + date de clôture, bas-droite */}
+        {/* stratégie (clarté multi-stratégies, puce colorée — pas d'emoji) + date de clôture, bas-droite */}
         <div style={{ position: 'absolute', right: 48, bottom: 44, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-          <span style={{ fontSize: 22, fontWeight: 700, color: 'rgba(232,240,255,.85)', letterSpacing: 1 }}>{STRAT_NAME[strategy]}</span>
-          {t.closed_at && <span style={{ fontSize: 20, color: 'rgba(147,165,196,.7)', marginTop: 8 }}>Closed: {fmtDate(String(t.closed_at))}</span>}
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: STRAT_DOT[strategy] }} />
+            <span style={{ fontSize: 22, fontWeight: 700, color: 'rgba(232,240,255,.85)', letterSpacing: 1, lineHeight: 1, marginLeft: 10 }}>{STRAT_NAME[strategy]}</span>
+          </div>
+          {t.closed_at && <span style={{ fontSize: 20, color: 'rgba(147,165,196,.7)', lineHeight: 1, marginTop: 12 }}>Closed: {fmtDate(String(t.closed_at))}</span>}
         </div>
       </div>
     ),
@@ -115,8 +129,9 @@ export async function GET(req: NextRequest) {
       width: 1200,
       height: 675,
       fonts,
-      // un trade clôturé ne change plus → cache long (CDN Vercel), Telegram et les re-forwards tapent le cache
-      headers: { 'cache-control': 'public, max-age=31536000, immutable' },
+      // cache 1 jour (CDN Vercel) : assez pour Telegram et les re-forwards, mais permet d'itérer sur le
+      // design sans servir des vieilles cartes pendant un an (l'immutable a mordu au premier fix visuel)
+      headers: { 'cache-control': 'public, max-age=86400' },
     },
   );
 }
