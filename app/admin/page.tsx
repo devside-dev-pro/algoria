@@ -697,31 +697,15 @@ export default function AdminCRM() {
             </div>
           </section>
         )}
+        {/* PUSH ALERTS : réduit à UNE ligne de stat — le mur de 85 chips « à relancer » prenait tout
+            l'écran sans être actionnable (retiré à la demande de Mathieu, 27/07). Le compteur reste :
+            c'est le seul signal utile (couverture push de la base). */}
         {tab === 'members' && (
-          <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'rgba(43,227,245,.28)' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-              <h2 style={secH}>🔔 PUSH ALERTS</h2>
-              <span className="mono" style={{ fontSize: 18, fontWeight: 800, color: alertsOn > 0 ? 'var(--up)' : 'var(--dim)' }}>{alertsOn}<span style={{ color: 'var(--dim)', fontWeight: 500 }}> / {rows.length}</span></span>
-              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>have alerts on{alertsOff.length ? ` · ${alertsOff.length} to nudge` : ' · everyone covered 🎉'}</span>
-            </div>
-            {alertsOff.length > 0 && (
-              <>
-                <p style={{ margin: 0, fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.5 }}>
-                  These members haven&rsquo;t enabled notifications (no device subscribed). Ping them on Telegram — installing the app + one tap on <b style={{ color: 'var(--muted)' }}>Profile → Enable alerts</b> is all it takes.
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                  {alertsOff.map((r) => (
-                    <span key={r.member_no} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)', fontSize: 11.5 }}>
-                      <span className="goldText mono" style={{ fontWeight: 800 }}>#{r.member_no}</span>
-                      <span style={{ color: 'var(--text)' }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
-                      <StatusChip status={r.status} />
-                      {r.tg_username && <a href={`https://t.me/${r.tg_username}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none', color: 'var(--cyan)', fontWeight: 700, fontSize: 10.5 }}>💬 DM</a>}
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
-          </section>
+          <div className="mono" style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '2px 4px', fontSize: 11.5, color: 'var(--muted)' }}>
+            <span>🔔</span>
+            <b style={{ color: alertsOn > 0 ? 'var(--up)' : 'var(--dim)', fontSize: 13 }}>{alertsOn}</b>
+            <span>/ {rows.length} have push alerts on</span>
+          </div>
         )}
 
         {tab === 'members' && (
