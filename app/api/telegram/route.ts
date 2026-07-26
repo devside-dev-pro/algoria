@@ -107,6 +107,9 @@ export async function POST(req: Request) {
   // CONNEXION NATIVE de l'app membre : /start lg_<code> (deep-link depuis app.algoria.tech/member/login).
   // On confirme le code avec l'identité Telegram de l'expéditeur → la page de login (en polling) pose la session.
   // Nécessite "message" dans allowed_updates du webhook.
+  // ⚠️ CE WEBHOOK EST LE SEUL DU BOT (Telegram n'en autorise qu'UN) : login + waitlist live + inbox vivent
+  // ICI. Ne JAMAIS enregistrer une autre URL de webhook — vécu 26/07 : une route inbox séparée a écrasé
+  // celle-ci et cassé la connexion de tous les membres pendant une soirée.
   const msg = update?.message;
   const startPayload = typeof msg?.text === 'string' ? msg.text.match(/^\/start\s+lg_([A-Za-z0-9]{16,64})$/) : null;
   if (db && startPayload && msg?.from?.id) {
@@ -135,6 +138,36 @@ export async function POST(req: Request) {
       }
     } catch (e) {
       console.error('[telegram] login code failed:', (e as { message?: string })?.message ?? e);
+    }
+  }
+
+  // 🤖 BOÎTE DE RÉCEPTION DU BOT — tout DM privé qui n'est PAS un /start de login : enregistré
+  // (member_actions kind='bot_reply' → fil BOT ACTIVITY de l'admin, réponse via le bot possible)
+  // + UN accusé de réception routant vers l'humain, dédupliqué 6 h (anti-spam).
+  if (db && msg?.from && !msg.from.is_bot && msg.chat?.type === 'private' && !startPayload && !(typeof msg.text === 'string' && msg.text.startsWith('/start'))) {
+    try {
+      const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1500) || '[media]';
+      const tgId = Number(msg.from.id);
+      const { data: mrow } = await (db as any).from('members').select('member_no').eq('tg_id', tgId).limit(1);
+      const { data: recent } = await (db as any).from('member_actions').select('id').eq('tg_id', tgId).eq('kind', 'bot_reply')
+        .gte('created_at', new Date(Date.now() - 6 * 3_600_000).toISOString()).limit(1);
+      await (db as any).from('member_actions').insert({
+        tg_id: tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'bot_reply', status: 'done', done_by: 'telegram',
+        detail: { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null },
+      });
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (token && !recent?.length) {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
+          body: JSON.stringify({
+            chat_id: tgId,
+            text: "Got your message 🙌 A real human reads these — Mathieu will get back to you personally.\n\nFor a faster answer, message him directly: @mathieu_algoria\nYour app: app.algoria.tech/member",
+            disable_web_page_preview: true,
+          }),
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[telegram] bot inbox failed:', (e as { message?: string })?.message ?? e);
     }
   }
 

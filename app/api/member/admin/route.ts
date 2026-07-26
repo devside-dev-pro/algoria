@@ -45,15 +45,15 @@ export async function GET(req: NextRequest) {
   // 🤖 BOT ACTIVITY : fil unifié envoyé (nudge, avec le texte du DM) / reçu (bot_reply) — le plus récent d'abord
   const { data: botActivity } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by')
     .in('kind', ['nudge', 'bot_reply']).order('created_at', { ascending: false }).limit(120);
-  // état RÉEL de la boîte de réception (getWebhookInfo) — le bouton ENABLE ne s'affiche que si le webhook
-  // n'est pas branché (avant : il restait affiché après activation tant qu'aucune réponse n'était arrivée)
+  // état RÉEL du webhook (getWebhookInfo) — SAIN uniquement s'il pointe sur /api/telegram (le webhook
+  // unique : login + waitlist + inbox). Toute autre URL = cassé → le bouton de réparation s'affiche.
   let tgInboxOn = false;
   try {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (token) {
       const wh = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`, { signal: AbortSignal.timeout(3000) });
       const wd = (await wh.json().catch(() => ({}))) as { result?: { url?: string } };
-      tgInboxOn = String(wd.result?.url ?? '').includes('/api/tg/webhook');
+      tgInboxOn = String(wd.result?.url ?? '').includes('/api/telegram');
     }
   } catch { /* Telegram injoignable → on laisse le bouton visible */ }
   const pushTgIds = [...new Set((pushQ.data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
@@ -469,17 +469,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ connected: st.data.tradingAccountConnected === true, masters: st.data.masterAccountsList ?? [], raw: st.data });
   }
   if (body.setupTgWebhook) {
-    // 🤖 ACTIVER LA BOÎTE DE RÉCEPTION DU BOT (un clic) : branche le webhook Telegram sur /api/tg/webhook.
-    // Les DM privés reçus par le bot arrivent alors en base (kind='bot_reply') + accusé de réception auto.
-    // allowed_updates=['message'] : on ne reçoit QUE les messages (jamais les posts du canal VIP).
+    // 🤖 (RÉ)ENREGISTRER LE WEBHOOK UNIQUE du bot — /api/telegram, qui porte TOUT : login /start, waitlist
+    // live (chat_join_request/chat_member) ET la boîte de réception (bot_reply). Telegram n'autorise qu'UN
+    // webhook par bot : ce bouton ré-applique toujours la config COMPLÈTE (vécu 26/07 : une URL inbox
+    // séparée avait écrasé le webhook et cassé la connexion des membres).
     const token = process.env.TELEGRAM_BOT_TOKEN;
-    const { tgWebhookSecret } = await import('@/lib/member/tgwebhook');
-    const secret = tgWebhookSecret();
-    if (!token || !secret) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured (Vercel)' }, { status: 400 });
+    const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
+    if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured (Vercel)' }, { status: 400 });
     const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: 'https://app.algoria.tech/api/tg/webhook', secret_token: secret, allowed_updates: ['message'] }),
+      body: JSON.stringify({
+        url: 'https://www.algoria.tech/api/telegram',
+        ...(secret ? { secret_token: secret } : {}),
+        allowed_updates: ['chat_join_request', 'chat_member', 'message'],
+      }),
     });
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
     if (!d.ok) return NextResponse.json({ error: `Telegram: ${d.description ?? 'setWebhook failed'}` }, { status: 400 });
