@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
     revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
-    setupTgWebhook?: boolean;
+    setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
     setCountry?: { tg_id: number; country: string };
   };
   const db = sdb();
@@ -484,6 +484,28 @@ export async function POST(req: NextRequest) {
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
     if (!d.ok) return NextResponse.json({ error: `Telegram: ${d.description ?? 'setWebhook failed'}` }, { status: 400 });
     return NextResponse.json({ ok: true, description: d.description ?? 'webhook set' });
+  }
+  if (body.botDm) {
+    // 💬 RÉPONDRE VIA LE BOT — depuis le fil BOT ACTIVITY : la réponse part DANS la conversation que la
+    // personne a déjà ouverte avec le bot (le lien t.me/@username ne marche pas quand la personne n'a pas
+    // de pseudo public — vécu 27/07 : Telegram s'ouvrait sur rien). Tracée comme message sortant du fil.
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured (Vercel)' }, { status: 400 });
+    const text = String(body.botDm.text ?? '').trim().slice(0, 1500);
+    const dmTg = Number(body.botDm.tg_id);
+    if (!text || !dmTg) return NextResponse.json({ error: 'tg_id and text required' }, { status: 400 });
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: dmTg, text, disable_web_page_preview: true }),
+    });
+    if (!r.ok) {
+      const err = (await r.json().catch(() => ({}))) as { description?: string };
+      return NextResponse.json({ error: `Telegram: ${err.description ?? `HTTP ${r.status}`}` }, { status: 400 });
+    }
+    const { data: mrow } = await db.from('members').select('member_no').eq('tg_id', dmTg).limit(1);
+    await db.from('member_actions').insert({ tg_id: dmTg, member_no: mrow?.[0]?.member_no ?? null, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'admin', note: `reply via bot by ${who}`, text } as never });
+    return NextResponse.json({ ok: true });
   }
   if (body.nudged) {
     // « ✓ FAIT » de la file RELANCES : Mathieu a envoyé son message/vocal perso → on trace (kind='nudge',
