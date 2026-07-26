@@ -42,6 +42,9 @@ export async function GET(req: NextRequest) {
   const { data: extraAccounts } = await (db as any).from('member_accounts')
     .select('id,tg_id,member_no,account_no,broker,strategy,status,mt5_login,mt5_server,declared_deposit,holder_name,created_at')
     .order('created_at', { ascending: false }).limit(300) as { data: Array<Record<string, unknown>> | null };
+  // 🤖 BOT ACTIVITY : fil unifié envoyé (nudge, avec le texte du DM) / reçu (bot_reply) — le plus récent d'abord
+  const { data: botActivity } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by')
+    .in('kind', ['nudge', 'bot_reply']).order('created_at', { ascending: false }).limit(120);
   const pushTgIds = [...new Set((pushQ.data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
   // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
   // Une balance NÉGATIVE (commission annulée APRÈS retrait) est le signal d'abus n°1 → flag rouge.
@@ -66,7 +69,7 @@ export async function GET(req: NextRequest) {
     const n = String((k.detail as { broker_name?: string })?.broker_name ?? '').trim();
     if (n && !legalNames[t]) legalNames[t] = n;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [] });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [] });
 }
 
 export async function POST(req: NextRequest) {
@@ -82,6 +85,7 @@ export async function POST(req: NextRequest) {
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
     revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
+    setupTgWebhook?: boolean;
     setCountry?: { tg_id: number; country: string };
   };
   const db = sdb();
@@ -452,6 +456,23 @@ export async function POST(req: NextRequest) {
     const st = await sthStatus(String(body.sthStatusCheck));
     if (!st.ok) return NextResponse.json({ error: `STH: ${st.errorMessage}` }, { status: 400 });
     return NextResponse.json({ connected: st.data.tradingAccountConnected === true, masters: st.data.masterAccountsList ?? [], raw: st.data });
+  }
+  if (body.setupTgWebhook) {
+    // 🤖 ACTIVER LA BOÎTE DE RÉCEPTION DU BOT (un clic) : branche le webhook Telegram sur /api/tg/webhook.
+    // Les DM privés reçus par le bot arrivent alors en base (kind='bot_reply') + accusé de réception auto.
+    // allowed_updates=['message'] : on ne reçoit QUE les messages (jamais les posts du canal VIP).
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const { tgWebhookSecret } = await import('@/lib/member/tgwebhook');
+    const secret = tgWebhookSecret();
+    if (!token || !secret) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured (Vercel)' }, { status: 400 });
+    const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://app.algoria.tech/api/tg/webhook', secret_token: secret, allowed_updates: ['message'] }),
+    });
+    const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    if (!d.ok) return NextResponse.json({ error: `Telegram: ${d.description ?? 'setWebhook failed'}` }, { status: 400 });
+    return NextResponse.json({ ok: true, description: d.description ?? 'webhook set' });
   }
   if (body.nudged) {
     // « ✓ FAIT » de la file RELANCES : Mathieu a envoyé son message/vocal perso → on trace (kind='nudge',

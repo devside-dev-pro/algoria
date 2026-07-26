@@ -190,8 +190,10 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
 }
 
 /** Trace une relance (auto ou manuelle) → kind='nudge', status='done' (jamais dans la file support). */
-export async function recordNudge(tgId: number, memberNo: number | null, via: 'auto' | 'manual', note: string) {
-  await (db as unknown as { from: (t: string) => any }).from('member_actions').insert({ tg_id: tgId, member_no: memberNo, kind: 'nudge', status: 'done', done_by: via, detail: { via, note } });
+export async function recordNudge(tgId: number, memberNo: number | null, via: 'auto' | 'manual', note: string, text?: string) {
+  // text = le DM EXACT envoyé par le bot — tracé pour le panneau BOT ACTIVITY de l'admin (« je veux voir
+  // ce que le bot raconte à mes prospects » — Mathieu, 27/07)
+  await (db as unknown as { from: (t: string) => any }).from('member_actions').insert({ tg_id: tgId, member_no: memberNo, kind: 'nudge', status: 'done', done_by: via, detail: { via, note, ...(text ? { text } : {}) } });
 }
 
 // ===== ÉTAT JOURNALIER PERSISTANT (table runner_day) — le latch « journée terminée » et le pic du jour

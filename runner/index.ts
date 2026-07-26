@@ -814,7 +814,7 @@ async function main() {
         const m = nudgeMessage(c.step, c.days);
         const dm = await sendDm(c.tg_id, m.dm);
         const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: c.step <= 0 ? '/member/academy' : '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
-        await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} step${c.step} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`);
+        await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} step${c.step} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`, dm ? m.dm : undefined);
         if (dm || push) sent++;
       }
       if (candidates.length) console.log(`[algoria] activation : ${sent}/${candidates.length} prospect(s) touché(s)`);

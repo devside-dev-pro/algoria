@@ -49,6 +49,8 @@ export default function AdminCRM() {
   const [legalNames, setLegalNames] = useState<Record<string, string>>({}); // tg_id → nom légal broker (kyc) : LE pont entre les 3 identités
   // comptes SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut + STH id)
   const [extraAccounts, setExtraAccounts] = useState<Array<{ id: string; tg_id: number; account_no: number; broker: string | null; strategy: number; status: string; mt5_login: string | null; declared_deposit: number | null }>>([]);
+  // 🤖 BOT ACTIVITY : fil envoyé (nudge, texte du DM) / reçu (bot_reply) — visibilité totale sur le bot
+  const [botActivity, setBotActivity] = useState<Array<{ id: string; tg_id: number; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }>>([]);
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
   const [depBroker, setDepBroker] = useState('');
@@ -90,6 +92,7 @@ export default function AdminCRM() {
       setRunnerLastSeen((d as { runnerLastSeen?: number | null }).runnerLastSeen ?? null);
       setLegalNames((d as { legalNames?: Record<string, string> }).legalNames ?? {});
       setExtraAccounts(((d as unknown as { extraAccounts?: typeof extraAccounts }).extraAccounts) ?? []);
+      setBotActivity(((d as unknown as { botActivity?: typeof botActivity }).botActivity) ?? []);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -539,6 +542,46 @@ export default function AdminCRM() {
                 </section>
               );
             })()}
+            {/* ===== 🤖 BOT ACTIVITY — TOUT ce que le bot envoie (relances, texte complet) et reçoit
+                (réponses des prospects, via le webhook Telegram). « Je veux voir ce que le bot fait » —
+                le fil est là. Le bouton ENABLE INBOX branche le webhook (à cliquer UNE fois). */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <h2 style={secH}>🤖 BOT ACTIVITY</h2>
+                <span style={{ fontSize: 11, color: 'var(--dim)' }}>sent → and received ← by the Telegram bot</span>
+                <span style={{ flex: 1 }} />
+                {!botActivity.some((b) => b.kind === 'bot_reply') && (
+                  <button disabled={busy} onClick={() => { setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ setupTgWebhook: true }) }).then(async (r) => { const d = (await r.json()) as { error?: string }; window.alert(d.error ? `⚠ ${d.error}` : '✓ Bot inbox enabled — replies to the bot now land here.'); }).finally(() => setBusy(false)); }}
+                    title="one-time setup: point the Telegram webhook at the app so replies to the bot are recorded here (+ auto-acknowledgement routing people to you)" style={goldBtn}>🔌 ENABLE INBOX</button>
+                )}
+              </div>
+              {botActivity.length === 0 && <p style={dimP}>No bot activity recorded yet — the 10:00 UTC auto-nudges will appear here with their full text.</p>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 420, overflowY: 'auto' }}>
+                {botActivity.slice(0, 60).map((b) => {
+                  const d = b.detail ?? {};
+                  const incoming = b.kind === 'bot_reply';
+                  const who = rows.find((r) => Number(r.tg_id) === Number(b.tg_id));
+                  const label = who ? (who.tg_username ? '@' + who.tg_username : (who.tg_name ?? `#${who.member_no}`)) : String((d as { username?: string }).username ? '@' + (d as { username?: string }).username : ((d as { name?: string }).name ?? b.tg_id));
+                  const text = String((d as { text?: string }).text ?? (d as { note?: string }).note ?? '');
+                  return (
+                    <div key={b.id} style={{ display: 'flex', gap: 9, padding: '8px 11px', borderRadius: 9, border: `1px solid ${incoming ? 'rgba(245,194,74,.4)' : 'var(--border)'}`, background: incoming ? 'rgba(245,194,74,.05)' : 'rgba(10,17,31,.5)' }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: incoming ? 'var(--gold)' : 'var(--cyan)', minWidth: 16 }}>{incoming ? '←' : '→'}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 12, fontWeight: 750, color: 'var(--text)' }}>{label}</span>
+                          {who?.member_no != null && <span className="mono goldText" style={{ fontSize: 10, fontWeight: 800 }}>#{who.member_no}</span>}
+                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{incoming ? 'replied to the bot' : 'auto-nudge sent'}</span>
+                          <span style={{ flex: 1 }} />
+                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{new Date(b.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                          {who?.tg_username && incoming && <a href={`https://t.me/${who.tg_username}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', color: 'var(--cyan)', fontWeight: 700, fontSize: 10.5 }}>💬 REPLY</a>}
+                        </div>
+                        <p style={{ margin: '4px 0 0', fontSize: 11.5, color: incoming ? 'var(--text)' : 'var(--muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text || '—'}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           </>
         )}
 
