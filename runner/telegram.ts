@@ -34,6 +34,25 @@ export async function sendDm(tgId: number, text: string): Promise<boolean> {
   }
 }
 
+/** Poste une PHOTO dans le canal VIP (carte de gain générée par l'app — /api/card/win). Telegram va
+ *  chercher l'URL lui-même. Renvoie true si posté — l'appelant retombe sur postVip (texte) en cas d'échec,
+ *  un TP ne doit JAMAIS être perdu parce que le rendu d'image a raté. */
+export async function postVipPhoto(photoUrl: string, caption: string): Promise<boolean> {
+  if (!TOKEN || !VIP) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: VIP, photo: photoUrl, caption, parse_mode: 'HTML' }),
+    });
+    if (!res.ok) console.error('[algoria] postVipPhoto HTTP', res.status, (await res.text()).slice(0, 200));
+    return res.ok;
+  } catch (e) {
+    console.error('[algoria] postVipPhoto failed:', (e as { message?: string })?.message ?? e);
+    return false;
+  }
+}
+
 /** Poste dans le canal VIP en HTML (gras/italique/mono → cartes soignées). No-op si non configuré. Ne throw JAMAIS.
  *  Les messages sont composés en interne (aucune entrée utilisateur) → pas d'échappement nécessaire côté appelant. */
 export async function postVip(text: string): Promise<void> {
