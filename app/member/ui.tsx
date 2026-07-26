@@ -17,6 +17,7 @@ export interface Member {
   broker: string | null;
   risk_tier: 'low' | 'balanced' | 'high';
   strategy?: number; // 1=Steady · 2=Balanced (défaut) · 3=Turbo — le levier de risque du membre
+  lot?: number; // le VRAI lot copieur (0.01 par défaut) — remplace le mapping risk_tier→lot qui affichait faux
   onboarding_step: number;
   created_at: string;
   mt5_login: string | null;

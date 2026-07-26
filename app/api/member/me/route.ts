@@ -33,7 +33,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // Champs SÛRS renvoyés au client — jamais les identifiants MT5 (même chiffrés).
-const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,strategy,onboarding_step,created_at,mt5_login,mt5_server,referral_code,usdt_trc20';
+const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,strategy,lot,onboarding_step,created_at,mt5_login,mt5_server,referral_code,usdt_trc20';
 
 async function me(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -157,6 +157,29 @@ export async function POST(req: NextRequest) {
       });
     } else {
       await queueAction(s.tgId, 'strategy_change', { to: choice }); // → le support déplace le compte vers le master de la stratégie dans STH
+    }
+  } else if (body.action === 'lot') {
+    // TAILLE DE COPIE (le vrai lot, fin du mapping risk_tier) : le membre choisit son lot parmi des paliers.
+    // APPLICATION AUTO via STH quand le compte est connecté par l'API (join-master-account déclaratif avec le
+    // nouveau lot) ; sinon carte risk_change dans la file → le support l'applique dans le dashboard STH.
+    const LOT_CHOICES = [0.01, 0.02, 0.03, 0.05, 0.1];
+    const newLot = Number(body.lot ?? 0);
+    if (!LOT_CHOICES.includes(newLot)) return NextResponse.json({ error: 'invalid lot size' }, { status: 400 });
+    if (!['live', 'paused'].includes(cur.status)) return NextResponse.json({ error: 'copy not activated yet' }, { status: 403 });
+    const { data: mrow } = await db.from('members').select('member_no,strategy').eq('tg_id', s.tgId).limit(1);
+    const strat = Number((mrow?.[0] as { strategy?: number } | undefined)?.strategy ?? 2) || 2;
+    let applied = false;
+    const { sthReady, sthMoveMaster } = await import('@/lib/member/sth');
+    if (sthReady()) {
+      // même master, nouveau lot — join-master-account est déclaratif, un seul appel suffit
+      const r = await sthMoveMaster(String(s.tgId), strat, newLot);
+      applied = r.ok;
+    }
+    (patch as Record<string, unknown>).lot = newLot;
+    if (applied) {
+      await db.from('member_actions').insert({ tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member (auto STH)', detail: { text: `📏 copy size changed to ${newLot} lot — applied automatically via STH` } as never });
+    } else {
+      await queueAction(s.tgId, 'risk_change', { lot: String(newLot), to: `lot ${newLot}` }); // → le support règle le lot dans STH
     }
   } else if (body.action === 'risk') {
     const tier = String(body.tier ?? '');
