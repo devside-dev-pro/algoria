@@ -91,10 +91,10 @@ export async function GET(req: NextRequest) {
             chevauche le bloc QR — vécu au premier rendu) */}
         <div style={{ position: 'absolute', left: 60, top: 178, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            {/* flèche = triangle CSS (aucun glyphe de police) */}
-            <div style={isLong
-              ? { width: 0, height: 0, borderLeft: '20px solid transparent', borderRight: '20px solid transparent', borderBottom: '34px solid #22e0a6' }
-              : { width: 0, height: 0, borderLeft: '20px solid transparent', borderRight: '20px solid transparent', borderTop: '34px solid #ff6b8a' }} />
+            {/* flèche = SVG inline (l'astuce triangle-par-bordures CSS sort un CARRÉ sous Satori — vécu) */}
+            <svg width={40} height={36} viewBox="0 0 40 36">
+              <polygon points={isLong ? '20,0 40,36 0,36' : '0,0 40,0 20,36'} fill={isLong ? '#22e0a6' : '#ff6b8a'} />
+            </svg>
             <span style={{ fontSize: 46, fontWeight: 700, color: isLong ? '#22e0a6' : '#ff6b8a', letterSpacing: 3, lineHeight: 1, marginLeft: 22 }}>
               {isLong ? 'LONG' : 'SHORT'}  {symLabel(String(t.symbol))}
             </span>
