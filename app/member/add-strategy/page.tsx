@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker, STRATEGY_UI } from '../ui';
 import { BROKERS } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
+import { bracketForAmount, brokerOrderFor } from '@/lib/member/brokerSteering';
 
 const STRAT_NAME: Record<number, string> = { 1: 'S1 STEADY', 2: 'S2 BALANCED', 3: 'S3 TURBO' };
 
@@ -34,6 +35,15 @@ export default function AddStrategy() {
   const freeBrokers = BROKERS.filter((b) => !usedBrokers.has(b.key));
   const brokerServers = BROKERS.find((b) => b.key === brokerPick)?.servers ?? [];
   const minDep = strategy != null ? STRATEGY_MIN_DEPOSIT[strategy] ?? 500 : null;
+  // brokers restants présentés dans l'ordre recommandé pour le minimum de la stratégie choisie
+  // (brokerSteering — le nouveau compte sera financé autour de ce minimum), sinon ordre BROKERS
+  const steer = minDep != null ? brokerOrderFor(bracketForAmount(minDep)?.key) : null;
+  const freeOrdered = steer
+    ? [...freeBrokers].sort((a, b) => {
+        const ia = steer.indexOf(a.key), ib = steer.indexOf(b.key);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      })
+    : freeBrokers;
 
   if (loading || !member) return <Center>loading…</Center>;
   // réservé aux membres déjà LIVE (continuité VIP) — un prospect passe d'abord par l'onboarding classique
@@ -113,10 +123,11 @@ export default function AddStrategy() {
               <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
                 Each strategy runs on its own broker — pick one you don&rsquo;t have yet, open the account, fund it with <b className="goldText">${minDep}+</b>.
               </p>
-              {freeBrokers.map((b) => (
+              {freeOrdered.map((b, i) => (
                 <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(b.key); setServer(''); setServerManual(false); }}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${brokerPick === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: brokerPick === b.key ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)' }}>
                   <span style={{ fontWeight: 750, fontSize: 13.5 }}>{b.name}</span>
+                  {steer != null && i === 0 && <span className="mono" style={{ fontSize: 8.5, letterSpacing: 1, color: 'var(--cyan)', border: '1px solid rgba(43,227,245,.4)', borderRadius: 4, padding: '1px 5px' }}>★ RECOMMENDED</span>}
                   {b.featured && <span className="mono" style={{ fontSize: 8.5, letterSpacing: 1, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 4, padding: '1px 5px' }}>ALGORIA&rsquo;S BROKER</span>}
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: brokerPick === b.key ? 'var(--cyan)' : 'var(--dim)' }}>{brokerPick === b.key ? '✓ selected' : 'open account ↗'}</span>
                 </a>
