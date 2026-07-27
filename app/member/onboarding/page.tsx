@@ -68,6 +68,21 @@ export default function Onboarding() {
   // budget annoncé (étape 0) : oriente QUEL broker est mis en avant — tant que rien n'est choisi,
   // RaiseFX garde la vedette (comportement historique). Client-only : rien n'est persisté.
   const [budget, setBudget] = useState<string | null>(null);
+  // POPUP CODE BONUS (ALGORIA100) : l'arme de closing, servie uniquement sur signal d'HÉSITATION —
+  // 45 s plantés sur le mur du dépôt sans avoir cliqué un seul broker, au plus 1 fois / 24 h
+  // (localStorage). Celui qui avance tout seul ne la voit jamais : pas besoin de sortir un bonus
+  // pour quelqu'un de déjà convaincu. Hook AVANT les early-returns (règle des hooks).
+  const [bonusPop, setBonusPop] = useState(false);
+  useEffect(() => {
+    if (!member || member.status !== 'onboarding' || bonusPop) return;
+    if ((step ?? member.onboarding_step) !== 0 || (brokerPick ?? member.broker) != null) return;
+    try { if (Date.now() - Number(localStorage.getItem('alg_b100_at') ?? 0) < 86_400_000) return; } catch { /* localStorage indispo → tant pis, pas de popup */ }
+    const t = setTimeout(() => {
+      setBonusPop(true);
+      try { localStorage.setItem('alg_b100_at', String(Date.now())); } catch { /* idem */ }
+    }, 45_000);
+    return () => clearTimeout(t);
+  }, [member, step, brokerPick, bonusPop]);
 
   if (loading || !member) return <Center>loading…</Center>;
   if (member.status !== 'onboarding') { router.replace('/member'); return <Center>redirecting…</Center>; }
@@ -246,6 +261,24 @@ export default function Onboarding() {
       )}
 
       {err && <p style={{ fontSize: 12.5, color: 'rgba(210,150,165,.9)', margin: 0 }}>⚠ {err}</p>}
+
+      {/* popup ALGORIA100 — cadrage honnête OBLIGATOIRE : « trading power » / crédit broker,
+          jamais « double ton argent » (le bonus n'est pas du cash retirable) */}
+      {bonusPop && FEATURED.bonus && (
+        <div onClick={() => setBonusPop(false)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,8,16,.74)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}>
+          <section className="panel cardIn" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 380, width: '100%', padding: 20, display: 'flex', flexDirection: 'column', gap: 12, border: '1px solid rgba(245,194,74,.5)', boxShadow: '0 0 40px rgba(245,194,74,.18)' }}>
+            <span style={{ fontSize: 30, textAlign: 'center' }}>🎁</span>
+            <h2 style={{ margin: 0, fontSize: 16, textAlign: 'center' }}>Exclusive code unlocked</h2>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, textAlign: 'center' }}>
+              <b className="goldText">{FEATURED.bonus.pct}% deposit bonus</b> at {FEATURED.name} with the code below — deposit $300, the AI trades with <b style={{ color: 'var(--text)' }}>$600 of buying power</b>. Enter it when you fund your account.
+            </p>
+            <div className="mono" style={{ textAlign: 'center', fontSize: 20, fontWeight: 800, letterSpacing: 3, color: 'var(--gold)', border: '1px dashed rgba(245,194,74,.55)', borderRadius: 10, padding: '10px 12px' }}>{FEATURED.bonus.code}</div>
+            <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(FEATURED.key); setBonusPop(false); }} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
+            <button onClick={() => setBonusPop(false)} style={linkBtn}>Maybe later</button>
+            <p className="mono" style={{ margin: 0, fontSize: 9.5, color: 'var(--dim)', textAlign: 'center', letterSpacing: 0.4, lineHeight: 1.5 }}>BONUS = TRADING CREDIT ON YOUR BROKER ACCOUNT · YOUR OWN DEPOSIT STAYS YOURS, WITHDRAWABLE ANYTIME</p>
+          </section>
+        </div>
+      )}
 
       {/* porte de sortie humaine — l'onboarding est LÀ où les gens bloquent (broker, dépôt, serveur…) */}
       <a href="https://t.me/mathieu_algoria" target="_blank" rel="noreferrer"

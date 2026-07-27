@@ -947,12 +947,19 @@ export default function AdminCRM() {
                 const b = BROKERS.find((x) => x.key === key);
                 if (!b) return null;
                 const top = i === 0;
+                const bonus = b.bonus; // capturé : le narrowing TS ne traverse pas les callbacks onClick
                 return (
                   <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', borderRadius: 10, border: `1px solid ${top ? 'color-mix(in srgb, var(--gold) 45%, transparent)' : 'var(--border)'}`, background: top ? 'rgba(240,200,80,.06)' : 'rgba(10,17,31,.55)' }}>
                     <span className="mono" style={{ fontSize: 11, color: top ? 'var(--gold)' : 'var(--dim)', minWidth: 18, fontWeight: 800 }}>{i + 1}.</span>
                     <span style={{ fontSize: 12.5, fontWeight: top ? 800 : 600, color: 'var(--text)' }}>{b.name}</span>
                     {top && <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, color: 'var(--gold)', border: '1px solid color-mix(in srgb, var(--gold) 40%, transparent)', borderRadius: 6, padding: '2px 7px' }}>BEST</span>}
                     <span className="mono" style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--up)' }}>${usd}</span>
+                    {/* code bonus (closing manuel) — clic = copie du CODE seul, à coller dans le DM avec le lien */}
+                    {bonus && (
+                      <button onClick={() => copyBrokerLink(key + ':code', bonus.code)} title={`${bonus.pct}% deposit bonus — click to copy the code`} className="mono" style={{ ...miniBtn, fontWeight: 800, color: 'var(--gold)' }}>
+                        {planCopied === key + ':code' ? '✓ code copied' : `🎁 ${bonus.code}`}
+                      </button>
+                    )}
                     <span style={{ flex: 1 }} />
                     <button onClick={() => copyBrokerLink(key, b.url)} style={miniBtn}>{planCopied === key ? '✓ copied' : '⧉ copy link'}</button>
                   </div>

@@ -12,6 +12,11 @@ export interface Broker {
   // Relevés directement dans la liste serveur de STH/MT5 (screens Mathieu). SERVEURS LIVE UNIQUEMENT (pas de demo :
   // un membre doit être en réel). Serveur non listé → saisie libre en repli, donc jamais de blocage.
   servers?: string[];
+  // Code bonus de dépôt négocié avec le broker (confirmé cumulable avec le lien IB). ARME DE CLOSING,
+  // pas un banner : servi uniquement aux hésitants (popup onboarding sur signal d'hésitation, relances
+  // bot J+6+, rappel admin BEST LINK). pct = % du dépôt offert EN CRÉDIT DE TRADING (pas du cash
+  // retirable) — toujours formuler « double ta puissance de trading », jamais « double ton argent ».
+  bonus?: { code: string; pct: number };
 }
 
 export const BROKERS: Broker[] = [
@@ -22,6 +27,7 @@ export const BROKERS: Broker[] = [
     featured: true,
     note: "Algoria's own broker — the exact same spreads as the AI you watch live.",
     servers: ['RaiseGlobal-Live'], // société "RaiseGlobal"
+    bonus: { code: 'ALGORIA100', pct: 100 }, // 100% de bonus de dépôt — confirmé RaiseFX 27/07/2026
   },
   { key: 'vtmarkets', name: 'VT Markets', url: 'https://go.vtaffiliates.com/visit/?bta=35824&brand=vt', servers: ['VTMarkets-Live', 'VTMarkets-Live 2', 'VTMarkets-Live 3', 'VTMarkets-Live 5', 'VTMarkets-Live 6', 'VTMarkets-Live 7', 'VTMarkets-Live 8'] },
   // PU Prime — attention : « PUPrime-Live2 » (sans espace) ET « PUPrime-Live 2 » (avec espace) sont DEUX serveurs distincts.
