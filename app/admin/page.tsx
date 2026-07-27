@@ -16,6 +16,7 @@ interface Row {
   broker: string | null; risk_tier: string; created_at: string; updated_at: string | null; onboarding_step: number;
   mt5_login: string | null; mt5_server: string | null; usdt_trc20: string | null; referred_by: number | null;
   country: string | null;
+  source: string | null; // canal d'acquisition (cookie UTM au premier clic) — null = organique/cross-device
 }
 interface Action { id: string; tg_id?: number; member_no: number | null; kind: string; status?: string; done_by?: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
@@ -490,6 +491,42 @@ export default function AdminCRM() {
                     <span>🔌 stuck at <b style={{ color: 'var(--text)' }}>MT5 connect</b> (step 1): <b style={{ color: 'var(--gold)' }}>{step1}</b></span>
                     <span style={{ color: 'var(--dim)' }}>· auto-sequence works these daily — your voice notes close them (see below)</span>
                   </div>
+                  {/* 📡 PAR CANAL (attribution UTM au premier clic) — le juge de paix des ads : inscrits et
+                      FINANCÉS par source. "organic / unknown" = pas de cookie (organique, ou flux cross-device
+                      ads→Telegram→autre appareil : attribution partielle assumée). Croiser avec la dépense
+                      hebdo du media buyer → CAC réel par financé, par canal (rituel du lundi). */}
+                  {(() => {
+                    const bySrc = new Map<string, { signups: number; funded: number; live: number }>();
+                    const fundedSet = new Set(deposits.map((d) => Number(d.tg_id)));
+                    for (const r of rows) {
+                      const k = r.source ?? 'organic / unknown';
+                      const e = bySrc.get(k) ?? { signups: 0, funded: 0, live: 0 };
+                      e.signups++;
+                      if (fundedSet.has(Number(r.tg_id))) e.funded++;
+                      if (r.status === 'live') e.live++;
+                      bySrc.set(k, e);
+                    }
+                    const srcRows = [...bySrc.entries()].sort((a, b) => b[1].signups - a[1].signups);
+                    if (srcRows.length <= 1) return (
+                      <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)' }}>
+                        📡 Per-channel attribution is live — tag your ad links with <b className="mono" style={{ color: 'var(--muted)' }}>?utm_source=meta&utm_campaign=uk</b> (or ?src=…) and new signups will break down by channel here.
+                      </p>
+                    );
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid rgba(130,152,190,.12)', paddingTop: 9 }}>
+                        <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.5, color: 'var(--dim)', fontWeight: 800 }}>📡 BY CHANNEL (first-click UTM)</span>
+                        {srcRows.map(([src, v]) => (
+                          <div key={src} className="mono" style={{ display: 'flex', gap: 14, fontSize: 11, alignItems: 'baseline' }}>
+                            <span style={{ color: src === 'organic / unknown' ? 'var(--dim)' : 'var(--cyan)', fontWeight: 700, minWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{src}</span>
+                            <span style={{ color: 'var(--muted)' }}>{v.signups} signups</span>
+                            <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{v.funded} funded</span>
+                            <span style={{ color: 'var(--up)' }}>{v.live} live</span>
+                            <span style={{ color: 'var(--dim)' }}>{v.signups > 0 ? Math.round((v.funded / v.signups) * 100) : 0}% conv</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </section>
               );
             })()}
@@ -721,6 +758,7 @@ export default function AdminCRM() {
               <span>since <b style={{ color: 'var(--text)' }}>{new Date(sel.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</b></span>
               <span>referred by <b style={{ color: 'var(--text)' }}>{sel.referred_by ? nameOf(sel.referred_by) : '—'}</b></span>
               <span>invited <b style={{ color: 'var(--text)' }}>{rows.filter((r) => Number(r.referred_by) === Number(sel.tg_id)).length}</b></span>
+              <span>source <b style={{ color: sel.source ? 'var(--cyan)' : 'var(--dim)' }}>{sel.source ?? 'organic / unknown'}</b></span>
             </div>
             {/* ➕ COMPTES SUPPLÉMENTAIRES (multi-stratégies) — chaque compte a SON STH id ({tg_id}-{n}) */}
             {extraAccounts.filter((a) => Number(a.tg_id) === Number(sel.tg_id)).length > 0 && (

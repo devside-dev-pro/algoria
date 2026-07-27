@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
-    (db as any).from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country').order('member_no', { ascending: false }).limit(200) as Promise<{ data: Array<{ tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>> | null }>,
+    (db as any).from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source').order('member_no', { ascending: false }).limit(200) as Promise<{ data: Array<{ tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>> | null }>,
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),

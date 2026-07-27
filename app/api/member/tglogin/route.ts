@@ -40,10 +40,15 @@ export async function GET(req: NextRequest) {
     if (r?.length && Number(r[0].tg_id) !== row.tg_id) referrerTg = Number(r[0].tg_id);
   }
 
+  // ATTRIBUTION : canal d'origine (cookie alg_src posé par le middleware au premier clic UTM) — figé à la
+  // CRÉATION uniquement, comme referred_by. Absent = organique/cross-device (attribution partielle assumée).
+  const srcCookie = (req.cookies.get('alg_src')?.value ?? '').toLowerCase().slice(0, 60);
+  const source = /^[a-z0-9:_-]{2,60}$/.test(srcCookie) ? srcCookie : null;
+
   const patch = { tg_username: row.tg_username, tg_name: row.tg_name, ...(row.photo_url ? { photo_url: row.photo_url } : {}), updated_at: new Date().toISOString() };
   const { data: existing } = await db.from('members').select('id').eq('tg_id', row.tg_id).limit(1);
-  if (existing?.length) await db.from('members').update(patch).eq('tg_id', row.tg_id); // referred_by ne s'écrit qu'à la CRÉATION
-  else await db.from('members').insert({ tg_id: row.tg_id, ...patch, referral_code: newReferralCode(), ...(referrerTg != null ? { referred_by: referrerTg } : {}) });
+  if (existing?.length) await db.from('members').update(patch).eq('tg_id', row.tg_id); // referred_by/source ne s'écrivent qu'à la CRÉATION
+  else await (db as any).from('members').insert({ tg_id: row.tg_id, ...patch, referral_code: newReferralCode(), ...(referrerTg != null ? { referred_by: referrerTg } : {}), ...(source ? { source } : {}) });
 
   const res = NextResponse.json({ ok: true });
   res.cookies.set(SESSION_COOKIE, signSession({ tgId: row.tg_id, username: row.tg_username, name: row.tg_name ?? String(row.tg_id), iat: Date.now() }), {
