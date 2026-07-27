@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { openTelegram } from '@/lib/telegram';
 import { BROKERS } from '@/lib/member/brokers';
+import { estimateCommission } from '@/lib/member/commissions';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -59,6 +60,10 @@ export default function AdminCRM() {
   const [depBroker, setDepBroker] = useState('');
   const [depAmount, setDepAmount] = useState('');
   const [depCom, setDepCom] = useState('');
+  // true = le champ com est vide ou contient une valeur auto (barème) → on peut le réécrire quand
+  // broker/montant changent ; une saisie manuelle le fige (la vider le réarme). Ref et pas state :
+  // aucun rendu à déclencher, juste un verrou lu par l'effet de pré-remplissage.
+  const depComAuto = useRef(true);
   const [depDate, setDepDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [depNote, setDepNote] = useState('');
   // ===== push composer (TOOLS) : message libre + segment ciblé =====
@@ -277,11 +282,19 @@ export default function AdminCRM() {
     setYm(new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7));
   };
   const monthLabel = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).toUpperCase();
+  // pré-remplissage « expected com $ » depuis le barème par broker (lib/member/commissions) —
+  // recalculé à chaque changement de broker/montant TANT QUE l'opérateur n'a pas saisi une valeur
+  // à la main. Barème vide ou palier non atteint → champ vidé (pas de reliquat d'un autre broker).
+  useEffect(() => {
+    if (!depComAuto.current) return;
+    const est = estimateCommission(depBroker, Number(depAmount));
+    setDepCom(est != null ? String(est) : '');
+  }, [depBroker, depAmount]);
   const addDeposit = () => {
     if (!depTg || !depAmount) return;
     post(
       { addDeposit: { tg_id: Number(depTg), broker: depBroker, amount: Number(depAmount), commission: Number(depCom || 0), date: depDate, note: depNote } },
-      () => { setDepAmount(''); setDepCom(''); setDepNote(''); },
+      () => { setDepAmount(''); setDepCom(''); setDepNote(''); depComAuto.current = true; },
     );
   };
   const editDepositCom = (d: Deposit) => {
@@ -883,7 +896,7 @@ export default function AdminCRM() {
                   {depBroker && !BROKERS.some((b) => b.key === depBroker) && <option value={depBroker}>{depBroker}</option>}
                 </select>
                 <input value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder="deposit $" inputMode="decimal" style={{ ...inp, width: 110 }} />
-                <input value={depCom} onChange={(e) => setDepCom(e.target.value)} placeholder="expected com $" inputMode="decimal" style={{ ...inp, width: 140 }} />
+                <input value={depCom} onChange={(e) => { setDepCom(e.target.value); depComAuto.current = e.target.value === ''; }} placeholder="expected com $" title="pré-rempli depuis le barème du broker — modifiable, vider le champ pour réactiver l'auto" inputMode="decimal" style={{ ...inp, width: 140 }} />
                 <input type="date" value={depDate} onChange={(e) => setDepDate(e.target.value)} style={{ ...inp, width: 150 }} />
                 <input value={depNote} onChange={(e) => setDepNote(e.target.value)} placeholder="note (optional)" style={{ ...inp, flex: 1, minWidth: 160 }} />
                 <button disabled={busy || !depTg || !Number(depAmount)} onClick={addDeposit} style={{ padding: '10px 18px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: !depTg || !Number(depAmount) ? 0.5 : 1 }}>+ ADD</button>
