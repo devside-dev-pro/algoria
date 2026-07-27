@@ -308,6 +308,30 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/member-sw.js').catch(() => {});
   }, []);
+  // GARDE-FRAÎCHEUR PWA : une app installée gardée en mémoire tourne parfois des JOURS sur un vieux bundle
+  // (vu en prod : « minimum $500 » doré affiché 3 jours après le passage à $200 — clients bloqués au dépôt
+  // sur la foi d'un écran périmé). Au chargement puis à chaque retour au premier plan, on compare le sha de
+  // build (/api/member/version) : changé → reload dur. Throttle 60 s ; jamais pendant une saisie (formulaire
+  // d'onboarding en cours → on retente au focus suivant).
+  useEffect(() => {
+    let base: string | null = null;
+    let last = 0;
+    const check = async () => {
+      if (Date.now() - last < 60_000) return;
+      last = Date.now();
+      try {
+        const { v } = (await (await fetch('/api/member/version', { cache: 'no-store' })).json()) as { v?: string };
+        if (!v || v === 'dev') return;
+        if (base == null) { base = v; return; }
+        const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
+        if (v !== base && !typing) window.location.reload();
+      } catch { /* offline → prochain focus */ }
+    };
+    void check();
+    const onVis = () => { if (document.visibilityState === 'visible') void check(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
   const Tab = ({ href, label, icon }: { href: string; label: string; icon: React.ReactNode }) => {
     const active = path === href || (href !== '/member' && path?.startsWith(href));
     return (

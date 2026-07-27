@@ -1,5 +1,5 @@
 'use client';
-// Wizard d'adhésion en 3 étapes : broker (Raise en avant, minimum 500$) → connexion MT5 (chiffrée) → profil de risque.
+// Wizard d'adhésion en 3 étapes : broker (Raise en avant, minimum PAR STRATÉGIE $200/$500/$1000) → connexion MT5 (chiffrée) → profil de risque.
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -189,7 +189,7 @@ export default function Onboarding() {
           <div style={grp}>
             <span style={grpLbl}>FOR VERIFICATION</span>
             <label style={lbl}>Full name on your broker account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
-            <label style={lbl}>Amount deposited ($ — min 200)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="500" style={inp} /></label>
+            <label style={lbl}>Amount deposited ($ — min 200)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="200" style={inp} /></label>
             <span style={hint}>Accurate name &amp; deposit = faster approval — the team checks them with the broker before switching the copy on.</span>
           </div>
 
