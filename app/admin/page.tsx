@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { openTelegram } from '@/lib/telegram';
 import { BROKERS } from '@/lib/member/brokers';
-import { estimateCommission } from '@/lib/member/commissions';
+import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -66,6 +66,10 @@ export default function AdminCRM() {
   const depComAuto = useRef(true);
   const [depDate, setDepDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [depNote, setDepNote] = useState('');
+  // ===== BEST LINK (DEPOSITS) : « il veut mettre X $, quel broker lui envoyer ? » =====
+  const [planAmount, setPlanAmount] = useState('');
+  const [planTg, setPlanTg] = useState(''); // prospect optionnel → exclut ses brokers existants
+  const [planCopied, setPlanCopied] = useState<string | null>(null); // key du lien copié (feedback ✓)
   // ===== push composer (TOOLS) : message libre + segment ciblé =====
   const [pushTitle, setPushTitle] = useState('');
   const [pushBody, setPushBody] = useState('');
@@ -290,6 +294,24 @@ export default function AdminCRM() {
     const est = estimateCommission(depBroker, Number(depAmount));
     setDepCom(est != null ? String(est) : '');
   }, [depBroker, depAmount]);
+  // classement des brokers pour le budget annoncé — brokers déjà utilisés par le prospect exclus
+  // (compte principal + comptes multi-stratégies) : on ne renvoie jamais quelqu'un là où il est déjà
+  const planExcluded = useMemo(() => {
+    const used = new Set<string>();
+    if (planTg) {
+      const m = rows.find((r) => String(r.tg_id) === planTg);
+      if (m?.broker) used.add(m.broker);
+      for (const a of extraAccounts) if (String(a.tg_id) === planTg && a.broker) used.add(a.broker);
+    }
+    return used;
+  }, [planTg, rows, extraAccounts]);
+  const planRanking = useMemo(() => rankBrokersByCommission(Number(planAmount), planExcluded), [planAmount, planExcluded]);
+  const copyBrokerLink = (key: string, url: string) => {
+    void navigator.clipboard.writeText(url).then(() => {
+      setPlanCopied(key);
+      setTimeout(() => setPlanCopied((k) => (k === key ? null : k)), 1500);
+    });
+  };
   const addDeposit = () => {
     if (!depTg || !depAmount) return;
     post(
@@ -901,6 +923,41 @@ export default function AdminCRM() {
                 <input value={depNote} onChange={(e) => setDepNote(e.target.value)} placeholder="note (optional)" style={{ ...inp, flex: 1, minWidth: 160 }} />
                 <button disabled={busy || !depTg || !Number(depAmount)} onClick={addDeposit} style={{ padding: '10px 18px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: !depTg || !Number(depAmount) ? 0.5 : 1 }}>+ ADD</button>
               </div>
+            </section>
+
+            {/* ===== BEST LINK — le tunnel optimisé : budget annoncé → broker le plus rémunérateur.
+                Demander au prospect combien il compte investir AVANT de lui envoyer un lien, saisir le
+                montant ici, envoyer le lien du haut du classement. Prospect sélectionné → ses brokers
+                existants sont retirés du classement (jamais renvoyer quelqu'un là où il a déjà un compte). */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <h2 style={secH}>BEST LINK — WHERE TO SEND A DEPOSIT</h2>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input value={planAmount} onChange={(e) => setPlanAmount(e.target.value)} placeholder="planned deposit $" inputMode="decimal" style={{ ...inp, width: 150 }} />
+                <select value={planTg} onChange={(e) => setPlanTg(e.target.value)} title="optional — removes the brokers this member already uses" style={{ ...inp, width: 210 }}>
+                  <option value="">prospect (optional)…</option>
+                  {[...rows].sort((a, b) => a.member_no - b.member_no).map((r) => (
+                    <option key={r.tg_id} value={String(r.tg_id)}>#{r.member_no} {r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '')}</option>
+                  ))}
+                </select>
+                {planExcluded.size > 0 && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>already at: {[...planExcluded].map((k) => (BROKERS.find((b) => b.key === k)?.name ?? k)).join(', ')}</span>}
+              </div>
+              {!Number(planAmount) && <p style={dimP}>Ask the prospect how much he plans to invest, type it above — the ranking tells you which broker link pays the most for that budget.</p>}
+              {Number(planAmount) > 0 && planRanking.length === 0 && <p style={dimP}>No commission at this amount on any available broker{Number(planAmount) < 200 ? ' — only RaiseFX pays under $200 (from $100)' : ''}.</p>}
+              {planRanking.map(({ key, usd }, i) => {
+                const b = BROKERS.find((x) => x.key === key);
+                if (!b) return null;
+                const top = i === 0;
+                return (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', borderRadius: 10, border: `1px solid ${top ? 'color-mix(in srgb, var(--gold) 45%, transparent)' : 'var(--border)'}`, background: top ? 'rgba(240,200,80,.06)' : 'rgba(10,17,31,.55)' }}>
+                    <span className="mono" style={{ fontSize: 11, color: top ? 'var(--gold)' : 'var(--dim)', minWidth: 18, fontWeight: 800 }}>{i + 1}.</span>
+                    <span style={{ fontSize: 12.5, fontWeight: top ? 800 : 600, color: 'var(--text)' }}>{b.name}</span>
+                    {top && <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, color: 'var(--gold)', border: '1px solid color-mix(in srgb, var(--gold) 40%, transparent)', borderRadius: 6, padding: '2px 7px' }}>BEST</span>}
+                    <span className="mono" style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--up)' }}>${usd}</span>
+                    <span style={{ flex: 1 }} />
+                    <button onClick={() => copyBrokerLink(key, b.url)} style={miniBtn}>{planCopied === key ? '✓ copied' : '⧉ copy link'}</button>
+                  </div>
+                );
+              })}
             </section>
 
             {/* le bilan du mois : navigation ‹ › + totaux + export CSV (Google Sheets / Excel) */}
