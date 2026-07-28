@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { openTelegram } from '@/lib/telegram';
 import { BROKERS } from '@/lib/member/brokers';
+import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -59,8 +60,20 @@ export default function AdminCRM() {
   const [depBroker, setDepBroker] = useState('');
   const [depAmount, setDepAmount] = useState('');
   const [depCom, setDepCom] = useState('');
+  // true = le champ com est vide ou contient une valeur auto (barème) → on peut le réécrire quand
+  // broker/montant changent ; une saisie manuelle le fige (la vider le réarme). Ref et pas state :
+  // aucun rendu à déclencher, juste un verrou lu par l'effet de pré-remplissage.
+  const depComAuto = useRef(true);
   const [depDate, setDepDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [depNote, setDepNote] = useState('');
+  // ===== BEST LINK (DEPOSITS) : « il veut mettre X $, quel broker lui envoyer ? » =====
+  const [planAmount, setPlanAmount] = useState('');
+  const [planTg, setPlanTg] = useState(''); // prospect optionnel → exclut ses brokers existants
+  const [planCopied, setPlanCopied] = useState<string | null>(null); // key du lien copié (feedback ✓)
+  // ===== QUEUE : « copier les infos dépôt » → un message prêt à COLLER dans le groupe WhatsApp du
+  // staff (vérification CellXpert chez le broker). Format calqué sur les messages actuels de Mathieu :
+  // entête + nom broker + login MT + broker + montant. Le staff répond ✅/« je le vois pas » → CONNECT (STH).
+  const [depInfoCopied, setDepInfoCopied] = useState<string | null>(null); // id de la carte copiée (feedback ✓)
   // ===== push composer (TOOLS) : message libre + segment ciblé =====
   const [pushTitle, setPushTitle] = useState('');
   const [pushBody, setPushBody] = useState('');
@@ -242,6 +255,20 @@ export default function AdminCRM() {
   };
   // nom légal (compte broker) d'un membre — la clé pour rapprocher Telegram ↔ admin ↔ broker/STH
   const legalOf = (tg: number | null | undefined) => (tg != null ? legalNames[String(tg)] ?? null : null);
+  // message « nouveau dépôt à vérifier » → presse-papiers (WhatsApp staff). Nom du compte broker en
+  // priorité (c'est LUI que le staff cherche dans CellXpert), sinon le nom Telegram en repli.
+  const copyDepositInfo = (a: Action) => {
+    const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id));
+    const brokerKey = String(a.detail?.broker ?? m?.broker ?? '');
+    const brokerLabel = BROKERS.find((b) => b.key === brokerKey)?.name ?? (brokerKey || '⚠ broker ?');
+    const who = String(a.detail?.broker_name ?? '') || legalOf(a.tg_id) || nameOf(a.tg_id);
+    const dep = Number(a.detail?.declared_deposit ?? 0);
+    const text = ['🔔 Nouveau dépôt à vérifier', who, String(a.detail?.login ?? '⚠ login ?'), brokerLabel, dep ? `${dep}$` : '⚠ montant non déclaré'].join('\n');
+    void navigator.clipboard?.writeText(text).then(() => {
+      setDepInfoCopied(a.id);
+      setTimeout(() => setDepInfoCopied((v) => (v === a.id ? null : v)), 1600);
+    });
+  };
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
@@ -277,11 +304,37 @@ export default function AdminCRM() {
     setYm(new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7));
   };
   const monthLabel = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).toUpperCase();
+  // pré-remplissage « expected com $ » depuis le barème par broker (lib/member/commissions) —
+  // recalculé à chaque changement de broker/montant TANT QUE l'opérateur n'a pas saisi une valeur
+  // à la main. Barème vide ou palier non atteint → champ vidé (pas de reliquat d'un autre broker).
+  useEffect(() => {
+    if (!depComAuto.current) return;
+    const est = estimateCommission(depBroker, Number(depAmount));
+    setDepCom(est != null ? String(est) : '');
+  }, [depBroker, depAmount]);
+  // classement des brokers pour le budget annoncé — brokers déjà utilisés par le prospect exclus
+  // (compte principal + comptes multi-stratégies) : on ne renvoie jamais quelqu'un là où il est déjà
+  const planExcluded = useMemo(() => {
+    const used = new Set<string>();
+    if (planTg) {
+      const m = rows.find((r) => String(r.tg_id) === planTg);
+      if (m?.broker) used.add(m.broker);
+      for (const a of extraAccounts) if (String(a.tg_id) === planTg && a.broker) used.add(a.broker);
+    }
+    return used;
+  }, [planTg, rows, extraAccounts]);
+  const planRanking = useMemo(() => rankBrokersByCommission(Number(planAmount), planExcluded), [planAmount, planExcluded]);
+  const copyBrokerLink = (key: string, url: string) => {
+    void navigator.clipboard.writeText(url).then(() => {
+      setPlanCopied(key);
+      setTimeout(() => setPlanCopied((k) => (k === key ? null : k)), 1500);
+    });
+  };
   const addDeposit = () => {
     if (!depTg || !depAmount) return;
     post(
       { addDeposit: { tg_id: Number(depTg), broker: depBroker, amount: Number(depAmount), commission: Number(depCom || 0), date: depDate, note: depNote } },
-      () => { setDepAmount(''); setDepCom(''); setDepNote(''); },
+      () => { setDepAmount(''); setDepCom(''); setDepNote(''); depComAuto.current = true; },
     );
   };
   const editDepositCom = (d: Deposit) => {
@@ -567,7 +620,7 @@ export default function AdminCRM() {
                 <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <h2 style={secH}>📞 RELANCES DU JOUR · {queue.length} — your personal DM/voice beats any bot</h2>
                   {queue.slice(0, 15).map(({ r, days, touched }) => (
-                    <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)' }}>
+                    <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)', flexWrap: 'wrap' }}>
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{r.member_no}</span>
                       <span style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
                       {legalOf(r.tg_id) && <span className="mono" style={{ fontSize: 10, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }} title="name on the broker account">🏦 {legalOf(r.tg_id)}</span>}
@@ -651,7 +704,10 @@ export default function AdminCRM() {
             {actions.length === 0 && <p style={dimP}>Queue clear — nothing to apply.</p>}
             {actions.map((a) => (
               <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* flexWrap : l'admin vit à 70% sur le téléphone de Mathieu — sans wrap, les boutons
+                    débordaient sur le texte de la carte (vécu en screenshot). Les boutons passent
+                    à la ligne proprement sur écran étroit. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   {/* QUI : @username cliquable (ouvre la fiche) — un #numéro seul ne dit rien à personne */}
                   <button
                     onClick={() => { const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id)); if (m) { openMember(m); setTab('members'); } }}
@@ -687,6 +743,9 @@ export default function AdminCRM() {
                       );
                     })()}
                   </div>
+                  {a.kind === 'connect' && (
+                    <button onClick={() => copyDepositInfo(a)} title="copie « nouveau dépôt à vérifier » (nom, login, broker, montant) — à coller dans le groupe WhatsApp du staff" style={depInfoCopied === a.id ? { ...goldBtn, color: 'var(--up)' } : goldBtn}>{depInfoCopied === a.id ? '✓ COPIÉ' : '📋 WHATSAPP'}</button>
+                  )}
                   {a.kind === 'connect' && !creds[a.id] && (
                     <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password (timestamped)" style={goldBtn}>🔑 REVEAL</button>
                   )}
@@ -883,11 +942,53 @@ export default function AdminCRM() {
                   {depBroker && !BROKERS.some((b) => b.key === depBroker) && <option value={depBroker}>{depBroker}</option>}
                 </select>
                 <input value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder="deposit $" inputMode="decimal" style={{ ...inp, width: 110 }} />
-                <input value={depCom} onChange={(e) => setDepCom(e.target.value)} placeholder="expected com $" inputMode="decimal" style={{ ...inp, width: 140 }} />
+                <input value={depCom} onChange={(e) => { setDepCom(e.target.value); depComAuto.current = e.target.value === ''; }} placeholder="expected com $" title="pré-rempli depuis le barème du broker — modifiable, vider le champ pour réactiver l'auto" inputMode="decimal" style={{ ...inp, width: 140 }} />
                 <input type="date" value={depDate} onChange={(e) => setDepDate(e.target.value)} style={{ ...inp, width: 150 }} />
                 <input value={depNote} onChange={(e) => setDepNote(e.target.value)} placeholder="note (optional)" style={{ ...inp, flex: 1, minWidth: 160 }} />
                 <button disabled={busy || !depTg || !Number(depAmount)} onClick={addDeposit} style={{ padding: '10px 18px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: !depTg || !Number(depAmount) ? 0.5 : 1 }}>+ ADD</button>
               </div>
+            </section>
+
+            {/* ===== BEST LINK — le tunnel optimisé : budget annoncé → broker le plus rémunérateur.
+                Demander au prospect combien il compte investir AVANT de lui envoyer un lien, saisir le
+                montant ici, envoyer le lien du haut du classement. Prospect sélectionné → ses brokers
+                existants sont retirés du classement (jamais renvoyer quelqu'un là où il a déjà un compte). */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <h2 style={secH}>BEST LINK — WHERE TO SEND A DEPOSIT</h2>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input value={planAmount} onChange={(e) => setPlanAmount(e.target.value)} placeholder="planned deposit $" inputMode="decimal" style={{ ...inp, width: 150 }} />
+                <select value={planTg} onChange={(e) => setPlanTg(e.target.value)} title="optional — removes the brokers this member already uses" style={{ ...inp, width: 210 }}>
+                  <option value="">prospect (optional)…</option>
+                  {[...rows].sort((a, b) => a.member_no - b.member_no).map((r) => (
+                    <option key={r.tg_id} value={String(r.tg_id)}>#{r.member_no} {r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '')}</option>
+                  ))}
+                </select>
+                {planExcluded.size > 0 && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>already at: {[...planExcluded].map((k) => (BROKERS.find((b) => b.key === k)?.name ?? k)).join(', ')}</span>}
+              </div>
+              {!Number(planAmount) && <p style={dimP}>Ask the prospect how much he plans to invest, type it above — the ranking tells you which broker link pays the most for that budget.</p>}
+              {Number(planAmount) > 0 && planRanking.length === 0 && <p style={dimP}>No commission at this amount on any available broker{Number(planAmount) < 200 ? ' — only RaiseFX pays under $200 (from $100)' : ''}.</p>}
+              {planRanking.map(({ key, usd }, i) => {
+                const b = BROKERS.find((x) => x.key === key);
+                if (!b) return null;
+                const top = i === 0;
+                const bonus = b.bonus; // capturé : le narrowing TS ne traverse pas les callbacks onClick
+                return (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', borderRadius: 10, border: `1px solid ${top ? 'color-mix(in srgb, var(--gold) 45%, transparent)' : 'var(--border)'}`, background: top ? 'rgba(240,200,80,.06)' : 'rgba(10,17,31,.55)' }}>
+                    <span className="mono" style={{ fontSize: 11, color: top ? 'var(--gold)' : 'var(--dim)', minWidth: 18, fontWeight: 800 }}>{i + 1}.</span>
+                    <span style={{ fontSize: 12.5, fontWeight: top ? 800 : 600, color: 'var(--text)' }}>{b.name}</span>
+                    {top && <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, color: 'var(--gold)', border: '1px solid color-mix(in srgb, var(--gold) 40%, transparent)', borderRadius: 6, padding: '2px 7px' }}>BEST</span>}
+                    <span className="mono" style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--up)' }}>${usd}</span>
+                    {/* code bonus (closing manuel) — clic = copie du CODE seul, à coller dans le DM avec le lien */}
+                    {bonus && (
+                      <button onClick={() => copyBrokerLink(key + ':code', bonus.code)} title={`${bonus.pct}% deposit bonus — click to copy the code`} className="mono" style={{ ...miniBtn, fontWeight: 800, color: 'var(--gold)' }}>
+                        {planCopied === key + ':code' ? '✓ code copied' : `🎁 ${bonus.code}`}
+                      </button>
+                    )}
+                    <span style={{ flex: 1 }} />
+                    <button onClick={() => copyBrokerLink(key, b.url)} style={miniBtn}>{planCopied === key ? '✓ copied' : '⧉ copy link'}</button>
+                  </div>
+                );
+              })}
             </section>
 
             {/* le bilan du mois : navigation ‹ › + totaux + export CSV (Google Sheets / Excel) */}
@@ -948,7 +1049,7 @@ export default function AdminCRM() {
               {aff.pendingPayouts.length === 0 && <p style={dimP}>No withdrawal requests.</p>}
               {aff.pendingPayouts.map((p) => (
                 <div key={p.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.05)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 12.5, fontWeight: 800 }}>💸 <span className="goldText">${Number(p.amount)}</span> → {nameOf(p.tg_id)}</span>
                     <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{new Date(p.created_at).toLocaleString('en-GB')}</span>
                     <span style={{ flex: 1 }} />
@@ -966,7 +1067,7 @@ export default function AdminCRM() {
               <h2 style={secH}>COMMISSIONS — CONFIRM WHEN THE BROKER PAID YOU {aff.pendingCommissions.length > 0 && `· ${aff.pendingCommissions.length}`}</h2>
               {aff.pendingCommissions.length === 0 && <p style={dimP}>Nothing pending — commissions appear when a referred member is approved.</p>}
               {aff.pendingCommissions.map((c) => (
-                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12 }}>
                     💰 <b className="goldText">${Number(c.amount)}</b> → {nameOf(c.referrer_tg_id)}
                     <span style={{ color: 'var(--dim)', fontSize: 10.5 }}> · referred {c.detail?.referred_member_no ? `#${String(c.detail.referred_member_no)}` : nameOf(c.referred_tg_id)}</span>
@@ -1043,7 +1144,7 @@ export default function AdminCRM() {
                 ['day', '📅 DAY RECAP', proof?.today] as const,
                 ['week', '🗓 WEEK RECAP', proof?.week] as const,
               ]).map(([period, label, s]) => (
-                <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.05)' }}>
+                <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.05)', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12, fontWeight: 800 }}>{label}</span>
                   <span className="mono" style={{ fontSize: 11.5, color: s?.count ? 'var(--up)' : 'var(--dim)' }}>
                     {s ? (s.count ? `✓ ${s.count} wins · +$${Math.round(s.total)} · best +$${Math.round(s.best)}` : 'no wins yet') : '…'}
@@ -1055,7 +1156,7 @@ export default function AdminCRM() {
               ))}
               {feedWins.length === 0 && <p style={dimP}>Recent wins appear here as trades close — each downloads as a ready-to-post story card.</p>}
               {feedWins.map((t) => (
-                <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 11, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
                   <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
                   <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--up)' }}>+${Number(t.pnl).toFixed(0)}</span>

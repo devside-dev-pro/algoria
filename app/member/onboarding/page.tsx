@@ -1,11 +1,13 @@
 'use client';
-// Wizard d'adhésion en 3 étapes : broker (Raise en avant, minimum PAR STRATÉGIE $200/$500/$1000) → connexion MT5 (chiffrée) → profil de risque.
+// Wizard d'adhésion en 3 étapes : broker (budget demandé D'ABORD → le partenaire recommandé pour la
+// tranche prend la vedette, Raise par défaut ; minimum PAR STRATÉGIE $200/$500/$1000) → connexion MT5 (chiffrée) → profil de risque.
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker } from '../ui';
-import { BROKERS } from '@/lib/member/brokers';
+import { BROKERS, type Broker } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
+import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
@@ -63,6 +65,24 @@ export default function Onboarding() {
   const [strategy, setStrategy] = useState(2); // 1=Steady · 2=Balanced (défaut) · 3=Turbo — lot copieur fixe 0.01
   const [brokerPick, setBrokerPick] = useState<string | null>(null); // broker cliqué (le lien ouvre un onglet, on retient le choix)
   const [showOthers, setShowOthers] = useState(false);
+  // budget annoncé (étape 0) : oriente QUEL broker est mis en avant — tant que rien n'est choisi,
+  // RaiseFX garde la vedette (comportement historique). Client-only : rien n'est persisté.
+  const [budget, setBudget] = useState<string | null>(null);
+  // POPUP CODE BONUS (ALGORIA100) : l'arme de closing, servie uniquement sur signal d'HÉSITATION —
+  // 45 s plantés sur le mur du dépôt sans avoir cliqué un seul broker, au plus 1 fois / 24 h
+  // (localStorage). Celui qui avance tout seul ne la voit jamais : pas besoin de sortir un bonus
+  // pour quelqu'un de déjà convaincu. Hook AVANT les early-returns (règle des hooks).
+  const [bonusPop, setBonusPop] = useState(false);
+  useEffect(() => {
+    if (!member || member.status !== 'onboarding' || bonusPop) return;
+    if ((step ?? member.onboarding_step) !== 0 || (brokerPick ?? member.broker) != null) return;
+    try { if (Date.now() - Number(localStorage.getItem('alg_b100_at') ?? 0) < 86_400_000) return; } catch { /* localStorage indispo → tant pis, pas de popup */ }
+    const t = setTimeout(() => {
+      setBonusPop(true);
+      try { localStorage.setItem('alg_b100_at', String(Date.now())); } catch { /* idem */ }
+    }, 45_000);
+    return () => clearTimeout(t);
+  }, [member, step, brokerPick, bonusPop]);
 
   if (loading || !member) return <Center>loading…</Center>;
   if (member.status !== 'onboarding') { router.replace('/member'); return <Center>redirecting…</Center>; }
@@ -71,7 +91,15 @@ export default function Onboarding() {
   // chaque étape a un retour ← — un compte refusé peut re-choisir un autre broker au lieu de rester coincé
   const picked = brokerPick ?? member.broker ?? null;
   const brokerServers = BROKERS.find((b) => b.key === picked)?.servers ?? []; // serveurs MT5 exacts du broker choisi
-  const othersOpen = showOthers || (picked != null && picked !== FEATURED.key);
+  // ordre de présentation des brokers : budget annoncé → partenaire recommandé pour cette tranche
+  // en tête (brokerSteering), sinon l'ordre historique (RaiseFX en vedette)
+  const order = brokerOrderFor(budget);
+  const ranked: Broker[] = order
+    ? order.map((k) => BROKERS.find((b) => b.key === k)).filter((b): b is Broker => b != null)
+    : [FEATURED, ...OTHERS];
+  const lead = ranked[0] ?? FEATURED;
+  const rest = ranked.slice(1);
+  const othersOpen = showOthers || (picked != null && picked !== lead.key);
 
   const run = (body: Record<string, unknown>, next: number | 'done') => {
     setBusy(true);
@@ -111,8 +139,28 @@ export default function Onboarding() {
       {cur === 0 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h2 style={{ fontSize: 15, margin: 0 }}>1 · Open your broker account</h2>
-          <p style={pMuted}>{FEATURED.note ?? 'Open your account with one of our partner brokers.'}</p>
-          <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(FEATURED.key)} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
+
+          {/* le budget D'ABORD : la réponse choisit quel partenaire prend la vedette juste en dessous */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>HOW MUCH DO YOU PLAN TO START WITH?</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {BUDGET_BRACKETS.map((b) => (
+                <button key={b.key} type="button" onClick={() => setBudget(budget === b.key ? null : b.key)}
+                  style={{ flex: '1 1 100px', padding: '9px 6px', borderRadius: 10, cursor: 'pointer', fontWeight: 750, fontSize: 12, letterSpacing: 0.2,
+                    border: `1px solid ${budget === b.key ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
+                    background: budget === b.key ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)',
+                    color: budget === b.key ? 'var(--cyan)' : 'var(--muted)' }}>
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {budget && (
+            <span className="mono" style={{ alignSelf: 'flex-start', fontSize: 9, letterSpacing: 1.4, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 5, padding: '2px 7px', fontWeight: 800 }}>★ BEST MATCH FOR YOUR BUDGET</span>
+          )}
+          <p style={pMuted}>{lead.note ?? (budget ? `${lead.name} is our recommended partner for your starting budget — fully supported, same hands-free copy.` : 'Open your account with one of our partner brokers.')}</p>
+          <a href={lead.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(lead.key)} style={ctaGold}>▲ CREATE MY {lead.name.toUpperCase()} ACCOUNT</a>
           <div style={{ borderLeft: '3px solid var(--gold)', background: 'rgba(245,194,74,.06)', borderRadius: 8, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
             <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
               <strong style={{ color: 'var(--gold)' }}>Minimum deposit: from $200</strong> — it depends on the strategy you&apos;ll pick at the last step. Fund for the one you want:
@@ -127,7 +175,7 @@ export default function Onboarding() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>OTHER PARTNER BROKERS — SAME MINIMUMS</span>
-              {OTHERS.map((b) => (
+              {rest.map((b) => (
                 <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(b.key)}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${picked === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: picked === b.key ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)' }}>
                   <span style={{ fontWeight: 750, fontSize: 13.5 }}>{b.name}</span>
@@ -136,7 +184,7 @@ export default function Onboarding() {
               ))}
             </div>
           )}
-          <button disabled={busy} onClick={() => run({ action: 'broker', broker: picked ?? FEATURED.key }, 1)} style={ctaMain}>MY ACCOUNT IS READY →</button>
+          <button disabled={busy} onClick={() => run({ action: 'broker', broker: picked ?? lead.key }, 1)} style={ctaMain}>MY ACCOUNT IS READY →</button>
         </section>
       )}
 
@@ -213,6 +261,24 @@ export default function Onboarding() {
       )}
 
       {err && <p style={{ fontSize: 12.5, color: 'rgba(210,150,165,.9)', margin: 0 }}>⚠ {err}</p>}
+
+      {/* popup ALGORIA100 — cadrage honnête OBLIGATOIRE : « trading power » / crédit broker,
+          jamais « double ton argent » (le bonus n'est pas du cash retirable) */}
+      {bonusPop && FEATURED.bonus && (
+        <div onClick={() => setBonusPop(false)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,8,16,.74)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}>
+          <section className="panel cardIn" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 380, width: '100%', padding: 20, display: 'flex', flexDirection: 'column', gap: 12, border: '1px solid rgba(245,194,74,.5)', boxShadow: '0 0 40px rgba(245,194,74,.18)' }}>
+            <span style={{ fontSize: 30, textAlign: 'center' }}>🎁</span>
+            <h2 style={{ margin: 0, fontSize: 16, textAlign: 'center' }}>Exclusive code unlocked</h2>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, textAlign: 'center' }}>
+              <b className="goldText">{FEATURED.bonus.pct}% deposit bonus</b> at {FEATURED.name} with the code below — deposit $300, the AI trades with <b style={{ color: 'var(--text)' }}>$600 of buying power</b>. Enter it when you fund your account.
+            </p>
+            <div className="mono" style={{ textAlign: 'center', fontSize: 20, fontWeight: 800, letterSpacing: 3, color: 'var(--gold)', border: '1px dashed rgba(245,194,74,.55)', borderRadius: 10, padding: '10px 12px' }}>{FEATURED.bonus.code}</div>
+            <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(FEATURED.key); setBonusPop(false); }} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
+            <button onClick={() => setBonusPop(false)} style={linkBtn}>Maybe later</button>
+            <p className="mono" style={{ margin: 0, fontSize: 9.5, color: 'var(--dim)', textAlign: 'center', letterSpacing: 0.4, lineHeight: 1.5 }}>BONUS = TRADING CREDIT ON YOUR BROKER ACCOUNT · YOUR OWN DEPOSIT STAYS YOURS, WITHDRAWABLE ANYTIME</p>
+          </section>
+        </div>
+      )}
 
       {/* porte de sortie humaine — l'onboarding est LÀ où les gens bloquent (broker, dépôt, serveur…) */}
       <a href="https://t.me/mathieu_algoria" target="_blank" rel="noreferrer"
