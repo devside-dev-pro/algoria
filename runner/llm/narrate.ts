@@ -5,7 +5,12 @@ import type { Confluence, Direction, MarketContext, Session, Signal, Zone } from
 // Runner-only (clé jamais exposée au navigateur). Sans ANTHROPIC_API_KEY, le desk tourne quand même
 // (100% structuré, sans la clause). deskMeta() construit les champs structurés lus par components/Desk.tsx.
 const KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = process.env.ALGORIA_NARRATE_MODEL ?? 'claude-opus-4-8';
+// Sonnet 5 par défaut (÷2,5 vs Opus) : la narration = clauses de ≤16 mots toutes les 5 min × 3
+// runners, 24h/24 — c'était ~97% de la facture API à l'échelle Opus, pour des one-liners. Le
+// raisonnement de marché reste ancré sur les VRAIS chiffres du moteur (marketBlock) quel que soit
+// le modèle. La VOIX publique (app/api/voice/ask, ALGORIA_VOICE_MODEL) reste sur Opus — c'est là
+// que l'intelligence se voit et se filme. Levier suivant si besoin : espacer la cadence (10 min = ÷2).
+const MODEL = process.env.ALGORIA_NARRATE_MODEL ?? 'claude-sonnet-5';
 const client = KEY ? new Anthropic({ apiKey: KEY }) : null;
 
 export const narrationReady = () => client != null;
