@@ -18,7 +18,14 @@ export const SPECS: Record<string, Spec> = {
 
 // ===== Interface stratégie : décision sur CLÔTURE de la bougie i, en ne voyant QUE bars[0..i] =====
 export interface LabSignal { direction: 'long' | 'short'; stopLoss: number; takeProfit: number }
-export interface Exits { be: number; trailActivate?: number; trailDist?: number } // gestion post-entrée (× riskDist)
+// gestion post-entrée (× riskDist). Étude 28/07 : beOffset (verrou du BE, défaut 0.05), ladder (paliers
+// [déclencheur, verrou] sur le pic — spec Mathieu « +1R→lock 0.5R, +1.5R→lock 1R… »), weekendFlat (flat
+// vendredi ≥ 20h UTC — les overnights en semaine restent intacts, seul l'overweek saute).
+// weekendFlatLosers : ne ferme au cutoff QUE les positions en perte latente (les runners gagnants gardent
+// leur week-end — ils font +1.9R de moyenne sur 21 mois). noEntryFriFrom : bloque les OUVERTURES le vendredi
+// dès l'heure UTC donnée (les 2 stops de −1850$ du 26/07 étaient des entrées du vendredi 19h) sans toucher
+// aux positions déjà en cours.
+export interface Exits { be: number; beOffset?: number; trailActivate?: number; trailDist?: number; ladder?: Array<[number, number]>; weekendFlat?: boolean; weekendFlatLosers?: boolean; noEntryFriFrom?: number }
 export interface StrategyDef { family: string; params: string; minBars: number; exits: Exits; onClose: (i: number, ind: Indicators) => LabSignal | null }
 
 // ===== Indicateurs précalculés (tous CAUSAUX : la valeur en i n'utilise que les bougies ≤ i) =====
@@ -75,6 +82,7 @@ export function computeIndicators(bars: Bar[]): Indicators {
 // ===== Simulateur du labo — MÊMES règles d'exécution que backtest/simulator.ts (pessimiste, causal) =====
 export const RISK_PCT = 0.01, MAX_DAILY_LOSS = 0.04, START = 10_000;
 const dayOf = (t: number) => Math.floor(t / 86_400_000);
+const isFriCutoff = (t: number) => { const d = new Date(t); return d.getUTCDay() === 5 && d.getUTCHours() >= 20; }; // or clôture ~21h UTC ven.
 
 export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec): BacktestRun {
   const bars = ind.bars;
@@ -107,13 +115,26 @@ export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec): Ba
         const fav = o.dir * (o.peak - o.entryPrice);
         const ex = strat.exits;
         if (ex.be && fav >= ex.be * o.riskDist) {
-          const be = o.entryPrice + o.dir * 0.05 * o.riskDist;
+          const be = o.entryPrice + o.dir * (ex.beOffset ?? 0.05) * o.riskDist;
           o.stop = o.dir === 1 ? Math.max(o.stop, be) : Math.min(o.stop, be);
         }
+        if (ex.ladder) // échelle : palier atteint (pic) → verrouille entrée + lock×R (jamais de recul)
+          for (const [trig, lock] of ex.ladder)
+            if (fav >= trig * o.riskDist) {
+              const lvl = o.entryPrice + o.dir * lock * o.riskDist;
+              o.stop = o.dir === 1 ? Math.max(o.stop, lvl) : Math.min(o.stop, lvl);
+            }
         if (ex.trailActivate && ex.trailDist && fav >= ex.trailActivate * o.riskDist) {
           const trail = o.peak - o.dir * ex.trailDist * o.riskDist;
           o.stop = o.dir === 1 ? Math.max(o.stop, trail) : Math.min(o.stop, trail);
         }
+      }
+      // FLAT WEEK-END : vendredi ≥ 20h UTC → fermeture au close (stop/TP de la bougie déjà honorés ci-dessus).
+      // Variante 'losers' : seules les positions en perte latente sont coupées — les runners gagnants restent.
+      if (open && isFriCutoff(bar.time)) {
+        const o = open as NonNullable<typeof open>;
+        const losing = o.dir * (bar.close - o.entryPrice) < 0;
+        if (strat.exits.weekendFlat || (strat.exits.weekendFlatLosers && losing)) close(bar.close, bar.time, 'wkd');
       }
     }
     // 2) frontière de jour + equity + kill switch
@@ -128,6 +149,9 @@ export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec): Ba
     const sig = strat.onClose(i, ind);
     if (!sig) continue;
     const next = bars[i + 1];
+    if ((strat.exits.weekendFlat || strat.exits.weekendFlatLosers) && isFriCutoff(next.time)) continue; // pas d'ouverture dans la fenêtre de coupe
+    const nf = strat.exits.noEntryFriFrom;
+    if (nf != null) { const dt = new Date(next.time); if (dt.getUTCDay() === 5 && dt.getUTCHours() >= nf) continue; } // vendredi : pas de nouvelle position
     const dir = sig.direction === 'long' ? 1 : -1;
     const entryPrice = next.open + dir * (spec.spread / 2 + slippage);
     const riskDist = Math.abs(entryPrice - sig.stopLoss);
