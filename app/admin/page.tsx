@@ -70,6 +70,10 @@ export default function AdminCRM() {
   const [planAmount, setPlanAmount] = useState('');
   const [planTg, setPlanTg] = useState(''); // prospect optionnel → exclut ses brokers existants
   const [planCopied, setPlanCopied] = useState<string | null>(null); // key du lien copié (feedback ✓)
+  // ===== QUEUE : « copier les infos dépôt » → un message prêt à COLLER dans le groupe WhatsApp du
+  // staff (vérification CellXpert chez le broker). Format calqué sur les messages actuels de Mathieu :
+  // entête + nom broker + login MT + broker + montant. Le staff répond ✅/« je le vois pas » → CONNECT (STH).
+  const [depInfoCopied, setDepInfoCopied] = useState<string | null>(null); // id de la carte copiée (feedback ✓)
   // ===== push composer (TOOLS) : message libre + segment ciblé =====
   const [pushTitle, setPushTitle] = useState('');
   const [pushBody, setPushBody] = useState('');
@@ -251,6 +255,20 @@ export default function AdminCRM() {
   };
   // nom légal (compte broker) d'un membre — la clé pour rapprocher Telegram ↔ admin ↔ broker/STH
   const legalOf = (tg: number | null | undefined) => (tg != null ? legalNames[String(tg)] ?? null : null);
+  // message « nouveau dépôt à vérifier » → presse-papiers (WhatsApp staff). Nom du compte broker en
+  // priorité (c'est LUI que le staff cherche dans CellXpert), sinon le nom Telegram en repli.
+  const copyDepositInfo = (a: Action) => {
+    const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id));
+    const brokerKey = String(a.detail?.broker ?? m?.broker ?? '');
+    const brokerLabel = BROKERS.find((b) => b.key === brokerKey)?.name ?? (brokerKey || '⚠ broker ?');
+    const who = String(a.detail?.broker_name ?? '') || legalOf(a.tg_id) || nameOf(a.tg_id);
+    const dep = Number(a.detail?.declared_deposit ?? 0);
+    const text = ['🔔 Nouveau dépôt à vérifier', who, String(a.detail?.login ?? '⚠ login ?'), brokerLabel, dep ? `${dep}$` : '⚠ montant non déclaré'].join('\n');
+    void navigator.clipboard?.writeText(text).then(() => {
+      setDepInfoCopied(a.id);
+      setTimeout(() => setDepInfoCopied((v) => (v === a.id ? null : v)), 1600);
+    });
+  };
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
@@ -602,7 +620,7 @@ export default function AdminCRM() {
                 <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <h2 style={secH}>📞 RELANCES DU JOUR · {queue.length} — your personal DM/voice beats any bot</h2>
                   {queue.slice(0, 15).map(({ r, days, touched }) => (
-                    <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)' }}>
+                    <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)', flexWrap: 'wrap' }}>
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{r.member_no}</span>
                       <span style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
                       {legalOf(r.tg_id) && <span className="mono" style={{ fontSize: 10, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }} title="name on the broker account">🏦 {legalOf(r.tg_id)}</span>}
@@ -686,7 +704,10 @@ export default function AdminCRM() {
             {actions.length === 0 && <p style={dimP}>Queue clear — nothing to apply.</p>}
             {actions.map((a) => (
               <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* flexWrap : l'admin vit à 70% sur le téléphone de Mathieu — sans wrap, les boutons
+                    débordaient sur le texte de la carte (vécu en screenshot). Les boutons passent
+                    à la ligne proprement sur écran étroit. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   {/* QUI : @username cliquable (ouvre la fiche) — un #numéro seul ne dit rien à personne */}
                   <button
                     onClick={() => { const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id)); if (m) { openMember(m); setTab('members'); } }}
@@ -722,6 +743,9 @@ export default function AdminCRM() {
                       );
                     })()}
                   </div>
+                  {a.kind === 'connect' && (
+                    <button onClick={() => copyDepositInfo(a)} title="copie « nouveau dépôt à vérifier » (nom, login, broker, montant) — à coller dans le groupe WhatsApp du staff" style={depInfoCopied === a.id ? { ...goldBtn, color: 'var(--up)' } : goldBtn}>{depInfoCopied === a.id ? '✓ COPIÉ' : '📋 WHATSAPP'}</button>
+                  )}
                   {a.kind === 'connect' && !creds[a.id] && (
                     <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password (timestamped)" style={goldBtn}>🔑 REVEAL</button>
                   )}
@@ -1025,7 +1049,7 @@ export default function AdminCRM() {
               {aff.pendingPayouts.length === 0 && <p style={dimP}>No withdrawal requests.</p>}
               {aff.pendingPayouts.map((p) => (
                 <div key={p.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.05)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 12.5, fontWeight: 800 }}>💸 <span className="goldText">${Number(p.amount)}</span> → {nameOf(p.tg_id)}</span>
                     <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{new Date(p.created_at).toLocaleString('en-GB')}</span>
                     <span style={{ flex: 1 }} />
@@ -1043,7 +1067,7 @@ export default function AdminCRM() {
               <h2 style={secH}>COMMISSIONS — CONFIRM WHEN THE BROKER PAID YOU {aff.pendingCommissions.length > 0 && `· ${aff.pendingCommissions.length}`}</h2>
               {aff.pendingCommissions.length === 0 && <p style={dimP}>Nothing pending — commissions appear when a referred member is approved.</p>}
               {aff.pendingCommissions.map((c) => (
-                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12 }}>
                     💰 <b className="goldText">${Number(c.amount)}</b> → {nameOf(c.referrer_tg_id)}
                     <span style={{ color: 'var(--dim)', fontSize: 10.5 }}> · referred {c.detail?.referred_member_no ? `#${String(c.detail.referred_member_no)}` : nameOf(c.referred_tg_id)}</span>
@@ -1120,7 +1144,7 @@ export default function AdminCRM() {
                 ['day', '📅 DAY RECAP', proof?.today] as const,
                 ['week', '🗓 WEEK RECAP', proof?.week] as const,
               ]).map(([period, label, s]) => (
-                <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.05)' }}>
+                <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.05)', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12, fontWeight: 800 }}>{label}</span>
                   <span className="mono" style={{ fontSize: 11.5, color: s?.count ? 'var(--up)' : 'var(--dim)' }}>
                     {s ? (s.count ? `✓ ${s.count} wins · +$${Math.round(s.total)} · best +$${Math.round(s.best)}` : 'no wins yet') : '…'}
@@ -1132,7 +1156,7 @@ export default function AdminCRM() {
               ))}
               {feedWins.length === 0 && <p style={dimP}>Recent wins appear here as trades close — each downloads as a ready-to-post story card.</p>}
               {feedWins.map((t) => (
-                <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 11, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
                   <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
                   <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--up)' }}>+${Number(t.pnl).toFixed(0)}</span>
