@@ -178,12 +178,36 @@ export default function AdminCRM() {
       .then(async (r) => { const d = (await r.json()) as { login?: string; server?: string; password?: string; error?: string }; if (d.error) window.alert(d.error); else if (d.password) setSelCreds({ login: d.login ?? '', server: d.server ?? '', password: d.password }); })
       .finally(() => setBusy(false));
   };
-  // connexion AUTO via STH : branche le compte dans le copieur, puis enchaîne `done` (passage LIVE) si OK
-  const connectViaSth = (id: string) => {
+  // ENREGISTREMENT DU DÉPÔT dans la foulée de la connexion (demande Mathieu 28/07 : « à 5 dépôts/jour
+  // je me perds entre valider, connecter, vérifier ») : un seul prompt, pré-rempli avec le montant
+  // DÉCLARÉ — corriger si CellXpert dit autre chose. La com attendue vient du barème (estimateCommission).
+  // Annuler = pas de ligne (le filet « LIVE sans dépôt » du registre DEPOSITS la rattrapera).
+  const recordDepositAfterConnect = (a: Action) => {
+    const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id));
+    const broker = String(a.detail?.broker ?? m?.broker ?? '').trim().toLowerCase() || null;
+    const declared = Number(a.detail?.declared_deposit ?? 0) || null;
+    const v = window.prompt(
+      `🏦 Log the deposit now? Validated amount ($)\n\nBroker: ${broker ? broker.toUpperCase() : '?'} — expected com auto from the schedule.\nCancel = no line (it will show up in DEPOSITS → "live, no deposit logged").`,
+      declared ? String(declared) : '',
+    );
+    if (v === null) return;
+    const amount = Number(v);
+    if (!Number.isFinite(amount) || amount <= 0) return window.alert('Invalid amount — no deposit logged. Add it in DEPOSITS.');
+    // garde anti-doublon : même membre, même montant, même jour → la ligne existe déjà (double clic, DONE après CONNECT…)
+    const today = new Date().toISOString().slice(0, 10);
+    const dup = deposits.some((d) => Number(d.tg_id) === Number(a.tg_id) && Number(d.detail?.amount_usd ?? 0) === amount && String(d.detail?.deposited_at ?? d.created_at).slice(0, 10) === today);
+    if (dup) return window.alert('Already logged today for this member (same amount) — nothing added.');
+    const commission = estimateCommission(broker, amount);
+    post({ addDeposit: { tg_id: Number(a.tg_id), broker: broker ?? undefined, amount, commission: commission ?? 0, note: 'logged at connect' } });
+  };
+  // connexion AUTO via STH : branche le compte dans le copieur, puis enchaîne `done` (passage LIVE) si OK,
+  // puis propose d'enregistrer le dépôt (un prompt) — les 3 gestes en un seul clic.
+  const connectViaSth = (a: Action) => {
     if (!window.confirm('Connect this account to the copier via STH now?\n\nVerify the deposit first — on success the member goes LIVE.')) return;
+    const id = a.id;
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectSth: id }) })
-      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return window.alert(d.error); post({ done: id }, () => setCreds((c) => { const n = { ...c }; delete n[id]; return n; })); })
+      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return window.alert(d.error); post({ done: id }, () => { setCreds((c) => { const n = { ...c }; delete n[id]; return n; }); recordDepositAfterConnect(a); }); })
       .catch(() => setBusy(false));
   };
   // RE-connexion STH depuis la fiche membre (ex. déconnecté par erreur sur le dashboard STH) : identifiants
@@ -299,6 +323,12 @@ export default function AdminCRM() {
     }
     return t;
   }, [monthDeps]);
+  // FILET DE SÉCURITÉ (demande Mathieu 28/07) : les membres LIVE sans AUCUNE ligne de dépôt — les
+  // « connectés mais pas encore ajoutés aux dépôts » qui se perdaient quand il y a du volume.
+  const liveNoDeposit = useMemo(() => {
+    const funded = new Set(deposits.map((d) => Number(d.tg_id)));
+    return rows.filter((r) => r.status === 'live' && !funded.has(Number(r.tg_id)));
+  }, [rows, deposits]);
   const shiftMonth = (delta: number) => {
     const [y, m] = ym.split('-').map(Number);
     setYm(new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7));
@@ -441,13 +471,13 @@ export default function AdminCRM() {
   const pendingRev = rows.filter((r) => r.status === 'pending_copier').length;
   // les coms de dépôt EN ATTENTE comptent dans le travail à faire : confirmer quand le broker a payé
   const depPending = deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending');
-  const todo = actions.length + (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) + depPending.length;
+  const todo = actions.length + (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) + depPending.length + liveNoDeposit.length;
   const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', strategy_change: '🎯 STRATEGY CHANGE (move master in STH)', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', disconnect: '⛔ DISCONNECT (remove from copier)', referral_reward: '💰 PAY REFERRAL REWARD (legacy)', kyc: '🪪 BROKER DETAILS', deposit: '🏦 DEPOSIT', note: '📝 NOTE' };
   const TABS: { key: Tab; label: string; badge?: number }[] = [
     { key: 'dashboard', label: 'DASHBOARD' },
     { key: 'queue', label: 'QUEUE', badge: actions.length },
     { key: 'members', label: 'MEMBERS', badge: rows.length },
-    { key: 'deposits', label: 'DEPOSITS', badge: deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending').length },
+    { key: 'deposits', label: 'DEPOSITS', badge: deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending').length + liveNoDeposit.length },
     { key: 'affiliate', label: 'AFFILIATE', badge: (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) },
     { key: 'tools', label: 'TOOLS' },
   ];
@@ -598,6 +628,10 @@ export default function AdminCRM() {
                 ))}
                 {depPending.slice(0, 5).map((d) => (
                   <RowLine key={d.id} onClick={() => setTab('deposits')} icon="🏦" text={`deposit com $${Number(d.detail?.commission_usd ?? 0)} · member #${d.member_no ?? '—'} (${(d.detail?.broker ?? '?').toUpperCase()})`} sub="mark ✓ RECEIVED once the broker paid you" gold />
+                ))}
+                {/* connectés mais dépôt jamais enregistré — le trou dans lequel les journées à 5 dépôts tombaient */}
+                {liveNoDeposit.slice(0, 5).map((r) => (
+                  <RowLine key={r.tg_id} onClick={() => setTab('deposits')} icon="⚠" text={`live, no deposit logged · #${r.member_no} ${r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '')}`} sub="click → DEPOSITS, the orange strip prefills the form" gold />
                 ))}
               </section>
             ) : (
@@ -750,12 +784,12 @@ export default function AdminCRM() {
                     <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password (timestamped)" style={goldBtn}>🔑 REVEAL</button>
                   )}
                   {a.kind === 'connect' && (
-                    <button disabled={busy} onClick={() => connectViaSth(a.id)} title="connect this account to the copier via STH now, then go LIVE (one click, no manual STH entry)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔗 CONNECT (STH)</button>
+                    <button disabled={busy} onClick={() => connectViaSth(a)} title="connect this account to the copier via STH now, then go LIVE + log the deposit (one click, no manual STH entry)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔗 CONNECT (STH)</button>
                   )}
                   {a.kind === 'strategy_change' && (
                     <button disabled={busy} onClick={() => moveViaSth(a.id)} title="move this member's receiver to their new strategy's master via the STH API (API-connected members only — manually-added receivers must be moved in the STH dashboard)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔀 MOVE (STH)</button>
                   )}
-                  <button disabled={busy} onClick={() => post({ done: a.id }, () => setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }))} title="mark done manually (if you connected the account in STH yourself)" style={okBtn}>✓ DONE</button>
+                  <button disabled={busy} onClick={() => post({ done: a.id }, () => { setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }); if (a.kind === 'connect') recordDepositAfterConnect(a); })} title="mark done manually (if you connected the account in STH yourself) — connect cards also offer to log the deposit" style={okBtn}>✓ DONE</button>
                   {a.kind === 'connect' && (
                     <button disabled={busy} onClick={() => rejectConnect(a.id)} title="verification failed → member goes back to the wizard with your reason, can resubmit" style={dangerBtn}>REJECT</button>
                   )}
@@ -915,6 +949,25 @@ export default function AdminCRM() {
         {/* ===== DEPOSITS — le registre des dépôts broker : la source du bilan de fin de mois ===== */}
         {tab === 'deposits' && (
           <>
+            {/* filet de sécurité : LIVE sans ligne de dépôt — cliquer pré-remplit le formulaire ci-dessous */}
+            {liveNoDeposit.length > 0 && (
+              <section className="panel" style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid rgba(255,138,92,.45)' }}>
+                <h2 style={{ ...secH, color: '#ff8a5c' }}>⚠ LIVE, NO DEPOSIT LOGGED · {liveNoDeposit.length}</h2>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {liveNoDeposit.map((r) => (
+                    <button
+                      key={r.tg_id}
+                      onClick={() => { setDepTg(String(r.tg_id)); if (r.broker) setDepBroker(r.broker); depComAuto.current = true; }}
+                      title="prefills the form below — enter the validated amount and hit + ADD"
+                      className="mono"
+                      style={{ fontSize: 11, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', cursor: 'pointer' }}
+                    >
+                      #{r.member_no} {r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '')}{r.broker ? ` · ${r.broker.toUpperCase()}` : ''}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
             {/* saisie : une ligne dès qu'un dépôt est constaté chez le broker partenaire */}
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <h2 style={secH}>LOG A DEPOSIT</h2>
