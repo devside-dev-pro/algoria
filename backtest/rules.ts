@@ -11,10 +11,10 @@ import { readFileSync } from 'node:fs';
 import { computeIndicators, labBacktest, SPECS, START, type StrategyDef, type Indicators, type Exits } from './labcore';
 import { backtest, type SimParams } from './simulator';
 import { metrics } from './metrics';
-import { SCALP_CONFIG, type EngineConfig } from '../lib/engine/config';
+import type { EngineConfig } from '../lib/engine/config';
 import { FEATURES } from '../lib/engine/features';
 import { STRATEGIES, type StrategyProfile } from '../lib/engine/strategies';
-import type { Bar, Mode } from '../lib/engine/types';
+import type { Bar } from '../lib/engine/types';
 
 const load = (f: string): Bar[] => JSON.parse(readFileSync(`backtest/.cache/${f}`, 'utf8'));
 const pct = (x: number) => Math.round(x * 100) + '%';
@@ -62,23 +62,7 @@ function runSwing(ind: Indicators) {
 }
 
 // ===== partie SCALP (M5, moteur réel via runTick) — S1 / S2 câblées comme instruments.ts =====
-function cfgFor(p: StrategyProfile): EngineConfig {
-  return {
-    ...SCALP_CONFIG,
-    fixedLot: 1,
-    emaGate: 'notOpposed',
-    targetRR: p.targetRR,
-    minRR: p.minRR,
-    trailActivate: p.trailActivate,
-    trailDist: p.trailDist,
-    regimeGate: p.regimeGate,
-    maxStopAtr: p.maxStopAtr ?? SCALP_CONFIG.maxStopAtr,
-    threshold: { ...SCALP_CONFIG.threshold, scalp: p.thresholdScalp },
-    risk: { ...SCALP_CONFIG.risk, dailyProfitTargetPct: p.dailyProfitTargetPct, maxDailyLossPct: p.maxDailyLossPct, dayLockTriggerPct: p.dayLockTriggerPct, dayLockFloorPct: p.dayLockFloorPct },
-  };
-}
-
-const SIM_BASE = { symbol: 'XAUUSD', mode: 'scalp' as Mode, startBalance: 70_000, spread: 0.2, slippage: 0.05, commissionPerLot: 7, contractSize: 100, warmup: 210, window: 600 };
+import { cfgFor, ctxFor, SIM_BASE } from './wiring';
 
 type ScalpVariant = { name: string; cfg?: Partial<EngineConfig>; sim?: Partial<SimParams> };
 function runScalp(bars: Bar[], profile: StrategyProfile, variants: ScalpVariant[]) {
@@ -86,7 +70,7 @@ function runScalp(bars: Bar[], profile: StrategyProfile, variants: ScalpVariant[
   console.log('variante'.padEnd(44), 'trades', ' PF ', 'win%', '  net$ ', ' DD% ', 'expR', '  sorties (part · R moy)');
   for (const v of variants) {
     const cfg = { ...cfgFor(profile), ...(v.cfg ?? {}) };
-    const sim: SimParams = { ...SIM_BASE, ...(v.sim ?? {}), ctxOpts: { tradeAsia: profile.tradeAsia, volMinPct: 0.05, volMaxPct: 0.995 } };
+    const sim: SimParams = { ...SIM_BASE, ...(v.sim ?? {}), ctxOpts: ctxFor(profile) };
     const r = backtest(bars, FEATURES, cfg, sim);
     const m = metrics(r, SIM_BASE.startBalance);
     const by: Record<string, { n: number; r: number }> = {};
