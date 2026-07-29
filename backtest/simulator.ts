@@ -22,6 +22,14 @@ export interface SimParams {
   dayLockFloor?: number;
   trailActivate?: number; // active le trailing quand le profit ≥ trailActivate × riskDist
   trailDist?: number; // distance du trailing en × riskDist (le SL suit à peak − trailDist)
+  // ÉCHELLE de verrouillage (étude 28/07 — spec Mathieu « à +1000 lock +500, à +1500 lock +1000 ») :
+  // paliers [déclencheur, verrou] en × riskDist sur le PIC favorable — dès pic ≥ déclencheur, SL ≥ entrée + verrou.
+  // Complémentaire du trailing continu (le plus haut des deux gagne, jamais de recul).
+  ladder?: Array<[number, number]>;
+  // FLAT WEEK-END (étude 28/07 — les 2 stops de ~−1850$ du dim. 26 étaient des shorts portés depuis ven. 19h) :
+  // ferme toute position le vendredi ≥ 20h UTC au close de la bougie, et n'ouvre plus rien dans la fenêtre.
+  // Les overnights en semaine restent INTACTS (décision Mathieu : les nuits performent).
+  weekendFlat?: boolean;
   ignoreTp?: boolean; // ignore le TP fixe → on ne sort que sur le stop (trailing) ou en fin de données
   ctxOpts?: Partial<import('../lib/engine/context').ContextOptions>; // options de contexte (session/vol) pour l'exploration
 }
@@ -32,7 +40,7 @@ export interface SimTrade {
   entryPrice: number;
   exitTime: number;
   exitPrice: number;
-  reason: 'tp' | 'sl' | 'eod' | 'be' | 'trail';
+  reason: 'tp' | 'sl' | 'eod' | 'be' | 'trail' | 'wkd';
   lot: number;
   pnl: number;
   r: number;
@@ -58,6 +66,8 @@ interface OpenPos {
   peak: number; // meilleur prix atteint (high pour long, low pour short)
 }
 const dayOf = (t: number) => Math.floor(t / 86_400_000);
+// fenêtre de coupe hebdo : vendredi ≥ 20h UTC (l'or clôture ~21h — on est flat 1h avant, conservateur)
+const isFriCutoff = (t: number) => { const d = new Date(t); return d.getUTCDay() === 5 && d.getUTCHours() >= 20; };
 
 export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p: SimParams): BacktestRun {
   let balance = p.startBalance;
@@ -125,10 +135,21 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
         const be = pos.entryPrice + dir * (p.beOffset ?? 0.05) * pos.riskDist; // BE+ : couvre les coûts
         pos.stop = long ? Math.max(pos.stop, be) : Math.min(pos.stop, be);
       }
+      if (p.ladder) // échelle : au palier atteint (pic), verrouille entrée + lock×R — même sémantique que manage.ts:46
+        for (const [trig, lock] of p.ladder)
+          if (fav >= trig * pos.riskDist) {
+            const lvl = pos.entryPrice + dir * lock * pos.riskDist;
+            pos.stop = long ? Math.max(pos.stop, lvl) : Math.min(pos.stop, lvl);
+          }
       if (trailAct && trailD && fav >= trailAct * pos.riskDist) {
         const trail = pos.peak - dir * trailD * pos.riskDist;
         pos.stop = long ? Math.max(pos.stop, trail) : Math.min(pos.stop, trail);
       }
+    }
+
+    // FLAT WEEK-END : vendredi ≥ 20h UTC → tout fermer au close (le stop/TP de la bougie a déjà été honoré ci-dessus)
+    if (p.weekendFlat && open.length && isFriCutoff(bar.time)) {
+      for (let k = open.length - 1; k >= 0; k--) { close(open[k], bar.close, bar.time, 'wkd'); open.splice(k, 1); }
     }
 
     // 2) frontière de jour → reset (kill switch, compteurs)
@@ -178,7 +199,7 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
     const { signal } = runTick({ symbol: p.symbol, bars: bars.slice(lo, i + 1), mode: p.mode, state, ctxOpts: { spread: p.spread, ...(p.ctxOpts ?? {}) } }, features, cfg);
 
     // 5) entrée à l'OUVERTURE de i+1 (jamais sur la bougie qu'on vient de lire → pas de lookahead)
-    if (signal) {
+    if (signal && !(p.weekendFlat && isFriCutoff(bars[i + 1].time))) {
       const next = bars[i + 1];
       const dir = signal.direction === 'long' ? 1 : -1;
       const entryPrice = next.open + dir * (p.spread / 2 + p.slippage);
