@@ -31,6 +31,10 @@ function scalpWF() {
     { name: 'sans trailing', cfg: { trailActivate: undefined, trailDist: undefined } },
     { name: 'BE retardé 0.3→+0.1', sim: { beTrigger: 0.3, beOffset: 0.1 } },
     { name: 'seuil 0.30 (plus sélectif)', cfg: { threshold: { soft: 0.3, normal: 0.3, turbo: 0.3, scalp: 0.3 } } },
+    // filtre de session (étude 29/07) : le live 20→29/07 perd −12,7k sur Londres+US-open, l'edge sim vit
+    // la nuit/Asie. Les overnights restent intacts — on bloque seulement les NOUVELLES entrées de jour.
+    { name: 'sans entrées 07-17 UTC', sim: { blockEntryHours: [[7, 17]] } },
+    { name: 'sans entrées 12-17 UTC', sim: { blockEntryHours: [[12, 17]] } },
   ];
   // folds : ~15 jours de tune → ~5 jours de test, en roulant (bornes par index de bougie)
   const days = [...new Set(bars.map((b) => dayStr(b.time)))].sort();
@@ -38,6 +42,7 @@ function scalpWF() {
   console.log(`\n========== WALK-FORWARD SCALP (S2 base) — ${days.length} jours · tune ${TUNE} → test ${TEST} ==========`);
   console.log('fold  (tune → test)             choisi sur tune            tune $     TEST $   TEST PF');
   let oosTotal = 0, tuneIllusion = 0, folds = 0;
+  const oosByCand = new Map<string, number>();
   for (let start = 0; start + TUNE + TEST <= days.length; start += TEST) {
     const tuneDays = new Set(days.slice(start, start + TUNE));
     const testDays = new Set(days.slice(start + TUNE, start + TUNE + TEST));
@@ -53,6 +58,11 @@ function scalpWF() {
     if (!best) continue;
     const cfg = { ...cfgFor(profile), ...(best.c.cfg ?? {}) };
     const t = metrics(backtest(testBars, FEATURES, cfg, { ...SIM_BASE, ...(best.c.sim ?? {}), ctxOpts: ctxFor(profile) }), SIM_BASE.startBalance);
+    // OOS par candidat SANS sélection : chaque candidat évalué sur CHAQUE fenêtre test — le vrai classement
+    for (const c of CANDS) {
+      const tc = metrics(backtest(testBars, FEATURES, { ...cfgFor(profile), ...(c.cfg ?? {}) }, { ...SIM_BASE, ...(c.sim ?? {}), ctxOpts: ctxFor(profile) }), SIM_BASE.startBalance);
+      oosByCand.set(c.name, (oosByCand.get(c.name) ?? 0) + tc.netPnl);
+    }
     oosTotal += t.netPnl; tuneIllusion += best.net; folds++;
     console.log(
       `#${folds}`.padEnd(5), `(${days[start]}→${days[start + TUNE + TEST - 1]})`.padEnd(26),
@@ -62,6 +72,8 @@ function scalpWF() {
   }
   console.log(`\n→ ILLUSION in-sample (somme des tunes gagnants) : $${tuneIllusion.toFixed(0)}`);
   console.log(`→ RÉALITÉ out-of-sample (somme des fenêtres test) : $${oosTotal.toFixed(0)} — c'est CE chiffre qu'on a le droit de croire.`);
+  console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) :');
+  for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1] - a[1])) console.log('   ', name.padEnd(30), '$' + v.toFixed(0));
 }
 
 // ===== SWING H1 : variantes d'exit en walk-forward (tune 9 mois → test 3 mois) =====
