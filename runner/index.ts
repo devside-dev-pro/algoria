@@ -22,7 +22,7 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from '.
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -344,7 +344,14 @@ async function main() {
         // validé. Le signal éventuel devient une simple « opportunity » à l'écran (le manuel reste possible).
         // S3 (intraday='breakout') : le scalp de confluence est ÉTEINT → le breakout devient le moteur principal
         // (le bloc breakout ci-dessous tire dès que autoSignal est null). Décorrélation phase 2 — voir strategies.ts.
-        const autoSignal = inst.watchOnly || ACTIVE_STRATEGY.intraday === 'breakout' ? null : signal;
+        let autoSignal = inst.watchOnly || ACTIVE_STRATEGY.intraday === 'breakout' ? null : signal;
+        // FILTRE DE SESSION scalp (étude 29/07, validé « go tout ») : pas de nouvelle entrée confluence
+        // sur les heures où le live saigne (S2/S3 : 12-17h UTC — walk-forward +9 198$ vs prod −405$ OOS).
+        // Les positions ouvertes et les autres couches (breakout, swing) ne sont PAS concernées.
+        if (autoSignal && ACTIVE_STRATEGY.blockScalpEntryUtcHours?.some(([from, to]) => { const h = new Date().getUTCHours(); return h >= from && h < to; })) {
+          await logSignal(autoSignal, { code: 'session filter: no new scalp entries 12-17h UTC (étude 29/07)', status: 'rejected' });
+          autoSignal = null;
+        }
         if (autoSignal) {
           // Garde-fou PORTEFEUILLE (global) au-dessus des limites par-symbole : on ne laisse pas l'or + le Nasdaq
           // (+ Forex à venir) empiler des positions corrélées. N'affecte que l'auto (manuel/show restent libres).
@@ -490,6 +497,11 @@ async function main() {
           if (await hasOpenSwingTrade(DISPLAY)) return; // 1 position de fond max par marché
           const sig = swingSignal(DISPLAY, h1bars, SW, mode, inst.config.priceStep ?? 0.01);
           if (!sig) return;
+          // ASSURANCE WEEK-END 1/2 (étude 28-29/07, validé « go tout ») : pas de NOUVELLE position de fond
+          // le vendredi ≥ 12h UTC — un swing ouvert vendredi après-midi n'a pas le temps de se protéger (BE à
+          // 1R) avant le gap du dimanche (vécu le 26/07 : 2 shorts de ven. 19h → −1 850$ chacun au ré-open).
+          // Backtest 21 mois : coût quasi nul ($26 663 vs $28 862) pour supprimer ce risque. Overnights intacts.
+          { const now = new Date(); if (now.getUTCDay() === 5 && now.getUTCHours() >= 12) { await logSignal(sig, { code: 'week-end insurance: no new swing entries Friday ≥ 12h UTC', status: 'rejected' }); return; } }
           // garde-fous : spread + lockout news (fenêtres du calendrier éco) + veto portefeuille global
           st2: {
             const freshState = readState(terminal, BROKER, state);
@@ -512,6 +524,32 @@ async function main() {
       const h1seed = await loadHistory(account, BROKER, '1h', 700).catch(() => [] as Bar[]);
       swingAgg = makeAggregator('1h', h1seed, (b) => void onH1Closed(b));
       console.log(`[algoria] couche SWING active sur ${DISPLAY} (${SW.kind}, lot ${SW.lot}) · seed H1: ${h1seed.length} bougies`);
+
+      // ASSURANCE WEEK-END 2/2 (étude 28-29/07, validé « go tout ») : le vendredi ≥ 20h UTC (l'or clôture
+      // ~21h), on ferme les swings PERDANTS — les gagnants, déjà protégés par leur BE/trailing, portent le
+      // week-end (c'est eux qui font la queue grasse : +1.9R de moyenne sur les holds overweek au backtest).
+      // Check toutes les 5 min sur la fenêtre 20h-21h ven. ; idempotent (une position fermée sort de la base).
+      const weekendFlatLosers = async () => {
+        try {
+          const now = new Date();
+          if (now.getUTCDay() !== 5 || now.getUTCHours() < 20) return;
+          const open = await listOpenSwingTrades(DISPLAY);
+          if (!open.length) return;
+          const px = terminal.price(BROKER);
+          if (!px) return;
+          const mid = (Number(px.bid) + Number(px.ask)) / 2;
+          for (const t of open) {
+            const dir = t.direction === 'long' ? 1 : -1;
+            if (dir * (mid - t.entry) < 0) {
+              await closePosition(stream, t.ticket);
+              await logNote(`🛡 WEEK-END insurance — losing swing ${t.ticket} closed before the Friday bell (winners ride, protected by their trailing)`, 'order');
+            }
+          }
+        } catch (e) {
+          console.error(`[algoria] weekend flat ${DISPLAY} échoué:`, e);
+        }
+      };
+      setInterval(() => void weekendFlatLosers(), 5 * 60_000);
     }
 
     // Agrégateur M1 LÉGER : log chaque bougie M1 clôturée (chart + data fraîche backtest), sans retenir l'historique.
