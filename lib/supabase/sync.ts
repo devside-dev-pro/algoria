@@ -289,6 +289,14 @@ export async function hasOpenSwingTrade(symbol: string): Promise<boolean> {
   return !!data?.length;
 }
 
+/** Positions SWING ouvertes (ticket + direction + entrée) — pour l'assurance week-end : fermer les
+ *  PERDANTES le vendredi soir (étude 28-29/07 : les 2 stops de −1 850$ du dim. 26 étaient des swings
+ *  portés sur le week-end Trump ; les gagnantes, protégées par leur trailing, continuent de courir). */
+export async function listOpenSwingTrades(symbol: string): Promise<Array<{ ticket: string; direction: 'long' | 'short'; entry: number }>> {
+  const { data } = await db.from('trades').select('ticket,direction,entry').eq('symbol', symbol).eq('strategy' as never, STRAT_ID as never).is('closed_at', null).ilike('signal_ref', '%-swing-%');
+  return (data ?? []).map((r: Record<string, unknown>) => ({ ticket: String(r.ticket), direction: r.direction === 'short' ? 'short' : 'long', entry: Number(r.entry) }));
+}
+
 /** Timestamp (ms) de la dernière bougie stockée pour symbol/timeframe — null si aucune. Sert au warm boot du runner. */
 export async function latestCandleTime(symbol: string, timeframe = 'M5'): Promise<number | null> {
   const { data } = await db.from('candles').select('time').eq('symbol', symbol).eq('timeframe', timeframe).order('time', { ascending: false }).limit(1);
