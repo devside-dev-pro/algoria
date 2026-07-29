@@ -83,6 +83,17 @@ export async function sthMoveMaster(userId: string, strategy: number, lots: numb
   return j.ok ? { ok: true, error: '' } : { ok: false, error: j.errorMessage };
 }
 
+/** PAUSE la copie d'un utilisateur API : join-master-account DÉCLARATIF avec une liste VIDE = désabonné de
+ *  tout, mais le compte MT reste connecté au copieur → le resume est un simple re-join (sthMoveMaster).
+ *  Même garde que sthMoveMaster : les receivers ajoutés à la main dans le dashboard sont invisibles ici. */
+export async function sthPauseCopy(userId: string): Promise<{ ok: boolean; error: string }> {
+  const st = await sthStatus(userId);
+  if (st.ok && (st.data.masterAccountsList ?? []).length === 0)
+    return { ok: false, error: 'this member is not API-connected (manually-added receiver?) — pause them in the STH dashboard instead' };
+  const r = await sthPost('/Partner/join-master-account', { UserID: userId, MasterAccounts: [] });
+  return r.ok ? { ok: true, error: '' } : { ok: false, error: r.errorMessage };
+}
+
 /** Flux complet « brancher un client » : connect PUIS join master (id via env ou auto-découverte si unique).
  *  ORDRE IMPORTANT : get-user-status sur un utilisateur JAMAIS connecté renvoie une liste de masters VIDE
  *  (doc STH : « un utilisateur inconnu renvoie tradingAccountConnected: false et une liste vide ») — la
