@@ -325,10 +325,13 @@ export default function AdminCRM() {
   }, [monthDeps]);
   // FILET DE SÉCURITÉ (demande Mathieu 28/07) : les membres LIVE sans AUCUNE ligne de dépôt — les
   // « connectés mais pas encore ajoutés aux dépôts » qui se perdaient quand il y a du volume.
+  // Les comptes de la WHITELIST admin (Mathieu, la CM…) sont exclus : un compte de test interne n'a pas
+  // de dépôt à réclamer — sans ça, le bandeau orange réclamait le compte #1 de Mathieu à l'infini (29/07).
   const liveNoDeposit = useMemo(() => {
     const funded = new Set(deposits.map((d) => Number(d.tg_id)));
-    return rows.filter((r) => r.status === 'live' && !funded.has(Number(r.tg_id)));
-  }, [rows, deposits]);
+    const admins = new Set(wl.map((w) => w.username.toLowerCase()));
+    return rows.filter((r) => r.status === 'live' && !funded.has(Number(r.tg_id)) && !(r.tg_username && admins.has(r.tg_username.toLowerCase())));
+  }, [rows, deposits, wl]);
   const shiftMonth = (delta: number) => {
     const [y, m] = ym.split('-').map(Number);
     setYm(new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7));
