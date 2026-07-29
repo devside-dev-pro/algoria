@@ -30,6 +30,10 @@ export interface SimParams {
   // ferme toute position le vendredi ≥ 20h UTC au close de la bougie, et n'ouvre plus rien dans la fenêtre.
   // Les overnights en semaine restent INTACTS (décision Mathieu : les nuits performent).
   weekendFlat?: boolean;
+  // FILTRE DE SESSION (étude 29/07 — live 20→29/07 : scalp S2/S3 −12,7k$ sur Londres+US-open, Asie/nuit OK ;
+  // le sim dit pareil : l'edge scalp vit la nuit) : bloque les NOUVELLES entrées dont l'heure UTC tombe dans
+  // [from, to). Les positions déjà ouvertes vivent leur vie (les overnights restent intacts).
+  blockEntryHours?: Array<[number, number]>;
   ignoreTp?: boolean; // ignore le TP fixe → on ne sort que sur le stop (trailing) ou en fin de données
   ctxOpts?: Partial<import('../lib/engine/context').ContextOptions>; // options de contexte (session/vol) pour l'exploration
 }
@@ -199,7 +203,9 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
     const { signal } = runTick({ symbol: p.symbol, bars: bars.slice(lo, i + 1), mode: p.mode, state, ctxOpts: { spread: p.spread, ...(p.ctxOpts ?? {}) } }, features, cfg);
 
     // 5) entrée à l'OUVERTURE de i+1 (jamais sur la bougie qu'on vient de lire → pas de lookahead)
-    if (signal && !(p.weekendFlat && isFriCutoff(bars[i + 1].time))) {
+    const entryHour = new Date(bars[i + 1].time).getUTCHours();
+    const hourBlocked = p.blockEntryHours?.some(([from, to]) => entryHour >= from && entryHour < to) ?? false;
+    if (signal && !hourBlocked && !(p.weekendFlat && isFriCutoff(bars[i + 1].time))) {
       const next = bars[i + 1];
       const dir = signal.direction === 'long' ? 1 : -1;
       const entryPrice = next.open + dir * (p.spread / 2 + p.slippage);
