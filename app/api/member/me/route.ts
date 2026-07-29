@@ -156,7 +156,17 @@ export async function POST(req: NextRequest) {
         ...(kyc?.[0]?.detail as Record<string, unknown> | undefined),
       });
     } else {
-      await queueAction(s.tgId, 'strategy_change', { to: choice }); // → le support déplace le compte vers le master de la stratégie dans STH
+      // AUTO via STH (demande Mathieu 29/07 : il validait 100 % des cartes — la file ne sert plus qu'aux
+      // connexions, où le dépôt se vérifie). join-master déclaratif = un appel déplace le receiver vers le
+      // master de la nouvelle stratégie. Échec (receiver manuel, STH down…) → carte dans la file (backup).
+      const { data: mrow } = await db.from('members').select('member_no,lot').eq('tg_id', s.tgId).limit(1);
+      const lot = Number((mrow?.[0] as { lot?: number } | undefined)?.lot ?? 0.01) || 0.01;
+      let applied = false;
+      const { sthReady, sthMoveMaster } = await import('@/lib/member/sth');
+      if (sthReady()) applied = (await sthMoveMaster(String(s.tgId), choice, lot)).ok;
+      if (applied)
+        await db.from('member_actions').insert({ tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member (auto STH)', detail: { text: `🎯 strategy switched to S${choice} — receiver moved automatically via STH` } as never });
+      else await queueAction(s.tgId, 'strategy_change', { to: choice }); // backup : le support déplace à la main
     }
   } else if (body.action === 'lot') {
     // TAILLE DE COPIE (le vrai lot, fin du mapping risk_tier) : le membre choisit son lot parmi des paliers.
@@ -206,7 +216,15 @@ export async function POST(req: NextRequest) {
         ...(kyc?.[0]?.detail as Record<string, unknown> | undefined),
       });
     } else {
-      await queueAction(s.tgId, 'risk_change', { to: tier, lot: TIER_LOT[tier] }); // → le support règle le lot dans STH
+      // AUTO via STH (29/07) : même master, nouveau lot — join déclaratif. Échec → file (backup).
+      const { data: mrow } = await db.from('members').select('member_no,strategy').eq('tg_id', s.tgId).limit(1);
+      const strat = Number((mrow?.[0] as { strategy?: number } | undefined)?.strategy ?? 2) || 2;
+      let applied = false;
+      const { sthReady, sthMoveMaster } = await import('@/lib/member/sth');
+      if (sthReady()) applied = (await sthMoveMaster(String(s.tgId), strat, Number(TIER_LOT[tier]))).ok;
+      if (applied)
+        await db.from('member_actions').insert({ tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member (auto STH)', detail: { text: `⚖ risk tier ${tier} (lot ${TIER_LOT[tier]}) — applied automatically via STH` } as never });
+      else await queueAction(s.tgId, 'risk_change', { to: tier, lot: TIER_LOT[tier] }); // backup : le support règle le lot à la main
     }
   } else if (body.action === 'add_account') {
     // ➕ AJOUTER UNE STRATÉGIE (multi-comptes) — la CONTINUITÉ d'un VIP : un membre déjà live ajoute un
@@ -286,13 +304,35 @@ export async function POST(req: NextRequest) {
     patch.mt5_login = null;
     patch.mt5_server = null;
     patch.mt5_password_enc = null;
-    await queueAction(s.tgId, 'disconnect', {}); // → le support retire le compte du copieur STH
+    // AUTO via STH (29/07) : retrait immédiat du copieur — le membre n'attend plus le support pour
+    // débrancher SON compte. Échec (receiver manuel, STH down…) → carte dans la file (backup).
+    {
+      let applied = false;
+      const { sthReady, sthDisconnect } = await import('@/lib/member/sth');
+      if (sthReady()) applied = (await sthDisconnect(String(s.tgId))).ok;
+      if (applied) {
+        const { data: mn } = await db.from('members').select('member_no').eq('tg_id', s.tgId).limit(1);
+        await db.from('member_actions').insert({ tg_id: s.tgId, member_no: mn?.[0]?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member (auto STH)', detail: { text: '⛔ disconnected from the copier — applied automatically via STH' } as never });
+      } else await queueAction(s.tgId, 'disconnect', {}); // backup : le support retire le compte à la main
+    }
   } else if (body.action === 'pause' || body.action === 'resume') {
     // GARDE-FOU : le statut gate maintenant le contenu (mode teaser) — un prospect ne doit pas pouvoir
     // s'auto-promouvoir en 'live' via un simple POST resume. Réservé aux comptes déjà activés.
     if (!['live', 'paused'].includes(cur.status)) return NextResponse.json({ error: 'copy not activated yet' }, { status: 403 });
     patch.status = body.action === 'pause' ? 'paused' : 'live';
-    await queueAction(s.tgId, body.action, {}); // → le support (dés)active la copie dans STH
+    // AUTO via STH (29/07) : pause = join-master DÉCLARATIF avec liste vide (désabonné, compte MT toujours
+    // branché) ; resume = re-join du master de SA stratégie avec SON lot. Échec → file (backup).
+    {
+      const { data: mrow } = await db.from('members').select('member_no,strategy,lot').eq('tg_id', s.tgId).limit(1);
+      const strat = Number((mrow?.[0] as { strategy?: number } | undefined)?.strategy ?? 2) || 2;
+      const lot = Number((mrow?.[0] as { lot?: number } | undefined)?.lot ?? 0.01) || 0.01;
+      let applied = false;
+      const { sthReady, sthMoveMaster, sthPauseCopy } = await import('@/lib/member/sth');
+      if (sthReady()) applied = (body.action === 'pause' ? await sthPauseCopy(String(s.tgId)) : await sthMoveMaster(String(s.tgId), strat, lot)).ok;
+      if (applied)
+        await db.from('member_actions').insert({ tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member (auto STH)', detail: { text: body.action === 'pause' ? '⏸ copy paused — applied automatically via STH' : '▶ copy resumed — applied automatically via STH' } as never });
+      else await queueAction(s.tgId, body.action, {}); // backup : le support (dés)active la copie à la main
+    }
   } else {
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
   }
