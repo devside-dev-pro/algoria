@@ -374,6 +374,12 @@ export default function AdminCRM() {
     const v = window.prompt('Expected commission ($):', String(d.detail?.commission_usd ?? 0));
     if (v !== null && Number.isFinite(Number(v))) post({ updateDeposit: { id: d.id, commission: Number(v) } });
   };
+  // montant du dépôt éditable (29/07 — Jamie a déposé en 2 fois 265+250 : la com se corrigeait mais pas le
+  // montant → bilan incohérent). L'API updateDeposit acceptait déjà amount, il manquait juste le crayon.
+  const editDepositAmount = (d: Deposit) => {
+    const v = window.prompt('Deposit amount ($) — cumule les dépôts multiples du même compte :', String(d.detail?.amount_usd ?? 0));
+    if (v !== null && Number.isFinite(Number(v)) && Number(v) > 0) post({ updateDeposit: { id: d.id, amount: Number(v) } });
+  };
   const deleteDeposit = (d: Deposit) => {
     if (window.confirm(`Delete this deposit line ($${Number(d.detail?.amount_usd ?? 0)} · #${d.member_no ?? '—'})? This can't be undone.`)) post({ deleteDeposit: d.id });
   };
@@ -1078,7 +1084,7 @@ export default function AdminCRM() {
                       {/* pays : hérité du membre — éditable ICI pour rattraper les dépôts déjà saisis en 2 clics */}
                       {countrySelect(d.tg_id, rows.find((r) => Number(r.tg_id) === Number(d.tg_id))?.country ?? null)}
                       <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{(d.detail?.broker ?? '—').toUpperCase()}</span>
-                      <span className="mono" style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--cyan)' }}>${Number(d.detail?.amount_usd ?? 0)}</span>
+                      <button onClick={() => editDepositAmount(d)} title="edit deposit amount (e.g. member deposited in several chunks)" className="mono" style={{ ...miniBtn, fontSize: 12.5, fontWeight: 800, color: 'var(--cyan)' }}>${Number(d.detail?.amount_usd ?? 0)} ✎</button>
                       <span style={{ color: 'var(--dim)', fontSize: 11 }}>→ com</span>
                       <button onClick={() => editDepositCom(d)} title="edit expected commission" className="mono" style={{ ...miniBtn, fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>${Number(d.detail?.commission_usd ?? 0)} ✎</button>
                       <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, color: stC, border: `1px solid color-mix(in srgb, ${stC} 40%, transparent)`, borderRadius: 6, padding: '2px 7px' }}>{st === 'canceled' ? 'LOST' : st.toUpperCase()}</span>
