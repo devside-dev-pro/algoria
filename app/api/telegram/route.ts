@@ -50,15 +50,20 @@ async function fetchAvatar(db: any, userId: number): Promise<string | null> {
  * sans conversation préalable (Bot API 5.4+) — c'est la SEULE fenêtre où c'est permis, d'où l'envoi ici,
  * tout de suite. Échoue si la personne a bloqué le bot ou a des réglages stricts → best effort, on note
  * juste le résultat (dm_status) pour mesurer le taux réel.
- * Texte surchargeable sans redéploiement par l'env TELEGRAM_JOIN_DM ; {backup} y est remplacé par la
- * ligne du canal de secours (omise si TELEGRAM_BACKUP_INVITE n'est pas posé → jamais de lien mort).
+ * Le message ne fait PAS patienter les mains vides : il envoie sur l'APP (décision Mathieu 30/07 — « le
+ * temps qu'ils soient acceptés ils installent l'appli, ils sont déjà à moitié closés »). Pas de canal de
+ * secours ici : proposer un 2e canal à quelqu'un qui n'est pas encore entré dans le 1er n'a aucun sens —
+ * et si le canal principal tombait, telegram_joins garde tous les user_id pour un broadcast.
+ * Texte surchargeable sans redéploiement par l'env TELEGRAM_JOIN_DM.
  */
 const JOIN_DM_DEFAULT = [
   '✅ <b>Request received</b> — you\'re in the queue.',
   '',
-  'Every member is approved by hand, usually within a few hours. You\'ll be notified the moment you\'re in.',
+  'Every member is approved by hand, usually within a few hours — you\'ll be notified the moment you\'re in.',
   '',
-  '{backup}💬 A question in the meantime? Message Mathieu directly — @mathieu_algoria',
+  'Get a head start while you wait 👇',
+  '📲 <b>app.algoria.tech/member</b> — see the 3 strategies, today\'s live results, and set up your access in a few minutes.',
+  '💬 A question? Message Mathieu directly: @mathieu_algoria',
   '',
   'Algoria is <b>completely free</b>. See you inside 🥇',
 ].join('\n');
@@ -66,11 +71,7 @@ const JOIN_DM_DEFAULT = [
 async function sendJoinDm(userId: number): Promise<'sent' | 'failed' | 'skipped'> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return 'skipped';
-  const backup = process.env.TELEGRAM_BACKUP_INVITE?.trim();
-  const text = (process.env.TELEGRAM_JOIN_DM?.trim() || JOIN_DM_DEFAULT).replace(
-    '{backup}',
-    backup ? `📲 Join our backup channel so you never lose access: ${backup}\n` : '',
-  );
+  const text = process.env.TELEGRAM_JOIN_DM?.trim() || JOIN_DM_DEFAULT;
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
