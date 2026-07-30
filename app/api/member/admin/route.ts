@@ -45,6 +45,23 @@ export async function GET(req: NextRequest) {
   // 🤖 BOT ACTIVITY : fil unifié envoyé (nudge, avec le texte du DM) / reçu (bot_reply) — le plus récent d'abord
   const { data: botActivity } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by')
     .in('kind', ['nudge', 'bot_reply']).order('created_at', { ascending: false }).limit(120);
+  // 📣 SOURCES DES DEMANDES D'ADHÉSION (30/07) : agrégat par lien d'invitation Telegram — un lien nommé
+  // par campagne relie enfin une pub à ses demandes (les ads pointent vers le canal, pas vers l'app, donc
+  // les ?src= étaient inexploitables). dm = taux de DM automatique délivré (bloqué/privé → 'failed').
+  const { data: joinRows } = await (db as any).from('telegram_joins')
+    .select('invite_name,status,dm_status,joined_at').order('joined_at', { ascending: false }).limit(1000) as { data: Array<{ invite_name: string | null; status: string | null; dm_status: string | null; joined_at: string }> | null };
+  const joinSources = Object.values(
+    (joinRows ?? []).reduce((acc: Record<string, { source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }>, r) => {
+      const key = r.invite_name ?? '(lien direct / inconnu)';
+      const cur = (acc[key] ??= { source: key, n: 0, accepted: 0, dmSent: 0, dmFailed: 0, last: r.joined_at });
+      cur.n++;
+      if (r.status === 'accepted') cur.accepted++;
+      if (r.dm_status === 'sent') cur.dmSent++;
+      if (r.dm_status === 'failed') cur.dmFailed++;
+      if (r.joined_at > cur.last) cur.last = r.joined_at;
+      return acc;
+    }, {}),
+  ).sort((a, b) => b.n - a.n);
   // état RÉEL du webhook (getWebhookInfo) — SAIN uniquement s'il pointe sur /api/telegram (le webhook
   // unique : login + waitlist + inbox). Toute autre URL = cassé → le bouton de réparation s'affiche.
   let tgInboxOn = false;
@@ -80,7 +97,7 @@ export async function GET(req: NextRequest) {
     const n = String((k.detail as { broker_name?: string })?.broker_name ?? '').trim();
     if (n && !legalNames[t]) legalNames[t] = n;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources });
 }
 
 export async function POST(req: NextRequest) {

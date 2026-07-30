@@ -44,6 +44,49 @@ async function fetchAvatar(db: any, userId: number): Promise<string | null> {
   }
 }
 
+/**
+ * DM AUTOMATIQUE au demandeur d'adhésion (30/07 — le bot qui faisait ça sur l'ancien canal est mort).
+ * Telegram AUTORISE un bot admin à écrire à quelqu'un qui vient d'envoyer une demande d'adhésion, même
+ * sans conversation préalable (Bot API 5.4+) — c'est la SEULE fenêtre où c'est permis, d'où l'envoi ici,
+ * tout de suite. Échoue si la personne a bloqué le bot ou a des réglages stricts → best effort, on note
+ * juste le résultat (dm_status) pour mesurer le taux réel.
+ * Texte surchargeable sans redéploiement par l'env TELEGRAM_JOIN_DM ; {backup} y est remplacé par la
+ * ligne du canal de secours (omise si TELEGRAM_BACKUP_INVITE n'est pas posé → jamais de lien mort).
+ */
+const JOIN_DM_DEFAULT = [
+  '✅ <b>Request received</b> — you\'re in the queue.',
+  '',
+  'Every member is approved by hand, usually within a few hours. You\'ll be notified the moment you\'re in.',
+  '',
+  '{backup}💬 A question in the meantime? Message Mathieu directly — @mathieu_algoria',
+  '',
+  'Algoria is <b>completely free</b>. See you inside 🥇',
+].join('\n');
+
+async function sendJoinDm(userId: number): Promise<'sent' | 'failed' | 'skipped'> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return 'skipped';
+  const backup = process.env.TELEGRAM_BACKUP_INVITE?.trim();
+  const text = (process.env.TELEGRAM_JOIN_DM?.trim() || JOIN_DM_DEFAULT).replace(
+    '{backup}',
+    backup ? `📲 Join our backup channel so you never lose access: ${backup}\n` : '',
+  );
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000),
+      body: JSON.stringify({ chat_id: userId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+    });
+    const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    if (!d.ok) console.error('[telegram] join DM refused:', d.description ?? 'unknown');
+    return d.ok ? 'sent' : 'failed';
+  } catch (e) {
+    console.error('[telegram] join DM failed:', (e as { message?: string })?.message ?? e);
+    return 'failed';
+  }
+}
+
 export async function POST(req: Request) {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (secret && req.headers.get('x-telegram-bot-api-secret-token') !== secret) {
@@ -62,17 +105,25 @@ export async function POST(req: Request) {
   const db = url && service ? createClient(url, service, { auth: { persistSession: false } }) : null;
   if (!db) console.error('[telegram] SUPABASE_SERVICE_KEY / NEXT_PUBLIC_SUPABASE_URL manquants');
 
-  // DEMANDE d'adhésion → entre en waitlist (status 'waiting').
-  // Pas de DM ici : un autre bot du canal envoie déjà les instructions aux demandeurs (éviter le double message).
+  // DEMANDE d'adhésion → entre en waitlist (status 'waiting') + DM instantané au demandeur.
+  // ATTRIBUTION : invite_link porte le lien exact utilisé — un lien nommé par campagne (« META-UK-JUL »)
+  // relie enfin une pub à ses demandes, alors que les ads pointent vers le canal et pas vers l'app.
   const jr = update?.chat_join_request;
   if (db && jr?.from) {
-    const photoUrl = jr.from.id ? await fetchAvatar(db, jr.from.id) : null; // avant l'insert → le spotlight arrive avec la photo
+    const userId = Number(jr.from.id) || null;
+    // le DM part AVANT l'avatar : la fenêtre d'autorisation Telegram est liée à la demande en cours,
+    // et 6 s de récupération de photo avant d'écrire, c'est 6 s d'attente pour le prospect.
+    const dmStatus = userId ? await sendJoinDm(userId) : 'skipped';
+    const photoUrl = userId ? await fetchAvatar(db, userId) : null; // avant l'insert → le spotlight arrive avec la photo
     const { error } = await (db as any).from('telegram_joins').insert({
-      user_id: jr.from.id ?? null,
+      user_id: userId,
       username: jr.from.username ?? null,
       first_name: jr.from.first_name ?? null,
       photo_url: photoUrl,
       status: 'waiting',
+      invite_link: jr.invite_link?.invite_link ?? null,
+      invite_name: jr.invite_link?.name ?? null,
+      dm_status: dmStatus,
     });
     if (error) console.error('[telegram] insert failed:', error.message);
   }
