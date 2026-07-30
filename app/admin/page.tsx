@@ -54,6 +54,8 @@ export default function AdminCRM() {
   // 🤖 BOT ACTIVITY : fil envoyé (nudge, texte du DM) / reçu (bot_reply) — visibilité totale sur le bot
   const [botActivity, setBotActivity] = useState<Array<{ id: string; tg_id: number; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }>>([]);
   const [tgInboxOn, setTgInboxOn] = useState(false); // état réel du webhook Telegram (getWebhookInfo)
+  // 📣 attribution des demandes d'adhésion par lien d'invitation nommé (une campagne = un lien)
+  const [joinSources, setJoinSources] = useState<Array<{ source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }>>([]);
   const [botDrafts, setBotDrafts] = useState<Record<string, string>>({}); // brouillons de réponse via le bot (par ligne du fil)
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
@@ -110,6 +112,7 @@ export default function AdminCRM() {
       setExtraAccounts(((d as unknown as { extraAccounts?: typeof extraAccounts }).extraAccounts) ?? []);
       setBotActivity(((d as unknown as { botActivity?: typeof botActivity }).botActivity) ?? []);
       setTgInboxOn(!!(d as unknown as { tgInboxOn?: boolean }).tgInboxOn);
+      setJoinSources((d as unknown as { joinSources?: Array<{ source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }> }).joinSources ?? []);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -678,6 +681,42 @@ export default function AdminCRM() {
                 </section>
               );
             })()}
+            {/* ===== 📣 SOURCES DES DEMANDES D'ADHÉSION — l'attribution enfin possible (30/07) : un lien
+                d'invitation Telegram NOMMÉ par campagne (« META-UK-JUL ») apparaît ici avec ses demandes,
+                ses acceptations et le taux de DM automatique délivré. Les ads pointent vers le canal, donc
+                c'était le seul chaînon manquant entre le budget pub et les vrais entrants. */}
+            {joinSources.length > 0 && (
+              <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <h2 style={secH}>📣 JOIN REQUESTS BY SOURCE</h2>
+                  <span style={{ fontSize: 11, color: 'var(--dim)' }}>name one Telegram invite link per campaign to see it split here</span>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="mono" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                    <thead>
+                      <tr style={{ color: 'var(--dim)', textAlign: 'left' }}>
+                        <th style={{ padding: '4px 8px 6px 0' }}>source</th>
+                        <th style={{ padding: '4px 8px 6px 0', textAlign: 'right' }}>requests</th>
+                        <th style={{ padding: '4px 8px 6px 0', textAlign: 'right' }}>accepted</th>
+                        <th style={{ padding: '4px 8px 6px 0', textAlign: 'right' }}>auto-DM</th>
+                        <th style={{ padding: '4px 0 6px 0' }}>last</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {joinSources.map((j) => (
+                        <tr key={j.source} style={{ borderTop: '1px solid var(--border)' }}>
+                          <td style={{ padding: '5px 8px 5px 0', color: 'var(--text)', fontWeight: 700 }}>{j.source}</td>
+                          <td style={{ padding: '5px 8px 5px 0', textAlign: 'right', color: 'var(--cyan)', fontWeight: 800 }}>{j.n}</td>
+                          <td style={{ padding: '5px 8px 5px 0', textAlign: 'right' }}>{j.accepted}</td>
+                          <td style={{ padding: '5px 8px 5px 0', textAlign: 'right', color: j.dmFailed > j.dmSent ? '#ff8a5c' : 'var(--up)' }}>{j.dmSent}{j.dmFailed ? ` (${j.dmFailed} ko)` : ''}</td>
+                          <td style={{ padding: '5px 0', color: 'var(--dim)' }}>{new Date(j.last).toLocaleDateString('en-GB')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
             {/* ===== 🤖 BOT ACTIVITY — TOUT ce que le bot envoie (relances, texte complet) et reçoit
                 (réponses des prospects, via le webhook Telegram). « Je veux voir ce que le bot fait » —
                 le fil est là. Le bouton ENABLE INBOX branche le webhook (à cliquer UNE fois). */}
