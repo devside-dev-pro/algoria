@@ -172,9 +172,9 @@ export async function POST(req: NextRequest) {
     // TAILLE DE COPIE (le vrai lot, fin du mapping risk_tier) : le membre choisit son lot parmi des paliers.
     // APPLICATION AUTO via STH quand le compte est connecté par l'API (join-master-account déclaratif avec le
     // nouveau lot) ; sinon carte risk_change dans la file → le support l'applique dans le dashboard STH.
-    const LOT_CHOICES = [0.01, 0.02, 0.03, 0.05, 0.1];
+    const { isLotAllowed } = await import('@/lib/member/lots'); // source unique partagée avec la page profil
     const newLot = Number(body.lot ?? 0);
-    if (!LOT_CHOICES.includes(newLot)) return NextResponse.json({ error: 'invalid lot size' }, { status: 400 });
+    if (!isLotAllowed(newLot)) return NextResponse.json({ error: 'invalid lot size' }, { status: 400 });
     if (!['live', 'paused'].includes(cur.status)) return NextResponse.json({ error: 'copy not activated yet' }, { status: 403 });
     const { data: mrow } = await db.from('members').select('member_no,strategy').eq('tg_id', s.tgId).limit(1);
     const strat = Number((mrow?.[0] as { strategy?: number } | undefined)?.strategy ?? 2) || 2;
