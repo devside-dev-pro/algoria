@@ -313,6 +313,29 @@ export function useFeedHealth(staleMs = 12000) {
   return { hasData: last > 0, ageMs, stale: last > 0 && ageMs > staleMs };
 }
 
+/**
+ * OPÉRATEUR ou SPECTATEUR ? (30/07 — un monteur vidéo filme le desk sans pouvoir toucher au compte).
+ * true = ce compte est dans desk_operators → contrôles affichés. false = lecture seule. null = pas
+ * encore connu : on n'affiche RIEN de dangereux tant qu'on n'est pas sûr (safe par défaut).
+ * Le vrai verrou est la RLS de `commands` — ceci ne fait que cacher ce qui serait de toute façon refusé.
+ */
+export function useIsOperator(): boolean | null {
+  const [isOp, setIsOp] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth?.user?.id;
+      if (!uid) { if (alive) setIsOp(false); return; }
+      // cast : desk_operators n'est pas dans les types générés (même pattern qu'edge_health/member_accounts)
+      const { data, error } = await (supabase as any).from('desk_operators').select('user_id').eq('user_id', uid).limit(1) as { data: Array<{ user_id: string }> | null; error: { message: string } | null };
+      if (alive) setIsOp(!error && !!data?.length);
+    })();
+    return () => { alive = false; };
+  }, []);
+  return isOp;
+}
+
 /** Cockpit → runner (mode pills, kill switch). On AWAIT : sinon supabase-js n'envoie jamais la requête. */
 export async function sendCommand(type: string, payload?: unknown) {
   const { error } = await supabase.from('commands').insert({ type, payload: (payload ?? null) as never });
