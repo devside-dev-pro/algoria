@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, StrategyPicker, Locked, UnlockSheet, type Member, type Referral } from '../ui';
 import { TRC20_RE } from '@/lib/member/affiliate';
+import { LOT_CHOICES } from '@/lib/member/lots';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
 
 // Alertes push : wins d'Algoria, recap du jour, annonce de live. Opt-in explicite (permission navigateur).
@@ -236,7 +237,9 @@ export default function Profile() {
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>YOUR STRATEGY</h2>
           <StrategyPicker value={member.strategy ?? 2} busy={busy || !unlocked} onPick={(id) => act('strategy', id)} />
-          <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Switches are applied by the team within a few hours — your account moves to the strategy&apos;s master.</p>
+          {/* texte corrigé le 30/07 : depuis le passage en full-auto (STH), le changement est immédiat —
+              la file support n'est plus qu'un repli si l'API refuse (receiver ajouté à la main). */}
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Applied instantly — your account moves to the strategy&apos;s master right away.</p>
         </section>
       </Locked>
 
@@ -246,7 +249,7 @@ export default function Profile() {
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>COPY SIZE</h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {[0.01, 0.02, 0.03, 0.05, 0.1].map((l) => {
+            {LOT_CHOICES.map((l) => {
               const active = Number(member.lot ?? 0.01) === l;
               return (
                 <button key={l} disabled={busy || !unlocked || active} onClick={() => setLot(l)}
