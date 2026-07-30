@@ -57,15 +57,23 @@ async function fetchAvatar(db: any, userId: number): Promise<string | null> {
  * Texte surchargeable sans redéploiement par l'env TELEGRAM_JOIN_DM.
  */
 const JOIN_DM_DEFAULT = [
-  '✅ <b>Request received</b> — you\'re in the queue.',
+  '🎉 <b>Thanks for requesting access to Algoria!</b>',
   '',
-  'Every member is approved by hand, usually within a few hours — you\'ll be notified the moment you\'re in.',
+  'Mathieu approves every member by hand — <b>usually in under 2 hours</b>. You\'ll be notified the moment you\'re in.',
   '',
-  'Get a head start while you wait 👇',
-  '📲 <b>app.algoria.tech/member</b> — see the 3 strategies, today\'s live results, and set up your access in a few minutes.',
-  '💬 A question? Message Mathieu directly: @mathieu_algoria',
+  'While you wait, get a head start 👇',
   '',
-  'Algoria is <b>completely free</b>. See you inside 🥇',
+  '🎬 <b>Watch the intro</b> — what Algoria is and how it works, in a few minutes:',
+  'app.algoria.tech/academy',
+  '',
+  '📲 <b>Create your free account</b> — pick your strategy and get your access ready:',
+  'app.algoria.tech/member',
+  '',
+  '💬 <b>A question?</b> Message Mathieu directly: @mathieu_algoria',
+  '',
+  'Algoria is <b>completely free</b>: the AI trades gold in <i>your own</i> broker account — your money never leaves it, and you stay in control.',
+  '',
+  'See you inside 🥇',
 ].join('\n');
 
 async function sendJoinDm(userId: number): Promise<'sent' | 'failed' | 'skipped'> {
