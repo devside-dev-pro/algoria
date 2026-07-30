@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Chart } from '@/components/Chart';
 import { Desk } from '@/components/Desk';
 import { Telemetry } from '@/components/Telemetry';
-import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk, useWeekHistory } from '@/lib/cockpit/useRealtime';
+import { useSignals, useLatestState, sendCommand, usePrice, useTrades, useDayStartEquity, useEquityCurve, useFeedHealth, useDesk, useWeekHistory, useIsOperator } from '@/lib/cockpit/useRealtime';
 import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { AlgoriaVoice } from './Voice';
@@ -45,6 +45,10 @@ export function Cockpit() {
   const [slIn, setSlIn] = useState('');
   const [tpIn, setTpIn] = useState('');
   const [broadcast, setBroadcast] = useState(false); // mode diffusion : vue épurée pour le live (masque les contrôles opérateur)
+  // SPECTATEUR (30/07) : un compte hors desk_operators voit TOUT (chart, positions, stats, recap, voix)
+  // mais aucun bouton qui agit sur le compte — la RLS de `commands` refuserait de toute façon ses ordres.
+  const isOperator = useIsOperator();
+  const canAct = isOperator === true; // null (encore inconnu) = on n'affiche pas : safe par défaut
   // MODE AUTOPILOT : Algoria tient le live seule (scène plein écran + chat TikTok + voix). Persisté →
   // un crash/reload de la machine de stream REPREND l'autopilot tout seul (personne n'est là pour cliquer).
   const [autopilot, setAutopilot] = useState(false);
@@ -280,7 +284,10 @@ export function Cockpit() {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {!broadcast && (
+          {isOperator === false && !broadcast && (
+            <span className="mono" style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: 'var(--dim)', border: '1px solid var(--border)', borderRadius: 7, padding: '4px 9px' }} title="read-only access: everything is live, no action can be sent to the account">👁 VIEW ONLY</span>
+          )}
+          {!broadcast && canAct && (
             <>
               {/* AUTO ON/OFF — l'interrupteur du moteur (remplace l'ex-sélecteur NORMAL/SCALP jamais utilisé
                   + l'ancien bouton KILL : même commande kill/resume, lecture instantanée ON=vert / OFF=rouge). */}
@@ -304,8 +311,11 @@ export function Cockpit() {
               >
                 {show ? '🔥 BEAST ON' : '🔥 BEAST MODE'}
               </button>
-              <button onClick={() => supabase.auth.signOut()} style={{ ...pill(false), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 9px' }} title="sign out" aria-label="sign out"><LogoutIcon /></button>
             </>
+          )}
+          {/* déconnexion : hors du gate opérateur — un spectateur doit pouvoir sortir de sa session */}
+          {!broadcast && (
+            <button onClick={() => supabase.auth.signOut()} style={{ ...pill(false), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 9px' }} title="sign out" aria-label="sign out"><LogoutIcon /></button>
           )}
           {/* VOICE — Algoria parle : annonces trades/news + « Hey Algoria » (Q&R vocale avec le contexte live) */}
           <AlgoriaVoice deskItems={deskItems} trades={trades} st={st} symbol={symbol} dayPnl={dayPnl} rafaleTickets={rafaleTickets} autopilot={autopilot} />
@@ -324,6 +334,8 @@ export function Cockpit() {
           </button>
           {/* AUTOPILOT — Algoria tient le live seule SUR CE MÊME ÉCRAN : orbe + sous-titres en calque flottant,
               chat TikTok lu et répondu à voix haute, trading auto inchangé. (l'ancien Broadcast reste via ?broadcast=1) */}
+          {/* AUTOPILOT parle au runner (chat TikTok) → réservé aux opérateurs */}
+          {canAct && (
           <button
             onClick={toggleAutopilot}
             style={{
@@ -336,11 +348,12 @@ export function Cockpit() {
           >
             {autopilot ? '🤖 AUTOPILOT ON' : '🤖 Autopilot'}
           </button>
+          )}
         </div>
       </header>
 
-      {/* ===== CONTROL DECK (manual) — masqué en mode diffusion ===== */}
-      {!broadcast && (
+      {/* ===== CONTROL DECK (manual) — masqué en mode diffusion ET pour les spectateurs ===== */}
+      {!broadcast && canAct && (
       <section className="panel" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', flexWrap: 'wrap' }}>
         <span style={grpLabel}>MANUAL</span>
         <label style={lbl}>lot<input value={lot} onChange={(e) => setLot(e.target.value)} inputMode="decimal" style={inp(52)} /></label>
@@ -497,7 +510,7 @@ export function Cockpit() {
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--cyan)' }}>
                       <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--cyan)' }} /> OPEN
                     </span>
-                    {!broadcast && (
+                    {!broadcast && canAct && (
                       <button onClick={() => fire('close-' + k, () => sendCommand('close_position', { ticket: k }))} title="close this position at market (without waiting for TP/SL)"
                         style={{ fontSize: 9.5, padding: '2px 8px', borderRadius: 5, border: '1px solid rgba(255,107,138,.5)', background: lastFire === 'close-' + k ? 'rgba(255,107,138,.2)' : 'transparent', color: '#ff8aa2', cursor: 'pointer' }}>✕ close</button>
                     )}
