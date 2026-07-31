@@ -10,6 +10,11 @@ type Phase = 'idle' | 'waiting' | 'expired' | 'error';
 
 export default function MemberLogin() {
   const [phase, setPhase] = useState<Phase>('idle');
+  // LIEN DE SECOURS (31/07 — un membre sur ORDINATEUR : « ça ne fait rien quand je clique »). Sur desktop
+  // sans Telegram installé, tg:// n'ouvre rien et le repli window.open part 1,6 s plus tard, DANS un
+  // setTimeout : Chrome le bloque (le geste utilisateur est perdu après l'await du fetch). D'où un bouton
+  // qui semble mort. On affiche donc TOUJOURS le lien t.me en clair : un vrai clic n'est jamais bloqué.
+  const [link, setLink] = useState<string | null>(null);
   const router = useRouter();
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => () => { if (poll.current) clearInterval(poll.current); }, []);
@@ -19,6 +24,7 @@ export default function MemberLogin() {
       const r = await fetch('/api/member/tglogin', { method: 'POST' });
       const d = (await r.json()) as { code?: string; link?: string };
       if (!d.code || !d.link) { setPhase('error'); return; }
+      setLink(d.link);
       setPhase('waiting');
       openTelegram(d.link, { fallbackNewTab: true }); // tg:// direct sur le bot ; repli t.me en NOUVEL onglet (le polling continue ici)
       if (poll.current) clearInterval(poll.current);
@@ -58,10 +64,19 @@ export default function MemberLogin() {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
           <span className="pulse" style={{ fontSize: 13.5, color: 'var(--cyan)', fontWeight: 700 }}>● waiting for Telegram…</span>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', maxWidth: 320, lineHeight: 1.55 }}>
-            Telegram just opened — tap <strong style={{ color: 'var(--text)' }}>START</strong> in the bot chat and you&apos;ll be signed in here automatically.
+            Telegram should have opened — tap <strong style={{ color: 'var(--text)' }}>START</strong> in the bot chat and you&apos;ll be signed in here automatically.
           </p>
+          {/* SECOURS TOUJOURS VISIBLE : sur ordinateur, l'ouverture automatique est souvent bloquée par le
+              navigateur. Ce lien est un vrai <a> — un clic dessus n'est jamais bloqué. Il marche aussi
+              depuis le téléphone si Telegram n'est installé que là. */}
+          {link && (
+            <a href={link} target="_blank" rel="noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 22px', borderRadius: 12, textDecoration: 'none', fontWeight: 800, fontSize: 13.5, color: '#fff', background: 'linear-gradient(90deg,#2AABEE,#229ED9)', boxShadow: '0 0 18px rgba(42,171,238,.3)' }}>
+              ✈️ Nothing opened? Open Telegram here
+            </a>
+          )}
           <button onClick={() => void start()} style={{ border: 'none', background: 'transparent', color: 'var(--dim)', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
-            Telegram didn&apos;t open? Tap to retry
+            Start over
           </button>
         </div>
       )}
