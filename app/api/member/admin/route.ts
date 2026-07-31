@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
-    (db as any).from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source').order('member_no', { ascending: false }).limit(200) as Promise<{ data: Array<{ tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>> | null }>,
+    (db as any).from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at').order('member_no', { ascending: false }).limit(200) as Promise<{ data: Array<{ tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>> | null }>,
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),
@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
     setCountry?: { tg_id: number; country: string };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
+    ban?: { tg_id: number; reason?: string; undo?: boolean };
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -419,6 +420,33 @@ export async function POST(req: NextRequest) {
     }
     await db.from('member_actions').insert({ tg_id: Number(acc[0].tg_id), member_no: acc[0].member_no != null ? Number(acc[0].member_no) : null, kind: 'note', status: 'done', done_by: who, detail: { text: `🔑 credentials revealed by ${who} (account #${acc[0].account_no})` } as never });
     return NextResponse.json({ login: acc[0].mt5_login, server: acc[0].mt5_server, password });
+  }
+  // ===== 🚫 BAN / UNBAN (31/07 — un concurrent s'était créé un compte pour capturer l'app et la copier).
+  // Coupe TOUT : la session en cours (banned_at relu à chaque requête), la reconnexion (aucune session
+  // n'est posée), et la copie côté STH. Retire aussi de la whitelist VIP — sinon un banni garderait
+  // l'app déverrouillée. Réversible : `unban` remet tout à zéro sauf la copie (à rebrancher à la main).
+  if (body.ban) {
+    const { tg_id, reason, undo } = body.ban;
+    const { data: m } = await db.from('members').select('member_no,tg_id,tg_username').eq('tg_id', tg_id).limit(1);
+    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    const uname = String(m[0].tg_username ?? '').trim().toLowerCase();
+    if (undo) {
+      await (db as any).from('members').update({ banned_at: null, banned_reason: null, updated_at: new Date().toISOString() }).eq('tg_id', tg_id);
+      await db.from('member_actions').insert({ tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: '✅ ban lifted — access restored (copy must be reconnected manually if needed)' } as never });
+      return NextResponse.json({ ok: true, banned: false });
+    }
+    await (db as any).from('members').update({ banned_at: new Date().toISOString(), banned_reason: String(reason ?? '').slice(0, 300) || null, status: 'paused', updated_at: new Date().toISOString() }).eq('tg_id', tg_id);
+    if (uname) await db.from('member_whitelist').delete().eq('username', uname); // sinon l'app resterait déverrouillée
+    let discLine = 'no copier link to cut';
+    if (sthReady()) {
+      const d = await sthDisconnect(String(tg_id));
+      discLine = d.ok ? 'copier disconnected via STH' : `STH disconnect failed (${d.errorMessage}) — check manually`;
+    }
+    await db.from('member_actions').insert({
+      tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who,
+      detail: { text: `🚫 BANNED${reason ? ` — ${String(reason).slice(0, 200)}` : ''} · ${discLine} · removed from VIP whitelist. Also kick them from the Telegram channel (manual).` } as never,
+    });
+    return NextResponse.json({ ok: true, banned: true });
   }
   if (body.offboard) {
     // OFF-BOARD : le client est parti (retrait). Statut → paused (sort du compte "actifs", fiche + creds conservés),

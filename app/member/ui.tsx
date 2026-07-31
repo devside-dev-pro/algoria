@@ -70,6 +70,7 @@ export function useMe() {
     const load = () =>
       void fetch('/api/member/me', { signal: AbortSignal.timeout(15_000) }) // sans timeout, une requête qui pend = écran figé
         .then(async (r) => {
+          if (r.status === 403) { router.replace('/member/denied'); return null; } // accès révoqué (banni)
           if (r.status === 401) { router.replace('/member/login'); return null; }
           return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null; accounts?: MemberAccount[] };
         })

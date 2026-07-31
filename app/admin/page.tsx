@@ -18,6 +18,7 @@ interface Row {
   mt5_login: string | null; mt5_server: string | null; usdt_trc20: string | null; referred_by: number | null;
   country: string | null;
   source: string | null; // canal d'acquisition (cookie UTM au premier clic) — null = organique/cross-device
+  banned_at?: string | null; // 🚫 accès révoqué (concurrent, abus) — session ET reconnexion bloquées
 }
 interface Action { id: string; tg_id?: number; member_no: number | null; kind: string; status?: string; done_by?: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
@@ -298,6 +299,19 @@ export default function AdminCRM() {
     post({ offboard: r.tg_id }, () => setSel((s) => (s ? { ...s, status: 'paused' } : s)));
   };
 
+  // 🚫 BAN / UNBAN — révoque l'accès app d'un compte (concurrent qui copie, abus). Confirmation obligatoire :
+  // c'est visible côté client (il tombe sur « accès refusé »), donc jamais sur un clic accidentel.
+  const banMember = (r: Row, undo: boolean) => {
+    const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
+    if (undo) {
+      if (!window.confirm(`Lift the ban on ${who}?\n\nThey'll be able to sign in again. The copier is NOT reconnected automatically.`)) return;
+      post({ ban: { tg_id: r.tg_id, undo: true } }, () => setSel((s) => (s ? { ...s, banned_at: null } : s)));
+      return;
+    }
+    const reason = window.prompt(`🚫 BAN ${who}?\n\n• kills their current session AND blocks any new sign-in\n• disconnects the copier\n• removes them from the VIP whitelist\n\nReason (kept in their timeline):`, 'competitor / scraping the app');
+    if (reason === null) return;
+    post({ ban: { tg_id: r.tg_id, reason } }, () => setSel((s) => (s ? { ...s, banned_at: new Date().toISOString(), status: 'paused' } : s)));
+  };
   const nameOf = (tg: number | null | undefined) => {
     const m = rows.find((r) => Number(r.tg_id) === Number(tg));
     return m ? (m.tg_username ? '@' + m.tg_username : `#${m.member_no}`) : tg == null ? '—' : String(tg);
@@ -949,6 +963,13 @@ export default function AdminCRM() {
               {/* TOUJOURS visible : « paused » peut venir du membre lui-même (bouton pause copy) — masquer
                   l'off-board sur un membre en pause bloquait pile le cas « il a retiré, je veux le sortir » */}
               <button disabled={busy} onClick={() => offboard(sel)} title="client left → status paused + copier disconnect (STH or queued) + timeline note (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>
+              {/* 🚫 BAN — coupe l'accès à l'app : session en cours ET reconnexion. Pour les concurrents /
+                  abus, pas pour un client qui part (→ OFF-BOARD). Réversible. */}
+              {sel.banned_at ? (
+                <button disabled={busy} onClick={() => banMember(sel, true)} title="lift the ban — this account can sign in again" style={{ ...goldBtn, color: 'var(--up)', borderColor: 'rgba(31,216,176,.45)' }}>✅ UNBAN</button>
+              ) : (
+                <button disabled={busy} onClick={() => banMember(sel, false)} title="revoke access: kills the live session AND blocks any new sign-in, cuts the copier, removes from the VIP whitelist" style={{ ...dangerBtn, fontWeight: 800 }}>🚫 BAN</button>
+              )}
               {selCreds && (
                 <span className="mono" style={{ display: 'inline-flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', fontSize: 11.5, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)' }}>
                   <span>login <b style={{ color: 'var(--text)' }}>{selCreds.login}</b></span>
