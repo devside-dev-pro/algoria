@@ -1,12 +1,14 @@
 'use client';
 // Coque CLIENT de l'espace membre : enregistrement du service worker, nav basse (onglets), hook useMe.
 // Réutilise le langage visuel du cockpit (globals.css : .panel, .goldText, .mono) — même ADN, mobile-first.
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { tgHref } from '@/lib/telegram';
 import { pushState, enablePush } from '@/lib/push/client';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
+import { asLocale, type Locale } from '@/lib/member/i18n';
+import { tr, guessLocale, rememberLocale } from '@/lib/member/ui-text';
 
 export interface Member {
   member_no: number;
@@ -24,6 +26,7 @@ export interface Member {
   mt5_server: string | null;
   referral_code: string | null;
   usdt_trc20: string | null;
+  locale?: string | null; // marché : 'en' | 'it' — pilote la langue de l'app
 }
 
 // Compte SUPPLÉMENTAIRE (multi-stratégies) — le compte principal reste la fiche Member elle-même.
@@ -65,6 +68,8 @@ export function useMe() {
   // pas « en cours » de « raté », toute erreur (500, réseau, JSON invalide, requête qui pend) laissait
   // member à null → les pages affichaient « loading… » POUR TOUJOURS, sans message ni issue.
   const [failed, setFailed] = useState(false);
+  const [guessed, setGuessed] = useState<Locale>('en'); // hydratation : 'en' côté serveur, deviné au montage
+  useEffect(() => { setGuessed(guessLocale()); }, []);
   useEffect(() => {
     let alive = true;
     const load = () =>
@@ -100,7 +105,21 @@ export function useMe() {
   }, []);
   // le serveur fait foi (il connaît la whitelist VIP/équipe) — repli local pour les vieux payloads
   const unlocked = srvUnlocked ?? (admin || member?.status === 'live' || member?.status === 'paused');
-  return { member, setMember, accounts, referral, rejection, admin, unlocked, loading, failed };
+  // LANGUE (phase 3) : celle du membre fait foi dès qu'il est chargé ; avant ça, on affiche déjà dans la
+  // langue devinée (choix mémorisé, sinon navigateur) pour éviter le clignotement anglais → italien.
+  // Le membre chargé écrase et MÉMORISE : sa prochaine visite s'ouvre directement dans la bonne langue,
+  // y compris sur les écrans hors session (login, accès refusé) qui n'ont aucun moyen de la connaître.
+  const locale: Locale = member?.locale ? asLocale(member.locale) : guessed;
+  useEffect(() => { if (member?.locale) rememberLocale(asLocale(member.locale)); }, [member?.locale]);
+  const t = useCallback((key: string) => tr(locale, key), [locale]);
+  return { member, setMember, accounts, referral, rejection, admin, unlocked, loading, failed, locale, t };
+}
+
+/** Langue des écrans SANS session (login, accès refusé) : choix mémorisé, sinon langue du navigateur. */
+export function useUILocale(): { locale: Locale; t: (key: string) => string } {
+  const [locale, setLocale] = useState<Locale>('en'); // 'en' au premier rendu : le serveur ne connaît ni
+  useEffect(() => { setLocale(guessLocale()); }, []); // localStorage ni navigator (hydratation cohérente)
+  return { locale, t: (key: string) => tr(locale, key) };
 }
 
 /**
@@ -109,23 +128,24 @@ export function useMe() {
  * fréquent : session expirée), écrire au support. Utilisé par toutes les pages de l'espace membre.
  */
 export function LoadFailed() {
+  const { t } = useUILocale(); // hors session possible (401) → langue devinée, pas celle du membre
   return (
     <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div className="panel" style={{ padding: 22, maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'center' }}>
         <div style={{ fontSize: 30 }}>⚠️</div>
-        <h1 style={{ margin: 0, fontSize: 17 }}>We couldn&rsquo;t load your account</h1>
+        <h1 style={{ margin: 0, fontSize: 17 }}>{t('fail.title')}</h1>
         <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-          Usually a expired session or a network hiccup. Try again — if it keeps happening, sign in again.
+          {t('fail.body')}
         </p>
         <button onClick={() => window.location.reload()}
           style={{ padding: '11px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 13, color: '#06101f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>
-          ↻ Try again
+          {t('fail.retry')}
         </button>
         <a href="/member/login" style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', textDecoration: 'none', color: 'var(--text)', fontSize: 12.5, fontWeight: 700 }}>
-          Sign in again
+          {t('fail.signin')}
         </a>
         <a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: 'var(--cyan)', textDecoration: 'none' }}>
-          💬 Still stuck? Message us — we answer fast
+          {t('fail.support')}
         </a>
       </div>
     </main>

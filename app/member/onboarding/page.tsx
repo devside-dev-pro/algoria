@@ -4,7 +4,7 @@
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StrategyPicker, LoadFailed } from '../ui';
+import { useMe, StrategyPicker, LoadFailed, useUILocale } from '../ui';
 import { BROKERS, type Broker } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
@@ -13,6 +13,7 @@ import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
 // et la vidéo du fondateur à un clic. Données via /api/public/proof (public, caché, always-green).
 function ConfidencePanel() {
+  const { t } = useUILocale();
   const [week, setWeek] = useState<{ count: number; best: number } | null>(null);
   useEffect(() => {
     void fetch('/api/public/proof').then((r) => r.json()).then((d: { week?: { count: number; best: number } }) => setWeek(d.week ?? null)).catch(() => {});
@@ -22,18 +23,18 @@ function ConfidencePanel() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontSize: 20 }}>⚡</span>
         <div>
-          <div style={{ fontSize: 13.5, fontWeight: 750 }}>You&apos;re joining a system that&apos;s already working</div>
+          <div style={{ fontSize: 13.5, fontWeight: 750 }}>{t('ob.proof.title')}</div>
           {week && week.count > 0 && (
-            <div className="mono" style={{ fontSize: 11.5, color: 'var(--up)' }}>this week: <b>{week.count} wins</b> · best trade <b>+${week.best}</b></div>
+            <div className="mono" style={{ fontSize: 11.5, color: 'var(--up)' }}>{t('ob.proof.week')}: <b>{week.count} {t('ob.proof.wins')}</b> · {t('ob.proof.best')} <b>+${week.best}</b></div>
           )}
         </div>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', fontSize: 11.5, color: 'var(--muted)' }}>
-        <span>🔒 <b style={{ color: 'var(--text)' }}>You keep full control</b> of your funds</span>
-        <span>💸 <b style={{ color: 'var(--text)' }}>Withdraw anytime</b></span>
-        <span>🛡️ <b style={{ color: 'var(--text)' }}>Risk capped</b> every single day</span>
+        <span>🔒 <b style={{ color: 'var(--text)' }}>{t('ob.proof.control')}</b> {t('ob.proof.controlEnd')}</span>
+        <span>💸 <b style={{ color: 'var(--text)' }}>{t('ob.proof.withdraw')}</b></span>
+        <span>🛡️ <b style={{ color: 'var(--text)' }}>{t('ob.proof.risk')}</b> {t('ob.proof.riskEnd')}</span>
       </div>
-      <a href="/member/academy" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, textDecoration: 'none', fontWeight: 750, fontSize: 12.5, color: 'var(--cyan)', border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)' }}>▶ New here? Watch the 2-min founder intro</a>
+      <a href="/member/academy" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, textDecoration: 'none', fontWeight: 750, fontSize: 12.5, color: 'var(--cyan)', border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)' }}>{t('ob.proof.video')}</a>
     </section>
   );
 }
@@ -48,7 +49,7 @@ async function post(body: Record<string, unknown>) {
 }
 
 export default function Onboarding() {
-  const { member, rejection, loading } = useMe();
+  const { member, rejection, loading, t } = useMe();
   const router = useRouter();
   const [step, setStep] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -139,11 +140,11 @@ export default function Onboarding() {
 
       {cur === 0 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h2 style={{ fontSize: 15, margin: 0 }}>1 · Open your broker account</h2>
+          <h2 style={{ fontSize: 15, margin: 0 }}>{t('ob.step1')}</h2>
 
           {/* le budget D'ABORD : la réponse choisit quel partenaire prend la vedette juste en dessous */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>HOW MUCH DO YOU PLAN TO START WITH?</span>
+            <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>{t('ob.budget.label')}</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {BUDGET_BRACKETS.map((b) => (
                 <button key={b.key} type="button" onClick={() => setBudget(budget === b.key ? null : b.key)}
@@ -158,54 +159,54 @@ export default function Onboarding() {
           </div>
 
           {budget && (
-            <span className="mono" style={{ alignSelf: 'flex-start', fontSize: 9, letterSpacing: 1.4, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 5, padding: '2px 7px', fontWeight: 800 }}>★ BEST MATCH FOR YOUR BUDGET</span>
+            <span className="mono" style={{ alignSelf: 'flex-start', fontSize: 9, letterSpacing: 1.4, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 5, padding: '2px 7px', fontWeight: 800 }}>{t('ob.budget.best')}</span>
           )}
-          <p style={pMuted}>{lead.note ?? (budget ? `${lead.name} is our recommended partner for your starting budget — fully supported, same hands-free copy.` : 'Open your account with one of our partner brokers.')}</p>
-          <a href={lead.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(lead.key)} style={ctaGold}>▲ CREATE MY {lead.name.toUpperCase()} ACCOUNT</a>
+          <p style={pMuted}>{lead.note ?? (budget ? `${lead.name} ${t('ob.broker.recoNote')}` : t('ob.broker.genericNote'))}</p>
+          <a href={lead.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(lead.key)} style={ctaGold}>{t('ob.broker.createCta')} {lead.name.toUpperCase()} {t('ob.broker.createCtaEnd')}</a>
           <div style={{ borderLeft: '3px solid var(--gold)', background: 'rgba(245,194,74,.06)', borderRadius: 8, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
             <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
-              <strong style={{ color: 'var(--gold)' }}>Minimum deposit: from $200</strong> — it depends on the strategy you&apos;ll pick at the last step. Fund for the one you want:
+              <strong style={{ color: 'var(--gold)' }}>{t('ob.min.title')}</strong> {t('ob.min.body')}
             </p>
             <p className="mono" style={{ margin: 0, fontSize: 11, color: 'var(--muted)', letterSpacing: 0.3 }}>
               🛡️ STEADY <b style={{ color: 'var(--text)' }}>$200</b> · ⚖️ BALANCED <b style={{ color: 'var(--text)' }}>$500</b> · 🔥 TURBO <b style={{ color: 'var(--text)' }}>$1,000</b>
             </p>
-            <p style={{ ...pMuted, margin: 0, fontSize: 11.5, color: 'var(--dim)' }}>Below the minimum, position sizing doesn&apos;t work — trades simply won&apos;t run.</p>
+            <p style={{ ...pMuted, margin: 0, fontSize: 11.5, color: 'var(--dim)' }}>{t('ob.min.warn')}</p>
           </div>
           {!othersOpen ? (
-            <button onClick={() => setShowOthers(true)} style={linkBtn}>I&apos;d rather use another broker</button>
+            <button onClick={() => setShowOthers(true)} style={linkBtn}>{t('ob.other')}</button>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>OTHER PARTNER BROKERS — SAME MINIMUMS</span>
+              <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>{t('ob.othersLabel')}</span>
               {rest.map((b) => (
                 <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(b.key)}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${picked === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: picked === b.key ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)' }}>
                   <span style={{ fontWeight: 750, fontSize: 13.5 }}>{b.name}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: picked === b.key ? 'var(--cyan)' : 'var(--dim)' }}>{picked === b.key ? '✓ selected' : 'open account ↗'}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: picked === b.key ? 'var(--cyan)' : 'var(--dim)' }}>{picked === b.key ? t('ob.selected') : t('ob.openAccount')}</span>
                 </a>
               ))}
             </div>
           )}
-          <button disabled={busy} onClick={() => run({ action: 'broker', broker: picked ?? lead.key }, 1)} style={ctaMain}>MY ACCOUNT IS READY →</button>
+          <button disabled={busy} onClick={() => run({ action: 'broker', broker: picked ?? lead.key }, 1)} style={ctaMain}>{t('ob.ready')}</button>
         </section>
       )}
 
       {cur === 1 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h2 style={{ fontSize: 15, margin: 0 }}>2 · Connect your MetaTrader account</h2>
-          <p style={pMuted}>Pick your broker &amp; platform, then enter the account it gave you. <strong style={{ color: 'var(--text)' }}>Encrypted end-to-end</strong>, never shown again.</p>
+          <h2 style={{ fontSize: 15, margin: 0 }}>{t('ob.step2')}</h2>
+          <p style={pMuted}>{t('ob.step2.sub')} <strong style={{ color: 'var(--text)' }}>{t('ob.step2.enc')}</strong>{t('ob.step2.encEnd')}</p>
 
           {/* BLOC 1 — le compte : broker → plateforme → login → serveur → mdp, dans l'ordre, au même endroit
               (plus de « revenir en arrière » pour changer le serveur). */}
           <div style={grp}>
-            <span style={grpLbl}>YOUR ACCOUNT</span>
+            <span style={grpLbl}>{t('ob.yourAccount')}</span>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <label style={{ ...lbl, flex: '1 1 130px' }}>Broker
+              <label style={{ ...lbl, flex: '1 1 130px' }}>{t('ob.broker')}
                 <select value={picked ?? ''} onChange={(e) => { setBrokerPick(e.target.value || null); setServer(''); setServerManual(false); }} style={inp}>
-                  <option value="">— choose —</option>
+                  <option value="">{t('ob.choose')}</option>
                   {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
                 </select>
               </label>
-              <label style={{ ...lbl, flex: '1 1 150px' }}>Platform
+              <label style={{ ...lbl, flex: '1 1 150px' }}>{t('ob.platform')}
                 <div style={{ display: 'flex', gap: 6 }}>
                   {(['mt5', 'mt4'] as const).map((p) => (
                     <button key={p} type="button" onClick={() => setPlatform(p)}
@@ -221,43 +222,43 @@ export default function Onboarding() {
             <label style={lbl}>Server
               {brokerServers.length > 0 && !serverManual ? (
                 <select value={server} onChange={(e) => { const v = e.target.value; if (v === '__other__') { setServerManual(true); setServer(''); } else setServer(v); }} style={inp}>
-                  <option value="">— choose your server —</option>
+                  <option value="">{t('ob.chooseServer')}</option>
                   {brokerServers.map((s) => <option key={s} value={s}>{s}</option>)}
-                  <option value="__other__">My server isn&apos;t listed…</option>
+                  <option value="__other__">{t('ob.serverNotListed')}</option>
                 </select>
               ) : (
-                <input value={server} onChange={(e) => setServer(e.target.value)} placeholder="type it EXACTLY as MetaTrader shows it" style={inp} />
+                <input value={server} onChange={(e) => setServer(e.target.value)} placeholder={t('ob.serverType')} style={inp} />
               )}
-              <span style={hint}>Must match your broker&apos;s server <b style={{ color: 'var(--muted)' }}>exactly</b> — copy it from MetaTrader (caps &amp; spaces count).</span>
-              {brokerServers.length > 0 && serverManual && <button type="button" onClick={() => { setServerManual(false); setServer(''); }} style={{ ...linkBtn, marginTop: 4, textAlign: 'left' }}>← Pick from the list instead</button>}
+              <span style={hint}>{t('ob.serverHint')}</span>
+              {brokerServers.length > 0 && serverManual && <button type="button" onClick={() => { setServerManual(false); setServer(''); }} style={{ ...linkBtn, marginTop: 4, textAlign: 'left' }}>{t('ob.serverBack')}</button>}
             </label>
-            <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} /><span style={hint}>Your <b style={{ color: 'var(--muted)' }}>main</b> password (the one you log in with) — <b style={{ color: 'var(--muted)' }}>not</b> the read-only &ldquo;investor&rdquo; one, or the copy can&apos;t trade.</span></label>
+            <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} /><span style={hint}>{t('ob.pwdHint')}</span></label>
           </div>
 
           {/* BLOC 2 — vérification (nom + dépôt) : le support recoupe avec le broker avant d'activer la copie. */}
           <div style={grp}>
-            <span style={grpLbl}>FOR VERIFICATION</span>
-            <label style={lbl}>Full name on your broker account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
-            <label style={lbl}>Amount deposited ($ — min 200)<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="200" style={inp} /></label>
-            <span style={hint}>Accurate name &amp; deposit = faster approval — the team checks them with the broker before switching the copy on.</span>
+            <span style={grpLbl}>{t('ob.verif')}</span>
+            <label style={lbl}>{t('ob.fullName')}<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
+            <label style={lbl}>{t('ob.amount')}<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder="200" style={inp} /></label>
+            <span style={hint}>{t('ob.verifHint')}</span>
           </div>
 
           <button disabled={busy || !picked || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', broker: picked, platform, login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
-            {busy ? 'ENCRYPTING…' : 'CONNECT MY ACCOUNT →'}
+            {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
-          <button onClick={() => setStep(0)} style={linkBtn}>Don&apos;t have a broker account yet? Open one →</button>
+          <button onClick={() => setStep(0)} style={linkBtn}>{t('ob.noBroker')}</button>
           <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
         </section>
       )}
 
       {cur === 2 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h2 style={{ fontSize: 15, margin: 0 }}>3 · Choose your strategy</h2>
-          <p style={pMuted}>Every strategy copies at the same fixed size — your risk lever is the strategy itself. You can switch anytime from your Profile.</p>
+          <h2 style={{ fontSize: 15, margin: 0 }}>{t('ob.step3')}</h2>
+          <p style={pMuted}>{t('ob.step3.sub')}</p>
           {/* budget = dépôt déclaré à l'étape 2 : les stratégies au-dessus sont grisées avec le minimum affiché */}
           <StrategyPicker value={strategy} onPick={setStrategy} busy={busy} budget={Number(deposit) > 0 ? Number(deposit) : undefined} />
-          <button disabled={busy || (Number(deposit) > 0 && Number(deposit) < (STRATEGY_MIN_DEPOSIT[strategy] ?? 500))} onClick={() => run({ action: 'strategy', choice: strategy }, 'done')} style={ctaMain}>{busy ? 'SAVING…' : '⚡ START COPYING ALGORIA'}</button>
-          <button onClick={() => setStep(1)} style={linkBtn}>← Back to MT5 details</button>
+          <button disabled={busy || (Number(deposit) > 0 && Number(deposit) < (STRATEGY_MIN_DEPOSIT[strategy] ?? 500))} onClick={() => run({ action: 'strategy', choice: strategy }, 'done')} style={ctaMain}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
+          <button onClick={() => setStep(1)} style={linkBtn}>{t('ob.backMt5')}</button>
         </section>
       )}
 
