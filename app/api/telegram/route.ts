@@ -244,7 +244,9 @@ export async function POST(req: Request) {
   // il a un ID numérique (-100…) invisible dans l'interface. Dès que le bot est admin quelque part
   // (ajout = my_chat_member, ou premier post = channel_post), on note l'ID et le titre : l'admin lit la
   // liste et copie l'ID dans les variables d'environnement. Fini le passage par un bot tiers.
-  const seenChat = update?.channel_post?.chat ?? update?.my_chat_member?.chat ?? null;
+  // chat_member inclus : sur un canal vivant, une entrée ou une sortie de membre suffit à le révéler —
+  // pas besoin d'attendre que Mathieu y publie. Un canal racheté avec sa communauté bouge tout seul.
+  const seenChat = update?.channel_post?.chat ?? update?.my_chat_member?.chat ?? update?.chat_member?.chat ?? update?.chat_join_request?.chat ?? null;
   if (db && seenChat?.id && (seenChat.type === 'channel' || seenChat.type === 'supergroup')) {
     await db.from('telegram_chats').upsert(
       { chat_id: Number(seenChat.id), title: String(seenChat.title ?? '').slice(0, 120) || null, type: String(seenChat.type), username: seenChat.username ? String(seenChat.username) : null, last_seen_at: new Date().toISOString() },
