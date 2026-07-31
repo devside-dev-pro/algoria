@@ -9,7 +9,7 @@ import { Chart } from '@/components/Chart';
 import { AlgoriaOrb } from '@/components/Orb';
 import { Desk } from '@/components/Desk';
 import { usePrice } from '@/lib/cockpit/useRealtime';
-import { useMe, Locked, UnlockSheet } from '../ui';
+import { useMe, Locked, UnlockSheet, LoadFailed } from '../ui';
 
 const SYMS = [
   { key: 'XAUUSD', short: 'XAU', dp: 2, watch: false },
@@ -72,7 +72,8 @@ export default function MemberLive() {
     [trades, hero],
   );
 
-  if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
+  if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
+  if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
 
   const stateWord = isWatch && !meta ? 'WATCHING' : STATE_WORD[meta?.state] ?? 'STANDING ASIDE';
   const stColor = isWatch ? 'var(--gold)' : stateColor(meta?.state);

@@ -4,7 +4,7 @@
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StrategyPicker } from '../ui';
+import { useMe, StrategyPicker, LoadFailed } from '../ui';
 import { BROKERS, type Broker } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
@@ -84,7 +84,8 @@ export default function Onboarding() {
     return () => clearTimeout(t);
   }, [member, step, brokerPick, bonusPop]);
 
-  if (loading || !member) return <Center>loading…</Center>;
+  if (loading) return <Center>loading…</Center>;
+  if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   if (member.status !== 'onboarding') { router.replace('/member'); return <Center>redirecting…</Center>; }
   const cur = step ?? member.onboarding_step;
   // le choix broker N'EST JAMAIS verrouillé : on repart du broker déjà enregistré (fiche membre) et

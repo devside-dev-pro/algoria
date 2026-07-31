@@ -61,16 +61,22 @@ export function useMe() {
   const [srvUnlocked, setSrvUnlocked] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  // ÉCHEC DE CHARGEMENT (31/07 — un client a vu « loading… » indéfiniment) : tant qu'on ne distinguait
+  // pas « en cours » de « raté », toute erreur (500, réseau, JSON invalide, requête qui pend) laissait
+  // member à null → les pages affichaient « loading… » POUR TOUJOURS, sans message ni issue.
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
     const load = () =>
-      void fetch('/api/member/me')
+      void fetch('/api/member/me', { signal: AbortSignal.timeout(15_000) }) // sans timeout, une requête qui pend = écran figé
         .then(async (r) => {
           if (r.status === 401) { router.replace('/member/login'); return null; }
           return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null; accounts?: MemberAccount[] };
         })
         .then((d) => {
-          if (!alive || !d?.member) return;
+          if (!alive) return;
+          if (!d?.member) { setFailed(true); setLoading(false); return; } // 401 compris : la redirection peut échouer
+          setFailed(false);
           setMember(d.member);
           setAccounts(d.accounts ?? []);
           setReferral(d.referral ?? null);
@@ -79,7 +85,7 @@ export function useMe() {
           setSrvUnlocked(typeof d.unlocked === 'boolean' ? d.unlocked : null);
           setLoading(false);
         })
-        .catch(() => alive && setLoading(false));
+        .catch(() => { if (alive) { setFailed(true); setLoading(false); } });
     load();
     // Le STATUT se re-vérifie tout seul (retour au premier plan + poll 60s) : un prospect approuvé pendant
     // que sa PWA est ouverte voit l'app se DÉVERROUILLER sans reload — sinon il restait grisé alors qu'il
@@ -93,7 +99,36 @@ export function useMe() {
   }, []);
   // le serveur fait foi (il connaît la whitelist VIP/équipe) — repli local pour les vieux payloads
   const unlocked = srvUnlocked ?? (admin || member?.status === 'live' || member?.status === 'paused');
-  return { member, setMember, accounts, referral, rejection, admin, unlocked, loading };
+  return { member, setMember, accounts, referral, rejection, admin, unlocked, loading, failed };
+}
+
+/**
+ * ÉCRAN DE SECOURS quand le compte n'a pas pu être chargé — remplace le « loading… » éternel.
+ * Trois issues, parce qu'un cul-de-sac coûte un client : réessayer, se reconnecter (cas le plus
+ * fréquent : session expirée), écrire au support. Utilisé par toutes les pages de l'espace membre.
+ */
+export function LoadFailed() {
+  return (
+    <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div className="panel" style={{ padding: 22, maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'center' }}>
+        <div style={{ fontSize: 30 }}>⚠️</div>
+        <h1 style={{ margin: 0, fontSize: 17 }}>We couldn&rsquo;t load your account</h1>
+        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+          Usually a expired session or a network hiccup. Try again — if it keeps happening, sign in again.
+        </p>
+        <button onClick={() => window.location.reload()}
+          style={{ padding: '11px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 13, color: '#06101f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>
+          ↻ Try again
+        </button>
+        <a href="/member/login" style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', textDecoration: 'none', color: 'var(--text)', fontSize: 12.5, fontWeight: 700 }}>
+          Sign in again
+        </a>
+        <a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: 'var(--cyan)', textDecoration: 'none' }}>
+          💬 Still stuck? Message us — we answer fast
+        </a>
+      </div>
+    </main>
+  );
 }
 
 // ===== MODE TEASER (prospects) — le paywall qui donne envie =====
