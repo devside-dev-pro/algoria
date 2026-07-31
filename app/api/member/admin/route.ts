@@ -72,7 +72,33 @@ export async function GET(req: NextRequest) {
   }
   const { data: chatRows } = await (db as any).from('telegram_chats')
     .select('chat_id,title,type,username,last_seen_at').order('last_seen_at', { ascending: false }).limit(30) as { data: Array<{ chat_id: number; title: string | null; type: string | null; username: string | null; last_seen_at: string }> | null };
-  const tgChats = (chatRows ?? []).map((c) => ({ ...c, role: roles[String(c.chat_id)] ?? null }));
+  // Attendre un post de canal pour découvrir un canal serait absurde : le bot y reçoit DÉJÀ les demandes
+  // d'adhésion, donc telegram_joins connaît son ID depuis le premier jour. On complète la liste avec ces
+  // canaux-là, et getChat va chercher le titre manquant (le bot y est admin, l'appel passe). Le résultat
+  // est mémorisé : ce détour ne coûte qu'un seul chargement, la fois où un canal apparaît.
+  const { data: joinChats } = await (db as any).from('telegram_joins')
+    .select('chat_id').not('chat_id', 'is', null).limit(2000) as { data: Array<{ chat_id: number }> | null };
+  const known = new Map((chatRows ?? []).map((c) => [Number(c.chat_id), c]));
+  const missing = [...new Set((joinChats ?? []).map((r) => Number(r.chat_id)).filter(Boolean))]
+    .filter((id) => !known.get(id)?.title).slice(0, 8);
+  if (missing.length && process.env.TELEGRAM_BOT_TOKEN) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const found = await Promise.all(missing.map(async (id) => {
+      try {
+        const r = await fetch(`https://api.telegram.org/bot${token}/getChat?chat_id=${id}`, { signal: AbortSignal.timeout(3500) });
+        const d = (await r.json().catch(() => ({}))) as { ok?: boolean; result?: { title?: string; type?: string; username?: string } };
+        return d.ok ? { chat_id: id, title: String(d.result?.title ?? '').slice(0, 120) || null, type: String(d.result?.type ?? 'channel'), username: d.result?.username ?? null } : null;
+      } catch { return null; }
+    }));
+    for (const f of found) {
+      if (!f) continue;
+      known.set(f.chat_id, { ...f, last_seen_at: known.get(f.chat_id)?.last_seen_at ?? new Date().toISOString() });
+      await (db as any).from('telegram_chats').upsert({ ...f, last_seen_at: known.get(f.chat_id)!.last_seen_at }, { onConflict: 'chat_id' }).then(() => {}, () => {});
+    }
+  }
+  const tgChats = [...known.values()]
+    .map((c) => ({ ...c, chat_id: Number(c.chat_id), role: roles[String(c.chat_id)] ?? null }))
+    .sort((a, b) => String(b.last_seen_at).localeCompare(String(a.last_seen_at)));
 
   // état RÉEL du webhook (getWebhookInfo) — SAIN uniquement s'il pointe sur /api/telegram (le webhook
   // unique : login + waitlist + inbox). Toute autre URL = cassé → le bouton de réparation s'affiche.
