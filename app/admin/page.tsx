@@ -85,6 +85,9 @@ export default function AdminCRM() {
   const [blastBody, setBlastBody] = useState('Code ALGORIA100 at RaiseFX — doubles your deposit. Until midnight.');
   // 📣 attribution des demandes d'adhésion par lien d'invitation nommé (une campagne = un lien)
   const [joinSources, setJoinSources] = useState<Array<{ source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }>>([]);
+  // canaux où le bot est admin, avec leur ID -100… (invisible dans Telegram) et le rôle qu'ils jouent
+  const [tgChats, setTgChats] = useState<Array<{ chat_id: number; title: string | null; type: string | null; username: string | null; last_seen_at: string; role: string | null }>>([]);
+  const [chatCopied, setChatCopied] = useState<number | null>(null);
   const [botDrafts, setBotDrafts] = useState<Record<string, string>>({}); // brouillons de réponse via le bot (par ligne du fil)
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
@@ -142,6 +145,7 @@ export default function AdminCRM() {
       setBotActivity(((d as unknown as { botActivity?: typeof botActivity }).botActivity) ?? []);
       setTgInboxOn(!!(d as unknown as { tgInboxOn?: boolean }).tgInboxOn);
       setJoinSources((d as unknown as { joinSources?: Array<{ source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }> }).joinSources ?? []);
+      setTgChats(((d as unknown as { tgChats?: typeof tgChats }).tgChats) ?? []);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -823,6 +827,36 @@ export default function AdminCRM() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </section>
+            )}
+            {/* ===== 📡 CANAUX TELEGRAM (01/08) — Telegram ne montre NULLE PART l'ID d'un canal, or c'est
+                la seule chose que l'API accepte (un lien t.me ne marche pas pour un canal privé). Le bot
+                est ajouté admin → la ligne apparaît ici → l'ID se copie dans les variables Vercel.
+                La colonne ROLE dit à quoi chaque canal est branché : un « — » = variable manquante. */}
+            {tgChats.length > 0 && (
+              <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <h2 style={secH}>📡 TELEGRAM CHANNELS</h2>
+                  <span style={{ fontSize: 11, color: 'var(--dim)' }}>click an ID to copy it — paste into the Vercel env vars</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {tgChats.map((c) => (
+                    <div key={c.chat_id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)' }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 750, color: 'var(--text)' }}>{c.title ?? '(sans titre)'}</span>
+                      {c.username && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>@{c.username}</span>}
+                      <span style={{ flex: 1 }} />
+                      {c.role
+                        ? <span className="mono" style={{ fontSize: 10, fontWeight: 800, color: 'var(--up)', border: '1px solid rgba(31,216,176,.4)', borderRadius: 7, padding: '3px 8px' }}>{c.role}</span>
+                        : <span className="mono" style={{ fontSize: 10, fontWeight: 800, color: 'var(--dim)', border: '1px dashed var(--border)', borderRadius: 7, padding: '3px 8px' }}>not wired</span>}
+                      <button
+                        onClick={() => { void navigator.clipboard.writeText(String(c.chat_id)); setChatCopied(c.chat_id); setTimeout(() => setChatCopied(null), 1500); }}
+                        className="mono" title="copier l'ID du canal"
+                        style={{ fontSize: 11, fontWeight: 800, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 7, padding: '4px 9px', background: 'transparent', color: chatCopied === c.chat_id ? 'var(--up)' : 'var(--cyan)' }}>
+                        {chatCopied === c.chat_id ? '✓ copied' : c.chat_id}
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </section>
             )}

@@ -62,6 +62,18 @@ export async function GET(req: NextRequest) {
       return acc;
     }, {}),
   ).sort((a, b) => b.n - a.n);
+  // 📡 CANAUX VUS PAR LE BOT — l'ID numérique (-100…) qu'aucune interface Telegram n'affiche, à copier
+  // dans les variables Vercel. On calcule ici le RÔLE de chacun : source du fan-out, miroir UK, canal IT.
+  // Un canal listé « — » n'est branché sur rien : c'est le signe qu'une variable manque.
+  const roles: Record<string, string> = {};
+  for (const [env, role] of [['TELEGRAM_CHANNEL_EN', 'source'], ['TELEGRAM_CHANNEL_MIRROR', 'mirror UK'], ['TELEGRAM_CHANNEL_IT', 'canale IT']] as const) {
+    const v = (process.env[env] ?? '').trim();
+    if (v) roles[v] = role;
+  }
+  const { data: chatRows } = await (db as any).from('telegram_chats')
+    .select('chat_id,title,type,username,last_seen_at').order('last_seen_at', { ascending: false }).limit(30) as { data: Array<{ chat_id: number; title: string | null; type: string | null; username: string | null; last_seen_at: string }> | null };
+  const tgChats = (chatRows ?? []).map((c) => ({ ...c, role: roles[String(c.chat_id)] ?? null }));
+
   // état RÉEL du webhook (getWebhookInfo) — SAIN uniquement s'il pointe sur /api/telegram (le webhook
   // unique : login + waitlist + inbox). Toute autre URL = cassé → le bouton de réparation s'affiche.
   let tgInboxOn = false;
@@ -97,7 +109,7 @@ export async function GET(req: NextRequest) {
     const n = String((k.detail as { broker_name?: string })?.broker_name ?? '').trim();
     if (n && !legalNames[t]) legalNames[t] = n;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats });
 }
 
 export async function POST(req: NextRequest) {
@@ -573,7 +585,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         url: 'https://www.algoria.tech/api/telegram',
         ...(secret ? { secret_token: secret } : {}),
-        allowed_updates: ['chat_join_request', 'chat_member', 'message'],
+        allowed_updates: ['chat_join_request', 'chat_member', 'message', 'channel_post', 'my_chat_member'],
       }),
     });
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };

@@ -80,12 +80,24 @@ async function sendJoinDm(userId: number, locale: Locale): Promise<'sent' | 'fai
   }
 }
 
+/** Le post rejoué vient-il d'ailleurs (témoignage VIP transféré par Mathieu) ? */
+function isForwarded(post: any): boolean {
+  return !!(post?.forward_origin || post?.forward_from || post?.forward_from_chat || post?.forward_sender_name);
+}
+
 /**
  * MIROIR EN → EN (01/08) : un second canal anglais racheté avec sa communauté (2 300 membres déjà
  * qualifiés) rejoue à l'identique tout ce qui part du canal principal.
- * copyMessage et NON forwardMessage : le forward affiche « Transféré de … » et trahit le montage —
- * copyMessage republie comme un post natif. Il gère aussi les BULLES VIDÉO, que la traduction ne peut
- * pas traiter : ce canal-là reçoit donc 100 % du contenu, sans intervention humaine.
+ *
+ * DEUX RÉGIMES, et c'est le post qui décide :
+ *  · POST NORMAL → copyMessage. Le forward afficherait « Transféré de Algoria » et trahirait le montage ;
+ *    la copie republie comme un post natif. Gère aussi les BULLES VIDÉO, que la traduction ne sait pas
+ *    traiter : ce canal-là reçoit donc 100 % du contenu, sans intervention humaine.
+ *  · TÉMOIGNAGE (post déjà transféré : un VIP écrit à Mathieu, il le relaie sur le canal) → forwardMessage.
+ *    Ici l'étiquette « Transféré de <VIP> » N'EST PAS un défaut, c'est TOUTE la preuve sociale : copier
+ *    la retirerait et laisserait un screenshot anonyme. Telegram garde l'auteur D'ORIGINE quand on
+ *    retransfère un transfert — le miroir affiche donc le VIP, jamais le canal principal.
+ *    (VIP en profil privé → Telegram affiche son nom sans lien : c'est sa limite, pas la nôtre.)
  */
 async function mirrorChannelPost(db: any, post: any, dst: string): Promise<void> {
   const src = (process.env.TELEGRAM_CHANNEL_EN ?? '').trim();
@@ -95,13 +107,14 @@ async function mirrorChannelPost(db: any, post: any, dst: string): Promise<void>
   const messageId = Number(post?.message_id) || 0;
   if (chatId !== src || !messageId) return;
 
-  const { error: lockErr } = await db.from('channel_translations').insert({ src_chat_id: Number(chatId), src_message_id: messageId, dst_chat_id: Number(dst), kind: 'mirror' });
+  const testimonial = isForwarded(post);
+  const { error: lockErr } = await db.from('channel_translations').insert({ src_chat_id: Number(chatId), src_message_id: messageId, dst_chat_id: Number(dst), kind: testimonial ? 'mirror_fwd' : 'mirror' });
   if (lockErr) return;
   const finish = (patch: Record<string, unknown>) =>
     db.from('channel_translations').update(patch).eq('src_chat_id', Number(chatId)).eq('src_message_id', messageId).eq('dst_chat_id', Number(dst));
 
   try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/copyMessage`, {
+    const r = await fetch(`https://api.telegram.org/bot${token}/${testimonial ? 'forwardMessage' : 'copyMessage'}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
       body: JSON.stringify({ chat_id: dst, from_chat_id: chatId, message_id: messageId }),
     });
@@ -142,6 +155,32 @@ async function bridgeChannelPost(db: any, post: any, dst: string): Promise<void>
 
   const finish = (patch: Record<string, unknown>) =>
     db.from('channel_translations').update(patch).eq('src_chat_id', Number(chatId)).eq('src_message_id', messageId).eq('dst_chat_id', Number(dst));
+
+  // TÉMOIGNAGE (post transféré d'un VIP) → on TRANSFÈRE tel quel côté italien aussi. Le traduire
+  // imposerait copyMessage, qui efface « Transféré de <VIP> » : on aurait un screenshot anonyme, donc
+  // zéro preuve. Un témoignage en anglais signé d'un vrai VIP vaut mieux qu'un témoignage italien
+  // signé de personne. La CM est prévenue : à elle d'ajouter une ligne en italien dessous si elle veut.
+  if (isForwarded(post)) {
+    try {
+      const r = await fetch(`https://api.telegram.org/bot${token}/forwardMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+        body: JSON.stringify({ chat_id: dst, from_chat_id: chatId, message_id: messageId }),
+      });
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+      if (d.ok) await finish({ status: 'sent', kind: 'forward', dst_message_id: d.result?.message_id ?? null });
+      else await finish({ status: 'failed', kind: 'forward', error: (d.description ?? 'unknown').slice(0, 200) });
+      const cm = (process.env.TELEGRAM_CM_IT_ID ?? '').trim();
+      if (cm && d.ok) {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000),
+          body: JSON.stringify({ chat_id: cm, text: "⭐️ Testimonianza VIP inoltrata sul canale IT (in inglese, con il nome dell'autore — è la prova). Se vuoi, aggiungi tu una riga in italiano sotto il post." }),
+        }).catch(() => {});
+      }
+    } catch (e) {
+      await finish({ status: 'failed', kind: 'forward', error: String((e as { message?: string })?.message ?? e).slice(0, 200) });
+    }
+    return;
+  }
 
   const text: string = typeof post.text === 'string' ? post.text : '';
   const caption: string = typeof post.caption === 'string' ? post.caption : '';
@@ -200,6 +239,18 @@ export async function POST(req: Request) {
   const service = process.env.SUPABASE_SERVICE_KEY;
   const db = url && service ? createClient(url, service, { auth: { persistSession: false } }) : null;
   if (!db) console.error('[telegram] SUPABASE_SERVICE_KEY / NEXT_PUBLIC_SUPABASE_URL manquants');
+
+  // CARNET D'ADRESSES DES CANAUX (01/08) : un canal Telegram n'a pas de « lien » exploitable côté API,
+  // il a un ID numérique (-100…) invisible dans l'interface. Dès que le bot est admin quelque part
+  // (ajout = my_chat_member, ou premier post = channel_post), on note l'ID et le titre : l'admin lit la
+  // liste et copie l'ID dans les variables d'environnement. Fini le passage par un bot tiers.
+  const seenChat = update?.channel_post?.chat ?? update?.my_chat_member?.chat ?? null;
+  if (db && seenChat?.id && (seenChat.type === 'channel' || seenChat.type === 'supergroup')) {
+    await db.from('telegram_chats').upsert(
+      { chat_id: Number(seenChat.id), title: String(seenChat.title ?? '').slice(0, 120) || null, type: String(seenChat.type), username: seenChat.username ? String(seenChat.username) : null, last_seen_at: new Date().toISOString() },
+      { onConflict: 'chat_id' },
+    ).then(() => {}, () => {});
+  }
 
   // POST DE CANAL → pont de traduction EN → IT (channel_post doit être dans allowed_updates du webhook).
   // edited_channel_post volontairement IGNORÉ : republier une correction créerait un second post italien
