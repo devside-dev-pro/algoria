@@ -22,7 +22,7 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from '.
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -870,6 +870,34 @@ async function main() {
     }
   };
   if (!SECONDARY) setInterval(() => void maybeNudge(), 3600_000); // relances = un seul runner (S2), sinon triple envoi
+
+  // ===== AUTO-APPROBATION des demandes d'adhésion au canal (31/07 — Mathieu les acceptait par lots de
+  // 10-20 à la main quand il les voyait). Le webhook Vercel ne peut pas « attendre 3 minutes » (fonction
+  // serverless) : c'est le runner, allumé en permanence, qui balaie la file chaque minute. Le délai laisse
+  // au DM d'onboarding le temps d'être lu et évite l'effet « accepté à la milliseconde ».
+  // ALGORIA_AUTOJOIN_MIN = délai en minutes (défaut 3) · 0 ou négatif = fonction DÉSACTIVÉE (retour au manuel).
+  const AUTOJOIN_MIN = Number(process.env.ALGORIA_AUTOJOIN_MIN ?? 3);
+  const autoApproveJoins = async () => {
+    try {
+      const { approveJoinRequest } = await import('./telegram');
+      const ripe = await listRipeJoinRequests(AUTOJOIN_MIN);
+      if (!ripe.length) return;
+      let ok = 0;
+      for (const r of ripe) {
+        const res = await approveJoinRequest(Number(r.chat_id), Number(r.user_id));
+        if (res.ok) { ok++; await markJoinApproved(r.id, null); }
+        else if (res.error) await markJoinApproved(r.id, res.error.slice(0, 200)); // refus structurel : ne pas boucler
+        // res.error null = pépin réseau → on laisse la ligne en file pour le prochain passage
+      }
+      if (ok) await logNote(`🚪 ${ok} join request(s) auto-approved after ${AUTOJOIN_MIN} min`, 'info');
+    } catch (e) {
+      console.error('[algoria] auto-approbation des adhésions échouée:', e);
+    }
+  };
+  if (!SECONDARY && AUTOJOIN_MIN > 0) {
+    setInterval(() => void autoApproveJoins(), 60_000); // un seul runner balaie, sinon triple approbation
+    console.log(`[algoria] auto-approbation des demandes d'adhésion : ON (délai ${AUTOJOIN_MIN} min)`);
+  }
 
   // ===== CONTENU VIP À VALEUR (au-delà des trades) : briefing du matin + pédagogie tournante — pour que le
   // canal VIT et donne des messages « forwardables » vers le public. Postés par le SEUL runner primaire (S2).

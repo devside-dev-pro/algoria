@@ -59,7 +59,7 @@ async function fetchAvatar(db: any, userId: number): Promise<string | null> {
 const JOIN_DM_DEFAULT = [
   '🎉 <b>Thanks for requesting access to Algoria!</b>',
   '',
-  'Mathieu approves every member by hand — <b>usually in under 2 hours</b>. You\'ll be notified the moment you\'re in.',
+  'You\'ll be let into the channel in <b>just a few minutes</b> — watch for the notification.',
   '',
   'While you wait, get a head start 👇',
   '',
@@ -130,6 +130,8 @@ export async function POST(req: Request) {
       first_name: jr.from.first_name ?? null,
       photo_url: photoUrl,
       status: 'waiting',
+      // chat_id : requis par approveChatJoinRequest — c'est lui qui rend l'auto-approbation possible
+      chat_id: jr.chat?.id ?? null,
       invite_link: jr.invite_link?.invite_link ?? null,
       invite_name: jr.invite_link?.name ?? null,
       dm_status: dmStatus,

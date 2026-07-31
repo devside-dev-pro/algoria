@@ -18,6 +18,28 @@ export const usd = (n: number): string => '$' + Math.round(Math.abs(n)).toLocale
 /** Filet de séparation léger pour aérer les cartes VIP. */
 export const VIP_RULE = '━━━━━━━━━━━━━';
 
+/**
+ * APPROUVE une demande d'adhésion au canal (31/07 — Mathieu les acceptait par lots à la main).
+ * Renvoie { ok } si Telegram a accepté, sinon { ok:false, error } :
+ *  · error non vide = refus STRUCTUREL (déjà membre, demande expirée/annulée) → ne pas retenter ;
+ *  · error null + ok false = pépin réseau → l'appelant laisse la demande en file pour le tick suivant.
+ */
+export async function approveJoinRequest(chatId: number, userId: number): Promise<{ ok: boolean; error: string | null }> {
+  if (!TOKEN) return { ok: false, error: 'TELEGRAM_BOT_TOKEN missing' };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/approveChatJoinRequest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal: AbortSignal.timeout(6000),
+      body: JSON.stringify({ chat_id: chatId, user_id: userId }),
+    });
+    const d = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    return d.ok ? { ok: true, error: null } : { ok: false, error: d.description ?? `HTTP ${res.status}` };
+  } catch {
+    return { ok: false, error: null }; // réseau : on retentera
+  }
+}
+
 /** DM direct du bot à UN utilisateur (relance onboarding…). Ne marche que si la personne a déjà ouvert le
  *  chat du bot (login natif /start → oui). Renvoie true si envoyé — 403 = chat jamais ouvert, on l'accepte. */
 export async function sendDm(tgId: number, text: string): Promise<boolean> {
