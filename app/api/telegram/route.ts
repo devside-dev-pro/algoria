@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { JOIN_DM, INBOX_ACK, SIGNED_IN, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
+import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 
 // Webhook Telegram (bot admin du canal) → alimente la WAITLIST du widget /join.
 // Flux : un viewer clique le lien d'invitation "demander à rejoindre" → Telegram POSTe un chat_join_request ici
@@ -79,6 +80,76 @@ async function sendJoinDm(userId: number, locale: Locale): Promise<'sent' | 'fai
   }
 }
 
+/**
+ * PONT DE TRADUCTION EN → IT (01/08) : tout ce que Mathieu poste sur le canal anglais part traduit sur
+ * le canal italien, sans intervention. La CM garde les bulles vidéo (non traduisibles) — le bot la
+ * prévient au lieu de la laisser surveiller le canal.
+ *
+ * Trois pièges traités ici :
+ *  · DOUBLON — Telegram retente un webhook lent, et traduire prend 1-3 s. La ligne channel_translations
+ *    est insérée AVANT la traduction : si l'insert casse sur la contrainte d'unicité, un autre passage
+ *    s'en occupe déjà, on sort.
+ *  · BOUCLE — on ne traite QUE le canal source déclaré (TELEGRAM_CHANNEL_EN). Le bot étant admin du
+ *    canal italien, ses propres posts lui reviennent : sans ce filtre, il se traduirait lui-même.
+ *  · MESSAGE CASSÉ — traduction vide ou en échec → on ne poste RIEN. Un trou côté italien se rattrape
+ *    à la main ; un post mutilé devant l'audience, non.
+ */
+async function bridgeChannelPost(db: any, post: any): Promise<void> {
+  const src = (process.env.TELEGRAM_CHANNEL_EN ?? '').trim();
+  const dst = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!src || !dst || !token) return; // pont non configuré → aucun effet
+  const chatId = String(post?.chat?.id ?? '');
+  const messageId = Number(post?.message_id) || 0;
+  if (chatId !== src || !messageId) return;
+
+  // verrou d'idempotence : c'est l'insert qui gagne la course, pas une lecture préalable
+  const { error: lockErr } = await db.from('channel_translations').insert({ src_chat_id: Number(chatId), src_message_id: messageId });
+  if (lockErr) return; // doublon (retry Telegram) ou base indisponible → on ne poste pas deux fois
+
+  const finish = (patch: Record<string, unknown>) =>
+    db.from('channel_translations').update(patch).eq('src_chat_id', Number(chatId)).eq('src_message_id', messageId);
+
+  const text: string = typeof post.text === 'string' ? post.text : '';
+  const caption: string = typeof post.caption === 'string' ? post.caption : '';
+  const raw = text || caption;
+
+  // Rien à traduire (bulle vidéo, média nu, sondage…) → on alerte la CM, qui reste maîtresse du format.
+  if (!raw.trim()) {
+    const cm = (process.env.TELEGRAM_CM_IT_ID ?? '').trim();
+    if (cm) {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000),
+        body: JSON.stringify({ chat_id: cm, text: "🎥 Nuovo post senza testo sul canale EN (video bubble o media) — da tradurre e ripubblicare a mano sul canale IT." }),
+      }).catch(() => {});
+    }
+    await finish({ status: 'skipped', kind: 'manual' });
+    return;
+  }
+
+  const html = entitiesToHtml(raw, text ? post.entities : post.caption_entities);
+  const translated = await translateToItalian(html);
+  if (!translated) { await finish({ status: 'failed', error: 'translation empty' }); return; }
+
+  try {
+    // média + légende → copyMessage rejoue le média avec la légende traduite (une seule requête).
+    // texte pur → sendMessage.
+    const endpoint = caption && !text ? 'copyMessage' : 'sendMessage';
+    const body = caption && !text
+      ? { chat_id: dst, from_chat_id: chatId, message_id: messageId, caption: translated, parse_mode: 'HTML' }
+      : { chat_id: dst, text: translated, parse_mode: 'HTML', disable_web_page_preview: true };
+    const r = await fetch(`https://api.telegram.org/bot${token}/${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+      body: JSON.stringify(body),
+    });
+    const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+    if (d.ok) await finish({ status: 'sent', kind: caption && !text ? 'caption' : 'text', dst_message_id: d.result?.message_id ?? null });
+    else await finish({ status: 'failed', error: (d.description ?? 'unknown').slice(0, 200) });
+  } catch (e) {
+    await finish({ status: 'failed', error: String((e as { message?: string })?.message ?? e).slice(0, 200) });
+  }
+}
+
 export async function POST(req: Request) {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (secret && req.headers.get('x-telegram-bot-api-secret-token') !== secret) {
@@ -96,6 +167,11 @@ export async function POST(req: Request) {
   const service = process.env.SUPABASE_SERVICE_KEY;
   const db = url && service ? createClient(url, service, { auth: { persistSession: false } }) : null;
   if (!db) console.error('[telegram] SUPABASE_SERVICE_KEY / NEXT_PUBLIC_SUPABASE_URL manquants');
+
+  // POST DE CANAL → pont de traduction EN → IT (channel_post doit être dans allowed_updates du webhook).
+  // edited_channel_post volontairement IGNORÉ : republier une correction créerait un second post italien
+  // sans supprimer le premier — la CM corrige à la main les rares cas.
+  if (db && update?.channel_post) await bridgeChannelPost(db, update.channel_post);
 
   // DEMANDE d'adhésion → entre en waitlist (status 'waiting') + DM instantané au demandeur.
   // ATTRIBUTION : invite_link porte le lien exact utilisé — un lien nommé par campagne (« META-UK-JUL »)

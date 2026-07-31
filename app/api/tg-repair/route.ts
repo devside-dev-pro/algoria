@@ -22,7 +22,8 @@ export async function GET() {
     body: JSON.stringify({
       url: 'https://www.algoria.tech/api/telegram',
       ...(secret ? { secret_token: secret } : {}),
-      allowed_updates: ['chat_join_request', 'chat_member', 'message'],
+      // channel_post : indispensable au pont de traduction EN → IT (le bot doit VOIR les posts du canal)
+      allowed_updates: ['chat_join_request', 'chat_member', 'message', 'channel_post'],
     }),
   });
   const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
