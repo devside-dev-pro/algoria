@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { sdb, signSession, SESSION_COOKIE, newReferralCode } from '@/lib/member/server';
+import { localeForChat } from '@/lib/member/i18n';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,10 +51,18 @@ export async function GET(req: NextRequest) {
   const srcCookie = (req.cookies.get('alg_src')?.value ?? '').toLowerCase().slice(0, 60);
   const source = /^[a-z0-9:_-]{2,60}$/.test(srcCookie) ? srcCookie : null;
 
+  // MARCHÉ (01/08) : la langue vient du canal par lequel la personne est arrivée. On la retrouve via sa
+  // demande d'adhésion la plus récente — c'est le seul lien fiable entre un compte et son canal d'origine.
+  const { data: jr } = await (db as any).from('telegram_joins')
+    .select('chat_id').eq('user_id', row.tg_id).order('joined_at', { ascending: false }).limit(1) as { data: Array<{ chat_id: number | null }> | null };
+  const locale = localeForChat(jr?.[0]?.chat_id);
+
   const patch = { tg_username: row.tg_username, tg_name: row.tg_name, ...(row.photo_url ? { photo_url: row.photo_url } : {}), updated_at: new Date().toISOString() };
   const { data: existing } = await db.from('members').select('id').eq('tg_id', row.tg_id).limit(1);
-  if (existing?.length) await db.from('members').update(patch).eq('tg_id', row.tg_id); // referred_by/source ne s'écrivent qu'à la CRÉATION
-  else await (db as any).from('members').insert({ tg_id: row.tg_id, ...patch, referral_code: newReferralCode(), ...(referrerTg != null ? { referred_by: referrerTg } : {}), ...(source ? { source } : {}) });
+  // sur un compte EXISTANT on n'écrase la langue que pour la promouvoir en 'it' : si le support l'a
+  // corrigée à la main, une vieille demande d'adhésion anglaise ne doit pas la ramener en arrière.
+  if (existing?.length) await (db as any).from('members').update({ ...patch, ...(locale !== 'en' ? { locale } : {}) }).eq('tg_id', row.tg_id); // referred_by/source ne s'écrivent qu'à la CRÉATION
+  else await (db as any).from('members').insert({ tg_id: row.tg_id, ...patch, locale, referral_code: newReferralCode(), ...(referrerTg != null ? { referred_by: referrerTg } : {}), ...(source ? { source } : {}) });
 
   const res = NextResponse.json({ ok: true });
   res.cookies.set(SESSION_COOKIE, signSession({ tgId: row.tg_id, username: row.tg_username, name: row.tg_name ?? String(row.tg_id), iat: Date.now() }), {

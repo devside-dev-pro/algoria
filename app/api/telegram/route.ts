@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { JOIN_DM, INBOX_ACK, SIGNED_IN, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
 
 // Webhook Telegram (bot admin du canal) → alimente la WAITLIST du widget /join.
 // Flux : un viewer clique le lien d'invitation "demander à rejoindre" → Telegram POSTe un chat_join_request ici
@@ -56,30 +57,12 @@ async function fetchAvatar(db: any, userId: number): Promise<string | null> {
  * et si le canal principal tombait, telegram_joins garde tous les user_id pour un broadcast.
  * Texte surchargeable sans redéploiement par l'env TELEGRAM_JOIN_DM.
  */
-const JOIN_DM_DEFAULT = [
-  '🎉 <b>Thanks for requesting access to Algoria!</b>',
-  '',
-  'You\'ll be let into the channel in <b>just a few minutes</b> — watch for the notification.',
-  '',
-  'While you wait, get a head start 👇',
-  '',
-  '🎬 <b>Watch the intro</b> — what Algoria is and how it works, in a few minutes:',
-  'app.algoria.tech/academy',
-  '',
-  '📲 <b>Create your free account</b> — pick your strategy and get your access ready:',
-  'app.algoria.tech/member',
-  '',
-  '💬 <b>A question?</b> Message Mathieu directly: @mathieu_algoria',
-  '',
-  'Algoria is <b>completely free</b>: the AI trades gold in <i>your own</i> broker account — your money never leaves it, and you stay in control.',
-  '',
-  'See you inside 🥇',
-].join('\n');
-
-async function sendJoinDm(userId: number): Promise<'sent' | 'failed' | 'skipped'> {
+async function sendJoinDm(userId: number, locale: Locale): Promise<'sent' | 'failed' | 'skipped'> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return 'skipped';
-  const text = process.env.TELEGRAM_JOIN_DM?.trim() || JOIN_DM_DEFAULT;
+  // l'override d'env ne s'applique qu'à l'anglais : sinon poser TELEGRAM_JOIN_DM ré-anglaiserait
+  // silencieusement les Italiens (le genre de régression qu'on ne voit qu'en lisant les logs du bot).
+  const text = locale === 'en' ? (process.env.TELEGRAM_JOIN_DM?.trim() || JOIN_DM[locale]) : JOIN_DM[locale];
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
@@ -120,9 +103,15 @@ export async function POST(req: Request) {
   const jr = update?.chat_join_request;
   if (db && jr?.from) {
     const userId = Number(jr.from.id) || null;
+    // LANGUE = le canal qui a reçu la demande (01/08, ouverture Italie). Pas la langue Telegram du
+    // compte : un Italien peut avoir Telegram en anglais, mais s'il rejoint le canal italien il veut
+    // être servi en italien.
+    const locale = localeForChat(jr.chat?.id);
     // le DM part AVANT l'avatar : la fenêtre d'autorisation Telegram est liée à la demande en cours,
     // et 6 s de récupération de photo avant d'écrire, c'est 6 s d'attente pour le prospect.
-    const dmStatus = userId ? await sendJoinDm(userId) : 'skipped';
+    const dmStatus = userId ? await sendJoinDm(userId, locale) : 'skipped';
+    // si la personne a DÉJÀ un compte (re-demande, autre canal), on aligne sa langue sur ce canal
+    if (userId && locale !== 'en') await (db as any).from('members').update({ locale }).eq('tg_id', userId);
     const photoUrl = userId ? await fetchAvatar(db, userId) : null; // avant l'insert → le spotlight arrive avec la photo
     const { error } = await (db as any).from('telegram_joins').insert({
       user_id: userId,
@@ -190,11 +179,13 @@ export async function POST(req: Request) {
           photo_url: photoUrl, confirmed_at: new Date().toISOString(),
         }).eq('code', code).eq('status', 'pending');
         // petit accusé dans Telegram (best effort) — l'utilisateur sait qu'il peut revenir sur l'app
+        const { data: lrow } = await (db as any).from('members').select('locale').eq('tg_id', u.id).limit(1);
+        const loginLocale = asLocale(lrow?.[0]?.locale);
         const token = process.env.TELEGRAM_BOT_TOKEN;
         if (token) {
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
-            body: JSON.stringify({ chat_id: u.id, text: '✅ Signed in — head back to the Algoria app.' }),
+            body: JSON.stringify({ chat_id: u.id, text: SIGNED_IN[loginLocale] }),
           }).catch(() => {});
         }
       }
@@ -210,7 +201,7 @@ export async function POST(req: Request) {
     try {
       const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1500) || '[media]';
       const tgId = Number(msg.from.id);
-      const { data: mrow } = await (db as any).from('members').select('member_no').eq('tg_id', tgId).limit(1);
+      const { data: mrow } = await (db as any).from('members').select('member_no,locale').eq('tg_id', tgId).limit(1);
       const { data: recent } = await (db as any).from('member_actions').select('id').eq('tg_id', tgId).eq('kind', 'bot_reply')
         .gte('created_at', new Date(Date.now() - 6 * 3_600_000).toISOString()).limit(1);
       await (db as any).from('member_actions').insert({
@@ -223,7 +214,7 @@ export async function POST(req: Request) {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
           body: JSON.stringify({
             chat_id: tgId,
-            text: "Got your message 🙌 A real human reads these — Mathieu will get back to you personally.\n\nFor a faster answer, message him directly: @mathieu_algoria\nYour app: app.algoria.tech/member",
+            text: INBOX_ACK[asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale)],
             disable_web_page_preview: true,
           }),
         }).catch(() => {});
