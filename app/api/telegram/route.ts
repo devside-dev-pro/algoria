@@ -81,6 +81,39 @@ async function sendJoinDm(userId: number, locale: Locale): Promise<'sent' | 'fai
 }
 
 /**
+ * MIROIR EN → EN (01/08) : un second canal anglais racheté avec sa communauté (2 300 membres déjà
+ * qualifiés) rejoue à l'identique tout ce qui part du canal principal.
+ * copyMessage et NON forwardMessage : le forward affiche « Transféré de … » et trahit le montage —
+ * copyMessage republie comme un post natif. Il gère aussi les BULLES VIDÉO, que la traduction ne peut
+ * pas traiter : ce canal-là reçoit donc 100 % du contenu, sans intervention humaine.
+ */
+async function mirrorChannelPost(db: any, post: any, dst: string): Promise<void> {
+  const src = (process.env.TELEGRAM_CHANNEL_EN ?? '').trim();
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!src || !dst || !token) return;
+  const chatId = String(post?.chat?.id ?? '');
+  const messageId = Number(post?.message_id) || 0;
+  if (chatId !== src || !messageId) return;
+
+  const { error: lockErr } = await db.from('channel_translations').insert({ src_chat_id: Number(chatId), src_message_id: messageId, dst_chat_id: Number(dst), kind: 'mirror' });
+  if (lockErr) return;
+  const finish = (patch: Record<string, unknown>) =>
+    db.from('channel_translations').update(patch).eq('src_chat_id', Number(chatId)).eq('src_message_id', messageId).eq('dst_chat_id', Number(dst));
+
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/copyMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+      body: JSON.stringify({ chat_id: dst, from_chat_id: chatId, message_id: messageId }),
+    });
+    const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+    if (d.ok) await finish({ status: 'sent', dst_message_id: d.result?.message_id ?? null });
+    else await finish({ status: 'failed', error: (d.description ?? 'unknown').slice(0, 200) });
+  } catch (e) {
+    await finish({ status: 'failed', error: String((e as { message?: string })?.message ?? e).slice(0, 200) });
+  }
+}
+
+/**
  * PONT DE TRADUCTION EN → IT (01/08) : tout ce que Mathieu poste sur le canal anglais part traduit sur
  * le canal italien, sans intervention. La CM garde les bulles vidéo (non traduisibles) — le bot la
  * prévient au lieu de la laisser surveiller le canal.
@@ -94,21 +127,21 @@ async function sendJoinDm(userId: number, locale: Locale): Promise<'sent' | 'fai
  *  · MESSAGE CASSÉ — traduction vide ou en échec → on ne poste RIEN. Un trou côté italien se rattrape
  *    à la main ; un post mutilé devant l'audience, non.
  */
-async function bridgeChannelPost(db: any, post: any): Promise<void> {
+async function bridgeChannelPost(db: any, post: any, dst: string): Promise<void> {
   const src = (process.env.TELEGRAM_CHANNEL_EN ?? '').trim();
-  const dst = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!src || !dst || !token) return; // pont non configuré → aucun effet
   const chatId = String(post?.chat?.id ?? '');
   const messageId = Number(post?.message_id) || 0;
   if (chatId !== src || !messageId) return;
 
-  // verrou d'idempotence : c'est l'insert qui gagne la course, pas une lecture préalable
-  const { error: lockErr } = await db.from('channel_translations').insert({ src_chat_id: Number(chatId), src_message_id: messageId });
+  // verrou d'idempotence PAR DESTINATION : si la traduction échoue, le miroir ne doit pas être rejoué
+  // (et inversement). C'est l'insert qui gagne la course, pas une lecture préalable.
+  const { error: lockErr } = await db.from('channel_translations').insert({ src_chat_id: Number(chatId), src_message_id: messageId, dst_chat_id: Number(dst) });
   if (lockErr) return; // doublon (retry Telegram) ou base indisponible → on ne poste pas deux fois
 
   const finish = (patch: Record<string, unknown>) =>
-    db.from('channel_translations').update(patch).eq('src_chat_id', Number(chatId)).eq('src_message_id', messageId);
+    db.from('channel_translations').update(patch).eq('src_chat_id', Number(chatId)).eq('src_message_id', messageId).eq('dst_chat_id', Number(dst));
 
   const text: string = typeof post.text === 'string' ? post.text : '';
   const caption: string = typeof post.caption === 'string' ? post.caption : '';
@@ -171,7 +204,15 @@ export async function POST(req: Request) {
   // POST DE CANAL → pont de traduction EN → IT (channel_post doit être dans allowed_updates du webhook).
   // edited_channel_post volontairement IGNORÉ : republier une correction créerait un second post italien
   // sans supprimer le premier — la CM corrige à la main les rares cas.
-  if (db && update?.channel_post) await bridgeChannelPost(db, update.channel_post);
+  // FAN-OUT du canal principal : miroir anglais (copie conforme) + canal italien (traduction).
+  // Le miroir d'abord : il est instantané, alors que la traduction attend le modèle. Les deux ont leur
+  // propre verrou, donc l'échec de l'un ne rejoue jamais l'autre.
+  if (db && update?.channel_post) {
+    const mirror = (process.env.TELEGRAM_CHANNEL_MIRROR ?? '').trim();
+    const it = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
+    if (mirror) await mirrorChannelPost(db, update.channel_post, mirror);
+    if (it) await bridgeChannelPost(db, update.channel_post, it);
+  }
 
   // DEMANDE d'adhésion → entre en waitlist (status 'waiting') + DM instantané au demandeur.
   // ATTRIBUTION : invite_link porte le lien exact utilisé — un lien nommé par campagne (« META-UK-JUL »)
