@@ -23,7 +23,8 @@ export async function GET() {
       url: 'https://www.algoria.tech/api/telegram',
       ...(secret ? { secret_token: secret } : {}),
       // channel_post : indispensable au pont de traduction EN → IT (le bot doit VOIR les posts du canal)
-      allowed_updates: ['chat_join_request', 'chat_member', 'message', 'channel_post'],
+      // my_chat_member : le bot est ajouté admin d'un canal → son ID s'inscrit tout seul dans l'admin
+      allowed_updates: ['chat_join_request', 'chat_member', 'message', 'channel_post', 'my_chat_member'],
     }),
   });
   const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
