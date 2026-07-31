@@ -54,6 +54,28 @@ export default function AdminCRM() {
   // 🤖 BOT ACTIVITY : fil envoyé (nudge, texte du DM) / reçu (bot_reply) — visibilité totale sur le bot
   const [botActivity, setBotActivity] = useState<Array<{ id: string; tg_id: number; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }>>([]);
   const [tgInboxOn, setTgInboxOn] = useState(false); // état réel du webhook Telegram (getWebhookInfo)
+  // 🎁 CAMPAGNE PROSPECTS : texte pré-rempli avec l'offre de fin de mois (éditable avant envoi)
+  const [blastText, setBlastText] = useState(
+    [
+      '🎁 <b>Last day of the month — exclusive offer</b>',
+      '',
+      'Fund your account today and RaiseFX <b>doubles your deposit in trading credit</b> with the code <b>ALGORIA100</b>.',
+      'Deposit $300 → the AI trades with $600 of buying power.',
+      '',
+      '⏳ <b>Valid until midnight tonight.</b>',
+      '',
+      'Remember:',
+      '• Start from $200 (STEADY strategy)',
+      '• YOUR money stays in YOUR broker account — withdraw anytime',
+      '• Risk is capped every single day',
+      '• Algoria itself stays <b>completely free</b>',
+      '',
+      '👉 app.algoria.tech/member/onboarding',
+      'Need a hand? Message @mathieu_algoria — he does this all day.',
+    ].join('\n'),
+  );
+  const [blastTitle, setBlastTitle] = useState('🎁 Last day: 100% deposit bonus');
+  const [blastBody, setBlastBody] = useState('Code ALGORIA100 at RaiseFX — doubles your deposit. Until midnight.');
   // 📣 attribution des demandes d'adhésion par lien d'invitation nommé (une campagne = un lien)
   const [joinSources, setJoinSources] = useState<Array<{ source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }>>([]);
   const [botDrafts, setBotDrafts] = useState<Record<string, string>>({}); // brouillons de réponse via le bot (par ligne du fil)
@@ -373,6 +395,30 @@ export default function AdminCRM() {
       () => { setDepAmount(''); setDepCom(''); setDepNote(''); depComAuto.current = true; },
     );
   };
+  // envoi de la campagne : on DEMANDE d'abord l'audience exacte au serveur (dryRun), puis confirmation
+  // chiffrée — un envoi de masse ne se déclenche jamais sur un clic seul.
+  const sendBlast = () => {
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offerBlast: { dryRun: true } }) })
+      .then(async (r) => {
+        const d = (await r.json()) as { audience?: number; alreadySent?: number; error?: string };
+        setBusy(false);
+        if (d.error) return window.alert(d.error);
+        const n = d.audience ?? 0;
+        if (!n) return window.alert('No prospect to reach right now (everyone already got it in the last 12h, or every member has deposited).');
+        if (!window.confirm(`Send this campaign to ${n} prospect(s) with no deposit?\n\n${d.alreadySent ? `${d.alreadySent} person(s) already received it in the last 12h and are skipped.\n\n` : ''}Depositors are never included. This cannot be undone.`)) return;
+        setBusy(true);
+        void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offerBlast: { text: blastText, title: blastTitle || undefined, pushBody: blastBody || undefined, url: '/member/onboarding' } }) })
+          .then(async (r2) => {
+            const d2 = (await r2.json()) as { audience?: number; dmOk?: number; pushOk?: number; error?: string };
+            if (d2.error) window.alert(d2.error);
+            else window.alert(`✓ Campaign sent\n\n${d2.dmOk ?? 0} Telegram DM delivered\n${d2.pushOk ?? 0} push notification(s)\nout of ${d2.audience ?? 0} prospect(s)`);
+            load();
+          })
+          .finally(() => setBusy(false));
+      })
+      .catch(() => setBusy(false));
+  };
   const editDepositCom = (d: Deposit) => {
     const v = window.prompt('Expected commission ($):', String(d.detail?.commission_usd ?? 0));
     if (v !== null && Number.isFinite(Number(v))) post({ updateDeposit: { id: d.id, commission: Number(v) } });
@@ -681,6 +727,32 @@ export default function AdminCRM() {
                 </section>
               );
             })()}
+            {/* ===== 🎁 CAMPAGNE PROSPECTS — DM du bot + push à tous les membres SANS dépôt. Né de
+                l'opération « dernier jour du mois » (31/07) : offre ALGORIA100 limitée dans le temps.
+                Le texte est éditable AVANT envoi ; le compte exact de destinataires est demandé au
+                serveur puis confirmé. Les déposants sont exclus d'office, et personne n'est touché
+                deux fois en 12 h même si on reclique. */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'rgba(245,194,74,.35)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <h2 style={{ ...secH, color: 'var(--gold)' }}>🎁 CAMPAIGN — PROSPECTS ONLY</h2>
+                <span style={{ fontSize: 11, color: 'var(--dim)' }}>bot DM + push to every member with no deposit yet (depositors excluded)</span>
+              </div>
+              <textarea value={blastText} onChange={(e) => setBlastText(e.target.value)} rows={9}
+                placeholder="Message (HTML Telegram : <b>gras</b>, <i>italique</i>)"
+                style={{ width: '100%', padding: 10, borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', fontSize: 12.5, lineHeight: 1.5, fontFamily: 'inherit', resize: 'vertical' }} />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input value={blastTitle} onChange={(e) => setBlastTitle(e.target.value)} placeholder="push title (optional)" style={{ ...inp, flex: '1 1 180px' }} />
+                <input value={blastBody} onChange={(e) => setBlastBody(e.target.value)} placeholder="push body (optional)" style={{ ...inp, flex: '1 1 220px' }} />
+                <button disabled={busy || blastText.trim().length < 10} onClick={sendBlast}
+                  title="asks the server how many prospects would receive this, then requires confirmation before sending"
+                  style={{ padding: '10px 18px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#f5c24a,#e39a2b)', opacity: blastText.trim().length < 10 ? 0.5 : 1 }}>
+                  📣 SEND CAMPAIGN
+                </button>
+              </div>
+              <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+                Telegram DM only reaches people who already opened a chat with the bot — the push notification covers part of the rest. Every send is logged in BOT ACTIVITY.
+              </p>
+            </section>
             {/* ===== 📣 SOURCES DES DEMANDES D'ADHÉSION — l'attribution enfin possible (30/07) : un lien
                 d'invitation Telegram NOMMÉ par campagne (« META-UK-JUL ») apparaît ici avec ses demandes,
                 ses acceptations et le taux de DM automatique délivré. Les ads pointent vers le canal, donc

@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
     revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
     setCountry?: { tg_id: number; country: string };
+    offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
   };
   const db = sdb();
   const who = s.username ?? String(s.tgId);
@@ -318,6 +319,51 @@ export async function POST(req: NextRequest) {
     const url = process.env.NEXT_PUBLIC_TIKTOK_URL ?? process.env.NEXT_PUBLIC_TELEGRAM_URL ?? '/member/live';
     const sent = await pushToAll({ title: '🔴 ALGORIA IS LIVE', body: 'The AI is trading live right now — come watch.', url, tag: 'algoria-live' });
     return NextResponse.json({ sent });
+  }
+  // ===== 📣 CAMPAGNE ONE-SHOT aux PROSPECTS (31/07 — opération dernier jour du mois) : DM du bot +
+  // push, à tous les membres SANS aucun dépôt (onboarding / pending_copier). Les déposants sont exclus
+  // d'office : une offre de premier dépôt ne les concerne pas et les spammer coûte de la confiance.
+  // dryRun = compte l'audience sans rien envoyer (le bouton l'appelle AVANT de demander confirmation).
+  // Chaque envoi est tracé en kind='nudge' → visible dans BOT ACTIVITY, et sert de garde anti-doublon
+  // (une même campagne n'est pas renvoyée deux fois à la même personne le même jour).
+  if (body.offerBlast) {
+    const { text, title, pushBody, url, dryRun } = body.offerBlast;
+    if (!dryRun && (!text || text.trim().length < 10)) return NextResponse.json({ error: 'message text required' }, { status: 400 });
+    const [{ data: mem }, { data: dep }, { data: sent }] = await Promise.all([
+      db.from('members').select('tg_id,member_no,status').in('status', ['onboarding', 'pending_copier']),
+      db.from('member_actions').select('tg_id').eq('kind', 'deposit'),
+      // déjà touchés par CETTE campagne aujourd'hui (anti double-envoi si l'admin reclique)
+      db.from('member_actions').select('tg_id').eq('kind', 'nudge').eq('done_by', 'admin (offer blast)')
+        .gte('created_at', new Date(Date.now() - 12 * 3_600_000).toISOString()),
+    ]);
+    const funded = new Set((dep ?? []).map((d) => Number(d.tg_id)));
+    const already = new Set((sent ?? []).map((d) => Number(d.tg_id)));
+    const targets = (mem ?? []).filter((m) => !funded.has(Number(m.tg_id)) && !already.has(Number(m.tg_id)));
+    if (dryRun) return NextResponse.json({ audience: targets.length, alreadySent: already.size });
+
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const { pushToUser } = await import('@/lib/push/send');
+    let dmOk = 0, pushOk = 0;
+    for (const m of targets) {
+      const tgId = Number(m.tg_id);
+      let dm = false;
+      if (token) {
+        // le DM échoue (403) si la personne n'a jamais ouvert le chat du bot — normal, le push prend le relais
+        const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(6000),
+          body: JSON.stringify({ chat_id: tgId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+        }).catch(() => null);
+        dm = !!(r && ((await r.json().catch(() => ({}))) as { ok?: boolean }).ok);
+      }
+      const push = title ? await pushToUser(tgId, { title, body: pushBody ?? '', url: url ?? '/member/onboarding', tag: 'algoria-offer' }).catch(() => 0) : 0;
+      if (dm) dmOk++;
+      if (push) pushOk++;
+      await db.from('member_actions').insert({
+        tg_id: tgId, member_no: m.member_no ?? null, kind: 'nudge', status: 'done', done_by: 'admin (offer blast)',
+        detail: { text, dm: dm ? 'ok' : 'no-chat', push: push ? 'ok' : 'none' } as never,
+      });
+    }
+    return NextResponse.json({ audience: targets.length, dmOk, pushOk });
   }
   if (body.reveal) {
     // RÉVÉLATION des identifiants MT5 (admin uniquement) : nécessaire pour brancher le compte dans STH.
