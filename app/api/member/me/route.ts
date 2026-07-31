@@ -38,14 +38,22 @@ const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,st
 async function me(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
   if (!s) return null;
-  const { data } = await sdb().from('members').select(SAFE).eq('tg_id', s.tgId).limit(1);
-  return data?.[0] ? { session: s, member: data[0] as Record<string, unknown> } : null;
+  // banned_at lu à CHAQUE requête : la session est un jeton signé sans état (valable 30 j), donc le seul
+  // moyen de couper l'accès d'un banni déjà connecté est de le vérifier en base ici (31/07).
+  const { data } = await (sdb() as any).from('members').select(`${SAFE},banned_at`).eq('tg_id', s.tgId).limit(1) as { data: Array<Record<string, unknown>> | null };
+  const row = data?.[0];
+  if (!row) return null;
+  if (row.banned_at) return 'banned' as const;
+  delete row.banned_at; // jamais renvoyé au client
+  return { session: s, member: row };
 }
 
 /** État du membre connecté (Home + wizard) + WALLET d'affiliation (commissions, retraits, paliers).
  *  Balance retirable = Σ commissions confirmées − Σ retraits (demandés + payés) — calculée ICI, jamais côté client. */
 export async function GET(req: NextRequest) {
   const ctx = await me(req);
+  // banni : 403 explicite (pas 401 — inutile de le renvoyer vers un login qui le refusera aussi)
+  if (ctx === 'banned') return NextResponse.json({ error: 'access revoked', banned: true }, { status: 403 });
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
   const [refs, commsQ, payoutsQ, rejQ, accountsQ] = await Promise.all([

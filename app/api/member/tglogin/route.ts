@@ -28,6 +28,11 @@ export async function GET(req: NextRequest) {
   // code confirmé → usage unique (anti-rejeu)
   await db.from('member_login_codes').update({ status: 'used' }).eq('code', code);
 
+  // BANNIS : aucune session posée (31/07 — un concurrent capturait l'app pour la copier). On refuse ICI,
+  // avant le cookie : la page de login attendait déjà `denied` et redirige vers /member/denied.
+  const { data: banRow } = await (db as any).from('members').select('banned_at').eq('tg_id', row.tg_id).limit(1) as { data: Array<{ banned_at: string | null }> | null };
+  if (banRow?.[0]?.banned_at) return NextResponse.json({ denied: true });
+
   // PORTE OUVERTE À TOUS (stratégie teaser/FOMO) : plus aucune waitlist à la connexion — n'importe quel
   // compte Telegram entre et voit l'app en mode grisé (gains en clair, flux verrouillé, paywall broker).
   // Le VRAI filtre n'a pas bougé : l'approbation admin (compte via notre lien + dépôt ≥ 500$) débloque tout.

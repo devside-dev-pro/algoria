@@ -7,9 +7,11 @@ export default function Denied() {
   return (
     <main style={{ minHeight: '92vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, textAlign: 'center', padding: '0 20px' }}>
       <span style={{ fontSize: 40 }}>🔒</span>
-      <h1 style={{ fontSize: 24, margin: 0 }}>You&apos;re not on the list yet</h1>
+      <h1 style={{ fontSize: 24, margin: 0 }}>Access unavailable</h1>
+      {/* Volontairement neutre : cette page sert AUSSI aux comptes révoqués (31/07 — concurrent qui copiait
+          l'app). On ne détaille ni le motif ni la mécanique — juste une porte humaine pour les vrais cas. */}
       <p style={{ color: 'var(--muted)', fontSize: 14.5, lineHeight: 1.65, maxWidth: 400, margin: 0 }}>
-        Access to Algoria Members is granted <strong style={{ color: 'var(--text)' }}>live on stream</strong> — join the Telegram waitlist and get in during the next drop.
+        This account can&apos;t access Algoria Members right now. If you think that&apos;s a mistake, message us and we&apos;ll sort it out.
       </p>
       <a
         {...tgHref(tg)}
