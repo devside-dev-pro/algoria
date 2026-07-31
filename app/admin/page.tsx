@@ -834,12 +834,12 @@ export default function AdminCRM() {
                 la seule chose que l'API accepte (un lien t.me ne marche pas pour un canal privé). Le bot
                 est ajouté admin → la ligne apparaît ici → l'ID se copie dans les variables Vercel.
                 La colonne ROLE dit à quoi chaque canal est branché : un « — » = variable manquante. */}
-            {tgChats.length > 0 && (
-              <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <h2 style={secH}>📡 TELEGRAM CHANNELS</h2>
                   <span style={{ fontSize: 11, color: 'var(--dim)' }}>click an ID to copy it — paste into the Vercel env vars</span>
                 </div>
+                {tgChats.length === 0 && <p style={dimP}>No channel seen yet — add the bot as an admin of the channel, then post anything in it.</p>}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {tgChats.map((c) => (
                     <div key={c.chat_id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)' }}>
@@ -858,8 +858,7 @@ export default function AdminCRM() {
                     </div>
                   ))}
                 </div>
-              </section>
-            )}
+            </section>
             {/* ===== 🤖 BOT ACTIVITY — TOUT ce que le bot envoie (relances, texte complet) et reçoit
                 (réponses des prospects, via le webhook Telegram). « Je veux voir ce que le bot fait » —
                 le fil est là. Le bouton ENABLE INBOX branche le webhook (à cliquer UNE fois). */}
