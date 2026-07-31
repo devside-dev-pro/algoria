@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { useMe, StatusPill, StrategyPicker, Locked, UnlockSheet, type Member, type Referral } from '../ui';
+import { useMe, StatusPill, StrategyPicker, Locked, UnlockSheet, type Member, type Referral, LoadFailed } from '../ui';
 import { TRC20_RE } from '@/lib/member/affiliate';
 import { LOT_CHOICES } from '@/lib/member/lots';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
@@ -63,7 +63,8 @@ export default function Profile() {
   useEffect(() => { if (refInit) setReferral(refInit); }, [refInit]);
   const reloadWallet = () =>
     void fetch('/api/member/me').then(async (r) => { const d = (await r.json()) as { referral?: Referral }; if (d.referral) setReferral(d.referral); });
-  if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
+  if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
+  if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
 
   const act = (action: 'pause' | 'resume' | 'strategy', choice?: number) => {
     setBusy(true);

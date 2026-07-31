@@ -3,7 +3,7 @@
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, UnlockSheet } from '../ui';
+import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { RECORD } from '@/lib/backtest/record';
 
@@ -46,7 +46,8 @@ export default function MemberHistory() {
       setSharing(null);
     }
   };
-  if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
+  if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
+  if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   const wins = trades.filter((t) => Number(t.pnl) > 0).length;
   const net = trades.reduce((a, t) => a + Number(t.pnl), 0);
   const winSum = trades.filter((t) => Number(t.pnl) > 0).reduce((a, t) => a + Number(t.pnl), 0);

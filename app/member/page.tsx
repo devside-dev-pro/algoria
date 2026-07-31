@@ -4,7 +4,7 @@
 // « Algoria trade en ce moment, toi tu regardes de dehors » + UNLOCK (paywall broker) + support Telegram.
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
-import { useMe, StatusPill, UnlockSheet, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount, type Referral } from './ui';
+import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount, type Referral } from './ui';
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 
@@ -34,7 +34,8 @@ export default function MemberHome() {
   // afficher le chiffre du master en premier fait fuir ; on montre le SIEN, master en note.
   const you = (t: FeedTrade) => Number(t.pnl) * clientLot / (Number(t.lot) > 0 ? Number(t.lot) : 1);
   const fmtYou = (v: number) => `${v > 0 ? '+' : ''}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)}$`;
-  if (loading || !member) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
+  if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
+  if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
 
   const act = (action: 'pause' | 'resume' | 'risk', tier?: string) => {
     setBusy(true);

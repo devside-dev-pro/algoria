@@ -5,7 +5,7 @@
 // commission broker par compte. Brokers déjà utilisés exclus, minimum par stratégie ($200/$500/$1000).
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StrategyPicker, STRATEGY_UI } from '../ui';
+import { useMe, StrategyPicker, STRATEGY_UI, LoadFailed } from '../ui';
 import { BROKERS } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { bracketForAmount, brokerOrderFor } from '@/lib/member/brokerSteering';
@@ -45,7 +45,8 @@ export default function AddStrategy() {
       })
     : freeBrokers;
 
-  if (loading || !member) return <Center>loading…</Center>;
+  if (loading) return <Center>loading…</Center>;
+  if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   // réservé aux membres déjà LIVE (continuité VIP) — un prospect passe d'abord par l'onboarding classique
   if (!unlocked || !['live', 'paused'].includes(member.status)) { router.replace('/member'); return <Center>redirecting…</Center>; }
 
