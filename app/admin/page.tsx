@@ -19,6 +19,7 @@ interface Row {
   country: string | null;
   source: string | null; // canal d'acquisition (cookie UTM au premier clic) — null = organique/cross-device
   banned_at?: string | null; // 🚫 accès révoqué (concurrent, abus) — session ET reconnexion bloquées
+  locale?: string | null; // marché : 'en' (canal anglais) | 'it' (canal italien) — pilote app, DM et relances
 }
 interface Action { id: string; tg_id?: number; member_no: number | null; kind: string; status?: string; done_by?: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
@@ -55,6 +56,11 @@ export default function AdminCRM() {
   // 🤖 BOT ACTIVITY : fil envoyé (nudge, texte du DM) / reçu (bot_reply) — visibilité totale sur le bot
   const [botActivity, setBotActivity] = useState<Array<{ id: string; tg_id: number; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }>>([]);
   const [tgInboxOn, setTgInboxOn] = useState(false); // état réel du webhook Telegram (getWebhookInfo)
+  // 🌍 FILTRE MARCHÉ (01/08 — ouverture de l'Italie, deux entités comptables séparées) : 'all' | 'en' | 'it'.
+  // Il pilote la liste des membres ET le registre des dépôts : « où en est l'Italie ce mois-ci ? » devient
+  // une question à un clic, et l'export CSV suit le filtre (une compta par marché).
+  const [market, setMarket] = useState<'all' | 'en' | 'it'>('all');
+  const localeOf = (tg: number | null | undefined) => String(rows.find((r) => Number(r.tg_id) === Number(tg))?.locale ?? 'en');
   // 🎁 CAMPAGNE PROSPECTS : texte pré-rempli avec l'offre de fin de mois (éditable avant envoi)
   const [blastText, setBlastText] = useState(
     [
@@ -334,10 +340,11 @@ export default function AdminCRM() {
   };
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
+    const base = market === 'all' ? rows : rows.filter((r) => String(r.locale ?? 'en') === market);
+    if (!q) return base;
     // tg_id inclus : c'est l'ID que STH affiche pour les receivers API — coller « 7557770646 » retrouve le membre
-    return rows.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), String(r.tg_id), r.status, r.country, legalOf(r.tg_id)].some((v) => String(v ?? '').toLowerCase().includes(q)));
-  }, [rows, search]);
+    return base.filter((r) => [r.tg_username, r.tg_name, r.broker, r.mt5_login, String(r.member_no), String(r.tg_id), r.status, r.country, legalOf(r.tg_id)].some((v) => String(v ?? '').toLowerCase().includes(q)));
+  }, [rows, search, market]);
 
   // ===== ALERTES PUSH : qui a activé, qui relancer (Telegram) =====
   const pushSet = useMemo(() => new Set(pushTgIds.map(Number)), [pushTgIds]);
@@ -347,8 +354,11 @@ export default function AdminCRM() {
   // ===== bilan du mois affiché : lignes + totaux (dépôts, coms reçues/attendues/sautées) =====
   const depDateOf = (d: Deposit) => String(d.detail?.deposited_at ?? d.created_at);
   const monthDeps = useMemo(
-    () => deposits.filter((d) => depDateOf(d).slice(0, 7) === ym).sort((a, b) => depDateOf(a).localeCompare(depDateOf(b))),
-    [deposits, ym],
+    () => deposits
+      .filter((d) => depDateOf(d).slice(0, 7) === ym && (market === 'all' || localeOf(d.tg_id) === market))
+      .sort((a, b) => depDateOf(a).localeCompare(depDateOf(b))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deposits, ym, market, rows],
   );
   const depTotals = useMemo(() => {
     const t = { deposited: 0, received: 0, pending: 0, lost: 0 };
@@ -508,9 +518,10 @@ export default function AdminCRM() {
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = [
-      ['date', 'member', 'username', 'country', 'broker', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
+      ['date', 'market', 'member', 'username', 'country', 'broker', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
       ...monthDeps.map((d) => [
         depDateOf(d).slice(0, 10),
+        localeOf(d.tg_id).toUpperCase(),
         d.member_no != null ? `#${d.member_no}` : '',
         (() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? ''); })(),
         rows.find((r) => Number(r.tg_id) === Number(d.tg_id))?.country ?? '',
@@ -531,7 +542,7 @@ export default function AdminCRM() {
     const csv = '\ufeff' + lines.map((l) => l.map(esc).join(',')).join('\r\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    a.download = `algoria-deposits-${ym}.csv`;
+    a.download = `algoria-deposits-${ym}${market === 'all' ? '' : '-' + market}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -578,6 +589,18 @@ export default function AdminCRM() {
           ))}
         </nav>
         <span style={{ flex: 1 }} />
+        {/* 🌍 MARCHÉ — bascule UK / Italie : filtre les membres ET le registre des dépôts (deux entités
+            comptables séparées). Visible en permanence : savoir « sur quel marché je regarde » est aussi
+            important que l'onglet où l'on se trouve. */}
+        <div style={{ display: 'inline-flex', gap: 2, padding: 2, borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)' }}>
+          {([['all', '🌍 ALL'], ['en', '🇬🇧 UK'], ['it', '🇮🇹 IT']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setMarket(k)} className="mono" title={k === 'all' ? 'both markets' : k === 'en' ? 'English channel (UK/UAE/DE…)' : 'Italian channel'}
+              style={{ padding: '5px 9px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
+                background: market === k ? 'rgba(43,227,245,.14)' : 'transparent', color: market === k ? 'var(--cyan)' : 'var(--dim)' }}>
+              {label}{market === k && k !== 'all' ? ` · ${rows.filter((r) => String(r.locale ?? 'en') === k).length}` : ''}
+            </button>
+          ))}
+        </div>
         <button disabled={busy} onClick={liveAlert} style={{ padding: '7px 13px', borderRadius: 9, border: '1px solid rgba(255,90,60,.5)', background: 'rgba(255,90,60,.08)', color: '#ff8a5c', fontWeight: 800, letterSpacing: 0.6, fontSize: 11, cursor: 'pointer' }}>📣 LIVE ALERT</button>
         <form action="/api/member/logout" method="post" style={{ display: 'flex' }}>
           <button style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer' }}>sign out</button>
@@ -947,6 +970,8 @@ export default function AdminCRM() {
           <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'rgba(43,227,245,.35)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span className="mono goldText" style={{ fontWeight: 800, fontSize: 15 }}>#{sel.member_no}</span>
+              {/* marché du membre : pilote la langue de l'app, des DM et des relances */}
+              <span className="mono" title={String(sel.locale ?? 'en') === 'it' ? 'Italian market — app, bot DMs and nudges in Italian' : 'English market'} style={{ fontSize: 11, padding: '2px 7px', borderRadius: 7, border: '1px solid var(--border)', color: 'var(--muted)' }}>{String(sel.locale ?? 'en') === 'it' ? '🇮🇹 IT' : '🇬🇧 EN'}</span>
               <span style={{ fontSize: 15, fontWeight: 800 }}>{sel.tg_username ? '@' + sel.tg_username : (sel.tg_name ?? '—')}</span>
               {sel.tg_username && sel.tg_name && <span style={{ fontSize: 12, color: 'var(--dim)' }}>{sel.tg_name}</span>}
               {legalOf(sel.tg_id) && <span className="mono" style={{ fontSize: 11, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.35)', borderRadius: 6, padding: '2px 8px' }} title="name on the broker account">🏦 {legalOf(sel.tg_id)}</span>}
