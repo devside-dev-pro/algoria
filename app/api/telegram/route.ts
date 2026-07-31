@@ -277,9 +277,19 @@ export async function POST(req: Request) {
     // compte : un Italien peut avoir Telegram en anglais, mais s'il rejoint le canal italien il veut
     // être servi en italien.
     const locale = localeForChat(jr.chat?.id);
-    // le DM part AVANT l'avatar : la fenêtre d'autorisation Telegram est liée à la demande en cours,
-    // et 6 s de récupération de photo avant d'écrire, c'est 6 s d'attente pour le prospect.
-    const dmStatus = userId ? await sendJoinDm(userId, locale) : 'skipped';
+    // UN SEUL MESSAGE DE BIENVENUE PAR PERSONNE (01/08). Trois canaux ouverts (principal, UK, IT) et une
+    // demande d'adhésion peut être annulée puis refaite : sans garde, le prospect reçoit deux fois le même
+    // accueil — l'impression d'un bot cassé, dès la première seconde. Fenêtre de 48 h : elle couvre le
+    // multi-canal et le re-clic, sans museler celui qui revient une semaine plus tard.
+    let dmStatus: string = 'skipped';
+    if (userId) {
+      const since = new Date(Date.now() - 48 * 3600_000).toISOString();
+      const { data: already } = await (db as any).from('telegram_joins')
+        .select('id').eq('user_id', userId).eq('dm_status', 'sent').gte('joined_at', since).limit(1) as { data: Array<{ id: number }> | null };
+      // le DM part AVANT l'avatar : la fenêtre d'autorisation Telegram est liée à la demande en cours,
+      // et 6 s de récupération de photo avant d'écrire, c'est 6 s d'attente pour le prospect.
+      dmStatus = already?.length ? 'duplicate' : await sendJoinDm(userId, locale);
+    }
     // si la personne a DÉJÀ un compte (re-demande, autre canal), on aligne sa langue sur ce canal
     if (userId && locale !== 'en') await (db as any).from('members').update({ locale }).eq('tg_id', userId);
     const photoUrl = userId ? await fetchAvatar(db, userId) : null; // avant l'insert → le spotlight arrive avec la photo
