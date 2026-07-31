@@ -289,6 +289,29 @@ export async function hasOpenSwingTrade(symbol: string): Promise<boolean> {
   return !!data?.length;
 }
 
+/**
+ * Demandes d'adhésion MÛRES à approuver (auto-approbation, 31/07) : en attente depuis plus de
+ * `minAgeMin` minutes, jamais tentées, et dont on connaît le chat_id (les demandes d'avant le
+ * déploiement n'en ont pas → elles restent manuelles). Le délai laisse au DM d'onboarding le temps
+ * d'être lu et évite l'effet « robot qui accepte à la milliseconde ».
+ */
+export async function listRipeJoinRequests(minAgeMin: number, limit = 25): Promise<Array<{ id: number; chat_id: number; user_id: number; username: string | null }>> {
+  const cutoff = new Date(Date.now() - minAgeMin * 60_000).toISOString();
+  const { data } = await (db as any).from('telegram_joins')
+    .select('id,chat_id,user_id,username')
+    .eq('status', 'waiting').is('approved_at', null)
+    .not('chat_id', 'is', null).not('user_id', 'is', null)
+    .lt('joined_at', cutoff)
+    .order('joined_at', { ascending: true }).limit(limit) as { data: Array<{ id: number; chat_id: number; user_id: number; username: string | null }> | null };
+  return data ?? [];
+}
+
+/** Trace la tentative d'approbation (succès : erreur nulle). Le passage en 'accepted' vient du webhook
+ *  chat_member — ici on ne pose que le garde anti-boucle. */
+export async function markJoinApproved(id: number, error: string | null): Promise<void> {
+  await (db as any).from('telegram_joins').update({ approved_at: new Date().toISOString(), approve_error: error }).eq('id', id);
+}
+
 /** Positions SWING ouvertes (ticket + direction + entrée) — pour l'assurance week-end : fermer les
  *  PERDANTES le vendredi soir (étude 28-29/07 : les 2 stops de −1 850$ du dim. 26 étaient des swings
  *  portés sur le week-end Trump ; les gagnantes, protégées par leur trailing, continuent de courir). */
