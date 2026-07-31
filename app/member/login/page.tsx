@@ -5,11 +5,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { openTelegram } from '@/lib/telegram';
+import { useUILocale } from '../ui';
 
 type Phase = 'idle' | 'waiting' | 'expired' | 'error';
 
 export default function MemberLogin() {
   const [phase, setPhase] = useState<Phase>('idle');
+  const { t } = useUILocale();
   // LIEN DE SECOURS (31/07 — un membre sur ORDINATEUR : « ça ne fait rien quand je clique »). Sur desktop
   // sans Telegram installé, tg:// n'ouvre rien et le repli window.open part 1,6 s plus tard, DANS un
   // setTimeout : Chrome le bloque (le geste utilisateur est perdu après l'await du fetch). D'où un bouton
@@ -49,7 +51,7 @@ export default function MemberLogin() {
           ALGORIA <span className="goldText">MEMBERS</span>
         </h1>
         <p style={{ color: 'var(--muted)', fontSize: 14.5, lineHeight: 1.6, maxWidth: 380, margin: '10px auto 0' }}>
-          Your member dashboard — copying status, risk control and the live AI feed. Sign in with the Telegram account that joined the channel.
+          {t('login.sub')}
         </p>
       </div>
 
@@ -58,13 +60,13 @@ export default function MemberLogin() {
           onClick={() => void start()}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '14px 28px', borderRadius: 13, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 15, color: '#fff', background: 'linear-gradient(90deg,#2AABEE,#229ED9)', boxShadow: '0 0 24px rgba(42,171,238,.35)' }}
         >
-          ✈️ LOG IN WITH TELEGRAM
+          {t('login.cta')}
         </button>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-          <span className="pulse" style={{ fontSize: 13.5, color: 'var(--cyan)', fontWeight: 700 }}>● waiting for Telegram…</span>
+          <span className="pulse" style={{ fontSize: 13.5, color: 'var(--cyan)', fontWeight: 700 }}>{t('login.waiting')}</span>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', maxWidth: 320, lineHeight: 1.55 }}>
-            Telegram should have opened — tap <strong style={{ color: 'var(--text)' }}>START</strong> in the bot chat and you&apos;ll be signed in here automatically.
+            {t('login.tapStart')}
           </p>
           {/* SECOURS TOUJOURS VISIBLE : sur ordinateur, l'ouverture automatique est souvent bloquée par le
               navigateur. Ce lien est un vrai <a> — un clic dessus n'est jamais bloqué. Il marche aussi
@@ -72,18 +74,18 @@ export default function MemberLogin() {
           {link && (
             <a href={link} target="_blank" rel="noreferrer"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 22px', borderRadius: 12, textDecoration: 'none', fontWeight: 800, fontSize: 13.5, color: '#fff', background: 'linear-gradient(90deg,#2AABEE,#229ED9)', boxShadow: '0 0 18px rgba(42,171,238,.3)' }}>
-              ✈️ Nothing opened? Open Telegram here
+              {t('login.fallback')}
             </a>
           )}
           <button onClick={() => void start()} style={{ border: 'none', background: 'transparent', color: 'var(--dim)', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
-            Start over
+            {t('login.restart')}
           </button>
         </div>
       )}
 
-      {phase === 'expired' && <Err>Link expired — try again.</Err>}
-      {phase === 'error' && <Err>Something went wrong — try again.</Err>}
-      <p className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 1 }}>ACCESS IS GRANTED LIVE ON STREAM · MEMBERS ONLY</p>
+      {phase === 'expired' && <Err>{t('login.expired')}</Err>}
+      {phase === 'error' && <Err>{t('login.error')}</Err>}
+      <p className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 1 }}>{t('login.footer')}</p>
     </main>
   );
 }
