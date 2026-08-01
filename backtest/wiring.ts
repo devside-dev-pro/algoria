@@ -29,3 +29,17 @@ export function cfgFor(p: StrategyProfile): EngineConfig {
 export const SIM_BASE = { symbol: 'XAUUSD', mode: 'scalp' as Mode, startBalance: 70_000, spread: 0.2, slippage: 0.05, commissionPerLot: 7, contractSize: 100, warmup: 210, window: 600, intrabarManage: true };
 
 export const ctxFor = (p: StrategyProfile) => ({ tradeAsia: p.tradeAsia, volMinPct: 0.05, volMaxPct: 0.995 });
+
+/**
+ * Paramètres de SIMULATION du profil — la partie du live qui ne vit pas dans EngineConfig (01/08).
+ * Trou trouvé en enquêtant sur la parité : blockScalpEntryUtcHours est en live depuis le 29/07 (S2 et S3
+ * ne prennent plus d'entrée scalp entre 12h et 17h UTC) et n'était câblé NULLE PART dans les harnais.
+ * Le « PROD S2 » du walk-forward et de la parité n'était donc pas la S2 réelle — on comparait la prod à
+ * une prod qui n'existe plus. Tout ce qui définit le comportement live doit passer par ici, sinon le
+ * tribunal juge un accusé qui n'est pas celui qu'on lui présente.
+ */
+export const simFor = (p: StrategyProfile) => ({
+  ...SIM_BASE,
+  ...(p.blockScalpEntryUtcHours ? { blockEntryHours: p.blockScalpEntryUtcHours } : {}),
+  ctxOpts: ctxFor(p),
+});

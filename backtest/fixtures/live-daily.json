@@ -1,90 +1,721 @@
 {
-  "_": "Journées LIVE réelles XAUUSD (table trades, agrégat closed_at::date × stratégie × couche) — extraites le 28/07/2026 pour la parité sim↔live. Couches : scalp (lot 1, ref sans marqueur) · breakout (ref -bk-) · swing (ref -swing-, lot 0.5) · rafale (lot 0.05, mode SHOW) · manuel (le reste). La v1 de cette fixture mélangeait tous les symboles et toutes les couches → parité S2/S3 faussement décorrélée. Source de vérité : Supabase.",
+  "_": "Journées LIVE réelles XAUUSD (table trades, agrégat closed_at::date × stratégie × couche) — RAFRAÎCHIE le 01/08/2026 jusqu'au 31/07 inclus. Couches : scalp (lot 1, ref sans marqueur) · breakout (ref -bk-) · swing (ref -swing-, lot 0.5) · rafale (lot 0.05, mode SHOW) · manuel (le reste).",
+  "_avertissement": "DÉRIVE DE CONFIG — à lire avant d'interpréter une parité S2/S3. La config live a changé PENDANT cette fenêtre : minRR 0.2→0.75, maxStopAtr 3.2→2.8 (22/07), dayLock (28/07), filtre de session 12-17 UTC (29/07). Le simulateur applique la config d'AUJOURD'HUI à des journées vécues avec celle d'hier — d'où live 256 trades contre sim 106 sur le scalp S2, et une corrélation de 0,16 qui ne prouve RIEN sur la qualité du simulateur. S1 corrèle à 0,74 précisément parce que son profil, lui, n'a pas bougé. Une parité S2/S3 valable demande une fenêtre à config STABLE : elle commence le 29/07.",
+  "_source": "Supabase, table trades. Régénérable : agrégat par date/strategy/layer sur symbol='XAUUSD'.",
   "days": [
-    { "day": "2026-07-02", "strategy": 2, "layer": "scalp", "n": 3, "pnl": 425 },
-    { "day": "2026-07-03", "strategy": 2, "layer": "scalp", "n": 15, "pnl": 508 },
-    { "day": "2026-07-05", "strategy": 2, "layer": "breakout", "n": 1, "pnl": 22 },
-    { "day": "2026-07-05", "strategy": 2, "layer": "scalp", "n": 4, "pnl": 1175 },
-    { "day": "2026-07-06", "strategy": 2, "layer": "breakout", "n": 3, "pnl": -1308 },
-    { "day": "2026-07-06", "strategy": 2, "layer": "rafale", "n": 92, "pnl": -82 },
-    { "day": "2026-07-06", "strategy": 2, "layer": "scalp", "n": 11, "pnl": -569 },
-    { "day": "2026-07-06", "strategy": 2, "layer": "swing", "n": 4, "pnl": 206 },
-    { "day": "2026-07-07", "strategy": 2, "layer": "breakout", "n": 5, "pnl": 1037 },
-    { "day": "2026-07-07", "strategy": 2, "layer": "scalp", "n": 23, "pnl": 1392 },
-    { "day": "2026-07-07", "strategy": 2, "layer": "swing", "n": 5, "pnl": 1057 },
-    { "day": "2026-07-08", "strategy": 2, "layer": "breakout", "n": 2, "pnl": 165 },
-    { "day": "2026-07-08", "strategy": 2, "layer": "manuel", "n": 1, "pnl": 31 },
-    { "day": "2026-07-08", "strategy": 2, "layer": "scalp", "n": 10, "pnl": 2238 },
-    { "day": "2026-07-08", "strategy": 2, "layer": "swing", "n": 3, "pnl": 726 },
-    { "day": "2026-07-09", "strategy": 2, "layer": "breakout", "n": 3, "pnl": -540 },
-    { "day": "2026-07-09", "strategy": 2, "layer": "scalp", "n": 18, "pnl": 1511 },
-    { "day": "2026-07-09", "strategy": 2, "layer": "swing", "n": 3, "pnl": 121 },
-    { "day": "2026-07-10", "strategy": 2, "layer": "breakout", "n": 5, "pnl": -818 },
-    { "day": "2026-07-10", "strategy": 2, "layer": "scalp", "n": 16, "pnl": -2668 },
-    { "day": "2026-07-10", "strategy": 2, "layer": "swing", "n": 6, "pnl": -59 },
-    { "day": "2026-07-12", "strategy": 2, "layer": "swing", "n": 1, "pnl": 39 },
-    { "day": "2026-07-13", "strategy": 2, "layer": "breakout", "n": 2, "pnl": 62 },
-    { "day": "2026-07-13", "strategy": 2, "layer": "scalp", "n": 17, "pnl": -129 },
-    { "day": "2026-07-14", "strategy": 2, "layer": "breakout", "n": 5, "pnl": -1361 },
-    { "day": "2026-07-14", "strategy": 2, "layer": "scalp", "n": 13, "pnl": -268 },
-    { "day": "2026-07-14", "strategy": 2, "layer": "swing", "n": 4, "pnl": 80 },
-    { "day": "2026-07-15", "strategy": 2, "layer": "breakout", "n": 8, "pnl": -1728 },
-    { "day": "2026-07-15", "strategy": 2, "layer": "scalp", "n": 25, "pnl": -2209 },
-    { "day": "2026-07-15", "strategy": 2, "layer": "swing", "n": 4, "pnl": -746 },
-    { "day": "2026-07-16", "strategy": 2, "layer": "breakout", "n": 3, "pnl": 83 },
-    { "day": "2026-07-16", "strategy": 2, "layer": "scalp", "n": 17, "pnl": 1378 },
-    { "day": "2026-07-16", "strategy": 2, "layer": "swing", "n": 5, "pnl": -724 },
-    { "day": "2026-07-17", "strategy": 2, "layer": "breakout", "n": 3, "pnl": -765 },
-    { "day": "2026-07-17", "strategy": 2, "layer": "manuel", "n": 2, "pnl": -103 },
-    { "day": "2026-07-17", "strategy": 2, "layer": "scalp", "n": 26, "pnl": -968 },
-    { "day": "2026-07-17", "strategy": 2, "layer": "swing", "n": 4, "pnl": 120 },
-    { "day": "2026-07-19", "strategy": 2, "layer": "scalp", "n": 2, "pnl": 179 },
-    { "day": "2026-07-19", "strategy": 2, "layer": "swing", "n": 1, "pnl": 35 },
-    { "day": "2026-07-20", "strategy": 1, "layer": "scalp", "n": 3, "pnl": -721 },
-    { "day": "2026-07-20", "strategy": 2, "layer": "breakout", "n": 2, "pnl": -692 },
-    { "day": "2026-07-20", "strategy": 2, "layer": "scalp", "n": 14, "pnl": -2029 },
-    { "day": "2026-07-20", "strategy": 2, "layer": "swing", "n": 6, "pnl": -570 },
-    { "day": "2026-07-20", "strategy": 3, "layer": "breakout", "n": 1, "pnl": -686 },
-    { "day": "2026-07-20", "strategy": 3, "layer": "scalp", "n": 4, "pnl": -479 },
-    { "day": "2026-07-20", "strategy": 3, "layer": "swing", "n": 5, "pnl": 39 },
-    { "day": "2026-07-21", "strategy": 1, "layer": "scalp", "n": 3, "pnl": -2418 },
-    { "day": "2026-07-21", "strategy": 2, "layer": "breakout", "n": 8, "pnl": -400 },
-    { "day": "2026-07-21", "strategy": 2, "layer": "manuel", "n": 1, "pnl": -936 },
-    { "day": "2026-07-21", "strategy": 2, "layer": "scalp", "n": 11, "pnl": -1097 },
-    { "day": "2026-07-21", "strategy": 2, "layer": "swing", "n": 1, "pnl": -584 },
-    { "day": "2026-07-21", "strategy": 3, "layer": "breakout", "n": 9, "pnl": -441 },
-    { "day": "2026-07-21", "strategy": 3, "layer": "scalp", "n": 17, "pnl": -2546 },
-    { "day": "2026-07-21", "strategy": 3, "layer": "swing", "n": 1, "pnl": -620 },
-    { "day": "2026-07-22", "strategy": 1, "layer": "scalp", "n": 4, "pnl": 964 },
-    { "day": "2026-07-22", "strategy": 2, "layer": "breakout", "n": 8, "pnl": 1798 },
-    { "day": "2026-07-22", "strategy": 2, "layer": "scalp", "n": 11, "pnl": -2567 },
-    { "day": "2026-07-22", "strategy": 2, "layer": "swing", "n": 1, "pnl": 36 },
-    { "day": "2026-07-22", "strategy": 3, "layer": "breakout", "n": 7, "pnl": 2736 },
-    { "day": "2026-07-22", "strategy": 3, "layer": "scalp", "n": 9, "pnl": -711 },
-    { "day": "2026-07-22", "strategy": 3, "layer": "swing", "n": 1, "pnl": 36 },
-    { "day": "2026-07-23", "strategy": 1, "layer": "scalp", "n": 2, "pnl": 392 },
-    { "day": "2026-07-23", "strategy": 2, "layer": "swing", "n": 4, "pnl": 1103 },
-    { "day": "2026-07-23", "strategy": 3, "layer": "scalp", "n": 1, "pnl": -656 },
-    { "day": "2026-07-23", "strategy": 3, "layer": "swing", "n": 4, "pnl": 1100 },
-    { "day": "2026-07-24", "strategy": 1, "layer": "scalp", "n": 14, "pnl": 1106 },
-    { "day": "2026-07-24", "strategy": 2, "layer": "breakout", "n": 3, "pnl": -25 },
-    { "day": "2026-07-24", "strategy": 2, "layer": "scalp", "n": 7, "pnl": 597 },
-    { "day": "2026-07-24", "strategy": 2, "layer": "swing", "n": 1, "pnl": 28 },
-    { "day": "2026-07-24", "strategy": 3, "layer": "breakout", "n": 8, "pnl": -4 },
-    { "day": "2026-07-24", "strategy": 3, "layer": "scalp", "n": 4, "pnl": -898 },
-    { "day": "2026-07-24", "strategy": 3, "layer": "swing", "n": 1, "pnl": 28 },
-    { "day": "2026-07-26", "strategy": 2, "layer": "breakout", "n": 2, "pnl": 29 },
-    { "day": "2026-07-26", "strategy": 2, "layer": "swing", "n": 1, "pnl": -1850 },
-    { "day": "2026-07-26", "strategy": 3, "layer": "breakout", "n": 2, "pnl": 37 },
-    { "day": "2026-07-26", "strategy": 3, "layer": "swing", "n": 1, "pnl": -1852 },
-    { "day": "2026-07-27", "strategy": 1, "layer": "scalp", "n": 12, "pnl": -2074 },
-    { "day": "2026-07-27", "strategy": 2, "layer": "breakout", "n": 5, "pnl": -171 },
-    { "day": "2026-07-27", "strategy": 2, "layer": "scalp", "n": 9, "pnl": -1342 },
-    { "day": "2026-07-27", "strategy": 2, "layer": "swing", "n": 3, "pnl": 80 },
-    { "day": "2026-07-27", "strategy": 3, "layer": "breakout", "n": 12, "pnl": -246 },
-    { "day": "2026-07-27", "strategy": 3, "layer": "swing", "n": 3, "pnl": 72 },
-    { "day": "2026-07-28", "strategy": 1, "layer": "scalp", "n": 1, "pnl": 160 },
-    { "day": "2026-07-28", "strategy": 2, "layer": "scalp", "n": 4, "pnl": -633 },
-    { "day": "2026-07-28", "strategy": 2, "layer": "swing", "n": 1, "pnl": 1499 }
+    {
+      "day": "2026-07-02",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 3,
+      "pnl": 425
+    },
+    {
+      "day": "2026-07-03",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 15,
+      "pnl": 508
+    },
+    {
+      "day": "2026-07-05",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 1,
+      "pnl": 22
+    },
+    {
+      "day": "2026-07-05",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 4,
+      "pnl": 1175
+    },
+    {
+      "day": "2026-07-06",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 3,
+      "pnl": -1308
+    },
+    {
+      "day": "2026-07-06",
+      "strategy": 2,
+      "layer": "rafale",
+      "n": 92,
+      "pnl": -82
+    },
+    {
+      "day": "2026-07-06",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 11,
+      "pnl": -569
+    },
+    {
+      "day": "2026-07-06",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 4,
+      "pnl": 206
+    },
+    {
+      "day": "2026-07-07",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 5,
+      "pnl": 1037
+    },
+    {
+      "day": "2026-07-07",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 23,
+      "pnl": 1392
+    },
+    {
+      "day": "2026-07-07",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 5,
+      "pnl": 1057
+    },
+    {
+      "day": "2026-07-08",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 2,
+      "pnl": 165
+    },
+    {
+      "day": "2026-07-08",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 11,
+      "pnl": 2269
+    },
+    {
+      "day": "2026-07-08",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 3,
+      "pnl": 726
+    },
+    {
+      "day": "2026-07-09",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 3,
+      "pnl": -540
+    },
+    {
+      "day": "2026-07-09",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 18,
+      "pnl": 1511
+    },
+    {
+      "day": "2026-07-09",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 3,
+      "pnl": 121
+    },
+    {
+      "day": "2026-07-10",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 5,
+      "pnl": -818
+    },
+    {
+      "day": "2026-07-10",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 16,
+      "pnl": -2668
+    },
+    {
+      "day": "2026-07-10",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 6,
+      "pnl": -59
+    },
+    {
+      "day": "2026-07-12",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 1,
+      "pnl": 39
+    },
+    {
+      "day": "2026-07-13",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 2,
+      "pnl": 62
+    },
+    {
+      "day": "2026-07-13",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 17,
+      "pnl": -129
+    },
+    {
+      "day": "2026-07-14",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 5,
+      "pnl": -1361
+    },
+    {
+      "day": "2026-07-14",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 12,
+      "pnl": -268
+    },
+    {
+      "day": "2026-07-14",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 4,
+      "pnl": 80
+    },
+    {
+      "day": "2026-07-15",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 7,
+      "pnl": -1728
+    },
+    {
+      "day": "2026-07-15",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 21,
+      "pnl": -2209
+    },
+    {
+      "day": "2026-07-15",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 3,
+      "pnl": -746
+    },
+    {
+      "day": "2026-07-16",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 2,
+      "pnl": 83
+    },
+    {
+      "day": "2026-07-16",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 17,
+      "pnl": 1378
+    },
+    {
+      "day": "2026-07-16",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 3,
+      "pnl": -724
+    },
+    {
+      "day": "2026-07-17",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 3,
+      "pnl": -765
+    },
+    {
+      "day": "2026-07-17",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 28,
+      "pnl": -1071
+    },
+    {
+      "day": "2026-07-17",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 4,
+      "pnl": 120
+    },
+    {
+      "day": "2026-07-19",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 2,
+      "pnl": 179
+    },
+    {
+      "day": "2026-07-19",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 1,
+      "pnl": 35
+    },
+    {
+      "day": "2026-07-20",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 3,
+      "pnl": -721
+    },
+    {
+      "day": "2026-07-20",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 2,
+      "pnl": -692
+    },
+    {
+      "day": "2026-07-20",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 14,
+      "pnl": -2029
+    },
+    {
+      "day": "2026-07-20",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 6,
+      "pnl": -570
+    },
+    {
+      "day": "2026-07-20",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 1,
+      "pnl": -686
+    },
+    {
+      "day": "2026-07-20",
+      "strategy": 3,
+      "layer": "scalp",
+      "n": 4,
+      "pnl": -479
+    },
+    {
+      "day": "2026-07-20",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 5,
+      "pnl": 39
+    },
+    {
+      "day": "2026-07-21",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 3,
+      "pnl": -2418
+    },
+    {
+      "day": "2026-07-21",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 8,
+      "pnl": -400
+    },
+    {
+      "day": "2026-07-21",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 12,
+      "pnl": -2033
+    },
+    {
+      "day": "2026-07-21",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 1,
+      "pnl": -584
+    },
+    {
+      "day": "2026-07-21",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 9,
+      "pnl": -441
+    },
+    {
+      "day": "2026-07-21",
+      "strategy": 3,
+      "layer": "scalp",
+      "n": 17,
+      "pnl": -2546
+    },
+    {
+      "day": "2026-07-21",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 1,
+      "pnl": -620
+    },
+    {
+      "day": "2026-07-22",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 4,
+      "pnl": 964
+    },
+    {
+      "day": "2026-07-22",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 8,
+      "pnl": 1798
+    },
+    {
+      "day": "2026-07-22",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 11,
+      "pnl": -2567
+    },
+    {
+      "day": "2026-07-22",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 1,
+      "pnl": 36
+    },
+    {
+      "day": "2026-07-22",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 7,
+      "pnl": 2736
+    },
+    {
+      "day": "2026-07-22",
+      "strategy": 3,
+      "layer": "scalp",
+      "n": 9,
+      "pnl": -711
+    },
+    {
+      "day": "2026-07-22",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 1,
+      "pnl": 36
+    },
+    {
+      "day": "2026-07-23",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 1,
+      "pnl": 392
+    },
+    {
+      "day": "2026-07-23",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 4,
+      "pnl": 1103
+    },
+    {
+      "day": "2026-07-23",
+      "strategy": 3,
+      "layer": "scalp",
+      "n": 1,
+      "pnl": -656
+    },
+    {
+      "day": "2026-07-23",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 4,
+      "pnl": 1100
+    },
+    {
+      "day": "2026-07-24",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 14,
+      "pnl": 1106
+    },
+    {
+      "day": "2026-07-24",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 3,
+      "pnl": -25
+    },
+    {
+      "day": "2026-07-24",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 7,
+      "pnl": 597
+    },
+    {
+      "day": "2026-07-24",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 1,
+      "pnl": 28
+    },
+    {
+      "day": "2026-07-24",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 8,
+      "pnl": -4
+    },
+    {
+      "day": "2026-07-24",
+      "strategy": 3,
+      "layer": "scalp",
+      "n": 4,
+      "pnl": -898
+    },
+    {
+      "day": "2026-07-24",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 1,
+      "pnl": 28
+    },
+    {
+      "day": "2026-07-26",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 2,
+      "pnl": 29
+    },
+    {
+      "day": "2026-07-26",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 1,
+      "pnl": -1850
+    },
+    {
+      "day": "2026-07-26",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 2,
+      "pnl": 37
+    },
+    {
+      "day": "2026-07-26",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 1,
+      "pnl": -1852
+    },
+    {
+      "day": "2026-07-27",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 12,
+      "pnl": -2074
+    },
+    {
+      "day": "2026-07-27",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 5,
+      "pnl": -171
+    },
+    {
+      "day": "2026-07-27",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 9,
+      "pnl": -1342
+    },
+    {
+      "day": "2026-07-27",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 3,
+      "pnl": 80
+    },
+    {
+      "day": "2026-07-27",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 12,
+      "pnl": -246
+    },
+    {
+      "day": "2026-07-27",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 3,
+      "pnl": 72
+    },
+    {
+      "day": "2026-07-28",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 3,
+      "pnl": 715
+    },
+    {
+      "day": "2026-07-28",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 2,
+      "pnl": 29
+    },
+    {
+      "day": "2026-07-28",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 6,
+      "pnl": -751
+    },
+    {
+      "day": "2026-07-28",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 3,
+      "pnl": 1560
+    },
+    {
+      "day": "2026-07-28",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 4,
+      "pnl": -2480
+    },
+    {
+      "day": "2026-07-28",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 3,
+      "pnl": 2514
+    },
+    {
+      "day": "2026-07-29",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 7,
+      "pnl": 546
+    },
+    {
+      "day": "2026-07-29",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 9,
+      "pnl": -1111
+    },
+    {
+      "day": "2026-07-29",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 5,
+      "pnl": 140
+    },
+    {
+      "day": "2026-07-29",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 14,
+      "pnl": 164
+    },
+    {
+      "day": "2026-07-29",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 5,
+      "pnl": 139
+    },
+    {
+      "day": "2026-07-30",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 5,
+      "pnl": 981
+    },
+    {
+      "day": "2026-07-30",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 3,
+      "pnl": 19
+    },
+    {
+      "day": "2026-07-30",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 6,
+      "pnl": 271
+    },
+    {
+      "day": "2026-07-30",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 2,
+      "pnl": 134
+    },
+    {
+      "day": "2026-07-30",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 9,
+      "pnl": 117
+    },
+    {
+      "day": "2026-07-30",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 2,
+      "pnl": -1342
+    },
+    {
+      "day": "2026-07-31",
+      "strategy": 1,
+      "layer": "scalp",
+      "n": 6,
+      "pnl": 817
+    },
+    {
+      "day": "2026-07-31",
+      "strategy": 2,
+      "layer": "breakout",
+      "n": 8,
+      "pnl": -565
+    },
+    {
+      "day": "2026-07-31",
+      "strategy": 2,
+      "layer": "scalp",
+      "n": 6,
+      "pnl": 756
+    },
+    {
+      "day": "2026-07-31",
+      "strategy": 2,
+      "layer": "swing",
+      "n": 5,
+      "pnl": 181
+    },
+    {
+      "day": "2026-07-31",
+      "strategy": 3,
+      "layer": "breakout",
+      "n": 10,
+      "pnl": -429
+    },
+    {
+      "day": "2026-07-31",
+      "strategy": 3,
+      "layer": "swing",
+      "n": 5,
+      "pnl": 159
+    }
   ]
 }

@@ -22,7 +22,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { backtest } from './simulator';
 import { FEATURES } from '../lib/engine/features';
 import { STRATEGIES } from '../lib/engine/strategies';
-import { cfgFor, ctxFor, SIM_BASE } from './wiring';
+import { cfgFor, simFor } from './wiring';
 import type { Bar } from '../lib/engine/types';
 
 interface LiveDay { day: string; strategy: number; layer: string; n: number; pnl: number }
@@ -51,7 +51,7 @@ for (const sid of ['1', '2', '3'] as const) {
   const liveS = liveAll.filter((d) => d.layer === 'scalp');
   if (!liveAll.length) continue;
 
-  const run = backtest(bars, FEATURES, cfgFor(profile), { ...SIM_BASE, ctxOpts: ctxFor(profile) });
+  const run = backtest(bars, FEATURES, cfgFor(profile), simFor(profile));
   const simByDay = new Map<string, { n: number; pnl: number }>();
   for (const t of run.trades) {
     const d = dayStr(t.exitTime);
