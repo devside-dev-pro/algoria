@@ -20,6 +20,20 @@ import { GOLD_BREAKOUT, type BreakoutConfig } from '../lib/engine/breakout';
 import type { EngineConfig } from '../lib/engine/config';
 import type { Bar } from '../lib/engine/types';
 
+
+// VOLUME = CONTRAINTE PRODUIT, pas une consequence (spec Mathieu 01/08) : S1 = 4-6 trades/jour (rassurer
+// un nouveau), S2 = 10-20 (le coeur de gamme), S3 = davantage et caps plus larges. Une strategie qui ne
+// trade pas ne se vend pas, quel que soit son P&L — un candidat a 0,5 trade/jour est DISQUALIFIE avant
+// meme qu'on regarde ses dollars. Le harnais doit donc juger sur les deux axes, sinon c'est moi qui
+// filtre a la main et j'oublierai.
+// Reperes par COUCHE (le scalp seul, pas la strategie entiere : en live, S2 tient ses 10-20 avec
+// scalp ~6,5 + breakout ~4,5 + swing ~3) :
+const volTag = (n: number, days: number) => {
+  const perDay = days > 0 ? n / days : 0;
+  const tag = perDay >= 5 ? '✓ S2-viable' : perDay >= 2 ? '~ appoint' : '✗ arret de jeu';
+  return `${perDay.toFixed(1)}/j ${tag}`;
+};
+
 const load = (f: string): Bar[] => JSON.parse(readFileSync(`backtest/.cache/${f}`, 'utf8'));
 const dayStr = (t: number) => new Date(t).toISOString().slice(0, 10);
 
@@ -138,9 +152,9 @@ function scalpWF() {
   }
   console.log(`\n→ ILLUSION in-sample (somme des tunes gagnants) : $${tuneIllusion.toFixed(0)}`);
   console.log(`→ RÉALITÉ out-of-sample (somme des fenêtres test) : $${oosTotal.toFixed(0)} — c'est CE chiffre qu'on a le droit de croire.`);
-  console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) — le nb de trades compte autant :');
+  console.log(`→ OOS par candidat (somme des fenêtres test, sans sélection) — sur ${folds * TEST} jours de test :`);
   for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1].pnl - a[1].pnl)) {
-    console.log('   ', name.padEnd(30), ('$' + v.pnl.toFixed(0)).padStart(9), String(v.n).padStart(6), 'trades');
+    console.log('   ', name.padEnd(30), ('$' + v.pnl.toFixed(0)).padStart(9), String(v.n).padStart(6), 'tr', volTag(v.n, folds * TEST).padStart(20));
   }
 }
 
@@ -159,8 +173,15 @@ function breakoutWF() {
     { name: 'sans BE ni trailing', cfg: { beTrigger: 0, trailActivate: 0, trailDist: 0 } },
     { name: 'N48 (canal 4h)', cfg: { N: 48 } },
     { name: 'N192 (canal 16h)', cfg: { N: 192 } },
+    // BALAYAGE ADX (01/08) : ADX ≥ 25 est sorti largement en tête (+$10 313 OOS sur 102 trades), mais un
+    // seul point ne prouve rien — un pic isolé entouré de creux, c'est du bruit qu'on a pris pour un edge.
+    // On balaie 20 → 30 : si la courbe monte puis redescend en douceur, c'est une propriété du marché ;
+    // si 25 est un pic solitaire, c'est la valeur qui allait bien à juillet et rien de plus.
     { name: 'régime ADX ≥ 20', opts: { regime: { adxMin: 20 } } },
+    { name: 'régime ADX ≥ 22', opts: { regime: { adxMin: 22 } } },
     { name: 'régime ADX ≥ 25', opts: { regime: { adxMin: 25 } } },
+    { name: 'régime ADX ≥ 28', opts: { regime: { adxMin: 28 } } },
+    { name: 'régime ADX ≥ 30', opts: { regime: { adxMin: 30 } } },
     { name: 'régime ER ≥ 0.25', opts: { regime: { erMin: 0.25 } } },
     { name: 'régime ER ≥ 0.35', opts: { regime: { erMin: 0.35 } } },
     { name: 'régime ADX ≥ 25 + ER ≥ 0.25', opts: { regime: { adxMin: 25, erMin: 0.25 } } },
@@ -202,9 +223,9 @@ function breakoutWF() {
   }
   console.log(`\n→ ILLUSION in-sample (somme des tunes gagnants) : $${tuneIllusion.toFixed(0)}`);
   console.log(`→ RÉALITÉ out-of-sample (somme des fenêtres test) : $${oosTotal.toFixed(0)}`);
-  console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) — le nb de trades compte autant :');
+  console.log(`→ OOS par candidat (somme des fenêtres test, sans sélection) — sur ${folds * TEST} jours de test :`);
   for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1].pnl - a[1].pnl)) {
-    console.log('   ', name.padEnd(30), ('$' + v.pnl.toFixed(0)).padStart(9), String(v.n).padStart(6), 'trades');
+    console.log('   ', name.padEnd(30), ('$' + v.pnl.toFixed(0)).padStart(9), String(v.n).padStart(6), 'tr', volTag(v.n, folds * TEST).padStart(20));
   }
 }
 
