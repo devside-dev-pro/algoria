@@ -31,6 +31,21 @@ export interface EngineConfig {
   minLot: number;
   minStopAtr: number;
   maxStopAtr: number;
+  // PLAFOND ABSOLU du stop, en unités de PRIX ($/once pour l'or) — étude forensique 01/08 sur les 343
+  // trades scalp de juillet en base. Le classement par distance de stop est sans appel :
+  //     < 2 $ : 246 trades  +$37 388  98 % de réussite
+  //   4 - 6 $ :  23 trades   −$6 777  39 %
+  //   6 - 9 $ :  46 trades  −$25 673  24 %
+  //    ≥ 9 $ :  25 trades  −$16 462  28 %
+  // Ce n'est pas seulement que la perte est plus grosse : le TAUX DE RÉUSSITE s'effondre. La raison est
+  // mécanique — tout le système vit du breakeven précoce à 0,15R. Avec un stop à 1,50 $, le BE s'arme
+  // après 22 centimes de mouvement favorable, presque toujours. Avec un stop à 12 $, il faut 1,80 $ : le
+  // trade part au stop plein avant. Les setups à stop large ne sont pas plus risqués, ils sortent de la
+  // logique du système.
+  // Pourquoi en PRIX et pas en ATR : maxStopAtr 2.8 avec un ATR de 3-5 $ en séance autorise 8 à 14 $ —
+  // il laisse passer exactement ce qu'il devrait bloquer. Le plafond doit être absolu pour mordre.
+  // undefined = pas de plafond (comportement actuel).
+  maxStopPrice?: number;
   minRR: number;
   emaGate?: 'off' | 'align' | 'notOpposed'; // filtre d'entrée sur la tendance EMA : 'align' = EMA doit soutenir le sens ; 'notOpposed' = refuse seulement si l'EMA s'oppose (plat OK). Défaut off.
   // GATE RÉGIME (décorrélation) : ne trade que dans CE régime de marché (context.regime). 'range' = rejets

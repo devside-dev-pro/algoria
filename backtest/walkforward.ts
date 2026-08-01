@@ -73,6 +73,17 @@ function scalpWF() {
     // ne les arrete pas. On serre le plafond — en sachant que trop serrer tue l'edge (deja vu le 22/07).
     { name: 'stop max 2.0 ATR', cfg: { maxStopAtr: 2.0 } },
     { name: 'stop max 1.5 ATR', cfg: { maxStopAtr: 1.5 } },
+    // PLAFOND ABSOLU (01/08) — LE candidat de la nuit. L'ATR est un mauvais juge : en séance il monte à
+    // 3-5 $, donc maxStopAtr 2.8 autorise 8-14 $, exactement la zone qui saigne (et 1.5 ATR ne laisse
+    // passer AUCUN trade — l'ATR ne sait pas doser). Le forensique dit que la frontière vit en dollars,
+    // pas en multiples : < 2 $ = +$37 388 à 98 % de réussite, ≥ 4 $ = −$48 912.
+    // Trois valeurs autour de la frontière observée. Si les trois tiennent, c'est une propriété du
+    // système ; si seule l'une tient, c'est la frontière de juillet et rien d'autre.
+    { name: 'stop max 2$ (absolu)', cfg: { maxStopPrice: 2 } },
+    { name: 'stop max 3$ (absolu)', cfg: { maxStopPrice: 3 } },
+    { name: 'stop max 4$ (absolu)', cfg: { maxStopPrice: 4 } },
+    { name: 'stop max 3$ + nuit 19h-05h', cfg: { maxStopPrice: 3 }, sim: { blockEntryHours: [[5, 19]] } },
+    { name: 'PROFIL S1 + stop max 3$', profile: STRATEGIES['1'], cfg: { maxStopPrice: 3 } },
     { name: 'nuit 19h-05h + stop max 2.0', cfg: { maxStopAtr: 2.0 }, sim: { blockEntryHours: [[5, 19]] } },
     { name: 'PROFIL S1 COMPLET', profile: STRATEGIES['1'] },
     { name: 'PROFIL S1 + nuit 19h-05h', profile: STRATEGIES['1'], sim: { blockEntryHours: [[5, 19]] } },
