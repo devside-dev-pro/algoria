@@ -35,6 +35,16 @@ function scalpWF() {
     // la nuit/Asie. Les overnights restent intacts — on bloque seulement les NOUVELLES entrées de jour.
     { name: 'sans entrées 07-17 UTC', sim: { blockEntryHours: [[7, 17]] } },
     { name: 'sans entrées 12-17 UTC', sim: { blockEntryHours: [[12, 17]] } },
+    // FILTRE DE RÉGIME (01/08). Deux familles de mesure, testées séparément avant d'être combinées :
+    // si l'une seule suffit, on garde la plus simple. Seuils volontairement dans les conventions de
+    // place (ADX 20/25, ER 0.25/0.35) plutôt qu'optimisés — un seuil choisi sur la donnée serait
+    // exactement le péché que ce fichier existe pour empêcher.
+    { name: 'régime ADX ≥ 20', sim: { regime: { adxMin: 20 } } },
+    { name: 'régime ADX ≥ 25', sim: { regime: { adxMin: 25 } } },
+    { name: 'régime ER ≥ 0.25', sim: { regime: { erMin: 0.25 } } },
+    { name: 'régime ER ≥ 0.35', sim: { regime: { erMin: 0.35 } } },
+    { name: 'régime ADX ≥ 20 + ER ≥ 0.25', sim: { regime: { adxMin: 20, erMin: 0.25 } } },
+    { name: 'régime ADX ≥ 20 + nuit only', sim: { regime: { adxMin: 20 }, blockEntryHours: [[12, 17]] } },
   ];
   // folds : ~15 jours de tune → ~5 jours de test, en roulant (bornes par index de bougie)
   const days = [...new Set(bars.map((b) => dayStr(b.time)))].sort();
