@@ -12,83 +12,18 @@ import { readFileSync } from 'node:fs';
 // dayLock (partagés entre couches en live — les simuler sur la couche seule fausserait dans les 2 sens),
 // pas de news-lockout, pas de priorité scalp (le scalp prend la bougie avant le breakout en live).
 //   npx tsx backtest/breakout.ts
-import { breakoutSignal, GOLD_BREAKOUT, type BreakoutConfig } from '../lib/engine/breakout';
-import { regimeMask, type RegimeFilter } from '../lib/engine/regime';
-import { SCALP_CONFIG } from '../lib/engine/config';
+import { GOLD_BREAKOUT, type BreakoutConfig } from '../lib/engine/breakout';
+import { type RegimeFilter } from '../lib/engine/regime';
 import { metrics } from './metrics';
 import type { Bar } from '../lib/engine/types';
-import type { BacktestRun, SimTrade } from './simulator';
+import type { BacktestRun } from './simulator';
+import { simBreakout as simBk, BK_COSTS, BK_START, type BkOpts } from './breakout-core';
 
 const bars: Bar[] = JSON.parse(readFileSync('backtest/.cache/XAUUSD-M5-15.json', 'utf8'));
 const dayStr = (t: number) => new Date(t).toISOString().slice(0, 10);
-const COSTS = { spread: 0.2, slippage: 0.05, commissionPerLot: 7, contractSize: 100 }; // frais RaiseFX mesurés (= SIM_BASE)
-const START = 70_000;
-const WINDOW = 600; // le runner ne voit qu'une fenêtre glissante de bougies — même discipline ici
-
-interface Pos { dir: 1 | -1; direction: 'long' | 'short'; entryPrice: number; entryTime: number; riskDist: number; risk: number; stop: number; tp: number; peak: number; lot: number; confidence: number }
-
-// Sim breakout : mêmes règles causales que simulator.ts (stop avant TP, entrée à l'open de i+1,
-// stop figé par les bougies précédentes), 1 position à la fois (checkRisk live = 1 pos/symbole).
-function simBreakout(cfg: BreakoutConfig, c = COSTS, opts?: { noEntryFriFrom?: number; regime?: RegimeFilter }): BacktestRun {
-  let balance = START;
-  // FILTRE DE RÉGIME (01/08) : le breakout est la couche la plus exposée au marché latéral — un canal
-  // Donchian percé sans tendance derrière, c'est un faux départ qui paie le spread puis le stop.
-  const regimeOk = opts?.regime ? regimeMask(bars, opts.regime) : null;
-  let pos: Pos | null = null;
-  const trades: SimTrade[] = [];
-  const equity: { time: number; equity: number }[] = [];
-  const close = (px: number, time: number, reason: SimTrade['reason']) => {
-    if (!pos) return;
-    const pnl = (px - pos.entryPrice) * pos.dir * pos.lot * c.contractSize - c.commissionPerLot * pos.lot;
-    balance += pnl;
-    trades.push({ dir: pos.direction, entryTime: pos.entryTime, entryPrice: pos.entryPrice, exitTime: time, exitPrice: px, reason, lot: pos.lot, pnl, r: pos.risk ? pnl / pos.risk : 0, confidence: pos.confidence });
-    pos = null;
-  };
-  for (let i = cfg.N + 20; i < bars.length - 1; i++) {
-    const bar = bars[i];
-    if (pos) {
-      const long = pos.dir === 1;
-      const hitStop = long ? bar.low <= pos.stop : bar.high >= pos.stop;
-      const hitTp = long ? bar.high >= pos.tp : bar.low <= pos.tp;
-      if (hitStop) {
-        const above = pos.dir * (pos.stop - pos.entryPrice);
-        close(pos.stop, bar.time, above > 0.1 * pos.riskDist ? 'trail' : above >= -1e-9 ? 'be' : 'sl');
-      } else if (hitTp) close(pos.tp, bar.time, 'tp');
-      else {
-        pos.peak = long ? Math.max(pos.peak, bar.high) : Math.min(pos.peak, bar.low);
-        const fav = pos.dir * (pos.peak - pos.entryPrice);
-        if (cfg.beTrigger && fav >= cfg.beTrigger * pos.riskDist) {
-          const be = pos.entryPrice + pos.dir * 0.05 * pos.riskDist; // BE+ couvre les coûts (= manage.ts)
-          pos.stop = long ? Math.max(pos.stop, be) : Math.min(pos.stop, be);
-        }
-        if (cfg.trailActivate && cfg.trailDist && fav >= cfg.trailActivate * pos.riskDist) {
-          const trail = pos.peak - pos.dir * cfg.trailDist * pos.riskDist;
-          pos.stop = long ? Math.max(pos.stop, trail) : Math.min(pos.stop, trail);
-        }
-      }
-    }
-    equity.push({ time: bar.time, equity: balance + (pos ? (bar.close - pos.entryPrice) * pos.dir * pos.lot * c.contractSize : 0) });
-    if (!pos && !(regimeOk && !regimeOk[i])) {
-      const lo = Math.max(0, i + 1 - WINDOW);
-      const sig = breakoutSignal('XAUUSD', bars.slice(lo, i + 1), cfg, 'scalp');
-      if (sig) {
-        const next = bars[i + 1];
-        if (opts?.noEntryFriFrom != null) { const d = new Date(next.time); if (d.getUTCDay() === 5 && d.getUTCHours() >= opts.noEntryFriFrom) continue; }
-        const dir = sig.direction === 'long' ? 1 : -1;
-        const entryPrice = next.open + dir * (c.spread / 2 + c.slippage);
-        const riskDist = Math.abs(entryPrice - sig.stopLoss);
-        if (riskDist <= 0) continue;
-        // GARDE LIVE maxOpenRiskPct (risk.ts:21) : les gaps de week-end gonflent l'ATR → SL à 50-160$ de
-        // distance = 7-23% du solde risqués. Le live REFUSE ces entrées (expo max 3%) — sans cette garde,
-        // le sim affichait +$89k/mois portés par 5 trades-monstres jamais pris en réel (bug attrapé le 29/07).
-        if ((riskDist * sig.lot * c.contractSize) / balance > SCALP_CONFIG.risk.maxOpenRiskPct) continue;
-        pos = { dir: dir as 1 | -1, direction: sig.direction, entryPrice, entryTime: next.time, riskDist, risk: riskDist * sig.lot * c.contractSize, stop: sig.stopLoss, tp: sig.takeProfits[0], peak: entryPrice, lot: sig.lot, confidence: sig.confidence };
-      }
-    }
-  }
-  if (pos !== null) close(bars[bars.length - 1].close, bars[bars.length - 1].time, 'eod');
-  return { trades, equity, finalBalance: balance };
-}
+const COSTS = BK_COSTS;
+const START = BK_START;
+const simBreakout = (cfg: BreakoutConfig, c = COSTS, opts?: BkOpts) => simBk(bars, cfg, c, opts);
 
 const pct = (x: number) => Math.round(x * 100) + '%';
 const fmt = (r: BacktestRun, name: string) => {
@@ -99,8 +34,27 @@ const fmt = (r: BacktestRun, name: string) => {
   console.log(name.padEnd(44), String(m.trades).padStart(5), (m.profitFactor === Infinity ? '∞' : m.profitFactor.toFixed(2)).padStart(4), pct(m.winRate).padStart(4), ('$' + m.netPnl.toFixed(0)).padStart(7), (m.maxDrawdownPct * 100).toFixed(0).padStart(4) + '%', m.expectancyR.toFixed(2).padStart(4), ' ', part);
 };
 
-// ===== 1. VARIANTES (période complète du cache) =====
+// Gestion RÉALISTE : le live remonte le stop à la seconde. Tout ce qui suit tourne avec, sauf la
+// section 0 qui existe précisément pour montrer ce que l'ancien modèle inventait.
+const REAL = { intrabarManage: true };
+
+// ===== 0. MODÈLE DE GESTION — d'où venait l'écart de parité (étude 01/08) =====
+// Constat qui a déclenché cette section : en juillet, le sim breakout affichait +$4 037 quand le live
+// perdait −$4 612, avec une corrélation journalière de 0,59 (mêmes jours, montants opposés). La table des
+// sorties réelles (Supabase, trades S2 -bk- de juillet) donne la réponse en une ligne : 66 % de sorties
+// au BREAKEVEN en live contre 6 % en sim, et 7 % de TRAILING contre 41 %. Tout le profit simulé venait
+// d'un seau qui n'existe pas dans la vraie vie.
+// La cause n'est ni les prix ni les lots (lot 1 des deux côtés) : c'est le TEMPS. Le sim ne déplaçait le
+// stop qu'en fin de bougie et ne le testait qu'à la suivante — un sursis de 5 minutes que le live,
+// qui gère à la seconde, n'accorde jamais.
+console.log(`\n================  MODÈLE DE GESTION — sim vs live  ================`);
+console.log('LIVE juillet S2 (source : table trades)   90 trades   be 66%  trail 7%  sl 18%  tp 2%   net $-6240');
+console.log('variante'.padEnd(44), 'trades', ' PF ', 'win%', '  net$ ', ' DD% ', 'expR', '  sorties (part · R moy)');
+fmt(simBreakout(GOLD_BREAKOUT), 'PROD — ancien modèle (stop bougé 1×/bougie)');
+fmt(simBreakout(GOLD_BREAKOUT, COSTS, REAL), 'PROD — modèle réaliste (stop à la seconde)');
+
 console.log(`\n================  BREAKOUT GOLD M5 — ${dayStr(bars[0].time)} → ${dayStr(bars[bars.length - 1].time)}  ================`);
+console.log('(gestion réaliste — les chiffres d\'hier, plus flatteurs, tournaient sur l\'ancien modèle)');
 console.log('variante'.padEnd(44), 'trades', ' PF ', 'win%', '  net$ ', ' DD% ', 'expR', '  sorties (part · R moy)');
 const OLD: BreakoutConfig = { ...GOLD_BREAKOUT, beTrigger: 0.8, trailActivate: 1.2, trailDist: 1.2 }; // config d'avant l'étude 2/6→20/7
 const VARIANTS: Array<{ name: string; cfg: BreakoutConfig; opts?: { noEntryFriFrom?: number; regime?: RegimeFilter } }> = [
@@ -122,12 +76,12 @@ const VARIANTS: Array<{ name: string; cfg: BreakoutConfig; opts?: { noEntryFriFr
   { name: 'PROD + régime ER ≥ 0.35', cfg: GOLD_BREAKOUT, opts: { regime: { erMin: 0.35 } } },
   { name: 'PROD + régime ADX ≥ 20 + ER ≥ 0.25', cfg: GOLD_BREAKOUT, opts: { regime: { adxMin: 20, erMin: 0.25 } } },
 ];
-for (const v of VARIANTS) fmt(simBreakout(v.cfg, COSTS, v.opts), v.name);
+for (const v of VARIANTS) fmt(simBreakout(v.cfg, COSTS, { ...REAL, ...(v.opts ?? {}) }), v.name);
 
 // ===== 2. PAR MOIS (la config prod a été réglée sur 2/6→20/7 : juillet tardif = premier vrai OOS) =====
 console.log('\n================  PROD PAR MOIS (net $)  ================');
 {
-  const r = simBreakout(GOLD_BREAKOUT);
+  const r = simBreakout(GOLD_BREAKOUT, COSTS, REAL);
   const byM = new Map<string, { n: number; pnl: number }>();
   for (const t of r.trades) { const m = dayStr(t.exitTime).slice(0, 7); const cur = byM.get(m) ?? { n: 0, pnl: 0 }; cur.n++; cur.pnl += t.pnl; byM.set(m, cur); }
   for (const [m, v] of [...byM.entries()].sort()) console.log(m, String(v.n).padStart(5), 'trades', ('$' + v.pnl.toFixed(0)).padStart(9));
@@ -149,7 +103,7 @@ console.log('\n================  RÉGIME MOIS PAR MOIS (net $ · trades)  ======
   ];
   const months = new Set<string>();
   const rows = REG.map((v) => {
-    const r = simBreakout(GOLD_BREAKOUT, COSTS, v.regime ? { regime: v.regime } : undefined);
+    const r = simBreakout(GOLD_BREAKOUT, COSTS, { ...REAL, ...(v.regime ? { regime: v.regime } : {}) });
     const by = new Map<string, { n: number; pnl: number }>();
     for (const t of r.trades) {
       const m = dayStr(t.exitTime).slice(0, 7);
@@ -172,26 +126,42 @@ const LIVE: LiveDay[] = JSON.parse(readFileSync('backtest/fixtures/live-daily.js
 const liveBk = LIVE.filter((d) => d.layer === 'breakout' && d.strategy === 2); // S2 = tout juillet (S3 même moteur mais ne démarre que le 20/07)
 if (liveBk.length >= 3) {
   const barDays = new Set(bars.map((b) => dayStr(b.time)));
-  const r = simBreakout(GOLD_BREAKOUT);
-  const simByDay = new Map<string, { n: number; pnl: number }>();
-  for (const t of r.trades) { const d = dayStr(t.exitTime); const cur = simByDay.get(d) ?? { n: 0, pnl: 0 }; cur.n++; cur.pnl += t.pnl; simByDay.set(d, cur); }
+  // LE VERDICT du modèle de gestion : les deux moteurs jugés sur les MÊMES jours réels. La corrélation
+  // ne suffit pas — l'ancien modèle la passait déjà (0,59) tout en se trompant de $8 649 sur le total.
+  // Ce qui compte ici, c'est l'écart au live : si la gestion intra-bougie est la bonne explication,
+  // le total du modèle réaliste doit s'effondrer vers le live.
+  const byDay = (r: BacktestRun) => {
+    const m = new Map<string, { n: number; pnl: number }>();
+    for (const t of r.trades) { const d = dayStr(t.exitTime); const cur = m.get(d) ?? { n: 0, pnl: 0 }; cur.n++; cur.pnl += t.pnl; m.set(d, cur); }
+    return m;
+  };
+  const oldDay = byDay(simBreakout(GOLD_BREAKOUT));
+  const newDay = byDay(simBreakout(GOLD_BREAKOUT, COSTS, REAL));
   console.log('\n================  PARITÉ JUILLET — couche breakout S2 live vs sim  ================');
-  console.log('jour        live n  live $   sim n   sim $     Δ$');
-  let lp = 0, sp = 0;
-  const daily: Array<{ live: number; sim: number }> = [];
+  console.log('jour        live n  live $   ancien $   réaliste $   Δ réaliste');
+  let lp = 0, so = 0, sn = 0;
+  const daily: Array<{ live: number; old: number; neo: number }> = [];
   for (const d of liveBk.filter((x) => barDays.has(x.day))) {
-    const s = simByDay.get(d.day) ?? { n: 0, pnl: 0 };
-    lp += d.pnl; sp += s.pnl;
-    daily.push({ live: d.pnl, sim: s.pnl });
-    console.log(d.day, String(d.n).padStart(7), String(d.pnl).padStart(7), String(s.n).padStart(7), s.pnl.toFixed(0).padStart(7), (s.pnl - d.pnl).toFixed(0).padStart(7));
+    const o = oldDay.get(d.day) ?? { n: 0, pnl: 0 };
+    const n = newDay.get(d.day) ?? { n: 0, pnl: 0 };
+    lp += d.pnl; so += o.pnl; sn += n.pnl;
+    daily.push({ live: d.pnl, old: o.pnl, neo: n.pnl });
+    console.log(d.day, String(d.n).padStart(7), String(d.pnl).padStart(7), o.pnl.toFixed(0).padStart(10), n.pnl.toFixed(0).padStart(12), (n.pnl - d.pnl).toFixed(0).padStart(12));
   }
   if (daily.length >= 3) {
-    const mL = lp / daily.length, mS = sp / daily.length;
-    let cov = 0, vL = 0, vS = 0;
-    for (const d of daily) { cov += (d.live - mL) * (d.sim - mS); vL += (d.live - mL) ** 2; vS += (d.sim - mS) ** 2; }
-    const corr = vL && vS ? cov / Math.sqrt(vL * vS) : 0;
-    console.log(`TOTAL        live $${lp}  sim $${sp.toFixed(0)}   corr(jours) = ${corr.toFixed(2)}`);
-    console.log(corr > 0.5 ? '✅ le sim breakout vit les mêmes jours que le live' : '⚠️ corrélation faible — priorité scalp/caps live non simulés, ou config live ≠ sim sur la période');
+    const corr = (pick: (d: (typeof daily)[number]) => number) => {
+      const mL = lp / daily.length, mS = daily.reduce((s, d) => s + pick(d), 0) / daily.length;
+      let cov = 0, vL = 0, vS = 0;
+      for (const d of daily) { cov += (d.live - mL) * (pick(d) - mS); vL += (d.live - mL) ** 2; vS += (pick(d) - mS) ** 2; }
+      return vL && vS ? cov / Math.sqrt(vL * vS) : 0;
+    };
+    console.log(`TOTAL        live $${lp}     ancien $${so.toFixed(0)}     réaliste $${sn.toFixed(0)}`);
+    console.log(`écart au live               ancien $${(so - lp).toFixed(0)}     réaliste $${(sn - lp).toFixed(0)}`);
+    console.log(`corr(jours)                 ancien ${corr((d) => d.old).toFixed(2)}        réaliste ${corr((d) => d.neo).toFixed(2)}`);
+    const better = Math.abs(sn - lp) < Math.abs(so - lp);
+    console.log(better
+      ? `✅ la gestion intra-bougie explique ${Math.round((1 - Math.abs(sn - lp) / Math.abs(so - lp)) * 100)} % de l'écart — le sim ment beaucoup moins`
+      : '⚠️ la gestion intra-bougie n\'explique pas l\'écart — chercher ailleurs (priorité scalp, caps journaliers, news-lockout)');
   }
 } else {
   console.log('\n[breakout] fixture sans couche breakout suffisante — parité juillet sautée.');
@@ -200,7 +170,7 @@ if (liveBk.length >= 3) {
 // ===== 4. STRESS COÛTS sur la PROD =====
 console.log('\n================  STRESS COÛTS — PROD  ================');
 for (const mult of [1, 2, 3]) {
-  const m = metrics(simBreakout(GOLD_BREAKOUT, { ...COSTS, spread: COSTS.spread * mult, slippage: COSTS.slippage * mult }), START);
+  const m = metrics(simBreakout(GOLD_BREAKOUT, { ...COSTS, spread: COSTS.spread * mult, slippage: COSTS.slippage * mult }, REAL), START);
   console.log(`coûts ×${mult}`.padEnd(10), String(m.trades).padStart(5), 'trades', ('$' + m.netPnl.toFixed(0)).padStart(9), 'PF', m.profitFactor === Infinity ? '∞' : m.profitFactor.toFixed(2));
 }
 console.log('\n[breakout] terminé — backtest only, zéro impact live.');

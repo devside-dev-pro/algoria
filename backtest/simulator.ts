@@ -39,6 +39,15 @@ export interface SimParams {
   // NOUVELLES entrées quand l'ADX et/ou l'Efficiency Ratio disent que le marché n'a pas de direction.
   // Les positions ouvertes vivent leur vie. Le masque est causal (valeur en i = bougies ≤ i seulement).
   regime?: import('../lib/engine/regime').RegimeFilter;
+  // GESTION INTRA-BOUGIE (étude 01/08 — LE trou de la parité breakout). Le live gère le stop TOUTES LES
+  // SECONDES (manage.ts sur le tick) ; le sim ne le déplaçait qu'en fin de bougie et ne le testait qu'à la
+  // bougie SUIVANTE. Une bougie qui monte à +0,75R puis revient à l'entrée sort au breakeven en live, alors
+  // que le sim offrait au trade une bougie de survie en plus — le temps de repartir et d'atteindre le
+  // trailing. D'où 41 % de sorties 'trail' en sim contre 7 % en live, et tout l'edge simulé qui vient de là.
+  // Activé : après avoir monté le stop avec l'extrême FAVORABLE de la bougie, on teste immédiatement
+  // l'extrême ADVERSE de la MÊME bougie. Un seul chemin supposé (ça monte, puis ça redescend) — donc pas de
+  // double peine avec le stop initial, déjà testé avant.
+  intrabarManage?: boolean;
   ignoreTp?: boolean; // ignore le TP fixe → on ne sort que sur le stop (trailing) ou en fin de données
   ctxOpts?: Partial<import('../lib/engine/context').ContextOptions>; // options de contexte (session/vol) pour l'exploration
 }
@@ -156,6 +165,14 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       if (trailAct && trailD && fav >= trailAct * pos.riskDist) {
         const trail = pos.peak - dir * trailD * pos.riskDist;
         pos.stop = long ? Math.max(pos.stop, trail) : Math.min(pos.stop, trail);
+      }
+
+      // Le stop qu'on vient de remonter est-il déjà touché par l'extrême adverse de CETTE bougie ?
+      // C'est ce que vit le live, qui gère à la seconde. Sans ça, le sim accorde un sursis d'une bougie.
+      if (p.intrabarManage && (long ? bar.low <= pos.stop : bar.high >= pos.stop)) {
+        const above = dir * (pos.stop - pos.entryPrice);
+        close(pos, pos.stop, bar.time, above > 0.1 * pos.riskDist ? 'trail' : above >= -1e-9 ? 'be' : 'sl');
+        open.splice(k, 1);
       }
     }
 
