@@ -6,13 +6,17 @@ import { readFileSync } from 'node:fs';
 // qu'on a le droit de croire. RÈGLE D'OR : aucun changement de config ne passe en live s'il ne bat pas la
 // prod sur les fenêtres test.
 //   npx tsx backtest/walkforward.ts            → scalp M5 (S2 par défaut, grille de configs)
+//   npx tsx backtest/walkforward.ts breakout   → breakout M5 (variantes + filtres de régime)
 //   npx tsx backtest/walkforward.ts swing      → swing H1 (variantes d'exit)
+//   npx tsx backtest/walkforward.ts all        → les trois
 import { backtest, type SimParams } from './simulator';
 import { metrics } from './metrics';
 import { FEATURES } from '../lib/engine/features';
 import { STRATEGIES } from '../lib/engine/strategies';
 import { computeIndicators, labBacktest, SPECS, START, type Exits, type StrategyDef } from './labcore';
 import { cfgFor, ctxFor, SIM_BASE } from './wiring';
+import { simBreakout, BK_COSTS, BK_START, type BkOpts } from './breakout-core';
+import { GOLD_BREAKOUT, type BreakoutConfig } from '../lib/engine/breakout';
 import type { EngineConfig } from '../lib/engine/config';
 import type { Bar } from '../lib/engine/types';
 
@@ -86,6 +90,70 @@ function scalpWF() {
   for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1] - a[1])) console.log('   ', name.padEnd(30), '$' + v.toFixed(0));
 }
 
+// ===== BREAKOUT M5 : la couche qui n'avait aucun walk-forward (01/08) =====
+// Ses chiffres étaient TOUS in-sample, y compris le filtre de régime qui semblait prometteur (ADX ≥ 25 :
+// espérance doublée, deux mois sur deux). « Semblait » est le mot : un résultat in-sample sur une couche
+// dont la config a déjà été re-réglée in-sample une fois n'est pas une preuve, c'est une répétition du
+// même péché. Ici on règle sur la fenêtre A et on n'évalue que sur la B, jamais vue.
+// Gestion INTRA-BOUGIE partout : depuis le 01/08 le sim déplace le stop comme le live (à la seconde).
+function breakoutWF() {
+  const bars = load('XAUUSD-M5-15.json');
+  type Cand = { name: string; cfg?: Partial<BreakoutConfig>; opts?: BkOpts };
+  const CANDS: Cand[] = [
+    { name: 'PROD' },
+    { name: 'ANCIENNE (BE .8 · trail 1.2@1.2)', cfg: { beTrigger: 0.8, trailActivate: 1.2, trailDist: 1.2 } },
+    { name: 'sans BE ni trailing', cfg: { beTrigger: 0, trailActivate: 0, trailDist: 0 } },
+    { name: 'N48 (canal 4h)', cfg: { N: 48 } },
+    { name: 'N192 (canal 16h)', cfg: { N: 192 } },
+    { name: 'régime ADX ≥ 20', opts: { regime: { adxMin: 20 } } },
+    { name: 'régime ADX ≥ 25', opts: { regime: { adxMin: 25 } } },
+    { name: 'régime ER ≥ 0.25', opts: { regime: { erMin: 0.25 } } },
+    { name: 'régime ER ≥ 0.35', opts: { regime: { erMin: 0.35 } } },
+    { name: 'régime ADX ≥ 25 + ER ≥ 0.25', opts: { regime: { adxMin: 25, erMin: 0.25 } } },
+    { name: 'pas d\'entrée ven ≥ 12h UTC', opts: { noEntryFriFrom: 12 } },
+  ];
+  const run = (bs: Bar[], c: Cand) => metrics(simBreakout(bs, { ...GOLD_BREAKOUT, ...(c.cfg ?? {}) }, BK_COSTS, { intrabarManage: true, ...(c.opts ?? {}) }), BK_START);
+  const days = [...new Set(bars.map((b) => dayStr(b.time)))].sort();
+  const TUNE = 15, TEST = 5;
+  console.log(`\n========== WALK-FORWARD BREAKOUT (M5) — ${days.length} jours · tune ${TUNE} → test ${TEST} ==========`);
+  console.log('fold  (tune → test)             choisi sur tune            tune $     TEST $   TEST n');
+  let oosTotal = 0, tuneIllusion = 0, folds = 0;
+  const oosByCand = new Map<string, { pnl: number; n: number }>();
+  for (let start = 0; start + TUNE + TEST <= days.length; start += TEST) {
+    const tuneDays = new Set(days.slice(start, start + TUNE));
+    const testDays = new Set(days.slice(start + TUNE, start + TUNE + TEST));
+    // le canal Donchian a besoin de N=96 bougies d'amorce : sans ce préfixe, chaque fenêtre démarrerait
+    // aveugle et le premier tiers des jours ne produirait aucun signal (biais silencieux contre le test).
+    const tuneBars = bars.filter((b) => tuneDays.has(dayStr(b.time)));
+    const testBars = bars.filter((b) => testDays.has(dayStr(b.time)));
+    if (tuneBars.length < 400 || testBars.length < 300) continue;
+    let best: { c: Cand; net: number } | null = null;
+    for (const c of CANDS) {
+      const m = run(tuneBars, c);
+      if (!best || m.netPnl > best.net) best = { c, net: m.netPnl };
+    }
+    if (!best) continue;
+    const t = run(testBars, best.c);
+    for (const c of CANDS) {
+      const tc = run(testBars, c);
+      const cur = oosByCand.get(c.name) ?? { pnl: 0, n: 0 };
+      cur.pnl += tc.netPnl; cur.n += tc.trades;
+      oosByCand.set(c.name, cur);
+    }
+    oosTotal += t.netPnl; tuneIllusion += best.net; folds++;
+    console.log(
+      `#${folds}`.padEnd(5), `(${days[start]}→${days[start + TUNE + TEST - 1]})`.padEnd(26),
+      best.c.name.padEnd(26), ('$' + best.net.toFixed(0)).padStart(8), ('$' + t.netPnl.toFixed(0)).padStart(9), String(t.trades).padStart(7),
+    );
+  }
+  console.log(`\n→ ILLUSION in-sample (somme des tunes gagnants) : $${tuneIllusion.toFixed(0)}`);
+  console.log(`→ RÉALITÉ out-of-sample (somme des fenêtres test) : $${oosTotal.toFixed(0)}`);
+  console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) — le nb de trades compte autant :');
+  for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1].pnl - a[1].pnl)) {
+    console.log('   ', name.padEnd(30), ('$' + v.pnl.toFixed(0)).padStart(9), String(v.n).padStart(6), 'trades');
+  }
+}
+
 // ===== SWING H1 : variantes d'exit en walk-forward (tune 9 mois → test 3 mois) =====
 function swingWF() {
   const ind = computeIndicators(load('XAUUSD-H1-15.json'));
@@ -136,6 +204,7 @@ function swingWF() {
 
 const which = process.argv[2] ?? 'scalp';
 if (which === 'swing') swingWF();
-else if (which === 'all') { scalpWF(); swingWF(); }
+else if (which === 'breakout') breakoutWF();
+else if (which === 'all') { scalpWF(); breakoutWF(); swingWF(); }
 else scalpWF();
 console.log('\n[walkforward] terminé — backtest only.');
