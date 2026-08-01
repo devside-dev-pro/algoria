@@ -33,6 +33,8 @@ export function constructTrade(cf: Confluence, ctx: MarketContext, mode: Mode, b
   const stopLoss = roundP(structural - dir * cfg.slAtrMult * atr); // buffer beyond structure — arrondi au pas de prix (sinon le broker rejette l'ordre)
   const riskDist = Math.abs(entry - stopLoss);
   if (riskDist < cfg.minStopAtr * atr || riskDist > cfg.maxStopAtr * atr) return null;
+  // plafond ABSOLU (voir config.ts) : les setups à stop large sortent de la logique du breakeven précoce
+  if (cfg.maxStopPrice && riskDist > cfg.maxStopPrice) return null;
 
   // TP: target R:R, clamped to the next opposing structure (never through a wall)
   const wall: Zone | undefined = long ? resistances[0] : supports[0];
