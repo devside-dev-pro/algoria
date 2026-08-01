@@ -1,6 +1,7 @@
 import type { Bar, EngineState, Feature, Mode, Signal } from '../lib/engine/types';
 import type { EngineConfig } from '../lib/engine/config';
 import { runTick } from '../lib/engine/pipeline';
+import { regimeMask } from '../lib/engine/regime';
 
 export interface SimParams {
   symbol: string;
@@ -34,6 +35,10 @@ export interface SimParams {
   // le sim dit pareil : l'edge scalp vit la nuit) : bloque les NOUVELLES entrées dont l'heure UTC tombe dans
   // [from, to). Les positions déjà ouvertes vivent leur vie (les overnights restent intacts).
   blockEntryHours?: Array<[number, number]>;
+  // FILTRE DE RÉGIME (étude 01/08 — « le trend following nous tue quand le marché range ») : refuse les
+  // NOUVELLES entrées quand l'ADX et/ou l'Efficiency Ratio disent que le marché n'a pas de direction.
+  // Les positions ouvertes vivent leur vie. Le masque est causal (valeur en i = bougies ≤ i seulement).
+  regime?: import('../lib/engine/regime').RegimeFilter;
   ignoreTp?: boolean; // ignore le TP fixe → on ne sort que sur le stop (trailing) ou en fin de données
   ctxOpts?: Partial<import('../lib/engine/context').ContextOptions>; // options de contexte (session/vol) pour l'exploration
 }
@@ -87,6 +92,9 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
   const beTrig = p.beTrigger ?? cfg.beTrigger ?? 0; // breakeven piloté par la config moteur (override possible via SimParams)
   const trailAct = p.trailActivate ?? cfg.trailActivate; // trailing lock piloté par la config moteur (même logique)
   const trailD = p.trailDist ?? cfg.trailDist;
+  // masque de régime précalculé UNE fois : chaque valeur ne dépend que des bougies ≤ i, donc le calculer
+  // d'avance ne donne aucune information future au moteur — c'est juste O(n) au lieu de O(n²).
+  const regimeOk = p.regime ? regimeMask(bars, p.regime) : null;
 
   const close = (pos: OpenPos, px: number, time: number, reason: SimTrade['reason']) => {
     const dir = pos.signal.direction === 'long' ? 1 : -1;
@@ -205,7 +213,9 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
     // 5) entrée à l'OUVERTURE de i+1 (jamais sur la bougie qu'on vient de lire → pas de lookahead)
     const entryHour = new Date(bars[i + 1].time).getUTCHours();
     const hourBlocked = p.blockEntryHours?.some(([from, to]) => entryHour >= from && entryHour < to) ?? false;
-    if (signal && !hourBlocked && !(p.weekendFlat && isFriCutoff(bars[i + 1].time))) {
+    // régime lu sur la bougie i (la dernière CLÔTURÉE), jamais sur i+1 où l'on entre
+    const regimeBlocked = regimeOk ? !regimeOk[i] : false;
+    if (signal && !hourBlocked && !regimeBlocked && !(p.weekendFlat && isFriCutoff(bars[i + 1].time))) {
       const next = bars[i + 1];
       const dir = signal.direction === 'long' ? 1 : -1;
       const entryPrice = next.open + dir * (p.spread / 2 + p.slippage);

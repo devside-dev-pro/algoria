@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 // pas de news-lockout, pas de priorité scalp (le scalp prend la bougie avant le breakout en live).
 //   npx tsx backtest/breakout.ts
 import { breakoutSignal, GOLD_BREAKOUT, type BreakoutConfig } from '../lib/engine/breakout';
+import { regimeMask, type RegimeFilter } from '../lib/engine/regime';
 import { SCALP_CONFIG } from '../lib/engine/config';
 import { metrics } from './metrics';
 import type { Bar } from '../lib/engine/types';
@@ -28,8 +29,11 @@ interface Pos { dir: 1 | -1; direction: 'long' | 'short'; entryPrice: number; en
 
 // Sim breakout : mêmes règles causales que simulator.ts (stop avant TP, entrée à l'open de i+1,
 // stop figé par les bougies précédentes), 1 position à la fois (checkRisk live = 1 pos/symbole).
-function simBreakout(cfg: BreakoutConfig, c = COSTS, opts?: { noEntryFriFrom?: number }): BacktestRun {
+function simBreakout(cfg: BreakoutConfig, c = COSTS, opts?: { noEntryFriFrom?: number; regime?: RegimeFilter }): BacktestRun {
   let balance = START;
+  // FILTRE DE RÉGIME (01/08) : le breakout est la couche la plus exposée au marché latéral — un canal
+  // Donchian percé sans tendance derrière, c'est un faux départ qui paie le spread puis le stop.
+  const regimeOk = opts?.regime ? regimeMask(bars, opts.regime) : null;
   let pos: Pos | null = null;
   const trades: SimTrade[] = [];
   const equity: { time: number; equity: number }[] = [];
@@ -64,7 +68,7 @@ function simBreakout(cfg: BreakoutConfig, c = COSTS, opts?: { noEntryFriFrom?: n
       }
     }
     equity.push({ time: bar.time, equity: balance + (pos ? (bar.close - pos.entryPrice) * pos.dir * pos.lot * c.contractSize : 0) });
-    if (!pos) {
+    if (!pos && !(regimeOk && !regimeOk[i])) {
       const lo = Math.max(0, i + 1 - WINDOW);
       const sig = breakoutSignal('XAUUSD', bars.slice(lo, i + 1), cfg, 'scalp');
       if (sig) {
@@ -99,7 +103,7 @@ const fmt = (r: BacktestRun, name: string) => {
 console.log(`\n================  BREAKOUT GOLD M5 — ${dayStr(bars[0].time)} → ${dayStr(bars[bars.length - 1].time)}  ================`);
 console.log('variante'.padEnd(44), 'trades', ' PF ', 'win%', '  net$ ', ' DD% ', 'expR', '  sorties (part · R moy)');
 const OLD: BreakoutConfig = { ...GOLD_BREAKOUT, beTrigger: 0.8, trailActivate: 1.2, trailDist: 1.2 }; // config d'avant l'étude 2/6→20/7
-const VARIANTS: Array<{ name: string; cfg: BreakoutConfig; opts?: { noEntryFriFrom?: number } }> = [
+const VARIANTS: Array<{ name: string; cfg: BreakoutConfig; opts?: { noEntryFriFrom?: number; regime?: RegimeFilter } }> = [
   { name: 'PROD (N96 · BE .7 · trail .5@.8)', cfg: GOLD_BREAKOUT },
   { name: 'ANCIENNE (BE .8 · trail 1.2@1.2)', cfg: OLD },
   { name: 'sans trailing (TP 3ATR sec)', cfg: { ...GOLD_BREAKOUT, trailActivate: 0, trailDist: 0 } },
@@ -108,6 +112,15 @@ const VARIANTS: Array<{ name: string; cfg: BreakoutConfig; opts?: { noEntryFriFr
   { name: 'N192 (canal 16h)', cfg: { ...GOLD_BREAKOUT, N: 192 } },
   { name: 'confirmation 0.25 ATR (plus stricte)', cfg: { ...GOLD_BREAKOUT, confirmAtr: 0.25 } },
   { name: 'PROD + pas d\'entrée ven ≥ 12h UTC', cfg: GOLD_BREAKOUT, opts: { noEntryFriFrom: 12 } },
+  // FILTRE DE RÉGIME (01/08) — c'est ICI qu'on l'attend : un canal percé sans tendance derrière est un
+  // faux départ qui paie le spread puis le stop. Si le filtre a une valeur quelque part, c'est sur cette
+  // couche. Le nombre de trades restants compte autant que le net : un filtre qui ne laisse passer que
+  // 5 trades sur 3 mois n'a rien prouvé, il a juste arrêté de jouer.
+  { name: 'PROD + régime ADX ≥ 20', cfg: GOLD_BREAKOUT, opts: { regime: { adxMin: 20 } } },
+  { name: 'PROD + régime ADX ≥ 25', cfg: GOLD_BREAKOUT, opts: { regime: { adxMin: 25 } } },
+  { name: 'PROD + régime ER ≥ 0.25', cfg: GOLD_BREAKOUT, opts: { regime: { erMin: 0.25 } } },
+  { name: 'PROD + régime ER ≥ 0.35', cfg: GOLD_BREAKOUT, opts: { regime: { erMin: 0.35 } } },
+  { name: 'PROD + régime ADX ≥ 20 + ER ≥ 0.25', cfg: GOLD_BREAKOUT, opts: { regime: { adxMin: 20, erMin: 0.25 } } },
 ];
 for (const v of VARIANTS) fmt(simBreakout(v.cfg, COSTS, v.opts), v.name);
 
@@ -118,6 +131,39 @@ console.log('\n================  PROD PAR MOIS (net $)  ================');
   const byM = new Map<string, { n: number; pnl: number }>();
   for (const t of r.trades) { const m = dayStr(t.exitTime).slice(0, 7); const cur = byM.get(m) ?? { n: 0, pnl: 0 }; cur.n++; cur.pnl += t.pnl; byM.set(m, cur); }
   for (const [m, v] of [...byM.entries()].sort()) console.log(m, String(v.n).padStart(5), 'trades', ('$' + v.pnl.toFixed(0)).padStart(9));
+}
+
+// ===== 2bis. RÉGIME MOIS PAR MOIS — le seul garde-fou anti-illusion disponible ici =====
+// Les seuils du filtre ne sont PAS optimisés sur la donnée (20/25 et 0.25/0.35 sont des conventions),
+// donc pas de tune/test à faire. Reste la question qui compte : le gain est-il régulier, ou porté par
+// un seul mois ? Un filtre qui gagne partout est crédible ; un filtre qui gagne sur un mois et perd sur
+// les autres est un hasard qu'on a confondu avec un edge.
+console.log('\n================  RÉGIME MOIS PAR MOIS (net $ · trades)  ================');
+{
+  const REG: Array<{ name: string; regime?: RegimeFilter }> = [
+    { name: 'PROD' },
+    { name: 'ADX≥20', regime: { adxMin: 20 } },
+    { name: 'ADX≥25', regime: { adxMin: 25 } },
+    { name: 'ER≥0.25', regime: { erMin: 0.25 } },
+    { name: 'ADX≥20+ER≥0.25', regime: { adxMin: 20, erMin: 0.25 } },
+  ];
+  const months = new Set<string>();
+  const rows = REG.map((v) => {
+    const r = simBreakout(GOLD_BREAKOUT, COSTS, v.regime ? { regime: v.regime } : undefined);
+    const by = new Map<string, { n: number; pnl: number }>();
+    for (const t of r.trades) {
+      const m = dayStr(t.exitTime).slice(0, 7);
+      months.add(m);
+      const cur = by.get(m) ?? { n: 0, pnl: 0 };
+      cur.n++; cur.pnl += t.pnl; by.set(m, cur);
+    }
+    return { name: v.name, by };
+  });
+  const ms = [...months].sort();
+  console.log('variante'.padEnd(18), ms.map((m) => m.padStart(14)).join(''));
+  for (const r of rows) {
+    console.log(r.name.padEnd(18), ms.map((m) => { const v = r.by.get(m); return (v ? `$${v.pnl.toFixed(0)}·${v.n}` : '—').padStart(14); }).join(''));
+  }
 }
 
 // ===== 3. PARITÉ JUILLET : sim ↔ couche breakout LIVE (fixture par couche) =====
