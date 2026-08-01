@@ -31,20 +31,22 @@ export interface EngineConfig {
   minLot: number;
   minStopAtr: number;
   maxStopAtr: number;
-  // PLAFOND ABSOLU du stop, en unités de PRIX ($/once pour l'or) — étude forensique 01/08 sur les 343
-  // trades scalp de juillet en base. Le classement par distance de stop est sans appel :
-  //     < 2 $ : 246 trades  +$37 388  98 % de réussite
-  //   4 - 6 $ :  23 trades   −$6 777  39 %
-  //   6 - 9 $ :  46 trades  −$25 673  24 %
-  //    ≥ 9 $ :  25 trades  −$16 462  28 %
-  // Ce n'est pas seulement que la perte est plus grosse : le TAUX DE RÉUSSITE s'effondre. La raison est
-  // mécanique — tout le système vit du breakeven précoce à 0,15R. Avec un stop à 1,50 $, le BE s'arme
-  // après 22 centimes de mouvement favorable, presque toujours. Avec un stop à 12 $, il faut 1,80 $ : le
-  // trade part au stop plein avant. Les setups à stop large ne sont pas plus risqués, ils sortent de la
-  // logique du système.
-  // Pourquoi en PRIX et pas en ATR : maxStopAtr 2.8 avec un ATR de 3-5 $ en séance autorise 8 à 14 $ —
-  // il laisse passer exactement ce qu'il devrait bloquer. Le plafond doit être absolu pour mordre.
-  // undefined = pas de plafond (comportement actuel).
+  // PLAFOND ABSOLU du stop, en unités de PRIX ($/once pour l'or). undefined = pas de plafond.
+  //
+  // ⚠️ HYPOTHÈSE TESTÉE ET RÉFUTÉE (01/08) — laissée en place, mais NE PAS la ressortir sans relire ceci.
+  // Le paramètre est né d'une analyse fausse : j'avais classé les trades de juillet par `trades.sl` en
+  // croyant lire la distance du stop À L'ENTRÉE. Or `trades.sl` est mis à jour par manageBreakeven
+  // (updateTradeStop) — c'est le stop FINAL. Un stop « à 0,50 $ de l'entrée » ne décrit pas un setup
+  // serré : il décrit un trade dont le breakeven a été appliqué, donc un trade GAGNANT. Les chiffres
+  // spectaculaires (< 2 $ → 98 % de réussite) ne mesuraient que « les gagnants ont gagné ».
+  // Preuve : reason='be' → distance moyenne 0,51 $ · reason='sl' → 8,12 $. C'est la sortie qui écrit la
+  // colonne, pas l'entrée.
+  //
+  // Relancée sur le VRAI stop initial (signals.stop_loss), la relation disparaît :
+  //    4-6 $ : 64 trades  −$2 025  ·  6-8 $ : 107 trades  +$124
+  //   8-11 $ : 96 trades  −$4 135  ·  ≥ 11 $ :  55 trades  +$2 071  ← le plus large est le plus rentable
+  // Et le walk-forward l'a dit tout seul : plafonds à 2/3/4 $ → ZÉRO trade, puisque les stops initiaux
+  // vivent entre 4 et 15 $. Le simulateur avait raison, l'analyse avait tort.
   maxStopPrice?: number;
   minRR: number;
   emaGate?: 'off' | 'align' | 'notOpposed'; // filtre d'entrée sur la tendance EMA : 'align' = EMA doit soutenir le sens ; 'notOpposed' = refuse seulement si l'EMA s'oppose (plat OK). Défaut off.
