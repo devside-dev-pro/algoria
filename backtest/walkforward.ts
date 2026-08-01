@@ -57,7 +57,25 @@ function scalpWF() {
     // ENTIER, puis chaque différence isolée : si une seule d'entre elles porte le résultat, on veut savoir
     // laquelle — une config qu'on ne comprend pas est une config qu'on ne saura pas défendre le jour où
     // elle cassera.
+    // NUIT vs JOUR (01/08, forensique sur les 358 trades scalp de juillet en base) :
+    //   NUIT 19h-05h : 95 trades, +$10 411, 92 % de reussite
+    //   JOUR 05h-19h : 263 trades, −$19 560, 74 %
+    // La perte MOYENNE est la meme des deux cotes (−$726 vs −$751) : le jour ne perd pas plus gros, il
+    // perd bien plus souvent. Le filtre actuel ne bloque que 12-17h — un tiers du jour perdant.
+    // On ne teste PAS heure par heure (ce serait du sur-mesure sur un mois) : une seule frontiere de
+    // session, deplacee de 2 h autour, pour verifier que le resultat ne tient pas a un reglage fin.
+    { name: 'nuit seule 19h-05h', sim: { blockEntryHours: [[5, 19]] } },
+    { name: 'nuit large 18h-06h', sim: { blockEntryHours: [[6, 18]] } },
+    { name: 'nuit stricte 20h-04h', sim: { blockEntryHours: [[4, 20]] } },
+    // GEOMETRIE (meme forensique) : gain moyen +$167, perte moyenne −$749 — une perte efface 4,5 gains.
+    // Les 10 pires trades pesent −$12 179, soit PLUS que la perte du mois (−$9 149) : sans eux, +$3 030.
+    // Tous sortent au stop avec une distance de 9,5 a 15 $/once, soit $950-1 500 de risque. maxStopAtr 2.8
+    // ne les arrete pas. On serre le plafond — en sachant que trop serrer tue l'edge (deja vu le 22/07).
+    { name: 'stop max 2.0 ATR', cfg: { maxStopAtr: 2.0 } },
+    { name: 'stop max 1.5 ATR', cfg: { maxStopAtr: 1.5 } },
+    { name: 'nuit 19h-05h + stop max 2.0', cfg: { maxStopAtr: 2.0 }, sim: { blockEntryHours: [[5, 19]] } },
     { name: 'PROFIL S1 COMPLET', profile: STRATEGIES['1'] },
+    { name: 'PROFIL S1 + nuit 19h-05h', profile: STRATEGIES['1'], sim: { blockEntryHours: [[5, 19]] } },
     { name: 'S2 + objectif jour +1%', cfg: { risk: { ...cfgFor(profile).risk, dailyProfitTargetPct: 0.01 } } },
     { name: 'S2 sans Asie', sim: {} }, // ctxOpts remplacé plus bas (tradeAsia piloté par le profil)
     { name: 'S2 + TP court 0.4R', cfg: { targetRR: 0.4, minRR: 0.2 } },
