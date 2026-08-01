@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
     confirmCommission?: string; cancelCommission?: string; payoutPaid?: string; payoutReject?: string; reason?: string; tx?: string;
     rejectConnect?: string;
     addDeposit?: { tg_id: number; broker?: string; amount: number; commission?: number; date?: string; note?: string };
-    updateDeposit?: { id: string; amount?: number; commission?: number; comStatus?: string; note?: string; broker?: string; date?: string };
+    updateDeposit?: { id: string; amount?: number; commission?: number; comStatus?: string; note?: string; broker?: string; date?: string; bookedYm?: string | null };
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
@@ -252,6 +252,20 @@ export async function POST(req: NextRequest) {
     if (u.note !== undefined) det.note = String(u.note).slice(0, 300) || null;
     if (u.broker !== undefined) det.broker = String(u.broker).trim().toLowerCase() || null;
     if (u.date && !Number.isNaN(Date.parse(String(u.date)))) det.deposited_at = new Date(String(u.date)).toISOString();
+    // REPORT COMPTABLE (01/08) — un dépôt dont la commission n'est pas encore validée (le membre n'a pas
+    // tradé le lot minimum) pollue le bilan du mois : il y figure en « pending » et fausse le total. Le
+    // support le reporte donc sur le mois suivant, où il sera validé.
+    // On NE touche PAS à deposited_at : la date réelle du dépôt est un fait, elle ne se réécrit pas. On
+    // ajoute un mois COMPTABLE à côté — le bilan groupe dessus, l'historique reste vrai, et le report est
+    // réversible d'un clic. Effacer la date aurait rendu la ligne introuvable le jour d'un litige broker.
+    if (u.bookedYm !== undefined) {
+      if (u.bookedYm === null) { det.booked_ym = null; det.booked_moved_at = null; det.booked_moved_by = null; }
+      else if (/^\d{4}-(0[1-9]|1[0-2])$/.test(String(u.bookedYm))) {
+        det.booked_ym = String(u.bookedYm);
+        det.booked_moved_at = new Date().toISOString();
+        det.booked_moved_by = who;
+      } else return NextResponse.json({ error: 'booked month must be YYYY-MM' }, { status: 400 });
+    }
     const { error } = await db.from('member_actions').update({ detail: det as never }).eq('id', u.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });

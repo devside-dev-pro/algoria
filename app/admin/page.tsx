@@ -28,7 +28,8 @@ interface Affiliate { pendingCommissions: Comm[]; recentCommissions: Comm[]; pen
 // registre des dépôts broker (bilan mensuel) — porté par member_actions kind='deposit'
 interface Deposit {
   id: string; tg_id: number; member_no: number | null; created_at: string;
-  detail: { broker?: string | null; amount_usd?: number; commission_usd?: number; commission_status?: string; note?: string | null; deposited_at?: string } | null;
+  // booked_ym : mois COMPTABLE quand il diffère de celui du dépôt (report d'une com pas encore validée)
+  detail: { broker?: string | null; amount_usd?: number; commission_usd?: number; commission_status?: string; note?: string | null; deposited_at?: string; booked_ym?: string | null } | null;
 }
 
 type Tab = 'dashboard' | 'queue' | 'members' | 'deposits' | 'affiliate' | 'tools';
@@ -357,9 +358,14 @@ export default function AdminCRM() {
 
   // ===== bilan du mois affiché : lignes + totaux (dépôts, coms reçues/attendues/sautées) =====
   const depDateOf = (d: Deposit) => String(d.detail?.deposited_at ?? d.created_at);
+  // MOIS COMPTABLE (01/08) : par défaut celui du dépôt, sauf report explicite (booked_ym). Un dépôt dont
+  // la commission n'est pas encore validée — le membre n'a pas tradé son lot — est reporté sur le mois
+  // suivant plutôt que de rester en « pending » à fausser le bilan. La date réelle, elle, ne bouge jamais.
+  const depMonthOf = (d: Deposit) => String(d.detail?.booked_ym ?? depDateOf(d).slice(0, 7));
+  const nextYm = (m: string) => { const [y, mo] = m.split('-').map(Number); return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; };
   const monthDeps = useMemo(
     () => deposits
-      .filter((d) => depDateOf(d).slice(0, 7) === ym && (market === 'all' || localeOf(d.tg_id) === market))
+      .filter((d) => depMonthOf(d) === ym && (market === 'all' || localeOf(d.tg_id) === market))
       .sort((a, b) => depDateOf(a).localeCompare(depDateOf(b))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deposits, ym, market, rows],
@@ -1267,6 +1273,14 @@ export default function AdminCRM() {
                   <div key={d.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                       <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 70 }}>{depDateOf(d).slice(0, 10)}</span>
+                      {/* la ligne vient d'un mois précédent : sans ce repère, un dépôt de juillet reporté
+                          en août ressemble à un dépôt d'août et le bilan devient illisible à la relecture */}
+                      {d.detail?.booked_ym && depDateOf(d).slice(0, 7) !== String(d.detail.booked_ym) && (
+                        <span className="mono" title={`deposited in ${depDateOf(d).slice(0, 7)}, booked here because the commission was not validated yet`}
+                          style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, color: 'var(--cyan)', border: '1px solid rgba(43,227,245,.4)', borderRadius: 6, padding: '2px 6px' }}>
+                          ↪ FROM {depDateOf(d).slice(0, 7)}
+                        </span>
+                      )}
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12 }}>#{d.member_no ?? '—'}</span>
                       {/* pas nameOf : sans @username il renvoie #no, déjà affiché juste avant → doublon */}
                       <span style={{ fontSize: 12, color: 'var(--text)' }}>{(() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? '—'); })()}</span>
@@ -1282,6 +1296,18 @@ export default function AdminCRM() {
                       {st !== 'received' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'received' } })} style={okBtn}>✓ RECEIVED</button>}
                       {st !== 'canceled' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'canceled' } })} title="commission fell through (flash withdrawal, broker refusal…)" style={dangerBtn}>✗ LOST</button>}
                       {st !== 'pending' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'pending' } })} title="back to pending" style={miniBtn}>↺</button>}
+                      {/* REPORT AU MOIS SUIVANT — pour les dépôts dont la com n'est pas encore validée (lot
+                          minimum pas atteint). La ligne quitte le bilan de ce mois et réapparaît au suivant,
+                          SANS que la date du dépôt soit modifiée. Réversible : le bouton ↩ la ramène. */}
+                      {d.detail?.booked_ym ? (
+                        <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, bookedYm: null } })}
+                          title={`reported to ${String(d.detail.booked_ym)} — click to put it back in its real month (${depDateOf(d).slice(0, 7)})`}
+                          style={{ ...miniBtn, color: 'var(--gold)' }}>↩ UNDO MOVE</button>
+                      ) : (
+                        <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, bookedYm: nextYm(ym) } })}
+                          title={`commission not validated yet (lot not traded) → move this line to ${nextYm(ym)}. The deposit date is NOT changed.`}
+                          style={{ ...miniBtn, color: 'var(--cyan)' }}>→ {nextYm(ym)}</button>
+                      )}
                       <button disabled={busy} onClick={() => deleteDeposit(d)} title="delete this line (typo)" style={miniBtn}>🗑</button>
                     </div>
                     {d.detail?.note && <div style={{ fontSize: 11, color: 'var(--dim)', paddingLeft: 80 }}>{String(d.detail.note)}</div>}
