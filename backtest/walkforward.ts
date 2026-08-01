@@ -27,7 +27,10 @@ const dayStr = (t: number) => new Date(t).toISOString().slice(0, 10);
 function scalpWF() {
   const bars = load('XAUUSD-M5-15.json');
   const profile = STRATEGIES['2'];
-  type Cand = { name: string; cfg?: Partial<EngineConfig>; sim?: Partial<SimParams> };
+  // `profile` par candidat : sans ça, on ne testait que des BOUTS de S1 (RR + trailing) sur le châssis de S2,
+  // en laissant de côté ce qui la définit — objectif du jour à +1 %, Asie coupée, plafond de stop par défaut.
+  // « Façon S1 » n'était pas S1. Ici on peut enfin faire tourner le profil ENTIER, tel qu'il tourne en live.
+  type Cand = { name: string; profile?: typeof profile; cfg?: Partial<EngineConfig>; sim?: Partial<SimParams> };
   const CANDS: Cand[] = [
     { name: 'PROD S2' },
     { name: 'RR0.4 minRR0.2 (façon S1)', cfg: { targetRR: 0.4, minRR: 0.2, trailActivate: undefined, trailDist: undefined } },
@@ -49,14 +52,26 @@ function scalpWF() {
     { name: 'régime ER ≥ 0.35', sim: { regime: { erMin: 0.35 } } },
     { name: 'régime ADX ≥ 20 + ER ≥ 0.25', sim: { regime: { adxMin: 20, erMin: 0.25 } } },
     { name: 'régime ADX ≥ 20 + nuit only', sim: { regime: { adxMin: 20 }, blockEntryHours: [[12, 17]] } },
+    // POURQUOI S1 TIENT (01/08) — S1 fait +$308 en live sur 11 jours quand le scalp S2 fait −$7 098, avec le
+    // MÊME générateur de signaux. La différence est entièrement dans le profil. On teste donc le profil
+    // ENTIER, puis chaque différence isolée : si une seule d'entre elles porte le résultat, on veut savoir
+    // laquelle — une config qu'on ne comprend pas est une config qu'on ne saura pas défendre le jour où
+    // elle cassera.
+    { name: 'PROFIL S1 COMPLET', profile: STRATEGIES['1'] },
+    { name: 'S2 + objectif jour +1%', cfg: { risk: { ...cfgFor(profile).risk, dailyProfitTargetPct: 0.01 } } },
+    { name: 'S2 sans Asie', sim: {} }, // ctxOpts remplacé plus bas (tradeAsia piloté par le profil)
+    { name: 'S2 + TP court 0.4R', cfg: { targetRR: 0.4, minRR: 0.2 } },
   ];
+  // « S2 sans Asie » = même config moteur, contexte de S1 : c'est le seul candidat dont la différence vit
+  // dans ctxOpts et pas dans la config — on l'aiguille ici plutôt que d'ajouter un champ pour un seul cas.
+  const ctxOf = (c: Cand) => (c.name === 'S2 sans Asie' ? { ...ctxFor(profile), tradeAsia: false } : ctxFor(c.profile ?? profile));
   // folds : ~15 jours de tune → ~5 jours de test, en roulant (bornes par index de bougie)
   const days = [...new Set(bars.map((b) => dayStr(b.time)))].sort();
   const TUNE = 15, TEST = 5;
   console.log(`\n========== WALK-FORWARD SCALP (S2 base) — ${days.length} jours · tune ${TUNE} → test ${TEST} ==========`);
   console.log('fold  (tune → test)             choisi sur tune            tune $     TEST $   TEST PF');
   let oosTotal = 0, tuneIllusion = 0, folds = 0;
-  const oosByCand = new Map<string, number>();
+  const oosByCand = new Map<string, { pnl: number; n: number }>();
   for (let start = 0; start + TUNE + TEST <= days.length; start += TEST) {
     const tuneDays = new Set(days.slice(start, start + TUNE));
     const testDays = new Set(days.slice(start + TUNE, start + TUNE + TEST));
@@ -65,17 +80,19 @@ function scalpWF() {
     if (tuneBars.length < 400 || testBars.length < 300) continue;
     let best: { c: Cand; net: number } | null = null;
     for (const c of CANDS) {
-      const cfg = { ...cfgFor(profile), ...(c.cfg ?? {}) };
-      const m = metrics(backtest(tuneBars, FEATURES, cfg, { ...SIM_BASE, ...(c.sim ?? {}), ctxOpts: ctxFor(profile) }), SIM_BASE.startBalance);
+      const cfg = { ...cfgFor(c.profile ?? profile), ...(c.cfg ?? {}) };
+      const m = metrics(backtest(tuneBars, FEATURES, cfg, { ...SIM_BASE, ...(c.sim ?? {}), ctxOpts: ctxOf(c) }), SIM_BASE.startBalance);
       if (!best || m.netPnl > best.net) best = { c, net: m.netPnl };
     }
     if (!best) continue;
-    const cfg = { ...cfgFor(profile), ...(best.c.cfg ?? {}) };
-    const t = metrics(backtest(testBars, FEATURES, cfg, { ...SIM_BASE, ...(best.c.sim ?? {}), ctxOpts: ctxFor(profile) }), SIM_BASE.startBalance);
+    const cfg = { ...cfgFor(best.c.profile ?? profile), ...(best.c.cfg ?? {}) };
+    const t = metrics(backtest(testBars, FEATURES, cfg, { ...SIM_BASE, ...(best.c.sim ?? {}), ctxOpts: ctxOf(best.c) }), SIM_BASE.startBalance);
     // OOS par candidat SANS sélection : chaque candidat évalué sur CHAQUE fenêtre test — le vrai classement
     for (const c of CANDS) {
-      const tc = metrics(backtest(testBars, FEATURES, { ...cfgFor(profile), ...(c.cfg ?? {}) }, { ...SIM_BASE, ...(c.sim ?? {}), ctxOpts: ctxFor(profile) }), SIM_BASE.startBalance);
-      oosByCand.set(c.name, (oosByCand.get(c.name) ?? 0) + tc.netPnl);
+      const tc = metrics(backtest(testBars, FEATURES, { ...cfgFor(c.profile ?? profile), ...(c.cfg ?? {}) }, { ...SIM_BASE, ...(c.sim ?? {}), ctxOpts: ctxOf(c) }), SIM_BASE.startBalance);
+      const cur = oosByCand.get(c.name) ?? { pnl: 0, n: 0 };
+      cur.pnl += tc.netPnl; cur.n += tc.trades;
+      oosByCand.set(c.name, cur);
     }
     oosTotal += t.netPnl; tuneIllusion += best.net; folds++;
     console.log(
@@ -86,8 +103,10 @@ function scalpWF() {
   }
   console.log(`\n→ ILLUSION in-sample (somme des tunes gagnants) : $${tuneIllusion.toFixed(0)}`);
   console.log(`→ RÉALITÉ out-of-sample (somme des fenêtres test) : $${oosTotal.toFixed(0)} — c'est CE chiffre qu'on a le droit de croire.`);
-  console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) :');
-  for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1] - a[1])) console.log('   ', name.padEnd(30), '$' + v.toFixed(0));
+  console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) — le nb de trades compte autant :');
+  for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1].pnl - a[1].pnl)) {
+    console.log('   ', name.padEnd(30), ('$' + v.pnl.toFixed(0)).padStart(9), String(v.n).padStart(6), 'trades');
+  }
 }
 
 // ===== BREAKOUT M5 : la couche qui n'avait aucun walk-forward (01/08) =====

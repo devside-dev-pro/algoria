@@ -91,6 +91,13 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
   let balance = p.startBalance;
   let dayStart = balance;
   let dayKilled = false;
+  // LATCH « journée terminée » (étude 01/08 — 2ᵉ triche du sim, trouvée en cherchant pourquoi S1 tient en
+  // live). En live, readState VERROUILLE la journée dès l'objectif atteint : plus aucune entrée jusqu'à
+  // minuit (types.ts dayDone). Le sim, lui, ne faisait que relire checkRisk à chaque bougie — donc dès que
+  // l'equity retombait sous l'objectif, il REPARTAIT trader. Il rendait exactement ce que S1 refuse de
+  // faire : continuer après avoir gagné. Or « +1 % puis stop » EST le design de S1 : sans le verrou, on ne
+  // simulait pas S1, on simulait une S1 sans discipline.
+  let dayDone = false;
   let dayPeakEq = balance;
   let tradesToday = 0;
   let lastTradeTime: number | undefined;
@@ -187,6 +194,7 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       lastDay = d;
       dayStart = balance;
       dayKilled = false;
+      dayDone = false; // minuit UTC : le verrou du jour saute, comme en live
       tradesToday = 0;
       dayPeakEq = balance;
     }
@@ -206,6 +214,10 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
     if (lockTrig && lockFloor != null && (dayPeakEq - dayStart) / dayStart >= lockTrig && (eq - dayStart) / dayStart <= lockFloor) dayKilled = true;
     // CAP DUR (option) : au moment PRÉCIS où le cap latche, on FERME les positions ouvertes au close de la bougie
     // (au lieu de les laisser courir jusqu'à leur stop). Borne la journée rouge ~au cap au lieu de saigner au-delà.
+    // LATCH du jour : objectif atteint OU cap de perte OU ratchet → verrouillé jusqu'à minuit. Une fois posé,
+    // il ne se relève JAMAIS dans la journée, même si l'equity repasse sous le seuil — c'est tout l'intérêt.
+    const target = cfg.risk.dailyProfitTargetPct;
+    if (!dayDone && ((target && (eq - dayStart) / dayStart >= target) || dayKilled)) dayDone = true;
     if (p.hardCap && dayKilled && !wasKilled && open.length) {
       for (let k = open.length - 1; k >= 0; k--) { close(open[k], bar.close, bar.time, 'sl'); open.splice(k, 1); }
     }
@@ -223,6 +235,7 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       spread: p.spread,
       newsWindows: [],
       killed: dayKilled,
+      dayDone,
     };
     const lo = p.window && p.window > 0 ? Math.max(0, i + 1 - p.window) : 0;
     const { signal } = runTick({ symbol: p.symbol, bars: bars.slice(lo, i + 1), mode: p.mode, state, ctxOpts: { spread: p.spread, ...(p.ctxOpts ?? {}) } }, features, cfg);
