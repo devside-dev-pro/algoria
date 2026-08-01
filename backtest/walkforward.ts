@@ -21,16 +21,18 @@ import type { EngineConfig } from '../lib/engine/config';
 import type { Bar } from '../lib/engine/types';
 
 
-// VOLUME = CONTRAINTE PRODUIT, pas une consequence (spec Mathieu 01/08) : S1 = 4-6 trades/jour (rassurer
-// un nouveau), S2 = 10-20 (le coeur de gamme), S3 = davantage et caps plus larges. Une strategie qui ne
-// trade pas ne se vend pas, quel que soit son P&L — un candidat a 0,5 trade/jour est DISQUALIFIE avant
-// meme qu'on regarde ses dollars. Le harnais doit donc juger sur les deux axes, sinon c'est moi qui
-// filtre a la main et j'oublierai.
-// Reperes par COUCHE (le scalp seul, pas la strategie entiere : en live, S2 tient ses 10-20 avec
-// scalp ~6,5 + breakout ~4,5 + swing ~3) :
+// FREQUENCE — information, PAS verdict (precision Mathieu, 01/08). Les « 4-6 » de S1 et « 10-20 » de S2
+// sont des ORDRES DE GRANDEUR communiques au client, pas des objectifs a tenir : le marche offre ce qu'il
+// offre, et un mois calme donnera moins de trades sans que rien ne soit casse. J'en avais fait un critere
+// eliminatoire — c'etait une erreur de lecture de la spec.
+// Ce que la colonne sert vraiment : distinguer deux candidats de P&L comparable (celui qui trade tous les
+// jours n'est pas le meme produit que celui qui trade une fois par semaine), et reperer d'un coup d'oeil
+// un candidat qui « gagne » simplement parce qu'il a cesse de jouer. On decrit, on ne sanctionne pas.
+// Repere par COUCHE, pas par strategie : en live, S2 tient sa moyenne avec scalp ~6,5 + breakout ~4,5 +
+// swing ~3 — d'ou la marge pour retrecir l'une si l'autre compense.
 const volTag = (n: number, days: number) => {
   const perDay = days > 0 ? n / days : 0;
-  const tag = perDay >= 5 ? '✓ S2-viable' : perDay >= 2 ? '~ appoint' : '✗ arret de jeu';
+  const tag = perDay >= 5 ? 'quotidien' : perDay >= 2 ? 'regulier' : perDay >= 0.5 ? 'rare' : 'quasi a l\'arret';
   return `${perDay.toFixed(1)}/j ${tag}`;
 };
 
