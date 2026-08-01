@@ -5,6 +5,7 @@
 //   (toute la famille N24/48/96 ±volume est robuste — signature d'un vrai edge, pas d'une config chanceuse.)
 // Sorties validées : SL 1.5×ATR · TP 3×ATR · breakeven à 0.8R · trailing 1.2R activé à 1.2R.
 import type { Bar, Confluence, Mode, Signal } from './types';
+import { passesRegime, type RegimeFilter } from './regime';
 
 export interface BreakoutConfig {
   N: number; // fenêtre Donchian (bougies M5) — 96 ≈ 8 h
@@ -15,6 +16,10 @@ export interface BreakoutConfig {
   beTrigger: number; // breakeven à × riskDist (0.8 — tard : une cassure a besoin d'air, pas comme le scalp 0.15)
   trailActivate: number; // active le trailing à × riskDist
   trailDist: number; // distance du trailing en × riskDist
+  // FILTRE DE RÉGIME — refuse la cassure quand le marché n'a pas de direction (voir GOLD_BREAKOUT).
+  // undefined = aucun filtre. Appliqué DANS breakoutSignal : le live et le simulateur exécutent donc
+  // strictement le même code sur les mêmes bougies, ils ne peuvent pas diverger.
+  regime?: RegimeFilter;
 }
 
 /** Config OR validée par le labo — voir l'en-tête.
@@ -24,8 +29,19 @@ export interface BreakoutConfig {
  *  voisines (be 0.7-0.9 × act 0.7-1.0 × dist 0.45-0.6) DOMINENT toutes l'ancienne config sur les DEUX moitiés.
  *  CONFIRMATION 0.25 ATR (harnais breakout 29/07, validé Mathieu « go tout ») : la marge anti-mèche à 0.1
  *  laissait passer trop de fausses cassures — à 0.25, PF 1.37→1.62 et juillet (OOS) ×2 (+7 957→+16 291$)
- *  sur N96 ; N32 (S3) gagne aussi (+47,8k→+49,5k, les deux mois verts). Coûts ×3 : toujours vert. */
-export const GOLD_BREAKOUT: BreakoutConfig = { N: 96, confirmAtr: 0.25, slAtr: 1.5, tpAtr: 3, lot: 1, beTrigger: 0.7, trailActivate: 0.8, trailDist: 0.5 };
+ *  sur N96 ; N32 (S3) gagne aussi (+47,8k→+49,5k, les deux mois verts). Coûts ×3 : toujours vert.
+ *
+ *  FILTRE DE RÉGIME ADX ≥ 25 (01/08, walk-forward 7 fenêtres jamais vues + feu vert Mathieu) — LE premier
+ *  changement de config adossé à une preuve hors échantillon, tous les précédents ayant été réglés in-sample.
+ *  Un canal Donchian percé sans tendance derrière est un faux départ qui paie le spread puis le stop.
+ *  OOS par seuil (35 jours de test) : 20 → +$4 108 · 22 → +$6 826 · 25 → +$10 313 · 28 → +$4 570 ·
+ *  30 → +$4 505 · AUCUN FILTRE → −$934. Les cinq seuils sont verts, le seul rouge est l'absence de filtre :
+ *  ce n'est donc pas la valeur 25 qui porte le résultat, c'est le fait de filtrer. 25 est à la fois le pic
+ *  et le centre du plateau, donc une dérive du marché nous laisse dans le vert n'importe où entre 20 et 30.
+ *  Mesuré sur un simulateur dont l'écart au live vaut $571 sur CETTE couche (parité juillet, après le
+ *  correctif de gestion intra-bougie). Coût assumé : 146 → 102 trades sur 35 jours.
+ *  État remplacé, prouvé mauvais en réel : breakout non filtré = −$1 089 (S2) et −$1 232 (S3) en 11 jours. */
+export const GOLD_BREAKOUT: BreakoutConfig = { N: 96, confirmAtr: 0.25, slAtr: 1.5, tpAtr: 3, lot: 1, beTrigger: 0.7, trailActivate: 0.8, trailDist: 0.5, regime: { adxMin: 25 } };
 
 const atr14 = (bars: Bar[]): number => {
   const n = bars.length;
@@ -57,6 +73,10 @@ export function breakoutSignal(symbol: string, bars: Bar[], cfg: BreakoutConfig,
   if (b.close > hi + cfg.confirmAtr * atr) { direction = 'long'; excess = (b.close - hi) / atr; }
   else if (b.close < lo - cfg.confirmAtr * atr) { direction = 'short'; excess = (lo - b.close) / atr; }
   else return null;
+
+  // RÉGIME : la cassure est là, mais y a-t-il une tendance pour la porter ? Testé APRÈS la détection —
+  // on ne paie le calcul que sur les rares bougies qui percent réellement le canal.
+  if (cfg.regime && !passesRegime(bars, cfg.regime)) return null;
 
   const dec = Math.max(0, Math.round(-Math.log10(priceStep))); // 0.01 → 2 décimales (coupe le bruit flottant du ×step)
   const roundP = (x: number) => +(Math.round(x / priceStep) * priceStep).toFixed(dec);
