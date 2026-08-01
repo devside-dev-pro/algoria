@@ -170,7 +170,7 @@ function breakoutWF() {
   const bars = load('XAUUSD-M5-15.json');
   type Cand = { name: string; cfg?: Partial<BreakoutConfig>; opts?: BkOpts };
   const CANDS: Cand[] = [
-    { name: 'PROD' },
+    { name: 'PROD (ADX ≥ 25 depuis le 01/08)' },
     { name: 'ANCIENNE (BE .8 · trail 1.2@1.2)', cfg: { beTrigger: 0.8, trailActivate: 1.2, trailDist: 1.2 } },
     { name: 'sans BE ni trailing', cfg: { beTrigger: 0, trailActivate: 0, trailDist: 0 } },
     { name: 'N48 (canal 4h)', cfg: { N: 48 } },
@@ -179,14 +179,18 @@ function breakoutWF() {
     // seul point ne prouve rien — un pic isolé entouré de creux, c'est du bruit qu'on a pris pour un edge.
     // On balaie 20 → 30 : si la courbe monte puis redescend en douceur, c'est une propriété du marché ;
     // si 25 est un pic solitaire, c'est la valeur qui allait bien à juillet et rien de plus.
-    { name: 'régime ADX ≥ 20', opts: { regime: { adxMin: 20 } } },
-    { name: 'régime ADX ≥ 22', opts: { regime: { adxMin: 22 } } },
-    { name: 'régime ADX ≥ 25', opts: { regime: { adxMin: 25 } } },
-    { name: 'régime ADX ≥ 28', opts: { regime: { adxMin: 28 } } },
-    { name: 'régime ADX ≥ 30', opts: { regime: { adxMin: 30 } } },
-    { name: 'régime ER ≥ 0.25', opts: { regime: { erMin: 0.25 } } },
-    { name: 'régime ER ≥ 0.35', opts: { regime: { erMin: 0.35 } } },
-    { name: 'régime ADX ≥ 25 + ER ≥ 0.25', opts: { regime: { adxMin: 25, erMin: 0.25 } } },
+    // Depuis le 01/08, PROD = GOLD_BREAKOUT PORTE deja ADX >= 25 (pousse en live apres ce balayage).
+    // Le temoin utile n'est donc plus « avec filtre » mais « SANS » — et les variantes de seuil passent par
+    // cfg.regime, qui REMPLACE la valeur de prod (via opts, elles s'ajouteraient au filtre existant et on
+    // mesurerait toujours 25).
+    { name: 'SANS filtre de régime (ex-PROD)', cfg: { regime: undefined } },
+    { name: 'régime ADX ≥ 20', cfg: { regime: { adxMin: 20 } } },
+    { name: 'régime ADX ≥ 22', cfg: { regime: { adxMin: 22 } } },
+    { name: 'régime ADX ≥ 28', cfg: { regime: { adxMin: 28 } } },
+    { name: 'régime ADX ≥ 30', cfg: { regime: { adxMin: 30 } } },
+    { name: 'régime ER ≥ 0.25 (sans ADX)', cfg: { regime: { erMin: 0.25 } } },
+    { name: 'régime ER ≥ 0.35 (sans ADX)', cfg: { regime: { erMin: 0.35 } } },
+    { name: 'régime ADX ≥ 25 + ER ≥ 0.25', cfg: { regime: { adxMin: 25, erMin: 0.25 } } },
     { name: 'pas d\'entrée ven ≥ 12h UTC', opts: { noEntryFriFrom: 12 } },
   ];
   const run = (bs: Bar[], c: Cand) => metrics(simBreakout(bs, { ...GOLD_BREAKOUT, ...(c.cfg ?? {}) }, BK_COSTS, { intrabarManage: true, ...(c.opts ?? {}) }), BK_START);

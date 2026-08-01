@@ -26,6 +26,8 @@ export function simBreakout(bars: Bar[], cfg: BreakoutConfig, c: Costs = BK_COST
   let balance = BK_START;
   // FILTRE DE RÉGIME (01/08) : le breakout est la couche la plus exposée au marché latéral — un canal
   // Donchian percé sans tendance derrière, c'est un faux départ qui paie le spread puis le stop.
+  // Le filtre de régime vit maintenant DANS breakoutSignal (cfg.regime) : live et sim exécutent le même
+  // code. opts.regime reste disponible pour explorer une valeur SANS toucher à la config de prod.
   const regimeOk = opts?.regime ? regimeMask(bars, opts.regime) : null;
   let pos: Pos | null = null;
   const trades: SimTrade[] = [];

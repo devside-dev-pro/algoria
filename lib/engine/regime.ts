@@ -72,6 +72,23 @@ export function regimeMask(bars: Bar[], f: RegimeFilter): boolean[] {
 }
 
 /**
+ * Le régime autorise-t-il une entrée sur la DERNIÈRE bougie ? C'est la forme utilisée par le LIVE.
+ * Volontairement écrit avec les mêmes fonctions et les mêmes comparaisons que regimeMask : une seule
+ * définition du « oui », donc aucune dérive possible entre ce que le simulateur juge et ce que le runner
+ * exécute. Un seuil absent n'impose rien.
+ */
+export function passesRegime(bars: Bar[], f: RegimeFilter): boolean {
+  const needAdx = (f.adxMin ?? 0) > 0;
+  const needEr = (f.erMin ?? 0) > 0;
+  if (!needAdx && !needEr) return true;
+  const i = bars.length - 1;
+  if (i < 0) return false;
+  if (needAdx && adx(bars, f.adxPeriod ?? 14)[i] < (f.adxMin ?? 0)) return false;
+  if (needEr && efficiencyRatio(bars, f.erLookback ?? 20)[i] < (f.erMin ?? 0)) return false;
+  return true;
+}
+
+/**
  * Lecture du régime sur la DERNIÈRE bougie d'une fenêtre — c'est la forme qu'utilisera le live.
  * Volontairement bâtie sur les mêmes fonctions que le masque : le live et le sim ne peuvent pas
  * diverger, puisqu'ils exécutent le même code sur les mêmes bougies.
