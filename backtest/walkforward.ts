@@ -14,7 +14,7 @@ import { metrics } from './metrics';
 import { FEATURES } from '../lib/engine/features';
 import { STRATEGIES } from '../lib/engine/strategies';
 import { computeIndicators, labBacktest, SPECS, START, type Exits, type StrategyDef } from './labcore';
-import { cfgFor, ctxFor, SIM_BASE } from './wiring';
+import { cfgFor, ctxFor, simFor, SIM_BASE } from './wiring';
 import { simBreakout, BK_COSTS, BK_START, type BkOpts } from './breakout-core';
 import { GOLD_BREAKOUT, type BreakoutConfig } from '../lib/engine/breakout';
 import type { EngineConfig } from '../lib/engine/config';
@@ -32,7 +32,7 @@ function scalpWF() {
   // « Façon S1 » n'était pas S1. Ici on peut enfin faire tourner le profil ENTIER, tel qu'il tourne en live.
   type Cand = { name: string; profile?: typeof profile; cfg?: Partial<EngineConfig>; sim?: Partial<SimParams> };
   const CANDS: Cand[] = [
-    { name: 'PROD S2' },
+    { name: 'PROD S2 (filtre 12-17 inclus)' },
     { name: 'RR0.4 minRR0.2 (façon S1)', cfg: { targetRR: 0.4, minRR: 0.2, trailActivate: undefined, trailDist: undefined } },
     { name: 'RR0.8 minRR0.5', cfg: { targetRR: 0.8, minRR: 0.5 } },
     { name: 'sans trailing', cfg: { trailActivate: undefined, trailDist: undefined } },
@@ -81,15 +81,15 @@ function scalpWF() {
     let best: { c: Cand; net: number } | null = null;
     for (const c of CANDS) {
       const cfg = { ...cfgFor(c.profile ?? profile), ...(c.cfg ?? {}) };
-      const m = metrics(backtest(tuneBars, FEATURES, cfg, { ...SIM_BASE, ...(c.sim ?? {}), ctxOpts: ctxOf(c) }), SIM_BASE.startBalance);
+      const m = metrics(backtest(tuneBars, FEATURES, cfg, { ...simFor(c.profile ?? profile), ...(c.sim ?? {}), ctxOpts: ctxOf(c) }), SIM_BASE.startBalance);
       if (!best || m.netPnl > best.net) best = { c, net: m.netPnl };
     }
     if (!best) continue;
     const cfg = { ...cfgFor(best.c.profile ?? profile), ...(best.c.cfg ?? {}) };
-    const t = metrics(backtest(testBars, FEATURES, cfg, { ...SIM_BASE, ...(best.c.sim ?? {}), ctxOpts: ctxOf(best.c) }), SIM_BASE.startBalance);
+    const t = metrics(backtest(testBars, FEATURES, cfg, { ...simFor(best.c.profile ?? profile), ...(best.c.sim ?? {}), ctxOpts: ctxOf(best.c) }), SIM_BASE.startBalance);
     // OOS par candidat SANS sélection : chaque candidat évalué sur CHAQUE fenêtre test — le vrai classement
     for (const c of CANDS) {
-      const tc = metrics(backtest(testBars, FEATURES, { ...cfgFor(c.profile ?? profile), ...(c.cfg ?? {}) }, { ...SIM_BASE, ...(c.sim ?? {}), ctxOpts: ctxOf(c) }), SIM_BASE.startBalance);
+      const tc = metrics(backtest(testBars, FEATURES, { ...cfgFor(c.profile ?? profile), ...(c.cfg ?? {}) }, { ...simFor(c.profile ?? profile), ...(c.sim ?? {}), ctxOpts: ctxOf(c) }), SIM_BASE.startBalance);
       const cur = oosByCand.get(c.name) ?? { pnl: 0, n: 0 };
       cur.pnl += tc.netPnl; cur.n += tc.trades;
       oosByCand.set(c.name, cur);
