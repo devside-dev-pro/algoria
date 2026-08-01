@@ -90,6 +90,29 @@ export default function DownloadPage() {
         >
           {installed ? '✓ INSTALLED — OPEN' : canNative ? '⬇ INSTALL THE APP' : platform === 'ios' ? '⬇ GET — HOW TO INSTALL' : '⬇ GET THE APP'}
         </button>
+
+        {/* ── PORTE D'ENTRÉE (01/08) — cette page n'en avait AUCUNE. Son seul bouton installait la PWA, son
+            seul lien renvoyait à algoria.tech : quelqu'un qui arrivait ici pour CRÉER SON COMPTE tournait en
+            rond dans les instructions d'installation. Plusieurs cas signalés deux jours de suite, dont une
+            personne qui a fini par écrire « still cannot get in to register » — littéralement exact.
+            Et le piège était conceptuel autant qu'ergonomique : installer n'est PAS nécessaire, l'app
+            tourne dans le navigateur. On présentait une étape optionnelle comme un passage obligé.
+            Bouton pleine largeur, au-dessus de la ligne de flottaison, avant toute instruction. ── */}
+        <a
+          href="/member"
+          style={{
+            width: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            padding: '14px 20px', borderRadius: 14, textDecoration: 'none', marginTop: -8,
+            fontSize: 15, fontWeight: 800, letterSpacing: 0.4, color: 'var(--text)',
+            border: '1px solid rgba(43,227,245,.45)', background: 'rgba(43,227,245,.07)',
+          }}
+        >
+          → SIGN IN / CREATE MY ACCOUNT
+        </a>
+        <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginTop: -14, lineHeight: 1.5 }}>
+          You don&rsquo;t need to install anything to use Algoria.<br />
+          Installing only adds the icon to your home screen.
+        </div>
         <div style={{ fontSize: 11.5, color: 'var(--dim)', textAlign: 'center', marginTop: -12 }}>
           Free · no App Store needed · installs in seconds · iPhone &amp; Android
         </div>
