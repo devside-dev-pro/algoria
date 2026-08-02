@@ -1531,23 +1531,39 @@ function Center({ children }: { children: React.ReactNode }) {
 function AdminGate({ forbidden, deniedAs }: { forbidden: boolean; deniedAs?: string | null }) {
   const [phase, setPhase] = useState<'idle' | 'waiting' | 'expired' | 'error'>('idle');
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+  // UN SEUL CODE PAR TENTATIVE (02/08). Trois connexions bloquées ce jour-là, dont une où deux codes
+  // sont partis à 187 ms d'intervalle : Telegram a ouvert le PREMIER lien, l'utilisateur a tapé START,
+  // la connexion a réussi — mais la page interrogeait le SECOND code, que personne ne confirmerait
+  // jamais. « waiting for Telegram… » à l'infini, alors que tout avait marché.
+  //  · inFlight : un tap qui déclenche deux événements (fréquent sur mobile) ne crée plus deux codes.
+  //  · link : le bouton de secours ROUVRE le même lien au lieu d'en forger un nouveau. C'était le pire
+  //    des deux défauts — le mécanisme de secours abandonnait le code que Telegram allait confirmer,
+  //    donc plus l'utilisateur insistait, plus il s'enfonçait.
+  const inFlight = useRef(false);
+  const [link, setLink] = useState<string | null>(null);
   useEffect(() => () => { if (poll.current) clearInterval(poll.current); }, []);
   const start = async () => {
+    if (inFlight.current) return;
+    if (link) { openTelegram(link, { fallbackNewTab: true }); return; } // secours : on rouvre, on ne recrée pas
+    inFlight.current = true;
     try {
       if (forbidden) { try { await fetch('/api/member/logout', { method: 'POST' }); } catch { /* purge best-effort */ } }
       const r = await fetch('/api/member/tglogin', { method: 'POST' });
       const d = (await r.json()) as { code?: string; link?: string };
       if (!d.code || !d.link) { setPhase('error'); return; }
+      setLink(d.link);
       setPhase('waiting');
       openTelegram(d.link, { fallbackNewTab: true });
       if (poll.current) clearInterval(poll.current);
       poll.current = setInterval(async () => {
         const p = (await fetch(`/api/member/tglogin?code=${d.code}`).then((x) => x.json()).catch(() => null)) as { ok?: boolean; expired?: boolean } | null;
         if (p?.ok) { if (poll.current) clearInterval(poll.current); window.location.replace('/admin'); } // reload complet → re-check admin
-        else if (p?.expired) { if (poll.current) clearInterval(poll.current); setPhase('expired'); }
+        else if (p?.expired) { if (poll.current) clearInterval(poll.current); setLink(null); setPhase('expired'); }
       }, 2000);
     } catch {
       setPhase('error');
+    } finally {
+      inFlight.current = false;
     }
   };
   return (
