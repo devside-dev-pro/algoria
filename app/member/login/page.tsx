@@ -19,9 +19,22 @@ export default function MemberLogin() {
   const [link, setLink] = useState<string | null>(null);
   const router = useRouter();
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+  // UN SEUL CODE PAR TENTATIVE (02/08) — le défaut le plus coûteux du login, trouvé dans les données :
+  // trois connexions bloquées le même jour, dont une où deux codes sont partis à 187 ms d'intervalle.
+  // Telegram ouvre le PREMIER lien, la personne tape START, la connexion RÉUSSIT — mais la page
+  // interroge le SECOND code, que personne ne confirmera jamais. Écran d'attente infini sur un login
+  // qui a fonctionné, et la personne écrit « ça ne marche pas ».
+  //  · inFlight : un tap qui déclenche deux événements (fréquent sur mobile) ne crée plus deux codes.
+  //  · le bouton « recommencer » ROUVRE le lien existant au lieu d'en forger un nouveau — c'était le
+  //    pire des deux : le secours abandonnait le code que Telegram allait confirmer, donc plus la
+  //    personne insistait, moins elle avait de chances d'entrer.
+  const inFlight = useRef(false);
   useEffect(() => () => { if (poll.current) clearInterval(poll.current); }, []);
 
   const start = async () => {
+    if (inFlight.current) return;
+    if (link) { openTelegram(link, { fallbackNewTab: true }); return; } // secours : on rouvre, on ne recrée pas
+    inFlight.current = true;
     try {
       const r = await fetch('/api/member/tglogin', { method: 'POST' });
       const d = (await r.json()) as { code?: string; link?: string };
@@ -36,10 +49,12 @@ export default function MemberLogin() {
         const dest = typeof window !== 'undefined' && window.location.hostname.startsWith('admin.') ? '/admin' : '/member';
         if (p?.ok) { if (poll.current) clearInterval(poll.current); router.replace(dest); }
         else if (p?.denied) { if (poll.current) clearInterval(poll.current); router.replace('/member/denied'); }
-        else if (p?.expired) { if (poll.current) clearInterval(poll.current); setPhase('expired'); }
+        else if (p?.expired) { if (poll.current) clearInterval(poll.current); setLink(null); setPhase('expired'); }
       }, 2000);
     } catch {
       setPhase('error');
+    } finally {
+      inFlight.current = false;
     }
   };
 
