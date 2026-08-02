@@ -41,6 +41,8 @@ export default function AdminCRM() {
   const [actions, setActions] = useState<Action[]>([]);
   const [aff, setAff] = useState<Affiliate | null>(null);
   const [state, setState] = useState<'loading' | 'ok' | 'forbidden' | 'anon'>('loading');
+  // pseudo Telegram de la session refusée : LE renseignement qui manquait pour sortir de la boucle
+  const [deniedAs, setDeniedAs] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
@@ -131,7 +133,11 @@ export default function AdminCRM() {
       // (au lieu d'un cul-de-sac) — mais l'accès reste réservé à ADMIN_TG_USERNAMES : un autre compte
       // se reconnecte, se refait renvoyer en 403, et ne voit jamais le CRM. Sécurité intacte, porte ajoutée.
       if (r.status === 401) return setState('anon');
-      if (r.status === 403) return setState('forbidden');
+      if (r.status === 403) {
+        const d = (await r.json().catch(() => ({}))) as { username?: string | null };
+        setDeniedAs(d.username ?? null);
+        return setState('forbidden');
+      }
       const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[] };
       setWl(d.whitelist);
       setRows(d.members);
@@ -558,7 +564,7 @@ export default function AdminCRM() {
   };
 
   if (state === 'loading') return <Center>loading…</Center>;
-  if (state === 'anon' || state === 'forbidden') return <AdminGate forbidden={state === 'forbidden'} />;
+  if (state === 'anon' || state === 'forbidden') return <AdminGate forbidden={state === 'forbidden'} deniedAs={deniedAs} />;
 
   const live = rows.filter((r) => r.status === 'live').length;
   const pendingRev = rows.filter((r) => r.status === 'pending_copier').length;
@@ -1522,7 +1528,7 @@ function Center({ children }: { children: React.ReactNode }) {
 // l'espace membre (code à usage unique + deep-link, pollé). `forbidden` = une session NON-admin traîne sur
 // ce poste → on la purge (logout) avant de relancer, pour repartir propre. L'accès reste gardé côté API :
 // tout compte hors ADMIN_TG_USERNAMES se reconnecte puis se refait refuser — il ne voit jamais le CRM.
-function AdminGate({ forbidden }: { forbidden: boolean }) {
+function AdminGate({ forbidden, deniedAs }: { forbidden: boolean; deniedAs?: string | null }) {
   const [phase, setPhase] = useState<'idle' | 'waiting' | 'expired' | 'error'>('idle');
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => () => { if (poll.current) clearInterval(poll.current); }, []);
@@ -1554,6 +1560,17 @@ function AdminGate({ forbidden }: { forbidden: boolean }) {
             ? 'This account isn’t an admin. Sign in with your authorized Telegram to open the back-office.'
             : 'Restricted back-office. Sign in with your authorized Telegram account.'}
         </p>
+        {/* QUI vient de se connecter — sans ça, quelqu'un dont Telegram est resté sur un autre compte
+            retape START à l'infini sans comprendre. Le pseudo affiché règle la question en une seconde. */}
+        {forbidden && (
+          <p className="mono" style={{ fontSize: 12, margin: '10px auto 0', color: 'var(--gold)', maxWidth: 360, lineHeight: 1.6 }}>
+            Signed in as {deniedAs ? '@' + deniedAs : '(no Telegram username)'}
+            <br />
+            <span style={{ color: 'var(--muted)', fontSize: 11.5 }}>
+              Switch account inside Telegram BEFORE tapping START — otherwise you will sign back in as this same account.
+            </span>
+          </p>
+        )}
       </div>
       {phase !== 'waiting' ? (
         <button onClick={() => void start()} style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '13px 26px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.5, fontSize: 14.5, color: '#fff', background: 'linear-gradient(90deg,#2AABEE,#229ED9)', boxShadow: '0 0 24px rgba(42,171,238,.35)' }}>
