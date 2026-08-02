@@ -15,8 +15,16 @@ function guard(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const s = guard(req);
-  if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  // PAS DE SESSION vs SESSION NON-ADMIN (01/08) — la distinction manquait et créait une boucle insoluble :
+  // on répondait 403 dans les deux cas, sans jamais dire QUEL compte venait de se connecter. Quelqu'un
+  // dont le Telegram est basculé sur un autre compte (un compte de test, par exemple) tapait START,
+  // arrivait bien connecté, se faisait refuser, retapait START avec le même compte… en boucle, sans
+  // aucun moyen de voir d'où venait le refus. On renvoie donc le pseudo : la page l'affiche, et le
+  // problème saute aux yeux en une seconde.
+  const sess = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
+  if (!sess) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!isAdmin(sess.username)) return NextResponse.json({ error: 'forbidden', username: sess.username ?? null }, { status: 403 });
+  const s = sess;
   const db = sdb();
   const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
