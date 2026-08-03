@@ -71,24 +71,38 @@ export function sthDisconnect(userId: string) {
  *  les membres connectés via l'API ; les receivers ajoutés à la main dans le dashboard STH sont invisibles
  *  ici → erreur explicite pour que le support les déplace à la main. */
 export async function sthMoveMaster(userId: string, strategy: number, lots: number): Promise<{ ok: boolean; error: string }> {
-  const masterId = MASTER_BY_STRATEGY[strategy] || MASTER_ID;
+  // JAMAIS de repli silencieux vers le master historique pour S1/S3 : brancher quelqu'un sur une stratégie
+  // qu'il n'a pas choisie est pire qu'un message d'erreur. S2 garde le repli — MASTER_ID EST son master.
+  const masterId = MASTER_BY_STRATEGY[strategy] || (strategy === 2 ? MASTER_ID : '');
   if (!masterId) return { ok: false, error: `no master configured for S${strategy} (set STH_MASTER_ID_S${strategy})` };
-  // « connu de l'API » = liste de masters NON VIDE (un utilisateur inconnu renvoie une liste vide — doc STH).
-  // NE PAS gater sur tradingAccountConnected : ce flag reflète l'état instantané du bridge MT et peut être
-  // false pour un membre parfaitement abonné (vécu 23/07 : userIsSubscribed:true avec connected:false).
-  const st = await sthStatus(userId);
-  if (st.ok && (st.data.masterAccountsList ?? []).length === 0)
+  if (!isApiKnown(await sthStatus(userId)))
     return { ok: false, error: 'this member is not API-connected (manually-added receiver?) — move them in the STH dashboard instead' };
   const j = await sthJoinMaster({ userId, masterId, lots });
   return j.ok ? { ok: true, error: '' } : { ok: false, error: j.errorMessage };
+}
+
+/**
+ * « Connu de l'API ? » — la question paraît simple, elle a coûté une cliente bloquée (03/08, membre #7).
+ * Un utilisateur INCONNU de STH renvoie les DEUX à la fois : tradingAccountConnected false ET une liste de
+ * masters vide. Chacun pris isolément est un faux négatif :
+ *  · la liste vide seule → c'est aussi l'état exact d'un membre MIS EN PAUSE par sthPauseCopy (join
+ *    déclaratif avec une liste vide). Résultat vécu : une cliente se déconnecte depuis l'app, son compte
+ *    reste parfaitement connecté chez STH, et plus aucune reconnexion n'est possible — ni par elle, ni par
+ *    le support. Le mécanisme de pause fabriquait l'état que le mécanisme de reprise refusait de traiter.
+ *  · le flag seul → il reflète l'état INSTANTANÉ du bridge MT et peut être false sur un membre
+ *    parfaitement abonné (vécu 23/07 : userIsSubscribed true avec connected false).
+ * On exige donc les deux pour déclarer quelqu'un inconnu.
+ */
+function isApiKnown(st: { ok: boolean; data: { tradingAccountConnected?: boolean; masterAccountsList?: Array<{ id: string }> } }): boolean {
+  if (!st.ok) return true; // STH injoignable → on laisse passer, l'appel suivant tranchera avec sa vraie erreur
+  return st.data.tradingAccountConnected === true || (st.data.masterAccountsList ?? []).length > 0;
 }
 
 /** PAUSE la copie d'un utilisateur API : join-master-account DÉCLARATIF avec une liste VIDE = désabonné de
  *  tout, mais le compte MT reste connecté au copieur → le resume est un simple re-join (sthMoveMaster).
  *  Même garde que sthMoveMaster : les receivers ajoutés à la main dans le dashboard sont invisibles ici. */
 export async function sthPauseCopy(userId: string): Promise<{ ok: boolean; error: string }> {
-  const st = await sthStatus(userId);
-  if (st.ok && (st.data.masterAccountsList ?? []).length === 0)
+  if (!isApiKnown(await sthStatus(userId)))
     return { ok: false, error: 'this member is not API-connected (manually-added receiver?) — pause them in the STH dashboard instead' };
   const r = await sthPost('/Partner/join-master-account', { UserID: userId, MasterAccounts: [] });
   return r.ok ? { ok: true, error: '' } : { ok: false, error: r.errorMessage };
