@@ -17,6 +17,17 @@ export function rememberManagement(ticket: string, m: Mgmt) {
   custom.set(ticket, m);
 }
 
+/**
+ * Cette position a-t-elle sa gestion custom ? (→ restauration après redémarrage, voir runner/index.ts)
+ *
+ * `custom` vit en MÉMOIRE du process. Le runner redémarre à chaque déploiement, et un swing tient des JOURS :
+ * sans restauration, la position survivante retombait sur le défaut scalp — breakeven à 0.15R au lieu de 1R,
+ * et surtout NI palier NI trailing (les deux branches sont sautées quand `mgmt` est absent). Le stop se figeait
+ * donc au breakeven pour le reste de la vie du trade, en silence. Vu en clair le 03/08 sur le swing or S2 :
+ * stop posé à BE deux minutes après l'entrée, plus jamais remonté, alors que le trade est monté à 2.1R.
+ */
+export const hasManagement = (ticket: string): boolean => custom.has(ticket);
+
 export async function manageBreakeven(stream: any, terminal: any, symbol: string) {
   const positions = (terminal.positions ?? []).filter((p: any) => p.symbol === symbol);
   const live = new Set<string>(positions.map((p: any) => String(p.id)));
