@@ -6,7 +6,7 @@ import { readState } from './metaapi/state';
 import { postVip, vipReady, VIP_TAG, usd, VIP_RULE } from './telegram';
 import { SECONDARY } from '../lib/supabase/sync';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
-import { manageBreakeven, rememberManagement } from './metaapi/manage';
+import { manageBreakeven, rememberManagement, hasManagement } from './metaapi/manage';
 import { DealRecorder } from './metaapi/trades';
 import { narrate, narrateRecap, narrateLossReview, narrationReady, deskMeta, type DeskKind } from './llm/narrate';
 import { runTick } from '../lib/engine/pipeline';
@@ -22,7 +22,7 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from '.
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -569,6 +569,46 @@ async function main() {
       }
     };
 
+    // ===== RESTAURATION DE LA GESTION POST-ENTRÉE (03/08) =====
+    // `custom` (manage.ts) vit en MÉMOIRE du process. Le runner redémarre à chaque déploiement — et un swing
+    // tient des JOURS. Les positions survivantes retombaient donc sur la gestion par DÉFAUT (scalp) : breakeven
+    // à 0.15R au lieu de 1R, et surtout NI palier NI trailing, puisque les deux branches de manageBreakeven
+    // sont sautées quand `mgmt` est absent. Le stop se figeait au breakeven pour le reste de la vie du trade,
+    // en silence, et un beau trade rentrait à ~0$ — exactement ce qu'on a vu sur le swing or S2 du 03/08
+    // (BE posé deux minutes après l'entrée, plus jamais remonté, alors que le trade est monté à 2.1R).
+    //
+    // On relit donc le stop D'ORIGINE en base (`signals.stop_loss`, JAMAIS `trades.sl` qui est le stop courant :
+    // après un BE il vaut ~l'entrée, et le risque recalculé dessus serait quasi nul → tous les seuils en R
+    // exploseraient). La couche se déduit du signal_ref, comme partout ailleurs.
+    // Passe paresseuse et idempotente : elle ne touche QUE les positions sans gestion, donc elle rattrape aussi
+    // bien un redémarrage qu'une position ouverte à la main pendant que le runner tournait.
+    let lastRestore = 0;
+    const ensureManagement = async () => {
+      if (Date.now() - lastRestore < 60_000) return;
+      const live = ((terminal.positions ?? []) as any[]).filter((x) => x.symbol === BROKER && x.stopLoss != null);
+      const orphans = live.filter((x) => !hasManagement(String(x.id)));
+      if (!orphans.length) return;
+      lastRestore = Date.now();
+      try {
+        const rows = await listOpenTradesWithInitialStop(DISPLAY);
+        const byTicket = new Map(rows.map((r) => [r.ticket, r]));
+        for (const p of orphans) {
+          const r = byTicket.get(String(p.id));
+          if (!r) continue; // trade manuel / mode show : le défaut est le bon comportement
+          const riskDist = Math.abs(r.entry - r.stopLoss);
+          if (!riskDist) continue;
+          const SWc = inst.swing;
+          if (r.ref.includes('-swing-') && SWc) rememberManagement(r.ticket, { beTrigger: SWc.beTrigger, trailActivate: SWc.trailActivate, trailDist: SWc.trailDist, ladder: SWc.ladder, riskDist });
+          else if (r.ref.includes('-bk-') && inst.breakout) rememberManagement(r.ticket, { beTrigger: inst.breakout.beTrigger, trailActivate: inst.breakout.trailActivate, trailDist: inst.breakout.trailDist, riskDist });
+          else if (inst.config.trailActivate != null && inst.config.trailDist != null) rememberManagement(r.ticket, { beTrigger: inst.config.beTrigger ?? 0, trailActivate: inst.config.trailActivate, trailDist: inst.config.trailDist, riskDist });
+          else continue; // couche sans gestion custom (scalp S1) → le défaut EST sa gestion
+          await logNote(`🔧 management restored on ${DISPLAY} position ${r.ticket} (${r.ref.includes('-swing-') ? 'swing' : r.ref.includes('-bk-') ? 'breakout' : 'scalp'} · risk ${riskDist.toFixed(2)}) — stop ladder + trailing are live again`, 'order');
+        }
+      } catch (e) {
+        console.error('[algoria] restauration gestion échec:', (e as { message?: string })?.message ?? e);
+      }
+    };
+
     // Tick (1 s) : alimente l'agrégateur M5 + M1, diffuse le prix (primaire), gère le breakeven. Isolé du reste.
     const tick = () => {
       const p = terminal.price(BROKER);
@@ -582,8 +622,10 @@ async function main() {
           broadcastTick(DISPLAY, p.bid, p.ask); // tick tagué symbole → le cockpit multi-symbole suit le marché choisi
         }
       }
+      void ensureManagement(); // AVANT la gestion : une position sans son mgmt serait gérée au défaut scalp
       void manageBreakeven(stream, terminal, BROKER); // no-op sur les ordres nus (sans SL)
     };
+
 
     // Réconciliation anti-fantômes (60 s) : un trade "ouvert" en base qui n'existe plus chez le broker a été
     // clôturé pendant une coupure (redeploy) ou à la main. On cherche d'abord la VRAIE clôture dans l'historique

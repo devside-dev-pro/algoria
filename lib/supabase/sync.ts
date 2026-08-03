@@ -320,6 +320,32 @@ export async function listOpenSwingTrades(symbol: string): Promise<Array<{ ticke
   return (data ?? []).map((r: Record<string, unknown>) => ({ ticket: String(r.ticket), direction: r.direction === 'short' ? 'short' : 'long', entry: Number(r.entry) }));
 }
 
+/**
+ * Positions ENCORE OUVERTES en base, avec le stop D'ORIGINE du signal qui les a créées.
+ *
+ * Sert à RESTAURER la gestion post-entrée après un redémarrage du runner (voir runner/index.ts). La gestion
+ * custom — breakeven tardif, paliers, trailing — ne vivait qu'en mémoire du process ; or le runner redémarre
+ * à chaque déploiement, et un swing tient des JOURS. On lit donc `signals.stop_loss`, le stop INITIAL, jamais
+ * `trades.sl` qui est le stop COURANT : après un breakeven il vaut ~l'entrée, et le risque recalculé dessus
+ * serait quasi nul — tous les seuils en R exploseraient.
+ */
+export async function listOpenTradesWithInitialStop(symbol: string): Promise<Array<{ ticket: string; ref: string; entry: number; stopLoss: number }>> {
+  const { data } = await db.from('trades').select('ticket,signal_ref,entry').eq('symbol', symbol).eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  if (!rows.length) return [];
+  const refs = rows.map((r) => String(r.signal_ref));
+  const { data: sigs } = await db.from('signals').select('ref,entry,stop_loss').in('ref', refs).eq('strategy' as never, STRAT_ID as never);
+  const byRef = new Map((sigs ?? []).map((s: Record<string, unknown>) => [String(s.ref), s]));
+  const out: Array<{ ticket: string; ref: string; entry: number; stopLoss: number }> = [];
+  for (const r of rows) {
+    const s = byRef.get(String(r.signal_ref));
+    const stopLoss = Number(s?.stop_loss ?? 0);
+    if (!stopLoss) continue; // ordre nu (sans SL) → rien à gérer, c'est voulu
+    out.push({ ticket: String(r.ticket), ref: String(r.signal_ref), entry: Number(s?.entry ?? r.entry), stopLoss });
+  }
+  return out;
+}
+
 /** Timestamp (ms) de la dernière bougie stockée pour symbol/timeframe — null si aucune. Sert au warm boot du runner. */
 export async function latestCandleTime(symbol: string, timeframe = 'M5'): Promise<number | null> {
   const { data } = await db.from('candles').select('time').eq('symbol', symbol).eq('timeframe', timeframe).order('time', { ascending: false }).limit(1);
