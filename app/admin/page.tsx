@@ -337,6 +337,16 @@ export default function AdminCRM() {
   };
   // nom légal (compte broker) d'un membre — la clé pour rapprocher Telegram ↔ admin ↔ broker/STH
   const legalOf = (tg: number | null | undefined) => (tg != null ? legalNames[String(tg)] ?? null : null);
+  // ÉDITER LE NOM DU TITULAIRE — le membre le saisit au wizard et se trompe (vu : « VTMarkets » à la place
+  // du nom de la personne). Ce champ relie son pseudo Telegram, son compte broker et la ligne de commission :
+  // faux, on ne retrouve plus son dépôt. On ajoute une correction, on n'écrase pas la saisie d'origine.
+  const editLegalName = (tg: number | null | undefined, current: string | null) => {
+    if (tg == null) return;
+    const v = window.prompt('Name on the broker account (as written at the broker — this is what links his deposit to him):', current ?? '');
+    if (v === null) return;
+    if (v.trim().length < 2) { window.alert('Enter the real full name.'); return; }
+    post({ setLegalName: { tg_id: Number(tg), name: v.trim() } });
+  };
   // message « nouveau dépôt à vérifier » → presse-papiers (WhatsApp staff). Nom du compte broker en
   // priorité (c'est LUI que le staff cherche dans CellXpert), sinon le nom Telegram en repli.
   const copyDepositInfo = (a: Action) => {
@@ -1032,7 +1042,11 @@ export default function AdminCRM() {
               <span className="mono" title={String(sel.locale ?? 'en') === 'it' ? 'Italian market — app, bot DMs and nudges in Italian' : 'English market'} style={{ fontSize: 11, padding: '2px 7px', borderRadius: 7, border: '1px solid var(--border)', color: 'var(--muted)' }}>{String(sel.locale ?? 'en') === 'it' ? '🇮🇹 IT' : '🇬🇧 EN'}</span>
               <span style={{ fontSize: 15, fontWeight: 800 }}>{sel.tg_username ? '@' + sel.tg_username : (sel.tg_name ?? '—')}</span>
               {sel.tg_username && sel.tg_name && <span style={{ fontSize: 12, color: 'var(--dim)' }}>{sel.tg_name}</span>}
-              {legalOf(sel.tg_id) && <span className="mono" style={{ fontSize: 11, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.35)', borderRadius: 6, padding: '2px 8px' }} title="name on the broker account">🏦 {legalOf(sel.tg_id)}</span>}
+              <button onClick={() => editLegalName(sel.tg_id, legalOf(sel.tg_id))} className="mono"
+                title="name on the broker account — click to fix it (members often type the broker's name here by mistake)"
+                style={{ fontSize: 11, cursor: 'pointer', color: legalOf(sel.tg_id) ? 'var(--gold)' : 'var(--dim)', border: `1px ${legalOf(sel.tg_id) ? 'solid rgba(245,194,74,.35)' : 'dashed var(--border)'}`, background: 'transparent', borderRadius: 6, padding: '2px 8px' }}>
+                🏦 {legalOf(sel.tg_id) ?? 'no holder name — add'} ✎
+              </button>
               <StatusChip status={sel.status} />
               {sel.tg_username && <a href={`https://t.me/${sel.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
               <span style={{ flex: 1 }} />
