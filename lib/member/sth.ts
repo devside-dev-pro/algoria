@@ -126,9 +126,21 @@ export async function sthConnectAndJoin(o: {
   //    RETRY-SAFE : si le compte est DÉJÀ connecté (re-clic alors que tout marche), on continue vers le join
   //    au lieu de bloquer — l'erreur « already connected » n'est pas un échec pour nous.
   const c = await sthConnectCustomer(o);
-  if (!c.ok && !/already/i.test(c.errorMessage)) return { ok: false, error: c.errorMessage };
-  // 2) master id : celui de la STRATÉGIE du membre d'abord, sinon env global, sinon auto-découverte
-  let masterId = (o.strategy != null ? MASTER_BY_STRATEGY[o.strategy] : '') || MASTER_ID;
+  if (!c.ok) {
+    // ON NE FAIT PAS CONFIANCE AU LIBELLÉ (03/08, cliente #7) : le filet ne reconnaissait « déjà connecté »
+    // qu'au mot « already ». STH répond « Invalid account » pour un compte déjà enregistré — message que
+    // rien ne laisse deviner. Résultat : une cliente parfaitement connectée chez eux était déclarée
+    // invalide chez nous, et le support ne pouvait plus la rebrancher.
+    // On redemande donc l'état RÉEL : si le compte est connecté, l'échec du connect n'en est pas un et on
+    // continue vers le join. Un fait vérifié vaut mieux qu'une chaîne de caractères devinée.
+    const after = await sthStatus(o.userId);
+    if (!(after.ok && after.data.tradingAccountConnected === true)) return { ok: false, error: c.errorMessage };
+  }
+  // 2) master id : celui de la STRATÉGIE du membre d'abord, sinon env global, sinon auto-découverte.
+  //    Comme sthMoveMaster : jamais de repli silencieux vers le master historique pour S1/S3 — brancher
+  //    quelqu'un sur une stratégie qu'il n'a pas choisie est pire qu'une erreur affichée.
+  let masterId = (o.strategy != null ? MASTER_BY_STRATEGY[o.strategy] : '') || (o.strategy == null || o.strategy === 2 ? MASTER_ID : '');
+  if (!masterId && o.strategy != null && o.strategy !== 2) return { ok: false, error: `no master configured for S${o.strategy} (set STH_MASTER_ID_S${o.strategy})` };
   if (!masterId) {
     const st = await sthStatus(o.userId);
     if (!st.ok) return { ok: false, error: `connected, but master lookup failed: ${st.errorMessage}` };

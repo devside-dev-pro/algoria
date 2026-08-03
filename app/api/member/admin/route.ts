@@ -623,10 +623,13 @@ export async function POST(req: NextRequest) {
     // jamais à ça, même en réparation de masse.
     if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
     const repair = body.sthAudit === 'repair';
+    // 'pending_copier' inclus depuis le 03/08 : la cliente #7 etait exactement la — connectee chez STH,
+    // abonnee a rien, et invisible du premier audit qui ne regardait que les 'live'. Quelqu'un qui essaie
+    // de se (re)brancher est precisement celui qu'on doit rattraper. 'paused' reste hors perimetre.
     const { data: lives } = await (db as any).from('members')
-      .select('tg_id,member_no,tg_username,tg_name,strategy,lot,mt5_login')
-      .eq('status', 'live').not('mt5_login', 'is', null).limit(60) as {
-        data: Array<{ tg_id: number; member_no: number | null; tg_username: string | null; tg_name: string | null; strategy: number | null; lot: number | null; mt5_login: string | null }> | null };
+      .select('tg_id,member_no,tg_username,tg_name,status,strategy,lot,mt5_login')
+      .in('status', ['live', 'pending_copier']).not('mt5_login', 'is', null).limit(60) as {
+        data: Array<{ tg_id: number; member_no: number | null; tg_username: string | null; tg_name: string | null; status: string; strategy: number | null; lot: number | null; mt5_login: string | null }> | null };
     const rows: Array<Record<string, unknown>> = [];
     for (const m of lives ?? []) {
       const st = await sthStatus(String(m.tg_id));
@@ -641,7 +644,12 @@ export async function POST(req: NextRequest) {
       if (!repair) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'orphan', detail: `connected but copying nothing → would rejoin S${strategy} (lots ${lots})` }); continue; }
       const r = await sthMoveMaster(String(m.tg_id), strategy, lots);
       rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: r.ok ? 'repaired' : 'failed', detail: r.ok ? `rejoined S${strategy} (lots ${lots})` : r.error });
-      if (r.ok) await db.from('member_actions').insert({ tg_id: m.tg_id, member_no: m.member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔧 STH audit: was connected but copying NO master → rejoined S${strategy} (lots ${lots})` } as never });
+      if (r.ok) {
+        // la copie tourne a nouveau : le statut doit dire la verite, sinon la fiche reste bloquee en
+        // 'pending_copier' et la carte de la file laisse croire qu'il reste quelque chose a faire.
+        if (m.status === 'pending_copier') await (db as any).from('members').update({ status: 'live', updated_at: new Date().toISOString() }).eq('tg_id', m.tg_id);
+        await db.from('member_actions').insert({ tg_id: m.tg_id, member_no: m.member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔧 STH audit: was connected but copying NO master → rejoined S${strategy} (lots ${lots})${m.status === 'pending_copier' ? ' · status → live' : ''}` } as never });
+      }
     }
     const count = (s: string) => rows.filter((r) => r.state === s).length;
     return NextResponse.json({ rows, summary: { checked: rows.length, ok: count('ok'), orphan: count('orphan'), repaired: count('repaired'), failed: count('failed'), unknown: count('unknown'), error: count('error') } });
