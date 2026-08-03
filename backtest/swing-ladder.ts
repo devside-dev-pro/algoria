@@ -47,10 +47,27 @@ const steps = (name: string, s: [number, number][], beyond?: number): Ladder => 
 //  • le VRAI gain gold vient d'un PALIER (verrouiller +0.5R à 2R), qui demande une extension moteur → I4.
 //  • sur BTC, un trail plus LARGE (activate2 dist3, config-only) améliore l'edge (PF 2.02→2.25).
 const cfg = (name: string, A: number, D: number): Ladder => ({ name, stopR: (p) => (p >= A ? p - D : p >= 1 ? 0.05 : -1) });
+// CANDIDATS « VERROUILLER PLUS TÔT » (03/08, demande Mathieu). Le trade du jour est monté à 2,1R (~+1400$ sur
+// le maître, 1R ≈ 668$) et s'est fermé à +502$ : le premier palier est à 2R et il ne verrouille que 0,5R, donc
+// entre 1R et 2R le moteur ne sécurise rien du tout. Objectif énoncé : « assurer 500$ puis 1000$ », soit ~0,75R
+// puis ~1,5R sur ce sizing. Les cinq candidats ci-dessous traduisent ça de plusieurs façons — le point de la
+// mesure est justement de voir ce que ce confort coûte en espérance sur un suiveur de tendance qui vit de ses
+// runners. Un escalier trop serré transforme les gros trades en petits ; c'est le comparatif qui tranche, pas
+// l'intuition. NB : `beyond` ne peut jamais faire REDESCENDRE un palier (steps() prend le max).
 const LADDERS: Ladder[] = [
   cfg('PROD (activate2.5 dist2.5)', 2.5, 2.5),
-  steps('GOLD I4 · BE1 · lock .5R@2R · trail2.5', [[1, 0.05], [2, 0.5]], 2.5), // ← gagnant GOLD (moteur : palier)
+  steps('GOLD I4 · BE1 · lock .5R@2R · trail2.5', [[1, 0.05], [2, 0.5]], 2.5), // ← gagnant GOLD actuel (en prod)
   cfg('BTC · activate2.0 dist3.0 (config-only)', 2.0, 3.0),                     // ← gagnant BTC (juste des chiffres)
+  // « 500$ puis 1000$ » au pied de la lettre : 0.75R verrouillé dès 1.2R, 1.5R verrouillé dès 2R
+  steps('C1 · lock .75R@1.2R · 1.5R@2R · trail2', [[1, 0.05], [1.2, 0.75], [2, 1.5]], 2),
+  // même idée, montée plus progressive (trois marches) et trail plus court derrière
+  steps('C2 · .3R@1R · .75R@1.5R · 1.2R@2R · trail1.5', [[1, 0.3], [1.5, 0.75], [2, 1.2]], 1.5),
+  // compromis : on laisse respirer jusqu'à 1.5R, puis on verrouille franchement
+  steps('C3 · .5R@1.5R · 1.5R@2.5R · trail2', [[1, 0.05], [1.5, 0.5], [2.5, 1.5]], 2),
+  // CONFIG-ONLY (aucune extension moteur) : trailing plus court, activé plus tôt. S'il tient la comparaison,
+  // c'est la correction la moins chère de toutes — deux nombres à changer, rien d'autre.
+  cfg('C4 · activate1.5 dist1.0 (config-only)', 1.5, 1.0),
+  cfg('C5 · activate1.2 dist0.7 (config-only, très serré)', 1.2, 0.7),
 ];
 
 function run(label: string, ind: Indicators, strat: StrategyDef, spec: Spec, tpAtr: number) {
