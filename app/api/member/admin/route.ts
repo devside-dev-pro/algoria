@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret } from '@/lib/member/server';
+import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret, encryptSecret } from '@/lib/member/server';
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
 import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } from '@/lib/member/sth';
+import { BROKERS } from '@/lib/member/brokers';
+import { LOT_CHOICES, isLotAllowed } from '@/lib/member/lots';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,7 +31,7 @@ export async function GET(req: NextRequest) {
   const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
-    (db as any).from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at,locale').order('member_no', { ascending: false }).limit(200) as Promise<{ data: Array<{ tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>> | null }>,
+    (db as any).from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at,locale,strategy,lot').order('member_no', { ascending: false }).limit(200) as Promise<{ data: Array<{ tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>> | null }>,
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),
@@ -161,6 +163,7 @@ export async function POST(req: NextRequest) {
     setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number;
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
     setCountry?: { tg_id: number; country: string };
+    editMember?: { tg_id: number; field: string; value: string | null };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
     ban?: { tg_id: number; reason?: string; undo?: boolean };
   };
@@ -629,6 +632,110 @@ export async function POST(req: NextRequest) {
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
+  }
+  // ===== CORRIGER UNE FICHE MEMBRE (03/08) — « fais le tour complet » =====
+  // La fiche affichait une dizaine de champs saisis PAR LE MEMBRE au wizard, et pas un seul n'était
+  // rattrapable depuis l'admin : broker, login/serveur MT, mot de passe, adresse USDT, parrain, marché,
+  // statut, lot, stratégie. Or c'est exactement là que les erreurs arrivent — le membre tape le nom de
+  // son broker à la place du sien, se trompe d'un caractère sur le serveur MT (« PUPrime-Live2 » ≠
+  // « PUPrime-Live 2 » → le copieur ne démarre jamais), colle une adresse USDT tronquée. Jusqu'ici la
+  // seule issue était une requête SQL à la main. Un champ faux et non corrigeable, c'est un client bloqué.
+  //
+  // TRACE SYSTÉMATIQUE : chaque correction écrit une note de timeline « ancien → nouveau », signée.
+  // Le mot de passe fait exception — il est chiffré, jamais journalisé en clair (la note dit juste qu'il
+  // a changé). On ne perd donc jamais la saisie d'origine, y compris quand le broker conteste plus tard.
+  if (body.editMember) {
+    const tg = Number(body.editMember.tg_id) || 0;
+    const field = String(body.editMember.field ?? '');
+    const raw = body.editMember.value == null ? '' : String(body.editMember.value).trim();
+    if (!tg) return NextResponse.json({ error: 'tg_id required' }, { status: 400 });
+    const { data: m } = await (db as any).from('members')
+      .select('member_no,tg_id,broker,mt5_login,mt5_server,mt5_password_enc,usdt_trc20,referred_by,locale,status,lot,strategy')
+      .eq('tg_id', tg).limit(1) as { data: Array<Record<string, unknown>> | null };
+    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    const cur = m[0];
+
+    const patch: Record<string, unknown> = {};
+    let before = String(cur[field] ?? '—');
+    let after = raw || '—';
+
+    if (field === 'broker') {
+      // clé de broker connue uniquement : c'est elle qui pilote le barème de commission et le message
+      // « à vérifier » envoyé au staff. Une clé inventée casserait les deux en silence.
+      if (raw && !BROKERS.some((b) => b.key === raw)) return NextResponse.json({ error: `unknown broker key "${raw}"` }, { status: 400 });
+      patch.broker = raw || null;
+    } else if (field === 'mt5_login') {
+      if (raw && !/^\d{4,15}$/.test(raw)) return NextResponse.json({ error: 'MT login must be 4-15 digits' }, { status: 400 });
+      patch.mt5_login = raw || null;
+    } else if (field === 'mt5_server') {
+      // AUCUNE normalisation (pas de trim interne, pas de casse forcée) : STH exige la chaîne EXACTE
+      // telle qu'elle apparaît chez le broker. « Corriger » l'espace de « PUPrime-Live 2 » casserait
+      // justement le compte qu'on essaie de réparer.
+      patch.mt5_server = raw.slice(0, 80) || null;
+    } else if (field === 'mt5_password') {
+      if (raw.length < 4) return NextResponse.json({ error: 'password too short' }, { status: 400 });
+      patch.mt5_password_enc = encryptSecret(raw);
+      before = cur.mt5_password_enc ? '(set)' : '—';
+      after = '(changed)'; // jamais le mot de passe en clair dans la timeline
+    } else if (field === 'usdt_trc20') {
+      // TRC20 : commence par T, 34 caractères. Une adresse fausse = un virement dans le vide, irréversible.
+      if (raw && !/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(raw)) return NextResponse.json({ error: 'not a valid TRC20 address (starts with T, 34 chars)' }, { status: 400 });
+      patch.usdt_trc20 = raw || null;
+    } else if (field === 'referred_by') {
+      // accepte un tg_id, un #numéro de membre ou un @pseudo — l'opérateur ne connaît que le dernier
+      let ref: number | null = null;
+      if (raw) {
+        const key = raw.replace(/^[#@]/, '').toLowerCase();
+        const { data: cand } = await db.from('members').select('tg_id,member_no,tg_username').limit(2000);
+        const hit = (cand ?? []).find((c) => String(c.tg_id) === key || String(c.member_no) === key || String(c.tg_username ?? '').toLowerCase() === key);
+        if (!hit) return NextResponse.json({ error: `no member matches "${raw}" (try #123, @username or the tg id)` }, { status: 400 });
+        if (Number(hit.tg_id) === tg) return NextResponse.json({ error: 'a member cannot refer themselves' }, { status: 400 });
+        ref = Number(hit.tg_id);
+        after = `#${hit.member_no}${hit.tg_username ? ' @' + hit.tg_username : ''}`;
+      }
+      patch.referred_by = ref;
+    } else if (field === 'locale') {
+      if (!['en', 'it'].includes(raw)) return NextResponse.json({ error: 'locale must be en or it' }, { status: 400 });
+      patch.locale = raw;
+      before = String(cur.locale ?? 'en');
+    } else if (field === 'status') {
+      // Rattrapage MANUEL du statut. Volontairement limité aux 4 états du parcours : un membre coincé en
+      // 'pending_copier' alors qu'il copie déjà, ou un 'paused' qui revient, n'avait aucune sortie.
+      // Ne touche NI le copieur NI le bannissement (→ OFF-BOARD / BAN / RECONNECT, qui eux agissent chez STH).
+      if (!['onboarding', 'pending_copier', 'live', 'paused'].includes(raw)) return NextResponse.json({ error: 'unknown status' }, { status: 400 });
+      patch.status = raw;
+    } else if (field === 'lot' || field === 'strategy') {
+      const n = Number(raw);
+      if (field === 'lot') {
+        if (!isLotAllowed(n)) return NextResponse.json({ error: `lot must be one of ${LOT_CHOICES.join(', ')}` }, { status: 400 });
+        patch.lot = n;
+      } else {
+        if (![1, 2, 3].includes(n)) return NextResponse.json({ error: 'strategy must be 1, 2 or 3' }, { status: 400 });
+        patch.strategy = n;
+      }
+    } else {
+      return NextResponse.json({ error: `field "${field}" is not editable` }, { status: 400 });
+    }
+
+    const { error } = await (db as any).from('members').update({ ...patch, updated_at: new Date().toISOString() }).eq('tg_id', tg);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // LOT / STRATÉGIE : la colonne n'est PAS la vérité, le copieur l'est. Les changer en base sans le dire
+    // à STH créerait exactement le mensonge que l'audit du 03/08 vient de débusquer — une fiche qui affiche
+    // S1 · 0.02 pendant que le compte copie toujours S2 · 0.01. On resynchronise donc dans la foulée pour
+    // les membres réellement branchés ; l'échec est REMONTÉ, jamais avalé.
+    let sync = '';
+    if ((field === 'lot' || field === 'strategy') && ['live', 'pending_copier'].includes(String(cur.status)) && sthReady()) {
+      const strategy = Number(field === 'strategy' ? patch.strategy : cur.strategy ?? 2) || 2;
+      const lots = Number(field === 'lot' ? patch.lot : cur.lot ?? 0.01) || 0.01;
+      const r = await sthMoveMaster(String(tg), strategy, lots);
+      sync = r.ok ? ` · copier re-synced (S${strategy} · ${lots})` : ` · ⚠ STH sync FAILED (${r.error}) — reconnect from the card`;
+    }
+    await db.from('member_actions').insert({
+      tg_id: tg, member_no: cur.member_no as number | null, kind: 'note', status: 'done', done_by: who,
+      detail: { text: `✏️ ${field}: ${before} → ${after}${sync}` } as never,
+    });
+    return NextResponse.json({ ok: true, sync: sync || null });
   }
   if (body.sthAudit) {
     // AUDIT STH DE MASSE (03/08) — né du cas #7 : une cliente affichée LIVE chez nous, connectée chez STH,
