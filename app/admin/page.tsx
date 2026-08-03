@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { openTelegram } from '@/lib/telegram';
 import { BROKERS } from '@/lib/member/brokers';
+import { LOT_CHOICES } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 
 interface WL { username: string; added_by: string | null; created_at: string }
@@ -20,6 +21,8 @@ interface Row {
   source: string | null; // canal d'acquisition (cookie UTM au premier clic) — null = organique/cross-device
   banned_at?: string | null; // 🚫 accès révoqué (concurrent, abus) — session ET reconnexion bloquées
   locale?: string | null; // marché : 'en' (canal anglais) | 'it' (canal italien) — pilote app, DM et relances
+  strategy?: number | null; // S1 / S2 / S3 — le master STH auquel son compte est abonné
+  lot?: number | null; // la VRAIE taille de copie (risk_tier n'est qu'un libellé dérivé)
 }
 interface Action { id: string; tg_id?: number; member_no: number | null; kind: string; status?: string; done_by?: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
@@ -347,6 +350,83 @@ export default function AdminCRM() {
     if (v.trim().length < 2) { window.alert('Enter the real full name.'); return; }
     post({ setLegalName: { tg_id: Number(tg), name: v.trim() } });
   };
+
+  // ===== CORRIGER UNE FICHE MEMBRE (03/08) — le tour complet des champs =====
+  // Tout ce qui est saisi par le MEMBRE au wizard finit tôt ou tard faux : un caractère d'écart sur le
+  // serveur MT et le copieur ne démarre jamais, une adresse USDT tronquée et le retrait part dans le vide,
+  // un mauvais broker et la commission n'est pas réclamée au bon endroit. Ces champs n'étaient rattrapables
+  // qu'en SQL. Ils le sont maintenant d'un clic, et chaque correction laisse « ancien → nouveau » en timeline.
+  // `sync` remonte le résultat de la resynchronisation STH (stratégie/lot) : un échec DOIT sauter aux yeux,
+  // sinon la fiche afficherait S1 pendant que le compte copie toujours S2 — le mensonge exact que l'audit
+  // du 03/08 vient de débusquer.
+  const editMember = (tg: number, field: string, value: string | null) => {
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ editMember: { tg_id: tg, field, value } }) })
+      .then(async (r) => {
+        const d = (await r.json()) as { error?: string; sync?: string | null };
+        if (d.error) window.alert(d.error);
+        else if (d.sync?.includes('FAILED')) window.alert(`Saved, BUT the copier was not re-synced:\n${d.sync}\n\nUse 🔗 RECONNECT STH.`);
+        load();
+      })
+      .finally(() => setBusy(false));
+  };
+  // saisie libre (texte) — pointillés + « ✎ » : on voit du premier coup d'œil ce qui est rattrapable
+  const editText = (tg: number, field: string, label: string, current: string | null, shown?: string, hint?: string) => (
+    <button
+      disabled={busy}
+      onClick={() => { const v = window.prompt(hint ? `${label}\n\n${hint}` : label, current ?? ''); if (v !== null) editMember(tg, field, v.trim()); }}
+      className="mono"
+      title={`click to fix — ${label}`}
+      style={{ fontSize: 11.5, fontWeight: 700, cursor: 'pointer', background: 'transparent', border: 'none', borderBottom: `1px dashed ${current ? 'rgba(130,152,190,.5)' : 'var(--border)'}`, padding: '0 1px', color: current ? 'var(--text)' : 'var(--dim)' }}
+    >
+      {shown ?? current ?? '—'} ✎
+    </button>
+  );
+  // valeur à choisir dans une liste fermée (broker, marché, statut, stratégie, lot, serveur MT)
+  const editPick = (tg: number, field: string, current: string, opts: Array<{ v: string; label: string }>, title: string, confirmMsg?: (v: string) => string) => (
+    <select
+      disabled={busy}
+      value={current}
+      onChange={(e) => { const v = e.target.value; if (v === current) return; if (confirmMsg && !window.confirm(confirmMsg(v))) return; editMember(tg, field, v); }}
+      className="mono"
+      title={title}
+      style={{ fontSize: 10.5, padding: '3px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: current ? 'var(--text)' : 'var(--dim)', cursor: 'pointer' }}
+    >
+      {!current && <option value="">—</option>}
+      {opts.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+    </select>
+  );
+  // SERVEUR MT — la chaîne doit être EXACTE au caractère près (« PUPrime-Live2 » ≠ « PUPrime-Live 2 »), donc
+  // on propose d'abord les serveurs relevés chez le broker du membre, et la saisie libre reste ouverte pour
+  // les brokers hors partenaires (où l'on n'a aucune liste).
+  const serverPick = (r: Row) => {
+    const known = BROKERS.find((b) => b.key === r.broker)?.servers ?? [];
+    const cur = r.mt5_server ?? '';
+    return (
+      <select
+        disabled={busy}
+        value={known.includes(cur) ? cur : '__free'}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === '__free') { const t = window.prompt('MT server — EXACT string as shown at the broker (a single wrong character stops the copier):', cur); if (t !== null) editMember(r.tg_id, 'mt5_server', t); return; }
+          editMember(r.tg_id, 'mt5_server', v);
+        }}
+        className="mono"
+        title="MT server — must match the broker's string exactly, character for character"
+        style={{ fontSize: 10.5, padding: '3px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: cur ? 'var(--text)' : 'var(--dim)', cursor: 'pointer' }}
+      >
+        {known.map((s) => <option key={s} value={s}>{s}</option>)}
+        <option value="__free">{known.includes(cur) ? 'type it…' : (cur || 'type it…')}</option>
+      </select>
+    );
+  };
+  // mot de passe MT : jamais affiché ici (🔑 SHOW CREDENTIALS le déchiffre à la demande, horodaté) — on
+  // ne fait que le REMPLACER, ce qui est le cas réel : le membre l'a changé chez son broker, la copie tombe.
+  const editPassword = (r: Row) => {
+    const v = window.prompt(`New MT password for ${r.mt5_login ?? 'this account'}\n\nThe TRADER password, not the investor one. It is re-encrypted immediately — after saving, hit 🔗 RECONNECT STH so the copier picks it up.`, '');
+    if (v === null || !v.trim()) return;
+    editMember(r.tg_id, 'mt5_password', v.trim());
+  };
   // message « nouveau dépôt à vérifier » → presse-papiers (WhatsApp staff). Nom du compte broker en
   // priorité (c'est LUI que le staff cherche dans CellXpert), sinon le nom Telegram en repli.
   const copyDepositInfo = (a: Action) => {
@@ -512,6 +592,10 @@ export default function AdminCRM() {
     }, `#${r.member_no}`);
   };
   // ===== FICHE MEMBRE : ouverture + notes privées =====
+  // La fiche ouverte est un INSTANTANÉ de la ligne cliquée. Sans resynchronisation, une correction partait
+  // bien en base mais l'écran continuait d'afficher l'ancienne valeur jusqu'à la réouverture de la fiche —
+  // et l'opérateur re-corrigeait, croyant que ça n'avait pas pris (le pays était déjà dans ce cas).
+  useEffect(() => { setSel((s) => (s ? rows.find((r) => Number(r.tg_id) === Number(s.tg_id)) ?? s : s)); }, [rows]);
   const openMember = (r: Row) => {
     setSel(r);
     setSelActs(null);
@@ -1038,8 +1122,9 @@ export default function AdminCRM() {
           <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'rgba(43,227,245,.35)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span className="mono goldText" style={{ fontWeight: 800, fontSize: 15 }}>#{sel.member_no}</span>
-              {/* marché du membre : pilote la langue de l'app, des DM et des relances */}
-              <span className="mono" title={String(sel.locale ?? 'en') === 'it' ? 'Italian market — app, bot DMs and nudges in Italian' : 'English market'} style={{ fontSize: 11, padding: '2px 7px', borderRadius: 7, border: '1px solid var(--border)', color: 'var(--muted)' }}>{String(sel.locale ?? 'en') === 'it' ? '🇮🇹 IT' : '🇬🇧 EN'}</span>
+              {/* marché du membre : pilote la langue de l'app, des DM et des relances. Corrigeable : un Italien
+                  entré par une pub anglaise recevait des DM en anglais à vie, sans aucun moyen de le basculer. */}
+              {editPick(sel.tg_id, 'locale', String(sel.locale ?? 'en'), [{ v: 'en', label: '🇬🇧 EN' }, { v: 'it', label: '🇮🇹 IT' }], "member's market — drives the app language, the bot DMs and the nudges")}
               <span style={{ fontSize: 15, fontWeight: 800 }}>{sel.tg_username ? '@' + sel.tg_username : (sel.tg_name ?? '—')}</span>
               {sel.tg_username && sel.tg_name && <span style={{ fontSize: 12, color: 'var(--dim)' }}>{sel.tg_name}</span>}
               <button onClick={() => editLegalName(sel.tg_id, legalOf(sel.tg_id))} className="mono"
@@ -1048,6 +1133,13 @@ export default function AdminCRM() {
                 🏦 {legalOf(sel.tg_id) ?? 'no holder name — add'} ✎
               </button>
               <StatusChip status={sel.status} />
+              {/* rattrapage MANUEL du statut : un membre coincé en « pending_copier » alors qu'il copie déjà
+                  n'avait aucune sortie. Ne touche ni au copieur ni au bannissement (→ RECONNECT / BAN). */}
+              {editPick(sel.tg_id, 'status', sel.status, [
+                { v: 'onboarding', label: 'onboarding' }, { v: 'pending_copier', label: 'pending_copier' },
+                { v: 'live', label: 'live' }, { v: 'paused', label: 'paused' },
+              ], 'fix the status by hand — does NOT touch the copier (use RECONNECT / OFF-BOARD for that)',
+                (v) => `Set the status to "${v}" by hand?\n\nThis only changes the label in our database — the copier is NOT touched.`)}
               {sel.tg_username && <a href={`https://t.me/${sel.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
               <span style={{ flex: 1 }} />
               <button onClick={() => { setSel(null); setSelActs(null); setSelCreds(null); }} style={miniBtn}>✕ close</button>
@@ -1078,18 +1170,38 @@ export default function AdminCRM() {
             </div>
             {/* identité + compte — tout ce qu'il faut savoir avant un appel */}
             <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 22px', fontSize: 11.5, color: 'var(--muted)' }}>
-              <span>broker <b style={{ color: 'var(--text)' }}>{sel.broker ?? '—'}</b></span>
-              <span>risk <b style={{ color: 'var(--text)' }}>{sel.risk_tier}</b></span>
-              <span>MT5 <b style={{ color: 'var(--text)' }}>{sel.mt5_login ? `${sel.mt5_login} @ ${sel.mt5_server ?? '?'}` : '—'}</b></span>
+              {/* le broker pilote le barème de commission ET le message « à vérifier » envoyé au staff :
+                  faux, la com n'est pas réclamée au bon endroit. Les dépôts DÉJÀ saisis gardent le leur
+                  (ils ont leur propre édition dans DEPOSITS) — on ne réécrit pas une compta passée. */}
+              <span>broker {editPick(sel.tg_id, 'broker', sel.broker ?? '', BROKERS.map((b) => ({ v: b.key, label: b.name })), "member's broker — drives the commission schedule and the staff verification message")}</span>
+              {/* STRATÉGIE + LOT : la colonne n'est pas la vérité, le copieur l'est → changer ici resynchronise
+                  STH dans la foulée (et remonte l'échec au lieu de l'avaler). C'est le geste « passe-le en S1 ». */}
+              <span>strategy {editPick(sel.tg_id, 'strategy', String(sel.strategy ?? ''), [{ v: '1', label: 'S1' }, { v: '2', label: 'S2' }, { v: '3', label: 'S3' }], 'strategy — also moves the copier to that master via STH',
+                (v) => `Move this member to S${v}?\n\nIf they are connected, the copier is switched to the S${v} master right away.`)}</span>
+              {/* String(Number(...)) : la base peut rendre « 0.010 », qui ne correspondrait à aucune option
+                  et afficherait silencieusement le mauvais lot */}
+              <span>lot {editPick(sel.tg_id, 'lot', sel.lot != null ? String(Number(sel.lot)) : '', LOT_CHOICES.map((l) => ({ v: String(l), label: l.toFixed(2) })), 'copy size — also re-synced to STH',
+                (v) => `Set the copy size to ${v} lot?\n\nIf they are connected, the copier is re-synced right away.`)}</span>
+              <span title="legacy label derived from the lot — the lot above is the real copy size">risk <b style={{ color: 'var(--dim)' }}>{sel.risk_tier}</b></span>
+              {/* un seul caractère d'écart sur le serveur et la copie ne démarre jamais — c'est LA panne
+                  la plus fréquente, et elle était invisible autant qu'incorrigeable depuis ici. */}
+              <span>MT5 {editText(sel.tg_id, 'mt5_login', 'MT account number (login)', sel.mt5_login)} @ {serverPick(sel)}</span>
+              <span>MT pwd <button disabled={busy} onClick={() => editPassword(sel)} className="mono" title="replace the stored MT password (the member changed it at the broker → the copy drops)" style={{ fontSize: 11.5, fontWeight: 700, cursor: 'pointer', background: 'transparent', border: 'none', borderBottom: '1px dashed rgba(130,152,190,.5)', padding: '0 1px', color: 'var(--text)' }}>replace ✎</button></span>
               {/* l'ID que STH affiche pour les receivers connectés via l'API (UserID = tg_id) — la clé pour
                   rapprocher « 7557770646 » vu dans STH ↔ le bon membre ici. Copiable en un clic. */}
               <span>STH id <b style={{ color: 'var(--gold)' }}>{sel.tg_id}</b> <button onClick={() => void navigator.clipboard?.writeText(String(sel.tg_id))} style={miniBtn}>copy</button></span>
               <span>country {countrySelect(sel.tg_id, sel.country)}</span>
-              <span>USDT <b style={{ color: 'var(--text)' }}>{sel.usdt_trc20 ? sel.usdt_trc20.slice(0, 8) + '…' : '—'}</b></span>
+              {/* adresse de retrait du parrain : une adresse fausse, et le virement part dans le vide sans
+                  retour possible. Affichée en ENTIER ici (elle était tronquée à 8 caractères, donc invérifiable). */}
+              <span>USDT {editText(sel.tg_id, 'usdt_trc20', 'USDT TRC20 payout address', sel.usdt_trc20, sel.usdt_trc20 ?? '—', 'Paste the full TRC20 address (starts with T, 34 characters). Empty = clear it.')}</span>
               <span>since <b style={{ color: 'var(--text)' }}>{new Date(sel.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</b></span>
-              <span>referred by <b style={{ color: 'var(--text)' }}>{sel.referred_by ? nameOf(sel.referred_by) : '—'}</b></span>
+              {/* attribution de parrainage : elle décide qui touche la commission — donc elle se conteste,
+                  donc elle doit se corriger. Accepte #numéro, @pseudo ou tg id ; vide = plus de parrain. */}
+              <span>referred by {editText(sel.tg_id, 'referred_by', 'Referred by', sel.referred_by ? String(sel.referred_by) : null, sel.referred_by ? nameOf(sel.referred_by) : '—', 'Enter #member number, @username or the Telegram id. Empty = no referrer.')}</span>
               <span>invited <b style={{ color: 'var(--text)' }}>{rows.filter((r) => Number(r.referred_by) === Number(sel.tg_id)).length}</b></span>
-              <span>source <b style={{ color: sel.source ? 'var(--cyan)' : 'var(--dim)' }}>{sel.source ?? 'organic / unknown'}</b></span>
+              {/* VOLONTAIREMENT non éditable : le canal d'acquisition est une mesure, pas une donnée client.
+                  Le réécrire à la main fausserait pile la répartition par source qui sert au bilan hebdo. */}
+              <span title="acquisition channel, captured at the first click — read-only on purpose: editing it would falsify the weekly per-source funnel">source <b style={{ color: sel.source ? 'var(--cyan)' : 'var(--dim)' }}>{sel.source ?? 'organic / unknown'}</b></span>
             </div>
             {/* ➕ COMPTES SUPPLÉMENTAIRES (multi-stratégies) — chaque compte a SON STH id ({tg_id}-{n}) */}
             {extraAccounts.filter((a) => Number(a.tg_id) === Number(sel.tg_id)).length > 0 && (
