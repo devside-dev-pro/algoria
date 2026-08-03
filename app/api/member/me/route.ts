@@ -144,7 +144,10 @@ export async function POST(req: NextRequest) {
     const { data: mn } = await db.from('members').select('member_no').eq('tg_id', s.tgId).limit(1);
     await db.from('member_actions').insert({
       tg_id: s.tgId, member_no: mn?.[0]?.member_no ?? null, kind: 'kyc', status: 'done', done_by: 'member',
-      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4' } as never,
+      // broker_label : nom saisi à la main quand le broker n'est PAS partenaire (résidents US, qui paient
+      // l'accès directement). Porté jusqu'à la carte admin — sans lui, le support voit « other » et doit
+      // demander au membre de quel broker il parle.
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
     });
   } else if (body.action === 'strategy') {
     // CHOIX DE STRATÉGIE (remplace le sélecteur de lot — le lot copieur est FIXE 0.01, le levier de risque

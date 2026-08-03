@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker, LoadFailed, useUILocale } from '../ui';
-import { BROKERS, type Broker } from '@/lib/member/brokers';
+import { BROKERS, PARTNER_BROKERS, type Broker } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 
@@ -39,8 +39,8 @@ function ConfidencePanel() {
   );
 }
 
-const FEATURED = BROKERS.find((b) => b.featured) ?? BROKERS[0];
-const OTHERS = BROKERS.filter((b) => !b.featured);
+const FEATURED = PARTNER_BROKERS.find((b) => b.featured) ?? PARTNER_BROKERS[0];
+const OTHERS = PARTNER_BROKERS.filter((b) => !b.featured);
 
 async function post(body: Record<string, unknown>) {
   const r = await fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -55,6 +55,7 @@ export default function Onboarding() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [login, setLogin] = useState('');
+  const [brokerOther, setBrokerOther] = useState(''); // nom du broker quand il n'est pas partenaire (résidents US)
   const [server, setServer] = useState('');
   const [serverManual, setServerManual] = useState(false); // « mon serveur n'est pas listé » → saisie libre
   const [platform, setPlatform] = useState<'mt5' | 'mt4'>('mt5'); // MT5 par défaut ; le copieur STH a besoin du IsMT4
@@ -218,6 +219,15 @@ export default function Onboarding() {
                 </div>
               </label>
             </div>
+            {/* BROKER HORS PARTENAIRES : on n'a ni lien ni liste de serveurs pour lui — le membre écrit le
+                nom, et le support fait la connexion au copieur à la main (le nom exact du serveur MT ne
+                s'invente pas, et une faute de frappe bloquerait la copie sans message clair). */}
+            {picked === 'other' && (
+              <label style={lbl}>Broker name
+                <input value={brokerOther} onChange={(e) => setBrokerOther(e.target.value)} placeholder="e.g. IC Markets" style={inp} />
+                <span style={hint}>We&rsquo;ll connect your account by hand — someone will confirm within a few hours.</span>
+              </label>
+            )}
             <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} /></label>
             <label style={lbl}>Server
               {brokerServers.length > 0 && !serverManual ? (
@@ -243,7 +253,7 @@ export default function Onboarding() {
             <span style={hint}>{t('ob.verifHint')}</span>
           </div>
 
-          <button disabled={busy || !picked || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', broker: picked, platform, login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
+          <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
           <button onClick={() => setStep(0)} style={linkBtn}>{t('ob.noBroker')}</button>

@@ -974,10 +974,21 @@ export default function AdminCRM() {
                       const uname = String(a.detail?.username ?? m?.tg_username ?? '') || null;
                       const bname = String(a.detail?.broker_name ?? '') || null;
                       const dep = Number(a.detail?.declared_deposit ?? 0) || null;
+                      // BROKER HORS PARTENAIRES : le membre a tapé le nom lui-même et le CONNECT auto échouera
+                      // (serveur MT jamais exact du premier coup). On le dit AVANT que le support ne clique.
+                      const label = String(a.detail?.broker_label ?? '') || null;
+                      const manual = broker === 'other' || Boolean(a.detail?.manual_connect);
                       return (
-                        <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          VERIFY → {broker ? broker.toUpperCase() : '⚠ broker ?'} · {bname ?? '⚠ no name — ask'} · {dep ? `$${dep} declared` : '⚠ no deposit declared — ask'}{uname ? <span style={{ color: 'var(--cyan)' }}> · @{uname}</span> : ''}
-                        </div>
+                        <>
+                          {manual && (
+                            <div style={{ fontSize: 10.5, marginTop: 3, color: '#ff8a5c', fontWeight: 800, letterSpacing: 0.4 }}>
+                              ⚠ NON-PARTNER BROKER{label ? ` · ${label.toUpperCase()}` : ''} — connect by hand in STH, the auto-connect will fail on the server name
+                            </div>
+                          )}
+                          <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            VERIFY → {label ? label.toUpperCase() : broker ? broker.toUpperCase() : '⚠ broker ?'} · {bname ?? '⚠ no name — ask'} · {dep ? `$${dep} declared` : '⚠ no deposit declared — ask'}{uname ? <span style={{ color: 'var(--cyan)' }}> · @{uname}</span> : ''}
+                          </div>
+                        </>
                       );
                     })()}
                   </div>
