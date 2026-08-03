@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, StrategyPicker, Locked, UnlockSheet, type Member, type Referral, LoadFailed } from '../ui';
 import { TRC20_RE } from '@/lib/member/affiliate';
-import { LOT_CHOICES } from '@/lib/member/lots';
+import { LOT_CHOICES, LOT_MAX, LOT_STEP, isLotAllowed } from '@/lib/member/lots';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
 
 // Alertes push : wins d'Algoria, recap du jour, annonce de live. Opt-in explicite (permission navigateur).
@@ -58,6 +58,7 @@ export default function Profile() {
   const [copied, setCopied] = useState(false);
   const [paywall, setPaywall] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
+  const [customLot, setCustomLot] = useState(''); // taille de copie hors grille (gros comptes)
   // copie locale du wallet : rafraîchie après un retrait / changement d'adresse (useMe ne charge qu'une fois)
   const [referral, setReferral] = useState<Referral | null>(null);
   useEffect(() => { if (refInit) setReferral(refInit); }, [refInit]);
@@ -86,8 +87,17 @@ export default function Profile() {
   const setLot = (lot: number) => {
     setBusy(true);
     void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'lot', lot }) })
-      .then(async (r) => { const d = (await r.json()) as { member?: Member; error?: string }; if (d.member) setMember(d.member); })
+      .then(async (r) => { const d = (await r.json()) as { member?: Member; error?: string }; if (d.error) window.alert(d.error); if (d.member) { setMember(d.member); setCustomLot(''); } })
       .finally(() => setBusy(false));
+  };
+  // SAISIE LIBRE de la taille de copie — la grille s'arrête à 0.10 et bridait les gros comptes. Au-delà de
+  // la grille on demande confirmation : c'est le seul réglage de l'app qui multiplie directement les pertes
+  // autant que les gains, et un zéro de trop se voit mal dans un champ.
+  const applyCustomLot = () => {
+    const lot = Math.round(Number(customLot.replace(',', '.')) * 100) / 100;
+    if (!isLotAllowed(lot)) { window.alert(`Enter a size between ${LOT_STEP.toFixed(2)} and ${LOT_MAX.toFixed(2)}, in steps of 0.01.\n\nNeed more than ${LOT_MAX.toFixed(2)}? Message the team — we'll set it up with you.`); return; }
+    if (lot > 0.1 && !window.confirm(`Copy every trade at ${lot.toFixed(2)} lot?\n\nThat is ${Math.round(lot / 0.01)}× the smallest size. Your wins AND your losses scale with it — the guideline is 0.01 per ~$500 of balance, so ${lot.toFixed(2)} suits a balance of roughly $${(lot / 0.01 * 500).toLocaleString('en-US')}.`)) return;
+    setLot(lot);
   };
   // DÉCONNECTER le compte de trading : coupe la copie (queue une action pour STH) et repasse en onboarding
   // pour reconnecter / changer de broker. Confirmation obligatoire (destructif).
@@ -262,7 +272,7 @@ export default function Profile() {
           <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>COPY SIZE</h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {LOT_CHOICES.map((l) => {
-              const active = Number(member.lot ?? 0.01) === l;
+              const active = Math.round(Number(member.lot ?? 0.01) * 100) === Math.round(l * 100);
               return (
                 <button key={l} disabled={busy || !unlocked || active} onClick={() => setLot(l)}
                   style={{ flex: '1 1 56px', padding: '11px 8px', borderRadius: 10, cursor: active ? 'default' : 'pointer', fontWeight: 800, fontSize: 13,
@@ -274,8 +284,26 @@ export default function Profile() {
               );
             })}
           </div>
+          {/* SAISIE LIBRE — la grille s'arrête à 0.10, ce qui bridait les gros comptes à dix fois moins que
+              ce qu'ils supportent. Le champ accepte tout jusqu'à LOT_MAX ; au-delà c'est le support. */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="number" inputMode="decimal" min={LOT_STEP} max={LOT_MAX} step={LOT_STEP}
+              value={customLot} onChange={(e) => setCustomLot(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyCustomLot(); }}
+              disabled={busy || !unlocked} placeholder={`or type any size — up to ${LOT_MAX.toFixed(2)}`}
+              style={{ flex: '1 1 180px', minWidth: 0, padding: '11px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700,
+                border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', color: 'var(--text)' }}
+            />
+            <button disabled={busy || !unlocked || !customLot.trim()} onClick={applyCustomLot}
+              style={{ padding: '11px 18px', borderRadius: 10, border: 'none', fontWeight: 800, fontSize: 13,
+                cursor: customLot.trim() ? 'pointer' : 'default', color: '#0b0e14',
+                background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: customLot.trim() ? 1 : 0.45 }}>
+              APPLY
+            </button>
+          </div>
           <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-            Every trade copies to your account at this fixed size. <b style={{ color: 'var(--text)' }}>Recommended: 0.01 per ~$500 of balance</b> — bigger moves both your wins <i>and</i> your losses up.
+            Every trade copies to your account at this fixed size — currently <b style={{ color: 'var(--cyan)' }}>{Number(member.lot ?? 0.01).toFixed(2)}</b>. <b style={{ color: 'var(--text)' }}>Recommended: 0.01 per ~$500 of balance</b> — bigger moves both your wins <i>and</i> your losses up.
           </p>
           <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Applied instantly when your account is API-connected — otherwise the team applies it within a few hours.</p>
         </section>
