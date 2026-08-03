@@ -58,10 +58,14 @@ export async function GET(req: NextRequest) {
   const locale = localeForChat(jr?.[0]?.chat_id);
 
   const patch = { tg_username: row.tg_username, tg_name: row.tg_name, ...(row.photo_url ? { photo_url: row.photo_url } : {}), updated_at: new Date().toISOString() };
-  const { data: existing } = await db.from('members').select('id').eq('tg_id', row.tg_id).limit(1);
+  const { data: existing } = await (db as any).from('members').select('id,locale_chosen_at').eq('tg_id', row.tg_id).limit(1);
   // sur un compte EXISTANT on n'écrase la langue que pour la promouvoir en 'it' : si le support l'a
   // corrigée à la main, une vieille demande d'adhésion anglaise ne doit pas la ramener en arrière.
-  if (existing?.length) await (db as any).from('members').update({ ...patch, ...(locale !== 'en' ? { locale } : {}) }).eq('tg_id', row.tg_id); // referred_by/source ne s'écrivent qu'à la CRÉATION
+  // LE CHOIX DU MEMBRE GAGNE (03/08) : si la personne a explicitement réglé sa langue dans l'app
+  // (locale_chosen_at), aucune déduction automatique ne la réécrit — sinon un Italien qui choisit
+  // l'anglais se ferait repasser en italien à sa prochaine demande d'adhésion, sans comprendre pourquoi.
+  const chosen = (existing?.[0] as { locale_chosen_at?: string | null } | undefined)?.locale_chosen_at;
+  if (existing?.length) await (db as any).from('members').update({ ...patch, ...(locale !== 'en' && !chosen ? { locale } : {}) }).eq('tg_id', row.tg_id); // referred_by/source ne s'écrivent qu'à la CRÉATION
   else await (db as any).from('members').insert({ tg_id: row.tg_id, ...patch, locale, referral_code: newReferralCode(), ...(referrerTg != null ? { referred_by: referrerTg } : {}), ...(source ? { source } : {}) });
 
   const res = NextResponse.json({ ok: true });

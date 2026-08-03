@@ -72,6 +72,17 @@ export default function Profile() {
       .then(async (r) => { const d = (await r.json()) as { member?: Member }; if (d.member) setMember(d.member); })
       .finally(() => setBusy(false));
   };
+  // LANGUE (03/08) — l'app est traduite a 100 %, mais la langue etait DEDUITE du canal d'arrivee :
+  // un Italien venu d'Instagram ou d'un DM restait bloque en anglais sans aucun moyen d'en sortir.
+  // C'est un prospect italien qui nous l'a signale, au moment ou il allait deposer. Rechargement
+  // complet apres le changement : le dictionnaire est lu au rendu, une simple mise a jour d'etat
+  // laisserait la moitie de l'ecran dans l'ancienne langue.
+  const setLocale = (loc: 'en' | 'it') => {
+    setBusy(true);
+    void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'locale', locale: loc }) })
+      .then(() => window.location.reload())
+      .catch(() => setBusy(false));
+  };
   const setLot = (lot: number) => {
     setBusy(true);
     void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'lot', lot }) })
@@ -271,6 +282,29 @@ export default function Profile() {
       </Locked>
 
       <PushCard />
+
+      {/* LANGUE — accessible à TOUT LE MONDE, y compris hors abonnement : elle n'est pas une fonctionnalité
+          premium, c'est la condition pour comprendre ce qu'on lit. Placée avant le bloc support, parce que
+          quelqu'un qui ne comprend pas l'écran écrit au support précisément à cause de ça. */}
+      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>LANGUAGE · LINGUA</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {([['en', '🇬🇧 English'], ['it', '🇮🇹 Italiano']] as const).map(([code, label]) => {
+            const active = (member.locale ?? 'en') === code;
+            return (
+              <button key={code} disabled={busy || active} onClick={() => setLocale(code)}
+                style={{
+                  flex: 1, padding: '12px 10px', borderRadius: 11, cursor: active ? 'default' : 'pointer', fontSize: 13, fontWeight: 800,
+                  border: active ? '1px solid rgba(43,227,245,.55)' : '1px solid var(--border)',
+                  background: active ? 'rgba(43,227,245,.12)' : 'rgba(10,17,31,.6)',
+                  color: active ? 'var(--cyan)' : 'var(--muted)',
+                }}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {/* SUPPORT direct — un membre (ou prospect) qui a une question doit toujours avoir une porte humaine */}
       <a href="https://t.me/mathieu_algoria" target="_blank" rel="noreferrer" className="panel"

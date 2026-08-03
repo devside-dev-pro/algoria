@@ -108,7 +108,17 @@ export async function POST(req: NextRequest) {
   if (!cur) return NextResponse.json({ error: 'member not found' }, { status: 404 });
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
-  if (body.action === 'broker') {
+  if (body.action === 'locale') {
+    // CHOIX DE LANGUE (03/08) — l'app est traduite à 100 % (95 clés EN/IT), mais la langue était
+    // DÉDUITE du canal d'arrivée : un Italien venu d'Instagram ou d'un DM restait bloqué en anglais,
+    // sans aucun moyen d'en sortir. Un prospect italien nous l'a signalé au moment de déposer.
+    // locale_chosen_at fige le choix : la déduction automatique ne le touchera plus jamais (voir
+    // tglogin). Un choix explicite doit toujours gagner sur une devinette.
+    const loc = String(body.locale ?? '');
+    if (!['en', 'it'].includes(loc)) return NextResponse.json({ error: 'unsupported locale' }, { status: 400 });
+    patch.locale = loc;
+    patch.locale_chosen_at = new Date().toISOString();
+  } else if (body.action === 'broker') {
     const broker = String(body.broker ?? '').slice(0, 40);
     if (!broker) return NextResponse.json({ error: 'broker required' }, { status: 400 });
     patch.broker = broker;
