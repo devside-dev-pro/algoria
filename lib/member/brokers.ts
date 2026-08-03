@@ -17,6 +17,12 @@ export interface Broker {
   // bot J+6+, rappel admin BEST LINK). pct = % du dépôt offert EN CRÉDIT DE TRADING (pas du cash
   // retirable) — toujours formuler « double ta puissance de trading », jamais « double ton argent ».
   bonus?: { code: string; pct: number };
+  // HORS PARTENAIRES (03/08) : aucun de nos brokers n'accepte les résidents américains. Ils paient donc
+  // l'accès directement, et gardent le broker qu'ils ont déjà. Ce choix n'apparaît PAS à l'étape « ouvre
+  // ton compte » (on n'a pas de lien à leur donner) — uniquement dans le menu de connexion, où il ouvre
+  // une saisie libre du nom du broker et du serveur. La connexion au copieur se fait à la main : le nom
+  // exact du serveur MT ne s'invente pas, et une erreur de frappe côté membre bloquerait la copie.
+  nonPartner?: boolean;
 }
 
 export const BROKERS: Broker[] = [
@@ -34,4 +40,8 @@ export const BROKERS: Broker[] = [
   { key: 'puprime', name: 'PU Prime', url: 'https://go.puprime.partners/visit/?bta=35491&brand=pu&campaign=230205&afp=ALGORIA', servers: ['PUPrime-Live', 'PUPrime-Live 2', 'PUPrime-Live2', 'PUPrime-Live 4', 'PUPrime-Live 5', 'PUPrime-Live 6', 'PUPrime-Live 7'] },
   { key: 'fxcess', name: 'FXCESS', url: 'https://go.fxcess.com/visit/?bta=35526&brand=fxcess&afp=ALGORIA', servers: ['FXCESS-Live01'] },
   { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', servers: ['TradingSphere-Real1'] },
+  { key: 'other', name: 'Other broker (I already have one)', url: '', nonPartner: true },
 ];
+
+/** Brokers PARTENAIRES uniquement — ceux pour lesquels on a un lien et une commission. */
+export const PARTNER_BROKERS = BROKERS.filter((b) => !b.nonPartner);
