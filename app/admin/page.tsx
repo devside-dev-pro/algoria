@@ -91,6 +91,8 @@ export default function AdminCRM() {
   // canaux où le bot est admin, avec leur ID -100… (invisible dans Telegram) et le rôle qu'ils jouent
   const [tgChats, setTgChats] = useState<Array<{ chat_id: number; title: string | null; type: string | null; username: string | null; last_seen_at: string; role: string | null }>>([]);
   const [chatCopied, setChatCopied] = useState<number | null>(null);
+  // audit STH : lignes renvoyees par /api/member/admin (sthAudit) — etat reel de la copie chez STH
+  const [sthAudit, setSthAudit] = useState<{ rows: Array<{ member_no: number | null; name: string; state: string; detail: string }>; summary: Record<string, number> } | null>(null);
   const [botDrafts, setBotDrafts] = useState<Record<string, string>>({}); // brouillons de réponse via le bot (par ligne du fil)
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
@@ -1394,6 +1396,47 @@ export default function AdminCRM() {
         {/* ===== TOOLS — la boîte à outils de l'opérateur : push composer, relance des leads, legacy ===== */}
         {tab === 'tools' && (
           <>
+            {/* AUDIT STH (03/08) — ne dans le cas #7 : une cliente affichee LIVE chez nous, connectee chez
+                STH, mais abonnee a AUCUN master. Elle ne recevait plus un seul trade, et RIEN dans notre
+                base ne permettait de le voir — seul STH connait cet etat. C'est le pire defaut possible
+                pour un copieur : le membre croit trader, regarde un ecran qui ne bouge plus, et c'est lui
+                qui finit par nous prevenir. Ce bouton pose la question a STH pour chaque membre live.
+                Les membres EN PAUSE ne sont jamais touches : leur absence de master est volontaire. */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
+              <h2 style={secH}>🩺 STH AUDIT — who is actually copying?</h2>
+              <p style={dimP}>Asks STH, member by member, whether each LIVE account is really subscribed to a master. Paused members are never touched — their empty subscription is deliberate.</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button disabled={busy} onClick={() => { setBusy(true); setSthAudit(null); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthAudit: 'check' }) }).then(async (r) => { const d = await r.json(); if (d.error) window.alert(`⚠ ${d.error}`); else setSthAudit(d); }).finally(() => setBusy(false)); }}
+                  style={goldBtn}>🔍 CHECK ONLY</button>
+                <button disabled={busy || !sthAudit || !(sthAudit.summary.orphan > 0)} onClick={() => { if (!window.confirm(`Reconnect ${sthAudit?.summary.orphan} member(s) to their strategy? This resumes copying on their live account.`)) return; setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthAudit: 'repair' }) }).then(async (r) => { const d = await r.json(); if (d.error) window.alert(`⚠ ${d.error}`); else setSthAudit(d); }).finally(() => setBusy(false)); }}
+                  style={{ ...goldBtn, opacity: sthAudit && sthAudit.summary.orphan > 0 ? 1 : 0.45 }}>🔧 REPAIR ORPHANS</button>
+              </div>
+              {sthAudit && (
+                <>
+                  <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                    {sthAudit.summary.checked} checked · <b style={{ color: 'var(--up)' }}>{sthAudit.summary.ok} ok</b>
+                    {sthAudit.summary.orphan > 0 && <> · <b style={{ color: '#ff8a5c' }}>{sthAudit.summary.orphan} copying nothing</b></>}
+                    {sthAudit.summary.repaired > 0 && <> · <b style={{ color: 'var(--up)' }}>{sthAudit.summary.repaired} repaired</b></>}
+                    {sthAudit.summary.failed > 0 && <> · <b style={{ color: '#ff6b8a' }}>{sthAudit.summary.failed} failed</b></>}
+                    {sthAudit.summary.unknown > 0 && <> · {sthAudit.summary.unknown} not connected</>}
+                    {sthAudit.summary.error > 0 && <> · {sthAudit.summary.error} STH error</>}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 360, overflowY: 'auto' }}>
+                    {sthAudit.rows.filter((r) => r.state !== 'ok').map((r, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 9, alignItems: 'baseline', flexWrap: 'wrap', padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)' }}>
+                        <span className="mono goldText" style={{ fontSize: 11, fontWeight: 800 }}>#{r.member_no ?? '—'}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text)' }}>{r.name}</span>
+                        <span className="mono" style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, color: r.state === 'repaired' ? 'var(--up)' : r.state === 'orphan' ? '#ff8a5c' : '#ff6b8a' }}>{r.state.toUpperCase()}</span>
+                        <span style={{ flex: 1 }} />
+                        <span style={{ fontSize: 11, color: 'var(--dim)' }}>{r.detail}</span>
+                      </div>
+                    ))}
+                    {sthAudit.rows.every((r) => r.state === 'ok') && <p style={dimP}>Everyone live is really copying. Nothing to fix.</p>}
+                  </div>
+                </>
+              )}
+            </section>
+
             {/* PUSH COMPOSER — le canal marketing gratuit : message libre vers un segment, test sur soi d'abord */}
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
               <h2 style={secH}>📣 PUSH COMPOSER</h2>

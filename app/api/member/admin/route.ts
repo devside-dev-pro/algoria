@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; moveSth?: string; dismiss?: string; nudged?: number;
+    revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number;
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
     setCountry?: { tg_id: number; country: string };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
@@ -610,6 +610,41 @@ export async function POST(req: NextRequest) {
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: act[0].tg_id, member_no: act[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔀 moved to the S${to} master via STH (lots ${lots})` } as never });
     return NextResponse.json({ ok: true });
+  }
+  if (body.sthAudit) {
+    // AUDIT STH DE MASSE (03/08) — né du cas #7 : une cliente affichée LIVE chez nous, connectée chez STH,
+    // mais abonnée à AUCUN master. Elle ne recevait plus un seul trade et personne ne pouvait le voir : rien
+    // dans notre base ne distingue « copie active » de « connectée dans le vide ». Seul STH le sait.
+    // Ce silence est le pire défaut possible pour un copieur — le membre croit trader, il regarde un écran
+    // qui ne bouge plus, et c'est lui qui finit par nous prévenir.
+    //
+    // PÉRIMÈTRE VOLONTAIREMENT ÉTROIT : uniquement les membres 'live'. Un membre 'paused' est masterless
+    // EXPRÈS — le rebrancher serait ouvrir des positions sur son compte contre sa volonté. On ne touche
+    // jamais à ça, même en réparation de masse.
+    if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
+    const repair = body.sthAudit === 'repair';
+    const { data: lives } = await (db as any).from('members')
+      .select('tg_id,member_no,tg_username,tg_name,strategy,lot,mt5_login')
+      .eq('status', 'live').not('mt5_login', 'is', null).limit(60) as {
+        data: Array<{ tg_id: number; member_no: number | null; tg_username: string | null; tg_name: string | null; strategy: number | null; lot: number | null; mt5_login: string | null }> | null };
+    const rows: Array<Record<string, unknown>> = [];
+    for (const m of lives ?? []) {
+      const st = await sthStatus(String(m.tg_id));
+      if (!st.ok) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'error', detail: st.errorMessage }); continue; }
+      const masters = st.data.masterAccountsList ?? [];
+      const connected = st.data.tradingAccountConnected === true;
+      if (masters.length > 0) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'ok', detail: `${masters.length} master(s)` }); continue; }
+      // masterless : orphelin s'il est bel et bien connecté chez STH, inconnu sinon (rien à réparer d'ici)
+      if (!connected) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'unknown', detail: 'not connected at STH — reconnect from the member card' }); continue; }
+      const strategy = Number(m.strategy ?? 2) || 2;
+      const lots = Number(m.lot ?? 0.01) || 0.01;
+      if (!repair) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'orphan', detail: `connected but copying nothing → would rejoin S${strategy} (lots ${lots})` }); continue; }
+      const r = await sthMoveMaster(String(m.tg_id), strategy, lots);
+      rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: r.ok ? 'repaired' : 'failed', detail: r.ok ? `rejoined S${strategy} (lots ${lots})` : r.error });
+      if (r.ok) await db.from('member_actions').insert({ tg_id: m.tg_id, member_no: m.member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔧 STH audit: was connected but copying NO master → rejoined S${strategy} (lots ${lots})` } as never });
+    }
+    const count = (s: string) => rows.filter((r) => r.state === s).length;
+    return NextResponse.json({ rows, summary: { checked: rows.length, ok: count('ok'), orphan: count('orphan'), repaired: count('repaired'), failed: count('failed'), unknown: count('unknown'), error: count('error') } });
   }
   if (body.sthStatusCheck) {
     // DIAGNOSTIC STH — la vérité directement depuis leur API : compte MT connecté ? abonné à quels masters ?
