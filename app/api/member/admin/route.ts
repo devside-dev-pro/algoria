@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number;
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number;
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
     setCountry?: { tg_id: number; country: string };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
@@ -609,6 +609,25 @@ export async function POST(req: NextRequest) {
     const r = await sthMoveMaster(String(act[0].tg_id), to, lots);
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: act[0].tg_id, member_no: act[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔀 moved to the S${to} master via STH (lots ${lots})` } as never });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.setLegalName) {
+    // CORRIGER LE NOM DU TITULAIRE (03/08) — le membre le saisit lui-même au wizard, et il se trompe :
+    // vu aujourd'hui un « VTMarkets » à la place du nom de la personne (#199). Ce champ n'est pas cosmétique,
+    // c'est LE pont entre les trois identités d'un client — son pseudo Telegram, son nom sur le compte
+    // broker, et la ligne du relevé de commissions. Un nom faux, et on ne retrouve plus son dépôt.
+    // On n'écrase rien : on ajoute une nouvelle ligne kyc, et legalNames retient déjà la plus récente.
+    // L'historique reste lisible, y compris la saisie d'origine — utile le jour où le broker conteste.
+    const tg = Number(body.setLegalName.tg_id) || 0;
+    const name = String(body.setLegalName.name ?? '').trim().slice(0, 80);
+    if (!tg || name.length < 2) return NextResponse.json({ error: 'tg_id and a real name are required' }, { status: 400 });
+    const { data: m } = await db.from('members').select('member_no').eq('tg_id', tg).limit(1);
+    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    const { error } = await db.from('member_actions').insert({
+      tg_id: tg, member_no: m[0].member_no, kind: 'kyc', status: 'done', done_by: who,
+      detail: { broker_name: name, corrected_by_support: true } as never,
+    });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }
   if (body.sthAudit) {
