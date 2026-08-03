@@ -3,7 +3,7 @@ import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret, encryptSecr
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
 import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } from '@/lib/member/sth';
 import { BROKERS } from '@/lib/member/brokers';
-import { LOT_CHOICES, isLotAllowed } from '@/lib/member/lots';
+import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -707,7 +707,7 @@ export async function POST(req: NextRequest) {
     } else if (field === 'lot' || field === 'strategy') {
       const n = Number(raw);
       if (field === 'lot') {
-        if (!isLotAllowed(n)) return NextResponse.json({ error: `lot must be one of ${LOT_CHOICES.join(', ')}` }, { status: 400 });
+        if (!isLotAllowed(n)) return NextResponse.json({ error: `lot must be between 0.01 and ${LOT_MAX.toFixed(2)}, in steps of 0.01` }, { status: 400 });
         patch.lot = n;
       } else {
         if (![1, 2, 3].includes(n)) return NextResponse.json({ error: 'strategy must be 1, 2 or 3' }, { status: 400 });

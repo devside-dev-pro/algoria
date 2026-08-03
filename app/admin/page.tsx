@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { openTelegram } from '@/lib/telegram';
 import { BROKERS } from '@/lib/member/brokers';
-import { LOT_CHOICES } from '@/lib/member/lots';
+import { LOT_CHOICES, LOT_MAX } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 
 interface WL { username: string; added_by: string | null; created_at: string }
@@ -417,6 +417,30 @@ export default function AdminCRM() {
       >
         {known.map((s) => <option key={s} value={s}>{s}</option>)}
         <option value="__free">{known.includes(cur) ? 'type it…' : (cur || 'type it…')}</option>
+      </select>
+    );
+  };
+  // TAILLE DE COPIE — la grille 0.01→0.10 en accès rapide, plus une saisie libre jusqu'à LOT_MAX : elle
+  // bridait les gros comptes à dix fois moins que ce que leur solde supporte (un client à plusieurs
+  // milliers d'euros ne peut pas rester à 0.10). Même validation serveur que côté membre.
+  const lotPick = (r: Row) => {
+    const cur = r.lot != null ? String(Number(r.lot)) : '';
+    const inGrid = LOT_CHOICES.some((l) => String(l) === cur);
+    return (
+      <select
+        disabled={busy}
+        value={inGrid ? cur : '__free'}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === '__free') { const t = window.prompt(`Copy size in lots (0.01 to ${LOT_MAX.toFixed(2)}, steps of 0.01) — re-synced to STH immediately:`, cur); if (t !== null && t.trim()) editMember(r.tg_id, 'lot', t.trim().replace(',', '.')); return; }
+          if (window.confirm(`Set the copy size to ${v} lot?\n\nIf they are connected, the copier is re-synced right away.`)) editMember(r.tg_id, 'lot', v);
+        }}
+        className="mono"
+        title="copy size — free entry above the grid, re-synced to STH"
+        style={{ fontSize: 10.5, padding: '3px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: cur ? 'var(--text)' : 'var(--dim)', cursor: 'pointer' }}
+      >
+        {LOT_CHOICES.map((l) => <option key={l} value={String(l)}>{l.toFixed(2)}</option>)}
+        <option value="__free">{inGrid || !cur ? 'type it…' : `${Number(cur).toFixed(2)} · type it…`}</option>
       </select>
     );
   };
@@ -1178,10 +1202,7 @@ export default function AdminCRM() {
                   STH dans la foulée (et remonte l'échec au lieu de l'avaler). C'est le geste « passe-le en S1 ». */}
               <span>strategy {editPick(sel.tg_id, 'strategy', String(sel.strategy ?? ''), [{ v: '1', label: 'S1' }, { v: '2', label: 'S2' }, { v: '3', label: 'S3' }], 'strategy — also moves the copier to that master via STH',
                 (v) => `Move this member to S${v}?\n\nIf they are connected, the copier is switched to the S${v} master right away.`)}</span>
-              {/* String(Number(...)) : la base peut rendre « 0.010 », qui ne correspondrait à aucune option
-                  et afficherait silencieusement le mauvais lot */}
-              <span>lot {editPick(sel.tg_id, 'lot', sel.lot != null ? String(Number(sel.lot)) : '', LOT_CHOICES.map((l) => ({ v: String(l), label: l.toFixed(2) })), 'copy size — also re-synced to STH',
-                (v) => `Set the copy size to ${v} lot?\n\nIf they are connected, the copier is re-synced right away.`)}</span>
+              <span>lot {lotPick(sel)}</span>
               <span title="legacy label derived from the lot — the lot above is the real copy size">risk <b style={{ color: 'var(--dim)' }}>{sel.risk_tier}</b></span>
               {/* un seul caractère d'écart sur le serveur et la copie ne démarre jamais — c'est LA panne
                   la plus fréquente, et elle était invisible autant qu'incorrigeable depuis ici. */}
