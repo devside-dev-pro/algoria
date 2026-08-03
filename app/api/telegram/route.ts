@@ -156,24 +156,48 @@ async function bridgeChannelPost(db: any, post: any, dst: string): Promise<void>
   const finish = (patch: Record<string, unknown>) =>
     db.from('channel_translations').update(patch).eq('src_chat_id', Number(chatId)).eq('src_message_id', messageId).eq('dst_chat_id', Number(dst));
 
-  // TÉMOIGNAGE (post transféré d'un VIP) → on TRANSFÈRE tel quel côté italien aussi. Le traduire
-  // imposerait copyMessage, qui efface « Transféré de <VIP> » : on aurait un screenshot anonyme, donc
-  // zéro preuve. Un témoignage en anglais signé d'un vrai VIP vaut mieux qu'un témoignage italien
-  // signé de personne. La CM est prévenue : à elle d'ajouter une ligne en italien dessous si elle veut.
+  // TÉMOIGNAGE (post transféré d'un VIP) — CONTRAINTE TELEGRAM : on ne peut PAS traduire un message
+  // transféré. Modifier son contenu impose copyMessage, qui efface « Transféré de <VIP> » : le
+  // témoignage devient un screenshot anonyme posté par nous, c'est-à-dire plus une preuve du tout.
+  // Les deux à la fois n'existent pas dans l'API.
+  //
+  // D'où le compromis, remonté par la CM le 03/08 (« le témoignage arrive en anglais sur le canal
+  // italien ») : on TRANSFÈRE d'abord — le nom du VIP et la capture restent intacts — puis on poste la
+  // traduction JUSTE EN DESSOUS, en réponse au message transféré. L'Italien lit dans sa langue, la
+  // preuve garde son auteur, et personne ne fait ça à la main.
   if (isForwarded(post)) {
+    const raw = (typeof post.text === 'string' ? post.text : '') || (typeof post.caption === 'string' ? post.caption : '');
     try {
       const r = await fetch(`https://api.telegram.org/bot${token}/forwardMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
         body: JSON.stringify({ chat_id: dst, from_chat_id: chatId, message_id: messageId }),
       });
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
-      if (d.ok) await finish({ status: 'sent', kind: 'forward', dst_message_id: d.result?.message_id ?? null });
-      else await finish({ status: 'failed', kind: 'forward', error: (d.description ?? 'unknown').slice(0, 200) });
+      if (!d.ok) { await finish({ status: 'failed', kind: 'forward', error: (d.description ?? 'unknown').slice(0, 200) }); return; }
+      const fwdId = d.result?.message_id ?? null;
+      await finish({ status: 'sent', kind: 'forward', dst_message_id: fwdId });
+
+      // La traduction part en RÉPONSE au transfert : les deux messages restent visuellement liés même
+      // si un autre post s'intercale. Étiquetée « Traduzione » pour qu'on ne croie jamais que c'est
+      // Algoria qui parle à la place du VIP — c'est un sous-titre, pas un témoignage réécrit.
+      if (raw.trim() && fwdId) {
+        const html = entitiesToHtml(raw, typeof post.text === 'string' && post.text ? post.entities : post.caption_entities);
+        const translated = await translateToItalian(html);
+        if (translated) {
+          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+            body: JSON.stringify({ chat_id: dst, reply_to_message_id: fwdId, parse_mode: 'HTML', disable_web_page_preview: true,
+              text: `💬 <i>Traduzione</i>\n\n${translated}` }),
+          }).catch(() => {});
+        }
+      }
+
+      // Bulle vidéo ou média nu : rien à traduire, la CM reste maîtresse du format.
       const cm = (process.env.TELEGRAM_CM_IT_ID ?? '').trim();
-      if (cm && d.ok) {
+      if (cm && !raw.trim()) {
         await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000),
-          body: JSON.stringify({ chat_id: cm, text: "⭐️ Testimonianza VIP inoltrata sul canale IT (in inglese, con il nome dell'autore — è la prova). Se vuoi, aggiungi tu una riga in italiano sotto il post." }),
+          body: JSON.stringify({ chat_id: cm, text: "⭐️ Testimonianza VIP inoltrata sul canale IT, ma senza testo da tradurre (video o media). Se serve, aggiungi tu una riga in italiano sotto il post." }),
         }).catch(() => {});
       }
     } catch (e) {
