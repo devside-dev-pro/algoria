@@ -30,7 +30,16 @@ export const hasManagement = (ticket: string): boolean => custom.has(ticket);
 
 export async function manageBreakeven(stream: any, terminal: any, symbol: string) {
   const positions = (terminal.positions ?? []).filter((p: any) => p.symbol === symbol);
-  const live = new Set<string>(positions.map((p: any) => String(p.id)));
+  // NETTOYAGE (04/08) : l'ensemble des positions encore vivantes se construit sur TOUS LES SYMBOLES, pas
+  // seulement celui qu'on gère. `custom`, `peaks` et `done` sont des tables de MODULE, partagées par tous
+  // les instruments ; les purger avec la liste du seul symbole courant revenait à effacer les entrées de
+  // l'autre. Deux instruments tournent en parallèle (l'or et le BTC), chacun avec son tick à la seconde :
+  // le tick BTC détruisait donc la gestion de l'or et réciproquement, EN CONTINU. Conséquences observées :
+  // les paliers et le trailing ne se déclenchaient jamais (leurs branches sont sautées quand `mgmt` est
+  // absent) et `peaks` repartait de zéro, donc le plus-haut atteint était perdu à chaque seconde — un stop
+  // ne montait plus jamais au-delà du breakeven. C'est la cause DOMINANTE du swing or du 03/08 monté à
+  // 2,1R et rentré à +502$ avec son stop resté au breakeven, bien avant le redémarrage du runner.
+  const stillOpen = new Set<string>(((terminal.positions ?? []) as any[]).map((p: any) => String(p.id)));
 
   for (const p of positions) {
     const id = String(p.id);
@@ -75,8 +84,8 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     }
   }
 
-  // nettoyage des positions fermées
-  for (const id of done.keys()) if (!live.has(id)) done.delete(id);
-  for (const id of peaks.keys()) if (!live.has(id)) peaks.delete(id);
-  for (const id of custom.keys()) if (!live.has(id)) custom.delete(id);
+  // nettoyage des positions RÉELLEMENT fermées (tous symboles — voir le commentaire en tête de fonction)
+  for (const id of done.keys()) if (!stillOpen.has(id)) done.delete(id);
+  for (const id of peaks.keys()) if (!stillOpen.has(id)) peaks.delete(id);
+  for (const id of custom.keys()) if (!stillOpen.has(id)) custom.delete(id);
 }

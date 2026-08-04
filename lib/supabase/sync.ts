@@ -334,8 +334,19 @@ export async function listOpenTradesWithInitialStop(symbol: string): Promise<Arr
   const rows = (data ?? []) as Array<Record<string, unknown>>;
   if (!rows.length) return [];
   const refs = rows.map((r) => String(r.signal_ref));
-  const { data: sigs } = await db.from('signals').select('ref,entry,stop_loss').in('ref', refs).eq('strategy' as never, STRAT_ID as never);
-  const byRef = new Map((sigs ?? []).map((s: Record<string, unknown>) => [String(s.ref), s]));
+  // Toutes stratégies confondues, puis on PRÉFÈRE la ligne de ce runner. Repli volontaire : jusqu'au 04/08
+  // un index unique sur `ref` seul faisait perdre leur ligne à deux runners sur trois (le premier qui
+  // écrivait gagnait), donc d'anciennes positions n'ont aucune ligne à leur propre stratégie. Se rabattre
+  // sur celle d'un autre runner est exact ici : le stop d'un signal ne dépend pas de la stratégie — il vaut
+  // `entrée − slAtr × ATR`, calculé par l'instrument. Ce que la stratégie change, c'est QUELS signaux sont
+  // pris et ce qu'il advient du stop ENSUITE, pas sa distance à l'entrée.
+  // `strategy` : colonne ajoutée par migration, absente des types générés — même cast que partout ailleurs ici
+  const { data: sigs } = await (db as any).from('signals').select('ref,entry,stop_loss,strategy').in('ref', refs) as { data: Array<Record<string, unknown>> | null };
+  const byRef = new Map<string, Record<string, unknown>>();
+  for (const s of sigs ?? []) {
+    const key = String(s.ref);
+    if (!byRef.has(key) || Number(s.strategy) === STRAT_ID) byRef.set(key, s);
+  }
   const out: Array<{ ticket: string; ref: string; entry: number; stopLoss: number }> = [];
   for (const r of rows) {
     const s = byRef.get(String(r.signal_ref));
