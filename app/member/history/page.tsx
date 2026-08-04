@@ -88,7 +88,7 @@ export default function MemberHistory() {
           est FIXE, donc identique sur les trois) : la comparaison est exacte, pas une projection. */}
       {unlocked && stats.length > 0 && (
         <section className="panel" style={{ padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
-          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 800 }}>COMPARE THE THREE STRATEGIES</span>
+          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 800 }}>COMPARE THE THREE STRATEGIES · LAST 7 DAYS</span>
           <div style={{ display: 'flex', gap: 7 }}>
             {STRATEGY_UI.map((s) => {
               const st = stats.find((x) => x.id === s.id);
@@ -114,7 +114,7 @@ export default function MemberHistory() {
             })}
           </div>
           <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>
-            All three shown <b style={{ color: 'var(--muted)' }}>at your {clientLot} lot</b>, over the same recent window — your copy size is the same whichever profile you run, so this compares like for like. {mine != null && shown !== mine && <b style={{ color: 'var(--cyan)' }}>You&rsquo;re viewing a profile you don&rsquo;t run.</b>}
+            All three shown <b style={{ color: 'var(--muted)' }}>at your {clientLot} lot</b>, over the same 7 days — your copy size is the same whichever profile you run, so this compares like for like. {mine != null && shown !== mine && <b style={{ color: 'var(--cyan)' }}>You&rsquo;re viewing a profile you don&rsquo;t run.</b>}
           </p>
         </section>
       )}

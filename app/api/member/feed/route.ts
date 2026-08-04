@@ -17,10 +17,12 @@ export async function GET(req: NextRequest) {
   const [memberQ, desk, tradesQ, signalsQ] = await Promise.all([
     (db as any).from('members').select('status,risk_tier,strategy,lot').eq('tg_id', s.tgId).limit(1) as Promise<{ data: Array<{ status: string; risk_tier: string; strategy: number | null; lot: number | null }> | null }>,
     db.from('events').select('id,ts,msg,data').eq('level', 'ai').order('ts', { ascending: false }).limit(24),
-    // MULTI-STRATÉGIES : le membre voit les trades de SA stratégie (défaut 2 = Balanced, historique inclus),
-    // et peut consulter les deux autres. 240 (au lieu de 90) pour que CHACUNE ait une fenêtre comparable —
-    // à 90 toutes stratégies confondues, celle qui trade le plus écrasait les deux autres dans le lot.
-    db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot,strategy').not('closed_at', 'is', null).not('pnl', 'is', null).order('closed_at', { ascending: false }).limit(240),
+    // MULTI-STRATÉGIES : le membre voit les trades de SA stratégie (défaut 2 = Balanced), et peut consulter
+    // les deux autres. Fenêtre bornée aux 7 DERNIERS JOURS (choix produit) : c'est une comparaison de forme
+    // récente, pas un track record — celui-ci vit sur /member/track-record. La borne par DATE et non par
+    // nombre de lignes est ce qui rend les trois colonnes comparables : à « les N derniers trades », celle
+    // qui trade le plus écrasait les autres dans le lot et couvrait une période bien plus courte qu'elles.
+    db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot,strategy').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', new Date(Date.now() - 7 * 86_400_000).toISOString()).order('closed_at', { ascending: false }).limit(500),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
   ]);
   // même règle que /api/member/me : admin OU copie activée OU whitelist VIP/équipe (CM…)
