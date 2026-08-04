@@ -16,6 +16,25 @@ function guard(req: NextRequest) {
   return s;
 }
 
+// TOUS les membres, paginés (04/08). La requête était plafonnée à 200 alors qu'ils étaient déjà 209 : triée
+// par member_no DÉCROISSANT, elle coupait les plus ANCIENS — ils disparaissaient de la liste, de la recherche,
+// de l'entonnoir et de tous les compteurs. Le pire était le silence : le dashboard affichait « 200 » comme si
+// c'était le total, et le mur reculait d'un membre à chaque inscription. Une limite plus haute ne ferait que
+// repousser la date, et PostgREST plafonne de toute façon ses réponses — donc on pagine jusqu'à épuisement.
+const MEMBER_COLS = 'member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at,locale,strategy,lot';
+type MemberRow = { tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>;
+async function allMembers(db: ReturnType<typeof sdb>): Promise<{ data: MemberRow[] }> {
+  const PAGE = 1000;
+  const out: MemberRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await (db as any).from('members').select(MEMBER_COLS).order('member_no', { ascending: false }).range(from, from + PAGE - 1) as { data: MemberRow[] | null };
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break; // dernière page (ou plafond serveur atteint et rien de plus à lire)
+  }
+  return { data: out };
+}
+
 export async function GET(req: NextRequest) {
   // PAS DE SESSION vs SESSION NON-ADMIN (01/08) — la distinction manquait et créait une boucle insoluble :
   // on répondait 403 dans les deux cas, sans jamais dire QUEL compte venait de se connecter. Quelqu'un
@@ -31,7 +50,7 @@ export async function GET(req: NextRequest) {
   const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
-    (db as any).from('members').select('member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at,locale,strategy,lot').order('member_no', { ascending: false }).limit(200) as Promise<{ data: Array<{ tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>> | null }>,
+    allMembers(db),
     db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),
