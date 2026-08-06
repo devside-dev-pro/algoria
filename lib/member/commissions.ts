@@ -12,9 +12,14 @@
 
 export type CommissionTier = { min: number; usd: number };
 
-// Barèmes communiqués par Mathieu le 27/07/2026 (tranches contiguës → paliers min croissants).
-// Repères utiles : seul RaiseFX commissionne dès 100$ ; VT Markets domine 200-499 (400$) et
-// 1000-2999 (1100$) ; RaiseFX/VT à égalité 500-999 (700$) ; PU Prime ne passe devant qu'à ≥ 3000$ (1200$).
+// Barèmes communiqués par Mathieu le 27/07/2026, TradingSphere revalorisé le 06/08/2026
+// (tranches contiguës → paliers min croissants). Repères à jour :
+//   • seul RaiseFX commissionne dès 100$ ;
+//   • 200-499  : VT Markets et TradingSphere en tête (400$) ;
+//   • 500-999  : RaiseFX, VT et TradingSphere à égalité (700$) ;
+//   • 1000-2999: VT Markets devant (1100$) ;
+//   • 3000-3999: PU Prime devant (1200$) ;
+//   • ≥ 4000   : TradingSphere écrase le marché (1800$) — c'est LE lien des gros dépôts.
 export const BROKER_COMMISSIONS: Record<string, CommissionTier[]> = {
   raisefx: [
     { min: 100, usd: 100 },
@@ -38,10 +43,16 @@ export const BROKER_COMMISSIONS: Record<string, CommissionTier[]> = {
     { min: 500, usd: 600 },
     { min: 1000, usd: 800 },
   ],
+  // REVALORISÉ le 06/08/2026 (nouveau deal) : 300/650/800 → 400/700/900, plus un 4ᵉ palier à 4000$.
+  // Ce que ça change en pratique : TradingSphere rejoint la tête à 200-499$ (400, à égalité avec VT) et
+  // à 500-999$ (700, à égalité avec RaiseFX et VT) ; il reste derrière entre 1000 et 3999$ (900 contre
+  // 1100 chez VT) ; mais à partir de 4000$ il écrase tout — 1800$ quand le meilleur suivant plafonne à
+  // 1200$ (PU Prime). C'est désormais LE lien à envoyer sur un gros dépôt.
   tradingsphere: [
-    { min: 200, usd: 300 },
-    { min: 500, usd: 650 },
-    { min: 1000, usd: 800 },
+    { min: 200, usd: 400 },
+    { min: 500, usd: 700 },
+    { min: 1000, usd: 900 },
+    { min: 4000, usd: 1800 },
   ],
 };
 
