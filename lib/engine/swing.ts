@@ -30,17 +30,30 @@ export interface SwingConfig {
 // backtest 2.7 ans → PF 2.02→2.25, +39%→+48% (petit échantillon 72 trades, amélioration probable). Config-only.
 export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.0, trailDist: 3.0 };
 /** OR — suivi de tendance EMA longues + reprise après repli.
- *  STOP RESSERRÉ slAtr 1 (au lieu de 2) : le copieur des clients est en LOT FIXE (~0.05), donc le risque
- *  client = largeur du stop × son lot, indépendant du lot master. Un stop 2×ATR (~37 pts) = −187$ sur un
- *  compte 500$ (37% en un trade) ; à 1×ATR (~18 pts) ça tombe à −93$ (19%). L'edge tient : backtest 637j
- *  gold H1 → PF 1.79, robuste sur les 3 tiers (T1 1.28 · T2 2.23 · T3 1.69) ; il ne s'écroule qu'en dessous
- *  (slAtr 0.5 → PF 1.29, DD 27%). LOT 0.5 (au lieu de 0.25) : le stop ayant fondu de moitié, 0.5 lot garde
- *  le MÊME risque master qu'avant (−935$/stop) tout en rapprochant la fraction copiée du scalp (10% vs 5%,
- *  au lieu de 20%) → bilans client↔master 2× plus cohérents. Le vrai fix (copie proportionnelle) viendra
- *  avec l'API STH. NB : 1.0 lot resterait impossible ici (−1870$/stop souffle un master à ~2300$). */
+ *  STOP RESSERRÉ slAtr 1 (au lieu de 2) : le copieur des clients est en LOT FIXE, donc le risque client =
+ *  largeur du stop × SON lot, indépendant du lot master. Un stop 2×ATR (~37 pts) = −187$ sur un compte 500$
+ *  (37% en un trade) ; à 1×ATR (~18 pts) ça tombe à −93$ (19%). L'edge tient : backtest 637j gold H1 →
+ *  PF 1.79, robuste sur les 3 tiers (T1 1.28 · T2 2.23 · T3 1.69) ; il ne s'écroule qu'en dessous
+ *  (slAtr 0.5 → PF 1.29, DD 27%).
+ *
+ *  LOT 1 (07/08, était 0.5) — ALIGNÉ SUR TOUTES LES AUTRES COUCHES. Le raisonnement précédent (« 0.5
+ *  rapproche la fraction copiée du scalp ») était FAUX de bout en bout : le copieur STH envoie un lot FIXE
+ *  par receveur, identique quelle que soit la couche. Le lot du master n'a donc AUCUNE influence sur ce que
+ *  prend le client — un swing master à 0.5 et un swing master à 1 produisent exactement le même trade sur
+ *  son compte. Il n'y a jamais eu de « fraction copiée » à ajuster.
+ *
+ *  Ce que 0.5 changeait vraiment, c'était deux choses, toutes deux nuisibles :
+ *    • l'HISTORIQUE mentait — le master affichait −982$ là où le client encaissait l'équivalent d'un
+ *      −1964$ master. La douleur du swing était divisée par deux à l'écran, et c'est cet écran qui sert
+ *      de référence aux membres ;
+ *    • les CAPS JOURNALIERS se déclenchaient deux fois trop tard sur cette couche — ils comptent en
+ *      dollars master, donc un swing perdant ne consommait que la moitié du budget de perte qu'il coûtait
+ *      réellement au client. Le garde-fou censé protéger les comptes protégeait mal.
+ *  Contrepartie assumée : un stop plein passe de ~935$ à ~1870$ sur le maître, soit ~67% du cap journalier
+ *  S2 en un seul trade. C'est le vrai poids de ce trade chez le client — il est désormais affiché tel quel. */
 // PALIER +0.5R à 2R (ladder) : verrouille un petit profit sur les trades qui plafonnent à 2-2.5R au lieu de
 // les laisser rentrer à BE — backtest 637j gold → PF 1.72 tenu, +189%→+251%. BE 1R + trail 2.5R gardés (runners).
-export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 0.5, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] };
+export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] };
 /** NAS100 — cassure du range 72h (labo 2.2 ans : PF 1.94, +$3086, DD 6.9%, tiers ✅ · tenue moy 8.5 j). */
 export const NAS_SWING: SwingConfig = { kind: 'breakout', N: 72, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 3, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 
