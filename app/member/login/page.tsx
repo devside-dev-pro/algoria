@@ -30,6 +30,12 @@ export default function MemberLogin() {
   //    personne insistait, moins elle avait de chances d'entrer.
   const inFlight = useRef(false);
   useEffect(() => () => { if (poll.current) clearInterval(poll.current); }, []);
+  // RETOUR DU BOUTON TELEGRAM (/member/login/confirm) quand le code n'était plus utilisable : on affiche le
+  // motif au lieu de reposer un écran neutre où la personne ne comprend pas pourquoi elle n'est pas entrée.
+  useEffect(() => {
+    const e = new URLSearchParams(window.location.search).get('e');
+    if (e === 'expired' || e === 'retry') setPhase('expired');
+  }, []);
 
   const start = async () => {
     if (inFlight.current) return;

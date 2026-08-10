@@ -69,8 +69,14 @@ export const INBOX_ACK: Record<Locale, string> = {
   it: "Messaggio ricevuto 🙌 Qui legge una persona vera — Mathieu ti risponderà di persona.\n\nPer una risposta più rapida, scrivigli direttamente: @mathieu_algoria\nLa tua app: app.algoria.tech/member",
 };
 
-/** Confirmation de connexion (deep-link /start lg_…). */
+/** Confirmation de connexion (deep-link /start lg_…). Le message porte un BOUTON (SIGNED_IN_BTN) : « reviens
+ *  sur l'app » ne suffisait pas quand la personne arrive du navigateur intégré de Telegram — l'onglet qui
+ *  attendait la confirmation a disparu, il n'y a plus rien où revenir. Le bouton la reconnecte en un tap. */
 export const SIGNED_IN: Record<Locale, string> = {
-  en: '✅ Signed in — head back to the Algoria app.',
-  it: '✅ Accesso effettuato — torna sull\'app Algoria.',
+  en: '✅ Signed in — tap below to open your Algoria app.',
+  it: '✅ Accesso effettuato — tocca qui sotto per aprire la tua app Algoria.',
+};
+export const SIGNED_IN_BTN: Record<Locale, string> = {
+  en: '🚀 Open Algoria',
+  it: '🚀 Apri Algoria',
 };

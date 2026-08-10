@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { JOIN_DM, INBOX_ACK, SIGNED_IN, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
+import { JOIN_DM, INBOX_ACK, SIGNED_IN, SIGNED_IN_BTN, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 
 // Webhook Telegram (bot admin du canal) → alimente la WAITLIST du widget /join.
@@ -357,9 +357,20 @@ export async function POST(req: Request) {
         const loginLocale = asLocale(lrow?.[0]?.locale);
         const token = process.env.TELEGRAM_BOT_TOKEN;
         if (token) {
+          // BOUTON DE RETOUR — indispensable quand la personne est arrivée sur l'app depuis un lien
+          // Telegram : le navigateur INTÉGRÉ de Telegram a emporté l'onglet qui interrogeait le serveur,
+          // donc « reviens sur l'app » ne mène nulle part et la connexion, pourtant validée ici, reste
+          // bloquée sur l'écran d'attente. Le bouton la termine en un tap, dans la conversation où la
+          // personne se trouve déjà. (Forcer un navigateur externe n'est pas une option : impossible sur
+          // iPhone, et intent:// ne couvrirait qu'Android.) Le polling de /member/login reste le chemin
+          // normal quand l'onglet a survécu — /member/login/confirm accepte un code déjà consommé.
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
-            body: JSON.stringify({ chat_id: u.id, text: SIGNED_IN[loginLocale] }),
+            body: JSON.stringify({
+              chat_id: u.id,
+              text: SIGNED_IN[loginLocale],
+              reply_markup: { inline_keyboard: [[{ text: SIGNED_IN_BTN[loginLocale], url: `https://app.algoria.tech/member/login/confirm?c=${code}` }]] },
+            }),
           }).catch(() => {});
         }
       }
