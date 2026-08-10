@@ -35,6 +35,20 @@ export interface StrategyProfile {
   // strictement sous beTrigger, sinon le stop se retrouve au-dessus du prix au moment où il s'arme —
   // infaisable chez le broker (et un simulateur naïf y encaisse un gain fictif : piège rencontré le 10/08).
   beTrigger?: number;
+  // PALIERS DE VERROUILLAGE — [pic atteint, niveau verrouillé] en multiples de R. Réponse au reproche que les
+  // membres formulent le mieux : « mes gains font 1,15$ et mes pertes 35$ ». Ce n'est pas une impression, c'est
+  // un TROU dans la gestion : entre le BE (verrou +0.05R) et l'activation du trailing, RIEN ne remonte le stop.
+  // Un trade qui monte à +0.40R puis se retourne ressort donc à +0.05R, quel que soit le chemin parcouru.
+  // Étude 10/08, 853 signaux scalp XAUUSD réels rejoués bougie à bougie en M1, en ne changeant QUE la sortie :
+  //   sorties entre 0 et +0.10R (les « miettes »)   465 → 220
+  //   espérance / trade                          +0.0505 → +0.0676R   (1ʳᵉ moitié +0.027 → +0.047)
+  //   stops pleins                                   130 → 130        ← INCHANGÉ, et c'est le point clé
+  // Les paliers n'agissent qu'au-dessus de +0.10R : ils ne peuvent pas transformer un gagnant en perdant.
+  // Plateau vérifié sur le voisinage (crans 0.18-0.22 × trail 0.30-0.35) : +0.062 à +0.068R, pas un pic isolé.
+  // ⚠️ Espacer les crans d'AU MOINS 0.05R : manage.ts:72 ignore tout stop qui n'avance pas de 5% du risque.
+  // Un premier cran verrouillant à 0.10R juste après le BE à 0.05R tomberait pile sur la limite et serait
+  // silencieusement sauté (piège rencontré le 10/08 — d'où le premier cran à 0.12).
+  ladder?: Array<[number, number]>;
   // TRAILING LOCK scalp (au-delà du BE) : SL suit à peak − trailDist×R dès peak ≥ trailActivate×R.
   // LE correctif de la géométrie « gains minuscules / pertes pleines » : avec TP à 1R, la plupart des trades
   // touchent +0.15R (BE) puis se font sortir à ~0$ — le trailing convertit ces scratchs en +0.2-0.3R verrouillés.
@@ -120,7 +134,7 @@ export const STRATEGIES: Record<string, StrategyProfile> = {
   '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 0.4, minRR: 0.2, beTrigger: 0.10, tradeAsia: false, dailyProfitTargetPct: 0.01, maxDailyLossPct: 0.03, swing: false, breakout: false },
   // S2 : BE armé à 0.10 + trailing resserré à 0.45/0.25 — la ligne la plus robuste de la grille du 10/08
   // (+0.0502R, première moitié +0.0269, seconde +0.0779, 128 stops pleins au lieu de 150, 85.0% de verts).
-  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, beTrigger: 0.10, trailActivate: 0.45, trailDist: 0.25, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
+  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, beTrigger: 0.10, ladder: [[0.18, 0.12], [0.28, 0.20], [0.38, 0.30]], trailActivate: 0.30, trailDist: 0.18, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
   // S3 : étude dédiée faite (20-21/7) — minRR 0.2 saignait juillet (−8 929$ au backtest) ; 0.75 + trailing
   // rendent les deux moitiés positives. Reste TURBO par son seuil bas (0.20 → ~2× plus de trades que S2) et ses caps larges.
   // RETOUR AU MOTEUR SCALP (10/08, décision Mathieu — voir le bloc BREAKOUT COUPÉ ci-dessous). Le passage en
@@ -142,7 +156,7 @@ export const STRATEGIES: Record<string, StrategyProfile> = {
   // ⚠️ Le rejeu pose un TP FIXE en R ; en live le clamp structure ramène une partie des TP sur le premier mur
   // (minRR 0.75 filtre le reste). targetRR 1.5 pousse donc dans le bon sens sans reproduire la ligne à
   // l'identique — c'est bien pour ça que S3 est le labo et pas S2.
-  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — high-frequency scalp, wide caps', thresholdScalp: 0.2, targetRR: 1.5, minRR: 0.75, beTrigger: 0.08, trailActivate: 0.45, trailDist: 0.25, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
+  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — high-frequency scalp, wide caps', thresholdScalp: 0.2, targetRR: 1.5, minRR: 0.75, beTrigger: 0.08, ladder: [[0.18, 0.12], [0.28, 0.20], [0.38, 0.30]], trailActivate: 0.30, trailDist: 0.18, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
 };
 
 /** Stratégie du runner courant (env ALGORIA_STRATEGY, défaut 2 = comportement actuel). */

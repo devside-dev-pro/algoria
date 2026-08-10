@@ -61,6 +61,15 @@ export interface EngineConfig {
   // combinaisons act 0.45-0.7 × dist 0.3-0.45) : net +9 174→+14 957$, juillet −1 722→+1 885$, jours verts 61→63%.
   trailActivate?: number;
   trailDist?: number;
+  // PALIERS DE VERROUILLAGE (× riskDist) — [pic atteint, niveau verrouillé], le stop ne recule jamais.
+  // Comble le TROU entre le breakeven et l'activation du trailing : sans paliers, un trade qui monte à
+  // +0.40R puis se retourne ressort au verrou de BE (+0.05R) — c'est LE « mes gains font 1,15$ et mes
+  // pertes 35$ » rapporté par les membres. Étude 10/08 sur 853 signaux réels rejoués en M1 : les sorties
+  // entre 0 et +0.10R tombent de 465 à 220 et l'espérance passe de +0.0505 à +0.0676R, à nombre de stops
+  // pleins INCHANGÉ (130) — les paliers n'agissent qu'au-dessus de +0.10R, ils ne peuvent pas créer de perte.
+  // ⚠️ Chaque cran doit dépasser le précédent d'au moins 0.05R : manage.ts refuse tout stop qui n'avance pas
+  // de 5% du risque (anti-spam). Un cran à 0.10 juste après le BE à 0.05 serait silencieusement ignoré.
+  ladder?: Array<[number, number]>;
   risk: RiskLimits;
 }
 

@@ -40,6 +40,7 @@ const XAUUSD_SCALP: EngineConfig = {
   targetRR: STRAT.targetRR,
   minRR: STRAT.minRR, // S2/S3 0.75 : refuse les TP clampés trop proches (l'hémorragie des mois difficiles)
   beTrigger: STRAT.beTrigger ?? SCALP_CONFIG.beTrigger, // armement du breakeven par stratégie — voir strategies.ts
+  ladder: STRAT.ladder, // paliers de verrouillage (S2/S3) : comblent le trou BE → trailing — voir strategies.ts
   trailActivate: STRAT.trailActivate, // trailing lock scalp (S2/S3) — voir strategies.ts
   trailDist: STRAT.trailDist,
   regimeGate: STRAT.regimeGate, // S3 'trend' : décorrélation + juillet ×2.4 — voir strategies.ts

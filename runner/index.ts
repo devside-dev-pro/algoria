@@ -361,11 +361,18 @@ async function main() {
             if (isPrimary) await logNote(`${DISPLAY}: trade bloqué — ${veto}`, 'veto');
           } else {
             const ticket = await executeSignal(autoSignal);
-            // TRAILING LOCK scalp (S2/S3) : gestion custom avec riskDist FIGÉ à l'entrée (après un BE,
-            // |open−SL| ne mesure plus le risque initial — même raison que le breakout).
-            if (ticket && cfg.trailActivate != null && cfg.trailDist != null && autoSignal.stopLoss > 0)
+            // GESTION CUSTOM scalp (BE propre à la stratégie + paliers + trailing), avec riskDist FIGÉ à
+            // l'entrée (après un BE, |open−SL| ne mesure plus le risque initial — même raison que le breakout).
+            // ⚠️ La condition portait AUTREFOIS sur le seul trailing. Conséquence silencieuse : S1, qui n'a pas
+            // de trailing, ne recevait AUCUNE gestion custom — donc manage.ts:63 retombait sur
+            // DEFAULT_CONFIG.beTrigger (0.15) et ignorait purement et simplement le beTrigger 0.10 posé sur S1
+            // le 10/08. Le réglage était en base de code et sans effet en production. On teste donc désormais
+            // la présence de N'IMPORTE QUELLE gestion custom, pas du seul trailing.
+            const hasCustomMgmt = cfg.beTrigger != null || cfg.ladder != null || (cfg.trailActivate != null && cfg.trailDist != null);
+            if (ticket && hasCustomMgmt && autoSignal.stopLoss > 0)
               rememberManagement(ticket, {
                 beTrigger: cfg.beTrigger ?? 0,
+                ladder: cfg.ladder,
                 trailActivate: cfg.trailActivate,
                 trailDist: cfg.trailDist,
                 riskDist: Math.abs(autoSignal.entry - autoSignal.stopLoss),
@@ -600,8 +607,11 @@ async function main() {
           const SWc = inst.swing;
           if (r.ref.includes('-swing-') && SWc) rememberManagement(r.ticket, { beTrigger: SWc.beTrigger, trailActivate: SWc.trailActivate, trailDist: SWc.trailDist, ladder: SWc.ladder, riskDist });
           else if (r.ref.includes('-bk-') && inst.breakout) rememberManagement(r.ticket, { beTrigger: inst.breakout.beTrigger, trailActivate: inst.breakout.trailActivate, trailDist: inst.breakout.trailDist, riskDist });
-          else if (inst.config.trailActivate != null && inst.config.trailDist != null) rememberManagement(r.ticket, { beTrigger: inst.config.beTrigger ?? 0, trailActivate: inst.config.trailActivate, trailDist: inst.config.trailDist, riskDist });
-          else continue; // couche sans gestion custom (scalp S1) → le défaut EST sa gestion
+          // même correctif qu'à l'exécution (voir le bloc hasCustomMgmt) : tester TOUTE gestion custom, pas le
+          // seul trailing — sinon un scalp S1 réadopté après redéploiement repartait sur le BE par défaut (0.15).
+          else if (inst.config.beTrigger != null || inst.config.ladder != null || (inst.config.trailActivate != null && inst.config.trailDist != null))
+            rememberManagement(r.ticket, { beTrigger: inst.config.beTrigger ?? 0, ladder: inst.config.ladder, trailActivate: inst.config.trailActivate, trailDist: inst.config.trailDist, riskDist });
+          else continue; // aucune gestion custom définie → le défaut EST la gestion
           await logNote(`🔧 management restored on ${DISPLAY} position ${r.ticket} (${r.ref.includes('-swing-') ? 'swing' : r.ref.includes('-bk-') ? 'breakout' : 'scalp'} · risk ${riskDist.toFixed(2)}) — stop ladder + trailing are live again`, 'order');
         }
       } catch (e) {
