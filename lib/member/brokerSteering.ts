@@ -24,12 +24,15 @@ export const BUDGET_BRACKETS: BudgetBracket[] = [
   { key: 'b4000', label: '$4,000+', min: 4000 },
 ];
 
+// FXCESS RETIRÉ de tous les ordres le 10/08/2026 (le broker arrête, voir brokers.ts). Il fermait
+// chaque tranche, donc son retrait ne redistribue aucune place : les quatre partenaires restants
+// gardent exactement leur rang.
 const ORDER: Record<string, string[]> = {
-  b200: ['vtmarkets', 'tradingsphere', 'raisefx', 'puprime', 'fxcess'], // VT et TS à 400, VT déclaré avant
-  b500: ['raisefx', 'vtmarkets', 'tradingsphere', 'puprime', 'fxcess'], // trio à 700, RaiseFX d'abord
-  b1000: ['vtmarkets', 'raisefx', 'puprime', 'tradingsphere', 'fxcess'],
-  b3000: ['puprime', 'vtmarkets', 'raisefx', 'tradingsphere', 'fxcess'],
-  b4000: ['tradingsphere', 'puprime', 'vtmarkets', 'raisefx', 'fxcess'], // 1800$ — sans rival
+  b200: ['vtmarkets', 'tradingsphere', 'raisefx', 'puprime'], // VT et TS à 400, VT déclaré avant
+  b500: ['raisefx', 'vtmarkets', 'tradingsphere', 'puprime'], // trio à 700, RaiseFX d'abord
+  b1000: ['vtmarkets', 'raisefx', 'puprime', 'tradingsphere'],
+  b3000: ['puprime', 'vtmarkets', 'raisefx', 'tradingsphere'],
+  b4000: ['tradingsphere', 'puprime', 'vtmarkets', 'raisefx'], // 1800$ — sans rival
 };
 
 // null = pas de tranche choisie → l'appelant garde son ordre par défaut (RaiseFX en vedette)
