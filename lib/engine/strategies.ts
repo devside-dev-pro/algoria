@@ -44,6 +44,8 @@ export interface StrategyProfile {
   // ~135→25, en RESTANT robuste (deux moitiés vertes, tout le voisinage N26-44) et fréquent (8.7 trades/j → S3
   // garde son identité TURBO). Quand intraday='breakout', le scalp de confluence s'éteint et le breakout devient
   // le moteur intraday principal (au lieu de couche additive). breakoutN = fenêtre Donchian (défaut 96).
+  // PLUS UTILISÉ depuis le 10/08 : aucune stratégie ne pose intraday (le breakout est coupé partout, voir le
+  // bloc au-dessus de STRATEGIES). Le champ reste câblé pour pouvoir revenir sans rien recoder.
   intraday?: 'scalp' | 'breakout';
   breakoutN?: number;
   // PLAFOND DES STOPS (× ATR) — étude 22/7 : les stops « monstres » (800-1000$+) effraient les VIP. Serrer la
@@ -62,7 +64,7 @@ export interface StrategyProfile {
   dayLockTriggerPct?: number;
   dayLockFloorPct?: number;
   swing: boolean; // couche positions de fond (H1, tenues des jours)
-  breakout: boolean; // 2ᵉ stratégie intraday (cassures Donchian)
+  breakout: boolean; // 2ᵉ stratégie intraday (cassures Donchian) — false PARTOUT depuis le 10/08 (voir le bloc au-dessus de STRATEGIES)
   // FILTRE DE SESSION scalp (étude 29/07, validé Mathieu « go tout ») : AUCUNE nouvelle entrée du scalp
   // de confluence dont l'heure UTC tombe dans [from, to). Les positions déjà ouvertes vivent leur vie
   // (les overnights restent intacts). Preuves : live 20→29/07 = scalp S2/S3 −12,7k$ sur 07-17h (Asie flat,
@@ -71,16 +73,48 @@ export interface StrategyProfile {
   blockScalpEntryUtcHours?: Array<[number, number]>;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BREAKOUT COUPÉ SUR LES TROIS STRATÉGIES (10/08/2026, décision Mathieu)
+//
+// Le live, mesuré en base :
+//   • cumul depuis le 05/07 : 151 trades · −12 551$ · 64% de réussite (le taux de réussite est bon, la
+//     géométrie ne l'est pas — les pertes sont plus grosses que les gains) ;
+//   • semaine 27/07→02/08 : 49 trades · −3 752$ · 67% ;
+//   • semaine 03/08→09/08 : 29 trades · −5 711$ · 45%.
+//   Sur ces deux semaines, breakout + swing = −9 906$ pendant que le scalp fait +3 833$.
+//
+// Le hors-échantillon, mesuré le 10/08 sur 719 signaux XAUUSD RÉELS (juin→août) dont le chemin a été rejoué
+// bougie à bougie en M5, en ne changeant QUE la sortie (mêmes entrées, mêmes stops) :
+//   RR testés   0.3    0.5    0.75   1.0    1.5    2.0    3.0   (espérance en R par trade)
+//   breakout  −0.211 −0.150 −0.090 −0.067 +0.017 +0.060 +0.120
+//   scalp     −0.123 −0.075 −0.063 −0.029 −0.005 −0.013 +0.167
+//   swing     +0.066 +0.096 +0.062 −0.011 −0.017 +0.180 +0.124
+//   Le breakout est la pire des trois couches sur tout le bas de la grille, et il n'y a AUCUN réglage de
+//   sortie qui le sauve dans la zone où il tradait réellement. On ne coupe donc pas sur une mauvaise
+//   semaine : on coupe sur une couche dont l'espérance est négative quelle que soit la sortie choisie.
+//
+// Ce que ça change concrètement : `breakout: false` partout → INSTRUMENTS ne construit plus la couche
+// (instruments.ts) et le bloc breakout du runner ne tire plus (runner/index.ts). S3 perdait du même coup son
+// SEUL moteur intraday : on lui rend le scalp de confluence en retirant intraday/breakoutN (voir S3).
+// GOLD_BREAKOUT et breakoutSignal restent en place, inutilisés — remettre `breakout: true` suffit à revenir.
+// Les positions breakout déjà ouvertes au moment du déploiement continuent d'être gérées normalement
+// (ensureManagement les réadopte par leur ref `-bk-`) : on coupe les ENTRÉES, pas la gestion des sorties.
+// ─────────────────────────────────────────────────────────────────────────────
 export const STRATEGIES: Record<string, StrategyProfile> = {
   '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 0.4, minRR: 0.2, tradeAsia: false, dailyProfitTargetPct: 0.01, maxDailyLossPct: 0.03, swing: false, breakout: false },
-  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: true, blockScalpEntryUtcHours: [[12, 17]] },
+  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
   // S3 : étude dédiée faite (20-21/7) — minRR 0.2 saignait juillet (−8 929$ au backtest) ; 0.75 + trailing
   // rendent les deux moitiés positives. Reste TURBO par son seuil bas (0.20 → ~2× plus de trades que S2) et ses caps larges.
-  // S3 : moteur intraday = CASSURES (breakout Donchian N32) — décorrélé de S2 (corr 0.89→0.15). Le scalp
-  // (thresholdScalp/regimeGate) devient inerte ; targetRR/minRR/trailing/maxStopAtr ne pilotent plus que
-  // l'éventuel scalp — le breakout a ses propres sorties (GOLD_BREAKOUT : BE 0.7 · trail 0.8/0.5). Reste TURBO
-  // par sa fréquence (8.7 trades/j) et ses caps larges (±8/−6). Swing de fond conservé.
-  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — breakout-driven, decorrelated', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, intraday: 'breakout', breakoutN: 32, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: true, blockScalpEntryUtcHours: [[12, 17]] },
+  // RETOUR AU MOTEUR SCALP (10/08, décision Mathieu — voir le bloc BREAKOUT COUPÉ ci-dessous). Le passage en
+  // intraday='breakout' du 24/07 avait un bon motif (décorrélation S2/S3 : corr 0.89→0.15) mais le moteur retenu
+  // perd de l'argent, et un moteur décorrélé qui saigne ne décorrèle rien d'utile. En retirant intraday/breakoutN,
+  // le scalp de confluence se rallume et S3 retrouve EXACTEMENT la config étudiée les 20-21/07 (seuil 0.20 ·
+  // minRR 0.75 · trailing 0.6/0.35 · cap stop 2.8), dont les deux moitiés d'échantillon étaient positives.
+  // Ce n'est donc pas une config neuve : c'est celle d'avant la phase 2. Reste TURBO par sa fréquence (seuil 0.20
+  // = ~2× les trades de S2) et ses caps larges (±8/−6). Swing de fond conservé.
+  // Contrepartie ASSUMÉE et connue : S2 et S3 repartagent le même générateur de signaux (corr ~0.89). La vraie
+  // décorrélation demande une AUTRE famille de signaux — chantier ouvert, pas résolu ici.
+  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — high-frequency scalp, wide caps', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
 };
 
 /** Stratégie du runner courant (env ALGORIA_STRATEGY, défaut 2 = comportement actuel). */
