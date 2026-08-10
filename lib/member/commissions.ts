@@ -10,6 +10,8 @@
 // NB : importé par la page admin donc présent dans son bundle client — n'y mettre que des
 // montants, jamais d'identifiants partenaires ou de liens privés.
 
+import { BROKERS } from './brokers';
+
 export type CommissionTier = { min: number; usd: number };
 
 // Barèmes communiqués par Mathieu le 27/07/2026, TradingSphere revalorisé le 06/08/2026
@@ -71,11 +73,16 @@ export function estimateCommission(brokerKey: string | null | undefined, amountU
 // minimum sont écartés (rien à gagner) ; `exclude` = brokers où le prospect a DÉJÀ un compte
 // (compte principal + multi-stratégies), à écarter aussi. Égalité de commission → l'ordre de
 // déclaration du barème tranche (tri stable, RaiseFX déclaré en premier : notre broker).
+// Les brokers RETIRÉS (FXCESS depuis le 10/08/2026) sont écartés du classement : BEST LINK sert à
+// décider OÙ ENVOYER un dépôt, donc y laisser un partenaire fermé enverrait le support ouvrir un
+// compte impossible. Leur barème reste dans la table au-dessus — estimateCommission continue d'en
+// avoir besoin pour les 5 membres déjà chez eux.
 export function rankBrokersByCommission(amountUsd: number, exclude?: Iterable<string>): { key: string; usd: number }[] {
   const out: { key: string; usd: number }[] = [];
   const skip = new Set(exclude ?? []);
+  const closed = new Set(BROKERS.filter((b) => b.retired).map((b) => b.key));
   for (const key of Object.keys(BROKER_COMMISSIONS)) {
-    if (skip.has(key)) continue;
+    if (skip.has(key) || closed.has(key)) continue;
     const usd = estimateCommission(key, amountUsd);
     if (usd != null) out.push({ key, usd });
   }

@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker, STRATEGY_UI, LoadFailed } from '../ui';
-import { BROKERS } from '@/lib/member/brokers';
+import { BROKERS, selectableBrokers } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { bracketForAmount, brokerOrderFor } from '@/lib/member/brokerSteering';
 
@@ -32,7 +32,9 @@ export default function AddStrategy() {
   const usedStrategies = useMemo(() => new Set<number>([Number(member?.strategy ?? 2), ...activeExtras.map((a) => a.strategy)]), [member, activeExtras]);
   const usedBrokers = useMemo(() => new Set<string>([String(member?.broker ?? ''), ...activeExtras.map((a) => String(a.broker ?? ''))].filter(Boolean)), [member, activeExtras]);
   const remaining = STRATEGY_UI.filter((s) => !usedStrategies.has(s.id));
-  const freeBrokers = BROKERS.filter((b) => !usedBrokers.has(b.key));
+  // un SECOND compte est forcément un compte NEUF : les brokers retirés (FXCESS) n'y figurent pas,
+  // même pour un membre qui en a déjà un chez eux — on ne peut plus ouvrir de compte là-bas.
+  const freeBrokers = selectableBrokers().filter((b) => !usedBrokers.has(b.key));
   const brokerServers = BROKERS.find((b) => b.key === brokerPick)?.servers ?? [];
   const minDep = strategy != null ? STRATEGY_MIN_DEPOSIT[strategy] ?? 500 : null;
   // brokers restants présentés dans l'ordre recommandé pour le minimum de la stratégie choisie

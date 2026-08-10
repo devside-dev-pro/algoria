@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker, LoadFailed, useUILocale } from '../ui';
-import { BROKERS, PARTNER_BROKERS, type Broker } from '@/lib/member/brokers';
+import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 
@@ -204,7 +204,9 @@ export default function Onboarding() {
               <label style={{ ...lbl, flex: '1 1 130px' }}>{t('ob.broker')}
                 <select value={picked ?? ''} onChange={(e) => { setBrokerPick(e.target.value || null); setServer(''); setServerManual(false); }} style={inp}>
                   <option value="">{t('ob.choose')}</option>
-                  {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
+                  {/* un broker retiré (FXCESS) n'apparaît que si c'est DÉJÀ celui du membre — sinon sa
+                      fiche s'ouvrirait sur un menu vide et le premier enregistrement l'effacerait */}
+                  {selectableBrokers(member?.broker).map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
                 </select>
               </label>
               <label style={{ ...lbl, flex: '1 1 150px' }}>{t('ob.platform')}

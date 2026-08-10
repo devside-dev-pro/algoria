@@ -23,6 +23,15 @@ export interface Broker {
   // une saisie libre du nom du broker et du serveur. La connexion au copieur se fait à la main : le nom
   // exact du serveur MT ne s'invente pas, et une erreur de frappe côté membre bloquerait la copie.
   nonPartner?: boolean;
+  // RETIRÉ DE LA BOUCLE (10/08/2026, décision Mathieu) : le partenariat s'arrête. Un broker retiré
+  // DISPARAÎT de tout endroit où un client CHOISIT (étape « ouvre ton compte », menu broker de
+  // l'onboarding, ajout d'un second compte, ordres de mise en avant) — plus aucun nouveau compte ne
+  // peut s'ouvrir chez lui. Mais son entrée RESTE ICI, et c'est délibéré : la fiche d'un membre
+  // résout son broker par cette liste (`BROKERS.find(b => b.key === r.broker)?.name`, admin:459).
+  // Supprimer la ligne afficherait « ⚠ broker ? » sur les membres concernés, ferait perdre les noms
+  // de serveurs MT5 qui valident leur connexion, et couperait le pré-remplissage de leur commission.
+  // L'admin continue donc de le voir dans ses menus — le support doit pouvoir corriger une fiche.
+  retired?: boolean;
 }
 
 export const BROKERS: Broker[] = [
@@ -38,10 +47,23 @@ export const BROKERS: Broker[] = [
   { key: 'vtmarkets', name: 'VT Markets', url: 'https://go.vtaffiliates.com/visit/?bta=35824&brand=vt', servers: ['VTMarkets-Live', 'VTMarkets-Live 2', 'VTMarkets-Live 3', 'VTMarkets-Live 5', 'VTMarkets-Live 6', 'VTMarkets-Live 7', 'VTMarkets-Live 8'] },
   // PU Prime — attention : « PUPrime-Live2 » (sans espace) ET « PUPrime-Live 2 » (avec espace) sont DEUX serveurs distincts.
   { key: 'puprime', name: 'PU Prime', url: 'https://go.puprime.partners/visit/?bta=35491&brand=pu&campaign=230205&afp=ALGORIA', servers: ['PUPrime-Live', 'PUPrime-Live 2', 'PUPrime-Live2', 'PUPrime-Live 4', 'PUPrime-Live 5', 'PUPrime-Live 6', 'PUPrime-Live 7'] },
-  { key: 'fxcess', name: 'FXCESS', url: 'https://go.fxcess.com/visit/?bta=35526&brand=fxcess&afp=ALGORIA', servers: ['FXCESS-Live01'] },
+  // FXCESS — RETIRÉ le 10/08/2026 : le broker arrête et s'auto-remplace par TradingSphere, sa seconde
+  // société (déjà partenaire ci-dessous). Lien d'affiliation VIDÉ : même si un chemin oublié affichait
+  // encore la carte, il n'y aurait rien à cliquer. 5 membres étaient chez eux au moment du retrait
+  // (2 live, 2 onboarding, 1 pending_copier) — leurs fiches continuent de fonctionner grâce à cette
+  // entrée conservée, serveurs MT5 compris. Voir le champ `retired` pour le détail.
+  { key: 'fxcess', name: 'FXCESS', url: '', retired: true, servers: ['FXCESS-Live01', 'FXCESS-Live02', 'FXCess-Live02'] },
   { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', servers: ['TradingSphere-Real1'] },
   { key: 'other', name: 'Other broker (I already have one)', url: '', nonPartner: true },
 ];
 
-/** Brokers PARTENAIRES uniquement — ceux pour lesquels on a un lien et une commission. */
-export const PARTNER_BROKERS = BROKERS.filter((b) => !b.nonPartner);
+/** Brokers PARTENAIRES OUVERTS — ceux chez qui un client peut encore ouvrir un compte aujourd'hui.
+ *  Exclut les retirés : c'est CETTE liste qui alimente l'étape « ouvre ton compte » du tunnel. */
+export const PARTNER_BROKERS = BROKERS.filter((b) => !b.nonPartner && !b.retired);
+
+/** Options du menu « quel est ton broker ? ». Un broker retiré n'apparaît QUE s'il est déjà celui du
+ *  membre — sinon sa fiche s'ouvrirait sur un menu vide et le moindre enregistrement effacerait son
+ *  broker. Personne d'autre ne peut le sélectionner. */
+export function selectableBrokers(currentKey?: string | null): Broker[] {
+  return BROKERS.filter((b) => !b.retired || b.key === currentKey);
+}
