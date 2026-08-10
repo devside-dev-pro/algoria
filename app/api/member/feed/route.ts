@@ -44,7 +44,14 @@ export async function GET(req: NextRequest) {
   // jamais, même après des semaines vertes. On ne montre que les GAINS (l'UI l'assume : "highlights") ;
   // l'historique complet, honnête, s'ouvre avec l'accès débloqué.
   if (!unlocked) trades = trades.filter((t) => Number(t.pnl) > 0);
-  trades = trades.slice(0, 30);
+  // MEMBRE : on renvoie les 7 JOURS ENTIERS, sans plafond de lignes. Le plafond à 30 créait deux chiffres
+  // contradictoires sur le même écran — le sélecteur annonçait « 36 trades · −15,27$ » (7 jours complets)
+  // pendant que le bloc juste en dessous affichait « 30 trades · −6,72$ » (les 30 derniers seulement).
+  // Les deux étaient exacts, sur des périmètres différents ; pour le membre c'était simplement incohérent,
+  // et un chiffre qu'on ne sait pas lire abîme plus la confiance qu'un chiffre négatif honnête.
+  // Le PROSPECT garde son plafond : sa liste est déjà filtrée aux gains (bande-annonce assumée), la
+  // rallonger n'ajouterait rien et alourdirait la page qui sert à convertir.
+  if (!unlocked) trades = trades.slice(0, 30);
   const deskFiltered = (desk.data ?? []).filter((e) => (e.data as { symbol?: string })?.symbol !== 'NAS100');
   const deskOut = unlocked
     ? deskFiltered
