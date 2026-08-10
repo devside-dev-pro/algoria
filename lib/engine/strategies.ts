@@ -21,7 +21,21 @@ export interface StrategyProfile {
   // (juillet −8 814$) ; à 0.75, juillet passe POSITIF (+2 621$) et le net total ×4.5 (+1 999→+9 174$).
   // S1 garde 0.2 : son design EST le petit TP rapide (targetRR 0.4 validé tel quel). S3 : étude à part.
   minRR: number;
-  // TRAILING LOCK scalp (au-delà du BE 0.15) : SL suit à peak − trailDist×R dès peak ≥ trailActivate×R.
+  // ARMEMENT DU BREAKEVEN (× riskDist) — LE levier des « gros stops », étude 10/08 sur 853 signaux scalp
+  // XAUUSD RÉELS (02/07→10/08) dont le chemin a été rejoué bougie à bougie en M1 (59 314 bougies), en ne
+  // changeant QUE la gestion de sortie. Le constat de départ, mesuré en base depuis le 05/07 : 119 trades
+  // (18%) partent au stop plein et coûtent −126,8R pendant que 313 break-even (48%) rapportent +19,3R au
+  // total — UN stop plein annule 17 break-even. La vanne qui agit dessus est l'armement du BE, et elle est
+  // monotone (BE armé → stops pleins → % de trades verts → espérance/trade, les DEUX moitiés positives) :
+  //   0.35R → 228 stops · 73.2% verts · +0.043R      0.15R → 150 stops · 82.4% verts · +0.041R  (ex-live)
+  //   0.10R → 128 stops · 85.0% verts · +0.050R ✅    0.08R → 120 stops · 85.9% verts · +0.050R
+  // 0.10 retenu sur S1/S2 : −15% de stops pleins et la MEILLEURE première moitié de toute la grille
+  // (+0.0269 avec le trailing 0.45/0.25). 0.08 réservé à S3 (labo, 1 seul membre live).
+  // ⚠️ Le verrou posé par manageBreakeven est à entrée +0.05R (BE+, couvre les coûts) : il DOIT rester
+  // strictement sous beTrigger, sinon le stop se retrouve au-dessus du prix au moment où il s'arme —
+  // infaisable chez le broker (et un simulateur naïf y encaisse un gain fictif : piège rencontré le 10/08).
+  beTrigger?: number;
+  // TRAILING LOCK scalp (au-delà du BE) : SL suit à peak − trailDist×R dès peak ≥ trailActivate×R.
   // LE correctif de la géométrie « gains minuscules / pertes pleines » : avec TP à 1R, la plupart des trades
   // touchent +0.15R (BE) puis se font sortir à ~0$ — le trailing convertit ces scratchs en +0.2-0.3R verrouillés.
   // Étude 2/6→20/7 (plateau 24/24 combinaisons robustes sur les deux moitiés) :
@@ -101,8 +115,12 @@ export interface StrategyProfile {
 // (ensureManagement les réadopte par leur ref `-bk-`) : on coupe les ENTRÉES, pas la gestion des sorties.
 // ─────────────────────────────────────────────────────────────────────────────
 export const STRATEGIES: Record<string, StrategyProfile> = {
-  '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 0.4, minRR: 0.2, tradeAsia: false, dailyProfitTargetPct: 0.01, maxDailyLossPct: 0.03, swing: false, breakout: false },
-  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
+  // S1 : BE armé à 0.10 (voir beTrigger). PAS de trailing — son TP est à 0.4R, un trailing qui s'active à
+  // 0.45R ne se déclencherait jamais. Le reste de son design (TP court, sans Asie, +1%/−3%) est inchangé.
+  '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 0.4, minRR: 0.2, beTrigger: 0.10, tradeAsia: false, dailyProfitTargetPct: 0.01, maxDailyLossPct: 0.03, swing: false, breakout: false },
+  // S2 : BE armé à 0.10 + trailing resserré à 0.45/0.25 — la ligne la plus robuste de la grille du 10/08
+  // (+0.0502R, première moitié +0.0269, seconde +0.0779, 128 stops pleins au lieu de 150, 85.0% de verts).
+  '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, beTrigger: 0.10, trailActivate: 0.45, trailDist: 0.25, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
   // S3 : étude dédiée faite (20-21/7) — minRR 0.2 saignait juillet (−8 929$ au backtest) ; 0.75 + trailing
   // rendent les deux moitiés positives. Reste TURBO par son seuil bas (0.20 → ~2× plus de trades que S2) et ses caps larges.
   // RETOUR AU MOTEUR SCALP (10/08, décision Mathieu — voir le bloc BREAKOUT COUPÉ ci-dessous). Le passage en
@@ -114,7 +132,17 @@ export const STRATEGIES: Record<string, StrategyProfile> = {
   // = ~2× les trades de S2) et ses caps larges (±8/−6). Swing de fond conservé.
   // Contrepartie ASSUMÉE et connue : S2 et S3 repartagent le même générateur de signaux (corr ~0.89). La vraie
   // décorrélation demande une AUTRE famille de signaux — chantier ouvert, pas résolu ici.
-  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — high-frequency scalp, wide caps', thresholdScalp: 0.2, targetRR: 1.0, minRR: 0.75, trailActivate: 0.6, trailDist: 0.35, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
+  // S3 = LABORATOIRE (décision Mathieu 10/08) : 1 seul membre live, donc c'est elle qui porte le réglage le
+  // plus agressif de la grille. BE armé à 0.08 (120 stops pleins, 85.9% de verts — le plus bas/haut mesurés)
+  // et TP poussé à 1.5R. Le rejeu est SANS ÉQUIVOQUE sur l'axe TP : à BE/trailing constants, le % de trades
+  // verts vaut 82.4% que le TP soit à 0.4R ou à 2.0R (le BE fixe le taux de réussite, PAS le TP) — seule
+  // l'espérance bouge, et elle MONTE avec le TP : 0.4R +0.001 (1ʳᵉ moitié négative) · 0.5R +0.013 (1ʳᵉ moitié
+  // négative) · 0.75R +0.028 · 1.0R +0.041 · 1.5R +0.050 · 2.0R +0.055. Couper le TP ne fabrique donc aucun
+  // trade vert de plus : ça ne fait que rétrécir les gagnants pendant que les stops, eux, ne bougent pas.
+  // ⚠️ Le rejeu pose un TP FIXE en R ; en live le clamp structure ramène une partie des TP sur le premier mur
+  // (minRR 0.75 filtre le reste). targetRR 1.5 pousse donc dans le bon sens sans reproduire la ligne à
+  // l'identique — c'est bien pour ça que S3 est le labo et pas S2.
+  '3': { id: 3, key: 'turbo', label: 'S3 TURBO — high-frequency scalp, wide caps', thresholdScalp: 0.2, targetRR: 1.5, minRR: 0.75, beTrigger: 0.08, trailActivate: 0.45, trailDist: 0.25, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.08, maxDailyLossPct: 0.06, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.01, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
 };
 
 /** Stratégie du runner courant (env ALGORIA_STRATEGY, défaut 2 = comportement actuel). */
