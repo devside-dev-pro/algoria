@@ -123,6 +123,10 @@ export default function MemberHistory() {
           un win rate 100% qui sentirait le faux. L'historique complet arrive avec l'accès. */}
       {unlocked ? (
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* MÊME FENÊTRE QUE LE SÉLECTEUR — 7 jours, écrit noir sur blanc. Ces trois chiffres reprennent
+              exactement ceux de la pastille du profil consulté juste au-dessus ; l'étiquette évite qu'on
+              se demande lequel des deux blocs dit vrai. */}
+          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 800 }}>LAST 7 DAYS</span>
           <div style={{ display: 'flex', gap: 18 }}>
             <Stat label="TRADES" value={String(trades.length)} />
             <Stat label="WINS" value={trades.length ? `${Math.round((wins / trades.length) * 100)}%` : '—'} color="var(--up)" />
@@ -200,7 +204,7 @@ export default function MemberHistory() {
             );
           });
         })()}
-        {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>No closed trades yet today.</p>}
+        {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>No closed trades on this profile over the last 7 days.</p>}
       </section>
 
       {/* « tu veux voir plus loin ? » → le track record COMPLET (16 mois, simulé), en natif. Visible par tous :
