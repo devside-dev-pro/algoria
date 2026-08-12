@@ -879,11 +879,16 @@ export default function AdminCRM() {
                 .filter((r) => r.status === 'onboarding')
                 .map((r) => ({ r, days: Math.floor((now - Date.parse(r.created_at)) / 86_400_000), touched: lastNudge.get(Number(r.tg_id)) }))
                 .filter((x) => x.days >= 1 && x.days <= 21 && (!x.touched || now - x.touched > 3 * 86_400_000))
-                .sort((a, b) => a.days - b.days);
+                // LE PLUS ANCIEN D'ABORD (12/08). C'était l'inverse : la file s'ouvrait sur les J+1 et
+                // enterrait les J+15 tout en bas — or ce sont eux qui attendent depuis le plus longtemps,
+                // et eux que le `slice(0, 15)` coupait quand la file était longue. Ceux qui avaient le plus
+                // besoin d'un mot étaient exactement ceux qu'on ne voyait jamais. On déroule maintenant du
+                // plus vieux au plus frais : la session de relance commence par la dette la plus ancienne.
+                .sort((a, b) => b.days - a.days);
               if (queue.length === 0) return <section className="panel" style={{ padding: 16, color: 'var(--dim)', fontSize: 12.5 }}>📞 Relance queue clear — every recent lead was touched in the last 3 days.</section>;
               return (
                 <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <h2 style={secH}>📞 RELANCES DU JOUR · {queue.length} — your personal DM/voice beats any bot</h2>
+                  <h2 style={secH}>📞 RELANCES DU JOUR · {queue.length} — oldest first, your personal DM/voice beats any bot</h2>
                   {queue.slice(0, 15).map(({ r, days, touched }) => (
                     <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)', flexWrap: 'wrap' }}>
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{r.member_no}</span>
@@ -896,7 +901,7 @@ export default function AdminCRM() {
                       <button disabled={busy} onClick={() => post({ nudged: r.tg_id })} title="I sent my personal message/voice note — remove from the queue for 3 days" style={okBtn}>✓ FAIT</button>
                     </div>
                   ))}
-                  {queue.length > 15 && <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)' }}>+{queue.length - 15} more — the 10:00 UTC auto-nudge (push + bot DM) catches whoever you don&rsquo;t reach.</p>}
+                  {queue.length > 15 && <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)' }}>+{queue.length - 15} more, all newer than these — the 10:00 UTC auto-nudge (push + bot DM) catches whoever you don&rsquo;t reach.</p>}
                 </section>
               );
             })()}
