@@ -43,7 +43,10 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 interface Engine {
   inst: InstrumentSpec;
   isPrimary: boolean;
-  tick: () => void; // appelé chaque seconde par la boucle partagée
+  // ASYNCHRONE depuis le 12/08 : le tick attend ensureManagement avant de lancer la gestion des stops,
+  // sinon une position orpheline est gérée au défaut scalp (voir le bloc dans `tick`). L'appelant DOIT
+  // donc rattraper le rejet — un try/catch synchrone ne suffit plus.
+  tick: () => Promise<void>; // appelé chaque seconde par la boucle partagée
   reconcile: () => void; // appelé chaque 60 s par la boucle partagée
   pushAccount: () => Promise<void>; // snapshot compte (balance/equity/day P&L) — 60 s, primaire uniquement
   executeSignal: (signal: Signal) => Promise<string | undefined>;
@@ -620,7 +623,7 @@ async function main() {
     };
 
     // Tick (1 s) : alimente l'agrégateur M5 + M1, diffuse le prix (primaire), gère le breakeven. Isolé du reste.
-    const tick = () => {
+    const tick = async () => {
       const p = terminal.price(BROKER);
       if (p) {
         const quoteMs = new Date(p.time).getTime();
@@ -632,8 +635,18 @@ async function main() {
           broadcastTick(DISPLAY, p.bid, p.ask); // tick tagué symbole → le cockpit multi-symbole suit le marché choisi
         }
       }
-      void ensureManagement(); // AVANT la gestion : une position sans son mgmt serait gérée au défaut scalp
-      void manageBreakeven(stream, terminal, BROKER); // no-op sur les ordres nus (sans SL)
+      // ⚠️ `await`, PAS `void` — ces deux lignes portaient déjà l'intention « ensureManagement AVANT la
+      // gestion », mais `void` ne fait rien attendre : manageBreakeven partait sur le MÊME tick avec la table
+      // `custom` encore vide, et manage.ts appliquait alors DEFAULT_CONFIG.beTrigger (0.15R, le défaut scalp)
+      // à un swing dont le breakeven doit s'armer bien plus tard. Le stop montait à l'entraînement +0.05R —
+      // et comme un stop ne redescend JAMAIS, la restauration qui arrivait quelques dizaines de ms plus tard
+      // ne pouvait plus rien réparer : le trade restait figé au breakeven pour le reste de sa vie.
+      // Mesuré le 12/08 : 52 swings sur 58 sortis « au breakeven » SANS avoir jamais atteint 1R — ce qui est
+      // impossible avec le réglage prévu, et prouve qu'ils tournaient sur le défaut scalp.
+      // ensureManagement est déjà bridée à un passage par minute et sort immédiatement s'il n'y a pas
+      // d'orpheline : l'attendre ne coûte rien dans le cas normal.
+      await ensureManagement();
+      await manageBreakeven(stream, terminal, BROKER); // no-op sur les ordres nus (sans SL)
     };
 
 
@@ -807,7 +820,11 @@ async function main() {
   // ===== Boucles PARTAGÉES : chaque moteur est tické/réconcilié isolément (un instrument qui casse n'affecte pas les autres). =====
   setInterval(() => {
     for (const eng of engines) {
-      try { eng.tick(); } catch (e) { console.error(`[algoria] tick ${eng.inst.display} échoué:`, e); }
+      // tick est ASYNCHRONE depuis le 12/08 (il attend ensureManagement avant la gestion) : un try/catch
+      // synchrone ne rattraperait plus rien, et une promesse rejetée non gérée peut tuer le process.
+      // Le .catch() est donc obligatoire ici. Les instruments restent isolés : un tick qui casse n'empêche
+      // pas les autres de tourner, et le suivant repartira dans une seconde.
+      void eng.tick().catch((e) => console.error(`[algoria] tick ${eng.inst.display} échoué:`, e));
     }
   }, 1000);
 

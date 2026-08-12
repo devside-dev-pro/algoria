@@ -52,8 +52,26 @@ export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.1
  *  Contrepartie assumée : un stop plein passe de ~935$ à ~1870$ sur le maître, soit ~67% du cap journalier
  *  S2 en un seul trade. C'est le vrai poids de ce trade chez le client — il est désormais affiché tel quel. */
 // PALIER +0.5R à 2R (ladder) : verrouille un petit profit sur les trades qui plafonnent à 2-2.5R au lieu de
-// les laisser rentrer à BE — backtest 637j gold → PF 1.72 tenu, +189%→+251%. BE 1R + trail 2.5R gardés (runners).
-export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] };
+// les laisser rentrer à BE — backtest 637j gold → PF 1.72 tenu, +189%→+251%. Trail 2.5R gardé (runners).
+//
+// BREAKEVEN 1R → 0.5R (12/08/2026, décision Mathieu : « passer de +1 000$ à −1 300$ sur un mouvement, ce
+// n'est pas normal »). À 1R le swing n'a AUCUNE protection sur toute la première moitié de son parcours.
+// Rejeu de 92 swings or réels (06/07→12/08, M5, 5 jours d'horizon, coûts déduits), en ne changeant QUE ce
+// seuil — le reste (palier 2R, trailing 2.5/2.5) est identique d'une ligne à l'autre :
+//   BE     espérance   % verts   STOPS PLEINS   gain moyen
+//   1.00R   −0.105R      51%         43           0.813R   ← l'actuel, le pire du tableau
+//   0.75R   −0.012R      61%         34           0.671R
+//   0.50R   +0.043R      72%         24           0.490R   ← retenu
+//   0.35R   −0.041R      79%         17           0.219R
+//   0.25R   −0.048R      77%         16           0.205R
+//   0.15R   +0.021R      80%         11           0.186R
+// 0.5R est le meilleur du tableau et le seul dont les DEUX moitiés d'échantillon tiennent. Descendre plus
+// bas (0.25, testé à la demande) effondre le gain moyen de 0.490R à 0.205R : on recréerait sur le swing le
+// problème des « miettes » qu'on venait de corriger sur le scalp — beaucoup de verts qui ne rapportent rien.
+// ⚠️ HONNÊTETÉ STATISTIQUE : sur 92 trades, les écarts d'ESPÉRANCE entre 0.15 et 0.50 sont dans le bruit
+// (erreur-type ~0.09R). Ce qui est solide, et purement mécanique, c'est que le nombre de stops pleins baisse
+// de façon MONOTONE quand on abaisse le seuil (43→34→24→17→16→11), et que 1R est nettement le pire.
+export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 1, beTrigger: 0.5, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] };
 /** NAS100 — cassure du range 72h (labo 2.2 ans : PF 1.94, +$3086, DD 6.9%, tiers ✅ · tenue moy 8.5 j). */
 export const NAS_SWING: SwingConfig = { kind: 'breakout', N: 72, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 3, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 
