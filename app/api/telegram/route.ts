@@ -195,7 +195,20 @@ async function bridgeChannelPost(db: any, post: any, dst: string): Promise<void>
 
   const html = entitiesToHtml(raw, text ? post.entities : post.caption_entities);
   const translated = await translateToItalian(html);
-  if (!translated) { await finish({ status: 'failed', error: 'translation empty' }); return; }
+  // Traduction vide OU refusée par le garde-fou de sortie (le modèle a bavardé au lieu de traduire —
+  // incident du 11/08, voir lib/member/translate.ts). On ne poste RIEN, mais on ne perd pas le post
+  // en silence : la CM est prévenue et republie à la main, comme pour les bulles vidéo.
+  if (!translated) {
+    await finish({ status: 'failed', error: 'translation rejected' });
+    const cm = (process.env.TELEGRAM_CM_IT_ID ?? '').trim();
+    if (cm) {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000),
+        body: JSON.stringify({ chat_id: cm, text: "⚠️ Traduzione NON riuscita per un post del canale EN — niente è stato pubblicato sul canale IT. Traducilo e pubblicalo a mano." }),
+      }).catch(() => {});
+    }
+    return;
+  }
 
   try {
     // média + légende → copyMessage rejoue le média avec la légende traduite (une seule requête).

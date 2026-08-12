@@ -84,7 +84,15 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     }
   }
 
-  // nettoyage des positions RÉELLEMENT fermées (tous symboles — voir le commentaire en tête de fonction)
+  // NETTOYAGE — uniquement si le broker a VRAIMENT répondu (12/08). `stillOpen` se construit sur
+  // terminal.positions ; pendant une déconnexion cette liste revient VIDE, et le nettoyage effaçait alors
+  // la gestion de TOUTES les positions d'un coup. Les orphelines retombaient sur le défaut scalp (BE 0.15R)
+  // et se faisaient verrouiller au breakeven avant que la restauration ne les rattrape — un stop ne
+  // redescendant jamais, le trade était figé pour de bon. Cinq déconnexions relevées le 10/08.
+  // Une liste vide est infiniment plus souvent une déconnexion qu'une clôture simultanée de tout le book :
+  // dans le doute on garde la gestion. Le coût est nul — les tickets ne se réutilisent pas, et le prochain
+  // cycle où le broker répond nettoie ce qui doit l'être.
+  if (stillOpen.size === 0) return;
   for (const id of done.keys()) if (!stillOpen.has(id)) done.delete(id);
   for (const id of peaks.keys()) if (!stillOpen.has(id)) peaks.delete(id);
   for (const id of custom.keys()) if (!stillOpen.has(id)) custom.delete(id);
