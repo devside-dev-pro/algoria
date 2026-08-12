@@ -4,9 +4,9 @@
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StrategyPicker, LoadFailed, useUILocale } from '../ui';
+import { useMe, StrategyPicker, bestStrategyFor, LoadFailed, useUILocale } from '../ui';
 import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/member/brokers';
-import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
+import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
@@ -49,7 +49,7 @@ async function post(body: Record<string, unknown>) {
 }
 
 export default function Onboarding() {
-  const { member, rejection, loading, t } = useMe();
+  const { member, rejection, declaredDeposit, loading, t } = useMe();
   const router = useRouter();
   const [step, setStep] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,6 +65,7 @@ export default function Onboarding() {
   const [fullName, setFullName] = useState('');
   const [deposit, setDeposit] = useState('');
   const [strategy, setStrategy] = useState(2); // 1=Steady · 2=Balanced (défaut) · 3=Turbo — lot copieur fixe 0.01
+  // ⚠️ ce 2 est une PRÉFÉRENCE, pas la valeur envoyée : elle est ramenée dans le budget plus bas (stratChoice)
   const [brokerPick, setBrokerPick] = useState<string | null>(null); // broker cliqué (le lien ouvre un onglet, on retient le choix)
   const [showOthers, setShowOthers] = useState(false);
   // budget annoncé (étape 0) : oriente QUEL broker est mis en avant — tant que rien n'est choisi,
@@ -103,6 +104,15 @@ export default function Onboarding() {
   const lead = ranked[0] ?? FEATURED;
   const rest = ranked.slice(1);
   const othersOpen = showOthers || (picked != null && picked !== lead.key);
+
+  // ÉTAPE 3 — la sélection ne peut JAMAIS porter sur une stratégie hors budget (12/08). `strategy` vaut 2
+  // (BALANCED, min $500) par défaut : un membre à $200 arrivait donc avec un profil coché ET grisé, un
+  // bouton START muet, et aucun moyen de comprendre qu'il fallait cliquer STEADY. Plusieurs adhésions
+  // bloquées là. On ramène ici la valeur affichée ET envoyée dans ce que le dépôt débloque réellement.
+  // Le dépôt vient du champ local (saisi à l'étape 2) ou de la fiche KYC (reprise du wizard plus tard).
+  const budgetUsd = Number(deposit) > 0 ? Number(deposit) : declaredDeposit ?? undefined;
+  const affordable = budgetUsd == null || budgetUsd >= (STRATEGY_MIN_DEPOSIT[strategy] ?? 500);
+  const stratChoice = affordable ? strategy : bestStrategyFor(budgetUsd) ?? 0; // 0 = rien de débloqué (dépôt < $200)
 
   const run = (body: Record<string, unknown>, next: number | 'done') => {
     setBusy(true);
@@ -268,8 +278,14 @@ export default function Onboarding() {
           <h2 style={{ fontSize: 15, margin: 0 }}>{t('ob.step3')}</h2>
           <p style={pMuted}>{t('ob.step3.sub')}</p>
           {/* budget = dépôt déclaré à l'étape 2 : les stratégies au-dessus sont grisées avec le minimum affiché */}
-          <StrategyPicker value={strategy} onPick={setStrategy} busy={busy} budget={Number(deposit) > 0 ? Number(deposit) : undefined} />
-          <button disabled={busy || (Number(deposit) > 0 && Number(deposit) < (STRATEGY_MIN_DEPOSIT[strategy] ?? 500))} onClick={() => run({ action: 'strategy', choice: strategy }, 'done')} style={ctaMain}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
+          <StrategyPicker value={stratChoice} onPick={setStrategy} busy={busy} budget={budgetUsd} />
+          {stratChoice === 0 && (
+            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: 'var(--gold)' }}>
+              Your declared deposit (${budgetUsd}) is below the ${MIN_ENTRY_DEPOSIT} minimum to start copying.
+              Fund your account, then go back and update the amount — or message us and we&rsquo;ll sort it out.
+            </p>
+          )}
+          <button disabled={busy || stratChoice === 0} onClick={() => run({ action: 'strategy', choice: stratChoice }, 'done')} style={ctaMain}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
           <button onClick={() => setStep(1)} style={linkBtn}>{t('ob.backMt5')}</button>
         </section>
       )}
