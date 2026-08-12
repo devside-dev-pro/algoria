@@ -68,6 +68,20 @@ export function nextHighImpact(): EcoEvent | null {
   return highUSD().filter((e) => e.time > now).sort((a, b) => a.time - b.time)[0] ?? null;
 }
 
+/**
+ * Annonce USD fort impact IMMINENTE (dans les `withinMin` prochaines minutes), sinon null.
+ *
+ * Sert à PROTÉGER LES POSITIONS DÉJÀ OUVERTES avant la publication (12/08, demande Mathieu). Le lockout
+ * du moteur ne bloque que les ENTRÉES : une position ouverte traversait le CPI avec son stop d'origine —
+ * exactement le scénario « +1 000$ → −1 300$ en un mouvement ». Voir manageBreakeven(newsGuard).
+ */
+export function imminentHighImpact(withinMin: number): EcoEvent | null {
+  const now = Date.now();
+  return highUSD()
+    .filter((e) => e.time > now && e.time - now <= withinMin * 60_000)
+    .sort((a, b) => a.time - b.time)[0] ?? null;
+}
+
 // ===== Annonces desk : T−30 min et T−5 min, une seule fois chacune par événement =====
 const announced = new Set<string>();
 export interface DueAnnouncement { event: EcoEvent; minutes: number; slot: 30 | 5 }
