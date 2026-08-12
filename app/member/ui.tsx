@@ -60,6 +60,7 @@ export function useMe() {
   const [accounts, setAccounts] = useState<MemberAccount[]>([]);
   const [referral, setReferral] = useState<Referral | null>(null);
   const [rejection, setRejection] = useState<{ reason: string; at: string | null } | null>(null);
+  const [declaredDeposit, setDeclaredDeposit] = useState<number | null>(null); // dépôt annoncé au wizard (grise les stratégies hors budget, même en reprise)
   const [admin, setAdmin] = useState(false);
   const [srvUnlocked, setSrvUnlocked] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,7 +78,7 @@ export function useMe() {
         .then(async (r) => {
           if (r.status === 403) { router.replace('/member/denied'); return null; } // accès révoqué (banni)
           if (r.status === 401) { router.replace('/member/login'); return null; }
-          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null; accounts?: MemberAccount[] };
+          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null; accounts?: MemberAccount[]; declaredDeposit?: number | null };
         })
         .then((d) => {
           if (!alive) return;
@@ -87,6 +88,7 @@ export function useMe() {
           setAccounts(d.accounts ?? []);
           setReferral(d.referral ?? null);
           setRejection(d.rejection ?? null);
+          setDeclaredDeposit(d.declaredDeposit ?? null);
           setAdmin(!!d.admin);
           setSrvUnlocked(typeof d.unlocked === 'boolean' ? d.unlocked : null);
           setLoading(false);
@@ -112,7 +114,7 @@ export function useMe() {
   const locale: Locale = member?.locale ? asLocale(member.locale) : guessed;
   useEffect(() => { if (member?.locale) rememberLocale(asLocale(member.locale)); }, [member?.locale]);
   const t = useCallback((key: string) => tr(locale, key), [locale]);
-  return { member, setMember, accounts, referral, rejection, admin, unlocked, loading, failed, locale, t };
+  return { member, setMember, accounts, referral, rejection, declaredDeposit, admin, unlocked, loading, failed, locale, t };
 }
 
 /** Langue des écrans SANS session (login, accès refusé) : choix mémorisé, sinon langue du navigateur. */
@@ -484,9 +486,24 @@ export const STRATEGY_UI = [
   { id: 3, icon: '🔥', name: 'TURBO', tag: 'More trades, more variance', blurb: 'Aggressive: more trades, wider caps. For those who accept bigger swings both ways.' },
 ] as const;
 
+/** La stratégie la plus HAUTE que ce budget débloque (null si le budget est sous le minimum d'entrée).
+ *  budget absent/0 = pas de contrainte connue → on ne restreint rien. */
+export function bestStrategyFor(budget?: number, exclude?: number[]): number | null {
+  const ok = STRATEGY_AVAILABLE.filter((id) => !exclude?.includes(id))
+    .filter((id) => !(budget != null && budget > 0 && budget < (STRATEGY_MIN_DEPOSIT[id] ?? 500)));
+  return ok.length ? Math.max(...ok) : null;
+}
+
 /** budget (optionnel) = dépôt déclaré : les stratégies au-dessus du budget sont grisées avec le minimum
  *  affiché — le membre voit tout de suite pourquoi et combien il faudrait. exclude = stratégies déjà prises
- *  (multi-comptes : on ne propose que celles qu'il n'a pas). */
+ *  (multi-comptes : on ne propose que celles qu'il n'a pas).
+ *
+ *  ⚠️ Une ligne GRISÉE n'est JAMAIS affichée comme sélectionnée (12/08). BALANCED est la valeur par défaut
+ *  du wizard : un membre à $200 arrivait à l'étape 3 avec BALANCED coché ✓ ET grisé, donc impossible à
+ *  décocher, pendant que le bouton START restait muet — il croyait avoir choisi et n'avait plus qu'à
+ *  cliquer. Plusieurs adhésions bloquées là (« I tried to click but not clicking »). Le coche ne doit
+ *  décrire que ce qui est réellement sélectionnable ; l'appelant, lui, ramène la valeur dans le domaine
+ *  autorisé (voir bestStrategyFor). */
 export function StrategyPicker({ value, onPick, busy, budget, exclude }: { value: number; onPick: (id: number) => void; busy?: boolean; budget?: number; exclude?: number[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -494,7 +511,7 @@ export function StrategyPicker({ value, onPick, busy, budget, exclude }: { value
         const min = STRATEGY_MIN_DEPOSIT[s.id] ?? 500;
         const underBudget = budget != null && budget > 0 && budget < min;
         const available = STRATEGY_AVAILABLE.includes(s.id) && !underBudget;
-        const active = value === s.id;
+        const active = value === s.id && available;
         return (
           <button
             key={s.id}

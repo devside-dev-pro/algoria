@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
   if (ctx === 'banned') return NextResponse.json({ error: 'access revoked', banned: true }, { status: 403 });
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
-  const [refs, commsQ, payoutsQ, rejQ, accountsQ] = await Promise.all([
+  const [refs, commsQ, payoutsQ, rejQ, accountsQ, kycQ] = await Promise.all([
     db.from('members').select('status').eq('referred_by', ctx.session.tgId),
     db.from('referral_commissions').select('id,kind,amount,status,reason,detail,created_at').eq('referrer_tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
     db.from('referral_payouts').select('id,amount,address,status,tx_hash,reason,created_at').eq('tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
@@ -64,6 +64,10 @@ export async function GET(req: NextRequest) {
     db.from('member_actions').select('detail,done_at').eq('tg_id', ctx.session.tgId).eq('kind', 'connect').eq('status', 'rejected').order('done_at', { ascending: false }).limit(1),
     // comptes SUPPLÉMENTAIRES (multi-stratégies) — champs sûrs uniquement, jamais les identifiants
     (db as any).from('member_accounts').select('account_no,broker,strategy,status,mt5_login,created_at').eq('tg_id', ctx.session.tgId).order('account_no', { ascending: true }) as Promise<{ data: Array<Record<string, unknown>> | null }>,
+    // DÉPÔT DÉCLARÉ à l'étape 2 du wizard. Renvoyé au client pour que l'étape 3 grise les bonnes
+    // stratégies MÊME EN REPRISE : le champ local est vide quand le membre revient plus tard, donc sans
+    // ça le sélecteur ouvrait les trois profils et le verrou serveur ne se déclenchait qu'à l'envoi.
+    db.from('member_actions').select('detail').eq('tg_id', ctx.session.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
   ]);
   const rejection = (ctx.member as { status?: string }).status === 'onboarding' && rejQ.data?.[0]
     ? { reason: String((rejQ.data[0].detail as { reject_reason?: string })?.reject_reason ?? 'verification failed'), at: rejQ.data[0].done_at }
@@ -94,7 +98,8 @@ export async function GET(req: NextRequest) {
   const admin = isAdmin(ctx.session.username);
   const status = String((ctx.member as { status?: string }).status ?? '');
   const unlocked = admin || ['live', 'paused'].includes(status) || (await isVip(ctx.session.username));
-  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [] });
+  const declaredDeposit = Number((kycQ.data?.[0]?.detail as { declared_deposit?: number } | undefined)?.declared_deposit ?? 0) || null;
+  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit });
 }
 
 /** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'risk'|'pause'|'resume', ... } */
