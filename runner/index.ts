@@ -18,7 +18,13 @@ import { activeInstruments, type InstrumentSpec } from '../lib/engine/instrument
 import { ACTIVE_STRATEGY } from '../lib/engine/strategies';
 import { portfolioVeto, PORTFOLIO } from '../lib/engine/portfolio';
 import { FEATURES } from '../lib/engine/features';
-import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh } from './news';
+import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh, imminentHighImpact } from './news';
+
+// Horizon de la protection avant publication : à T−5 min d'une annonce USD fort impact, les positions en
+// profit sont verrouillées au breakeven+. Aligné sur le rappel desk « T−5 » — on prévient et on protège
+// au même moment, plutôt que d'annoncer un risque qu'on ne couvre pas.
+const NEWS_GUARD_MIN = 5;
+import { pushToAdmins } from '../lib/push/send';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
@@ -646,7 +652,13 @@ async function main() {
       // ensureManagement est déjà bridée à un passage par minute et sort immédiatement s'il n'y a pas
       // d'orpheline : l'attendre ne coûte rien dans le cas normal.
       await ensureManagement();
-      await manageBreakeven(stream, terminal, BROKER); // no-op sur les ordres nus (sans SL)
+      // PROTECTION AVANT ANNONCE (12/08) : à T−5 min d'une publication USD fort impact, toute position en
+      // profit passe au breakeven+ sans attendre son beTrigger. Le lockout du calendrier, lui, ne bloque que
+      // les ENTRÉES — une position déjà ouverte traversait le CPI avec son stop d'origine.
+      // `calendarFresh()` est exigé ici : sans calendrier à jour, `imminentHighImpact` renverrait null en
+      // permanence et on croirait à tort qu'aucune annonce n'approche (voir l'alerte de fraîcheur plus bas).
+      const soon = calendarFresh() ? imminentHighImpact(NEWS_GUARD_MIN) : null;
+      await manageBreakeven(stream, terminal, BROKER, soon?.title ?? null); // no-op sur les ordres nus (sans SL)
     };
 
 
@@ -838,8 +850,30 @@ async function main() {
   // ===== CALENDRIER ÉCO : fetch au boot + toutes les 6 h, et chaque minute on émet les rappels desk
   // (T−30 et T−5 min avant chaque annonce USD fort impact). Le lockout moteur, lui, est déjà servi par
   // state.newsWindows dans onClosed — même si le desk se tait, l'auto ne rentre pas autour d'une annonce. =====
-  void refreshCalendar().then((n) => console.log(`[algoria] calendrier éco : ${n >= 0 ? n + ' événements chargés' : 'échec initial (retry auto)'}`));
-  setInterval(() => void refreshCalendar(), 6 * 3600_000);
+  // ALERTE DE FRAÎCHEUR (12/08) : quand le flux échoue, `events` reste vide → `newsWindows()` renvoie une
+  // liste vide → il n'y a PLUS AUCUN lockout, et plus aucune protection avant publication. Rien ne le
+  // signalait : une ligne de console au boot, et le moteur continuait à tirer pendant les annonces comme
+  // si le calendrier était vide de tout événement. Une panne de sécurité silencieuse est pire que pas de
+  // sécurité du tout — on croit être couvert. Désormais chaque tentative ratée qui laisse le cache périmé
+  // (> 24 h) écrit une note et pousse une alerte aux admins.
+  const CAL_ALERT_MS = 6 * 3600_000; // même alerte au plus une fois par cycle de rafraîchissement
+  let lastCalAlert = 0;
+  const refreshCalendarGuarded = async (boot = false) => {
+    const n = await refreshCalendar();
+    if (n >= 0) { console.log(`[algoria] calendrier éco : ${n} événements chargés`); return; }
+    console.error(`[algoria] calendrier éco : échec${boot ? ' initial' : ''} (retry auto)`);
+    if (calendarFresh()) return; // le cache tient encore : le prochain essai a le temps de passer
+    if (Date.now() - lastCalAlert < CAL_ALERT_MS) return;
+    lastCalAlert = Date.now();
+    void logNote('⚠️ economic calendar unavailable — news lockout and pre-release stop protection are OFF until the feed returns', 'veto');
+    void pushToAdmins({
+      title: '⚠ CALENDRIER ÉCO INDISPONIBLE',
+      body: 'Plus de lockout news ni de protection avant publication — le moteur trade sans filet macro.',
+      url: '/member/admin', tag: 'eco-calendar',
+    }).catch(() => {});
+  };
+  void refreshCalendarGuarded(true);
+  setInterval(() => void refreshCalendarGuarded(), 6 * 3600_000);
   setInterval(() => {
     void (async () => {
       try {

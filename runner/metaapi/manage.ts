@@ -10,6 +10,7 @@ interface Mgmt { beTrigger: number; trailActivate?: number; trailDist?: number; 
 const custom = new Map<string, Mgmt>(); // ticket → gestion spécifique (posée par le runner à l'exécution)
 const peaks = new Map<string, number>(); // ticket → meilleur prix atteint (pour le trailing)
 const done = new Map<string, true>(); // breakeven déjà appliqué
+const newsSecured = new Set<string>(); // `ticket|annonce` déjà sécurisé avant une publication (une note, pas dix)
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
 /** À appeler juste après l'exécution d'un trade géré différemment du défaut (ex. breakout). */
@@ -28,7 +29,22 @@ export function rememberManagement(ticket: string, m: Mgmt) {
  */
 export const hasManagement = (ticket: string): boolean => custom.has(ticket);
 
-export async function manageBreakeven(stream: any, terminal: any, symbol: string) {
+/**
+ * @param newsGuard  titre de l'annonce USD fort impact IMMINENTE, sinon null.
+ *
+ * PROTECTION AVANT PUBLICATION (12/08, demande Mathieu : « serrer les SL et ne pas prendre de position
+ * avant/après »). Le lockout du calendrier ne bloquait que les ENTRÉES ; une position déjà ouverte
+ * traversait le CPI avec son stop d'origine — un swing or à 1×ATR prenait la bougie en plein.
+ *
+ * Quand une annonce approche, toute position EN PROFIT passe au breakeven+ immédiatement, sans attendre
+ * son beTrigger. Le trade ne peut plus perdre pendant la publication ; s'il continue, paliers et trailing
+ * reprennent la main normalement derrière.
+ *
+ * Une position EN PERTE n'est PAS touchée, volontairement : resserrer un stop juste avant une annonce,
+ * c'est se faire sortir par l'agitation qui précède, sur le niveau qu'on venait de rapprocher, et souvent
+ * pour rien. On sécurise ce qui est acquis, on ne transforme pas une perte latente en perte certaine.
+ */
+export async function manageBreakeven(stream: any, terminal: any, symbol: string, newsGuard: string | null = null) {
   const positions = (terminal.positions ?? []).filter((p: any) => p.symbol === symbol);
   // NETTOYAGE (04/08) : l'ensemble des positions encore vivantes se construit sur TOUS LES SYMBOLES, pas
   // seulement celui qu'on gère. `custom`, `peaks` et `done` sont des tables de MODULE, partagées par tous
@@ -65,6 +81,9 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     if (beTrigger && profit >= beTrigger * riskDist) wantR = Math.max(wantR, 0.05); // BE+ (couvre les coûts)
     if (mgmt?.ladder) for (const [t, l] of mgmt.ladder) if (peakR >= t) wantR = Math.max(wantR, l); // paliers
     if (mgmt?.trailActivate != null && mgmt?.trailDist != null && peakR >= mgmt.trailActivate) wantR = Math.max(wantR, peakR - mgmt.trailDist); // trailing
+    // ANNONCE IMMINENTE : tout ce qui est en profit passe au breakeven+ sans attendre son beTrigger.
+    const guarded = newsGuard != null && profit > 0;
+    if (guarded) wantR = Math.max(wantR, 0.05);
     if (wantR === -Infinity) continue; // rien à sécuriser encore
 
     const wantSL = r2(p.openPrice + dir * wantR * riskDist);
@@ -72,14 +91,19 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     if (long ? wantSL <= sl + 0.05 * riskDist : wantSL >= sl - 0.05 * riskDist) continue;
 
     const firstSecure = !done.has(id); // 1er passage au-dessus de BE → une note ; ensuite silencieux
+    const newsKey = guarded ? `${id}|${newsGuard}` : null; // une seule note par position ET par annonce
+    const firstGuard = newsKey != null && !newsSecured.has(newsKey);
     done.set(id, true);
+    if (newsKey) newsSecured.add(newsKey);
     try {
       await stream.modifyPosition(id, wantSL, p.takeProfit);
-      console.log(`[algoria] stop → pos ${id} SL=${wantSL} (${wantR.toFixed(2)}R)`);
+      console.log(`[algoria] stop → pos ${id} SL=${wantSL} (${wantR.toFixed(2)}R)${guarded ? ` [news: ${newsGuard}]` : ''}`);
       void updateTradeStop(id, wantSL); // le cockpit fait suivre la zone SL en direct
-      if (firstSecure && wantR >= 0) void logNote(`stop secured · ${long ? 'long' : 'short'} · SL → ${wantSL} (+${wantR.toFixed(2)}R) · trade can't lose now`, 'order');
+      if (firstGuard) void logNote(`🛡️ ${newsGuard} is imminent — stop pulled up on the open ${long ? 'long' : 'short'} (SL → ${wantSL}) · this trade can't lose through the release`, 'order');
+      else if (firstSecure && wantR >= 0) void logNote(`stop secured · ${long ? 'long' : 'short'} · SL → ${wantSL} (+${wantR.toFixed(2)}R) · trade can't lose now`, 'order');
     } catch (e) {
       if (firstSecure) done.delete(id); // échec au 1er passage → on réessaiera
+      if (newsKey && firstGuard) newsSecured.delete(newsKey); // idem : la protection avant annonce doit repasser
       console.error('[algoria] stop update échec:', (e as { message?: string })?.message ?? e);
     }
   }
@@ -96,4 +120,5 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
   for (const id of done.keys()) if (!stillOpen.has(id)) done.delete(id);
   for (const id of peaks.keys()) if (!stillOpen.has(id)) peaks.delete(id);
   for (const id of custom.keys()) if (!stillOpen.has(id)) custom.delete(id);
+  for (const k of newsSecured) if (!stillOpen.has(k.slice(0, k.indexOf('|')))) newsSecured.delete(k);
 }
