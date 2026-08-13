@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { JOIN_DM, INBOX_ACK, SIGNED_IN, SIGNED_IN_BTN, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
+import { JOIN_DM, INBOX_ACK, SIGNED_IN, SIGNED_IN_BTN, SIGNED_IN_CODE_HINT, LOGIN_CODE_MSG, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
+import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 
 // Webhook Telegram (bot admin du canal) → alimente la WAITLIST du widget /join.
@@ -377,11 +378,16 @@ export async function POST(req: Request) {
           // personne se trouve déjà. (Forcer un navigateur externe n'est pas une option : impossible sur
           // iPhone, et intent:// ne couvrirait qu'Android.) Le polling de /member/login reste le chemin
           // normal quand l'onglet a survécu — /member/login/confirm accepte un code déjà consommé.
+          // Le bouton ci-dessus n'atteint PAS une app ajoutée à l'écran d'accueil (stockage séparé de
+          // Safari) : on joint donc un code à 6 chiffres, la seule forme qui traverse deux magasins de
+          // cookies. Émission best effort — si elle échoue, le message part avec le seul bouton.
+          const shortCode = await issueShortCode(db, u, photoUrl).catch(() => null);
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
             body: JSON.stringify({
               chat_id: u.id,
-              text: SIGNED_IN[loginLocale],
+              text: SIGNED_IN[loginLocale] + (shortCode ? SIGNED_IN_CODE_HINT[loginLocale].replace('%s', shortCode) : ''),
+              parse_mode: 'HTML',
               reply_markup: { inline_keyboard: [[{ text: SIGNED_IN_BTN[loginLocale], url: `https://app.algoria.tech/member/login/confirm?c=${code}` }]] },
             }),
           }).catch(() => {});
@@ -392,10 +398,36 @@ export async function POST(req: Request) {
     }
   }
 
+  // /code — DONNER UN CODE À 6 CHIFFRES à la demande. Indispensable pour l'app ajoutée à l'écran d'accueil :
+  // son stockage est séparé de celui du navigateur, donc ni le polling ni le bouton ne l'atteignent, et la
+  // personne tourne en boucle entre l'app et Telegram (signalé par un prospect le 13/08). Six chiffres se
+  // recopient là où la session est voulue. L'identité est celle de l'expéditeur, authentifiée par Telegram.
+  const wantsCode = typeof msg?.text === 'string' && /^\/(code|login)\b/i.test(msg.text.trim());
+  if (db && wantsCode && msg?.from?.id && msg.chat?.type === 'private') {
+    const u = msg.from;
+    try {
+      const photoUrl = await fetchAvatar(db, u.id);
+      const short = await issueShortCode(db, u, photoUrl);
+      const { data: lrow } = await (db as any).from('members').select('locale').eq('tg_id', u.id).limit(1);
+      const loc = asLocale(lrow?.[0]?.locale);
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (token && short) {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
+          body: JSON.stringify({ chat_id: u.id, text: LOGIN_CODE_MSG[loc].replace('%s', short), parse_mode: 'HTML' }),
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[telegram] short login code failed:', (e as { message?: string })?.message ?? e);
+    }
+  }
+
   // 🤖 BOÎTE DE RÉCEPTION DU BOT — tout DM privé qui n'est PAS un /start de login : enregistré
   // (member_actions kind='bot_reply' → fil BOT ACTIVITY de l'admin, réponse via le bot possible)
   // + UN accusé de réception routant vers l'humain, dédupliqué 6 h (anti-spam).
-  if (db && msg?.from && !msg.from.is_bot && msg.chat?.type === 'private' && !startPayload && !(typeof msg.text === 'string' && msg.text.startsWith('/start'))) {
+  // `wantsCode` exclu comme les /start : une demande de code est une commande, pas un message pour le
+  // support — sans ça chaque /code déclencherait un accusé de réception et une carte dans BOT ACTIVITY.
+  if (db && msg?.from && !msg.from.is_bot && msg.chat?.type === 'private' && !startPayload && !wantsCode && !(typeof msg.text === 'string' && msg.text.startsWith('/start'))) {
     try {
       const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1500) || '[media]';
       const tgId = Number(msg.from.id);

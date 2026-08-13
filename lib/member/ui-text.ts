@@ -29,6 +29,16 @@ export const UI: Dict = {
   'login.expired': { en: 'Link expired — try again.', it: 'Link scaduto — riprova.' },
   'login.error': { en: 'Something went wrong — try again.', it: 'Qualcosa è andato storto — riprova.' },
   'login.footer': { en: 'ACCESS IS GRANTED LIVE ON STREAM · MEMBERS ONLY', it: 'ACCESSO CONCESSO IN DIRETTA · SOLO MEMBRI' },
+  // CODE À 6 CHIFFRES — la porte de l'app installée sur l'écran d'accueil, dont le stockage est séparé de
+  // celui du navigateur (ni le polling ni le bouton du bot n'y posent de session). Toujours visible :
+  // c'est justement quand l'app se recharge en revenant de Telegram qu'on en a besoin.
+  'login.codeToggle': { en: 'Have a 6-digit code?', it: 'Hai un codice a 6 cifre?' },
+  'login.codeHelp': {
+    en: 'Send /code to the bot on Telegram, then type the six digits here. This is the way in for the app you added to your Home Screen.',
+    it: 'Invia /code al bot su Telegram, poi inserisci qui le sei cifre. È la via d\'accesso per l\'app che hai aggiunto alla schermata Home.',
+  },
+  'login.codeCta': { en: 'SIGN IN', it: 'ACCEDI' },
+  'login.codeBusy': { en: 'checking…', it: 'verifica…' },
 
   'denied.title': { en: 'Access unavailable', it: 'Accesso non disponibile' },
   'denied.body': {

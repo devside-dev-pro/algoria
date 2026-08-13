@@ -80,3 +80,16 @@ export const SIGNED_IN_BTN: Record<Locale, string> = {
   en: '🚀 Open Algoria',
   it: '🚀 Apri Algoria',
 };
+
+/** CODE À 6 CHIFFRES — la porte pour l'app installée sur l'écran d'accueil, dont le stockage est séparé de
+ *  celui du navigateur : le bouton ci-dessus y connecte Safari, jamais l'app. Ces six chiffres se recopient
+ *  LÀ où la session est voulue. %s = le code. Envoyé en complément du bouton, et sur commande /code. */
+export const LOGIN_CODE_MSG: Record<Locale, string> = {
+  en: '🔑 Your Algoria login code:\n\n<code>%s</code>\n\nType it into the app — works anywhere, including the app you added to your Home Screen. Valid 10 minutes, once.',
+  it: '🔑 Il tuo codice di accesso Algoria:\n\n<code>%s</code>\n\nInseriscilo nell’app — funziona ovunque, anche nell’app che hai aggiunto alla schermata Home. Valido 10 minuti, una sola volta.',
+};
+/** Ligne ajoutée SOUS le bouton après un START : le code est déjà là, sans avoir à demander quoi que ce soit. */
+export const SIGNED_IN_CODE_HINT: Record<Locale, string> = {
+  en: '\n\nAdded Algoria to your Home Screen? The button above won’t reach it — type this code in the app instead: <code>%s</code>',
+  it: '\n\nHai aggiunto Algoria alla schermata Home? Il pulsante qui sopra non la raggiunge — inserisci invece questo codice nell’app: <code>%s</code>',
+};
