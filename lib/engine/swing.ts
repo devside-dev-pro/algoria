@@ -1,5 +1,6 @@
 // COUCHE SWING — la stratégie "de fond" d'Algoria : positions H1 tenues des JOURS (week-end inclus),
-// SL structurel, objectif loin, stop remonté par paliers (breakeven à 1R puis trailing). Complète le scalp
+// SL structurel, objectif loin, stop remonté par paliers (breakeven puis trailing — seuils par marché,
+// voir beTrigger de chaque config ci-dessous : 0.5R sur l'or depuis #296, 1R sur BTC et NAS). Complète le scalp
 // (spectacle intraday) sans le toucher : slot de position séparé, lots dédiés.
 // Validée par le labo (backtest/lab.ts <SYM> H1, portes moitiés+tiers+week-end) :
 //   BTCUSD  breakout N24 trail2.5 — 2.7 ans · 56% win · PF 2.02 · +39% à 1% de risque · DD 9.2% · week-end PF 2.7
@@ -157,7 +158,7 @@ export function swingSignal(symbol: string, bars: Bar[], cfg: SwingConfig, mode:
     lot: cfg.lot,
     rationale: [
       `SWING ${direction.toUpperCase()} (${cfg.kind}) — ${note}`,
-      `H1 layer · SL ${cfg.slAtr}×ATR · target ${cfg.tpAtr}×ATR · BE at 1R then ${cfg.trailDist}R trailing — held for days`,
+      `H1 layer · SL ${cfg.slAtr}×ATR · target ${cfg.tpAtr}×ATR · BE at ${cfg.beTrigger}R then ${cfg.trailDist}R trailing — held for days`,
     ],
     confluence,
   };

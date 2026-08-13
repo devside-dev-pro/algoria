@@ -500,7 +500,7 @@ async function main() {
     const agg = makeAggregator(TF, seed, onClosed);
 
     // ===== COUCHE SWING (H1) — la stratégie de FOND : slot séparé du scalp, lot dédié, tenue de plusieurs
-    // jours avec breakeven à 1R puis trailing par paliers (manage.ts). Le slot survit aux reboots : l'état
+    // jours avec breakeven (seuil propre au marché) puis trailing par paliers (manage.ts). Le slot survit aux reboots : l'état
     // "swing ouvert ?" est relu en base (signal_ref *-swing-*), jamais en mémoire seule.
     let swingAgg: ((bid: number, ask: number, t: number) => void) | null = null;
     if (inst.swing) {
@@ -529,7 +529,10 @@ async function main() {
             const ticket = await executeSignal(sig);
             if (ticket) {
               rememberManagement(ticket, { beTrigger: SW.beTrigger, trailActivate: SW.trailActivate, trailDist: SW.trailDist, ladder: SW.ladder, riskDist: Math.abs(sig.entry - sig.stopLoss) });
-              await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at 1R, ${SW.trailDist}R trailing)`, 'order');
+              // ⚠️ seuils LUS DE LA CONFIG, jamais écrits en dur : ce texte annonçait « BE at 1R » alors que
+              // le breakeven du swing or est passé à 0.5R (#296) — la note du cockpit décrivait un réglage
+              // qui n'existait plus, et servait de référence pour juger le comportement du moteur.
+              await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at ${SW.beTrigger}R, ${SW.trailDist}R trailing)`, 'order');
               if (vipReady() && !SECONDARY) void postVip(`📈 <b>CORE position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction.toUpperCase()}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n🎯 TP  <code>${sig.takeProfits[0]}</code>\n${VIP_RULE}\n<i>This one can ride for days. Copied to your account.</i>`);
             }
           }
