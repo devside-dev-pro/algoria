@@ -173,20 +173,36 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
   const now = Date.now();
   // tables « membre » hors du schéma typé du runner (comme edge_health) → cast assumé
   const raw = db as unknown as { from: (t: string) => any };
+  // FENÊTRE 21 → 60 JOURS (14/08, décision Mathieu : « certains ont besoin de 30/40 jours avant d'être
+  // prêts »). Vrai dans ce métier : le frein n'est pas l'intérêt, c'est le moment où l'argent est
+  // disponible. Quelqu'un qui s'inscrit en fin de mois peut n'avoir de quoi déposer que six semaines plus
+  // tard, et il n'y a aucune raison de le rayer entre-temps.
   const { data: members } = await raw
     .from('members').select('tg_id,member_no,tg_username,created_at,onboarding_step')
     .eq('status', 'onboarding')
-    .gte('created_at', new Date(now - 21 * 86_400_000).toISOString())
+    .gte('created_at', new Date(now - 60 * 86_400_000).toISOString())
     .lte('created_at', new Date(now - 1 * 86_400_000).toISOString());
   if (!members?.length) return [];
+  // CADENCE DÉGRESSIVE — indispensable dès qu'on élargit. À 3 jours d'intervalle sur 60 jours, chacun
+  // recevrait une VINGTAINE de DM : ce n'est plus une relance, c'est du harcèlement, et ça se paie en
+  // blocages du bot. On garde le rythme serré tant que la décision est chaude (2 semaines), puis on
+  // espace : hebdomadaire jusqu'à un mois, toutes les deux semaines au-delà.
+  const cooldownDays = (days: number): number => (days <= 14 ? 3 : days <= 30 ? 7 : 14);
   const { data: nudges } = await raw
-    .from('member_actions').select('tg_id')
+    .from('member_actions').select('tg_id,created_at')
     .eq('kind', 'nudge')
-    .gte('created_at', new Date(now - 3 * 86_400_000).toISOString());
-  const touched = new Set(((nudges ?? []) as Array<{ tg_id: number }>).map((n) => Number(n.tg_id)));
+    .gte('created_at', new Date(now - 15 * 86_400_000).toISOString()); // couvre le plus long cooldown
+  const lastNudge = new Map<number, number>();
+  for (const n of (nudges ?? []) as Array<{ tg_id: number; created_at: string }>) {
+    const t = Number(n.tg_id); const at = Date.parse(n.created_at);
+    if ((lastNudge.get(t) ?? 0) < at) lastNudge.set(t, at);
+  }
   return (members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string; onboarding_step: number | null }>)
-    .filter((m) => !touched.has(Number(m.tg_id)))
-    .map((m) => ({ tg_id: Number(m.tg_id), member_no: m.member_no, tg_username: m.tg_username, days: Math.floor((now - Date.parse(m.created_at)) / 86_400_000), step: Number(m.onboarding_step ?? 0) }));
+    .map((m) => ({ tg_id: Number(m.tg_id), member_no: m.member_no, tg_username: m.tg_username, days: Math.floor((now - Date.parse(m.created_at)) / 86_400_000), step: Number(m.onboarding_step ?? 0) }))
+    .filter((m) => {
+      const last = lastNudge.get(m.tg_id);
+      return !last || now - last > cooldownDays(m.days) * 86_400_000;
+    });
 }
 
 /** Trace une relance (auto ou manuelle) → kind='nudge', status='done' (jamais dans la file support). */

@@ -920,8 +920,21 @@ export default function AdminCRM() {
                 filet passe à 10h UTC derrière — mais TON vocal convertit mieux : déroule cette liste d'abord. */}
             {(() => {
               const now = Date.now();
-              const lastNudge = new Map<number, number>();
-              for (const n of nudges) { const t = Number(n.tg_id); const at = Date.parse(n.created_at); if ((lastNudge.get(t) ?? 0) < at) lastNudge.set(t, at); }
+              // LE BOT NE VIDE PLUS TA FILE (14/08). La règle « masqué 3 jours après une relance » ne
+              // distinguait pas QUI avait relancé. Depuis que la relance automatique couvre 60 jours au
+              // lieu de 21, le bot touche en permanence les mêmes gens — il aurait donc effacé de la file
+              // manuelle, en continu, ceux que Mathieu voulait justement appeler. L'outil automatique
+              // aurait saboté la session humaine qu'il est censé compléter.
+              // Seul un contact HUMAIN masque désormais quelqu'un (done_by ≠ 'auto' : ✓ FAIT ou envoi par
+              // le bot déclenché à la main). Le passage du bot reste AFFICHÉ sur la ligne — l'information
+              // est utile, elle ne doit simplement pas décider à ta place.
+              const lastNudge = new Map<number, number>(); // contacts HUMAINS uniquement
+              const lastAuto = new Map<number, number>(); // dernier passage de la relance automatique
+              for (const n of nudges) {
+                const t = Number(n.tg_id); const at = Date.parse(n.created_at);
+                const map = String(n.done_by ?? '') === 'auto' ? lastAuto : lastNudge;
+                if ((map.get(t) ?? 0) < at) map.set(t, at);
+              }
               // ═══ SEGMENTATION (14/08) ═══════════════════════════════════════════════════════════════
               // La file mélangeait des situations qui n'appellent PAS le même message. Mesuré sur les 219
               // personnes qu'elle contenait : 196 n'avaient JAMAIS écrit une ligne au bot. Leur envoyer une
@@ -938,7 +951,7 @@ export default function AdminCRM() {
                 depositedSet.has(tg) ? 'deposited' : rejectedSet.has(tg) ? 'rejected' : spoke.has(tg) ? 'followup' : 'first';
               const all = rows
                 .filter((r) => r.status === 'onboarding')
-                .map((r) => ({ r, days: Math.floor((now - Date.parse(r.created_at)) / 86_400_000), touched: lastNudge.get(Number(r.tg_id)), seg: segOf(Number(r.tg_id)) }))
+                .map((r) => ({ r, days: Math.floor((now - Date.parse(r.created_at)) / 86_400_000), touched: lastNudge.get(Number(r.tg_id)), autoTouched: lastAuto.get(Number(r.tg_id)), seg: segOf(Number(r.tg_id)) }))
                 // FENÊTRE 21 → 60 JOURS (14/08). À 21 jours, 46 personnes inscrites entre 22 et 39 jours
                 // n'apparaissaient NULLE PART : jamais contactées à la main, sorties de la file sans que
                 // personne ne le décide. « Froid » n'est pas « perdu » quand on ne leur a jamais parlé.
@@ -983,7 +996,7 @@ export default function AdminCRM() {
                       {copiedScript === active.key ? '✓ copied' : '⧉ copy'}
                     </button>
                   </div>
-                  {queue.slice(0, 15).map(({ r, days, touched }) => (
+                  {queue.slice(0, 15).map(({ r, days, touched, autoTouched }) => (
                     <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)', flexWrap: 'wrap' }}>
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{r.member_no}</span>
                       <span style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
@@ -991,7 +1004,10 @@ export default function AdminCRM() {
                       <span className="mono" style={{ fontSize: 10, fontWeight: 800, color: days >= 5 ? '#ff8a5c' : 'var(--gold)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 6px' }}>J+{days}</span>
                       {/* OÙ IL EN EST : sans ça, impossible de savoir quoi lui dire sans ouvrir sa fiche */}
                       <span style={{ fontSize: 10.5, color: 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{STEP_LABEL[r.onboarding_step] ?? STEP_LABEL[0]}</span>
-                      {touched && <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>last touch {Math.floor((now - touched) / 86_400_000)}d ago</span>}
+                      {touched && <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>you: {Math.floor((now - touched) / 86_400_000)}d ago</span>}
+                      {/* passage du bot : affiché pour que tu ne doubles pas à quelques heures près, mais
+                          il ne masque plus personne — c'est toi qui décides si un DM auto suffit. */}
+                      {autoTouched && <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>🤖 {Math.floor((now - autoTouched) / 86_400_000)}d ago</span>}
                       <span style={{ flex: 1 }} />
                       {/* PAS DE @PSEUDO = PAS DE LIEN t.me. La moitié de la file est dans ce cas (109 sur 219),
                           et le bouton DM manquant donnait une ligne sans aucune action possible. Le bot, lui,
