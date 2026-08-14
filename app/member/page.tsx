@@ -168,7 +168,7 @@ export default function MemberHome() {
 
       {/* PARRAINAGE — sur le Home, là où le membre regarde ses gains chaque jour = le moment où il est
           content. On surfe sur la dopamine des wins juste au-dessus : "Algoria vient de te faire gagner,
-          amène ton crew et touche $50 par ami financé". La mécanique complète (retrait, historique,
+          amène ton crew et touche 10% du dépôt de chaque ami financé". La mécanique complète (retrait, historique,
           paliers) reste dans le Profil ; ici c'est le déclencheur en un tap. */}
       {unlocked && referral?.code && <InviteCard referral={referral} hasWins={wins.length > 0} />}
 
@@ -220,7 +220,9 @@ function AddStrategyCard({ member, accounts }: { member: Member; accounts: Membe
 
 function InviteCard({ referral, hasWins }: { referral: Referral; hasWins: boolean }) {
   const [copied, setCopied] = useState(false);
-  const reward = referral.rewardUsd || 50;
+  // % du dépôt du filleul (plafonné) — le montant exact dépend de ce que l'ami dépose, on annonce le taux
+  const pct = Math.round((referral.rewardRate || 0.1) * 100);
+  const cap = referral.rewardCapUsd || 200;
   const link = `https://app.algoria.tech/r/${referral.code}`;
   const share = () => {
     const text = 'Algoria is the AI that trades gold & Bitcoin for me on autopilot — my account just copies it. Get in with my link 👇';
@@ -232,12 +234,12 @@ function InviteCard({ referral, hasWins }: { referral: Referral; hasWins: boolea
     <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, borderColor: 'rgba(245,194,74,.4)', boxShadow: '0 0 22px rgba(245,194,74,.07)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
         <span style={{ fontSize: 17 }}>💸</span>
-        <h2 style={{ margin: 0, fontSize: 15.5 }}>Invite friends — earn <span className="goldText">${reward}</span> each</h2>
+        <h2 style={{ margin: 0, fontSize: 15.5 }}>Invite friends — earn <span className="goldText">{pct}%</span> of what they deposit</h2>
       </div>
       <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
         {hasWins
-          ? <>Algoria&rsquo;s on a roll right now — the perfect moment to bring someone in. You pocket <b className="goldText">${reward}</b> for every friend who funds their account, paid in USDT.</>
-          : <>Every friend whose account gets funded pays you <b className="goldText">${reward}</b>, straight to your wallet in USDT. Share once, earn on repeat.</>}
+          ? <>Algoria&rsquo;s on a roll right now — the perfect moment to bring someone in. You pocket <b className="goldText">{pct}%</b> of every friend&rsquo;s deposit when their account is funded, up to <b className="goldText">${cap}</b> each, paid in USDT.</>
+          : <>Every friend whose account gets funded pays you <b className="goldText">{pct}% of their deposit</b> — up to <b className="goldText">${cap}</b> each, straight to your wallet in USDT. Share once, earn on repeat.</>}
       </p>
       <button onClick={share} style={{ padding: '13px 16px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)', boxShadow: '0 8px 24px rgba(245,166,35,.24)' }}>
         {copied ? '✓ LINK COPIED — paste it anywhere' : '🚀 SHARE MY INVITE LINK'}

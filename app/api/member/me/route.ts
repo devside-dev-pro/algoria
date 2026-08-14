@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin, isVip } from '@/lib/member/server';
-import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, nextMilestone } from '@/lib/member/affiliate';
-import { minDepositFor } from '@/lib/member/minimums';
+import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, commissionTermsFor, nextMilestone } from '@/lib/member/affiliate';
+import { minDepositFor, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
 import { BROKERS } from '@/lib/member/brokers';
 
 const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
@@ -86,7 +86,13 @@ export async function GET(req: NextRequest) {
     pendingUsd: sumC('pending'), // filleuls activés, commission broker pas encore reçue
     paidUsd: payouts.filter((p) => p.status === 'paid').reduce((a, p) => a + Number(p.amount), 0),
     totalEarnedUsd: sumC('confirmed'),
-    rewardUsd: commissionForActivation(activated), // la com ACTUELLE par filleul (monte à 75$ après le palier 10)
+    // BARÈME ACTUEL du parrain : la commission n'est plus un montant fixe mais un % du dépôt du filleul,
+    // plafonné (10%/200$, puis 15%/300$ au palier 10). On envoie donc le taux ET le plafond — l'app ne
+    // peut plus afficher « tu gagnes X$ » avant de connaître le dépôt de l'ami.
+    rewardRate: commissionTermsFor(activated).rate,
+    rewardCapUsd: commissionTermsFor(activated).cap,
+    // exemple concret sur le dépôt d'entrée : « à partir de 20$ » parle plus qu'un pourcentage abstrait
+    rewardMinUsd: commissionForActivation(activated, MIN_ENTRY_DEPOSIT),
     minPayoutUsd: MIN_PAYOUT_USD,
     nextMilestone: next ? { at: next.at, bonus: next.bonus, label: next.label, remaining: next.at - activated } : null,
     address: (ctx.member as { usdt_trc20?: string | null }).usdt_trc20 ?? null,

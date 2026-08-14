@@ -16,7 +16,7 @@ const CTAS = [
   '🤖 EVERY TRADE ON SCREEN IS REAL — LIVE ACCOUNT',
   '📲 SCAN THE CODE — JOIN FREE ON TELEGRAM',
   '🔎 OR TYPE ALGORIA.TECH IN YOUR BROWSER — 100% FREE',
-  '🎁 EARN $50 FOR EVERY FRIEND YOU BRING',
+  '🎁 EARN 10% OF EVERY FRIEND’S DEPOSIT',
 ];
 
 function Px({ sym, label, dp }: { sym: string; label: string; dp: number }) {
