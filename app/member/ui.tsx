@@ -42,7 +42,10 @@ export interface Referral {
   pendingUsd: number;
   paidUsd: number;
   totalEarnedUsd: number;
-  rewardUsd: number;
+  // barème du parrain : % du dépôt du filleul, plancher (sur le dépôt d'entrée) et plafond par filleul
+  rewardRate: number;
+  rewardCapUsd: number;
+  rewardMinUsd: number;
   minPayoutUsd: number;
   nextMilestone: { at: number; bonus: number; label: string; remaining: number } | null;
   address: string | null;

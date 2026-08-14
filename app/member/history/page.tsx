@@ -192,7 +192,7 @@ export default function MemberHistory() {
                       )}
                       {/* UN SEUL bouton, texte explicite. Carte paysage ; QR = SON lien de parrainage */}
                       {win && (
-                        <button onClick={() => void shareWin(t, 'landscape')} disabled={sharing === `${t.ticket}-landscape`} title="share this win as a card — the QR is YOUR referral link ($50 per friend who activates)"
+                        <button onClick={() => void shareWin(t, 'landscape')} disabled={sharing === `${t.ticket}-landscape`} title="share this win as a card — the QR is YOUR referral link (10% of every friend’s deposit)"
                           style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '4px 9px', fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, cursor: 'pointer', lineHeight: 1, whiteSpace: 'nowrap' }}>
                           {sharing === `${t.ticket}-landscape` ? '…' : 'SHARE'}
                         </button>

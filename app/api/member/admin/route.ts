@@ -35,6 +35,54 @@ async function allMembers(db: ReturnType<typeof sdb>): Promise<{ data: MemberRow
   return { data: out };
 }
 
+/**
+ * Dépôt CONNU d'un membre, dans l'ordre de fiabilité : montant VALIDÉ du registre des dépôts (ce que tu
+ * as constaté chez le broker), à défaut le montant DÉCLARÉ au wizard, à défaut 0.
+ * L'écart entre les deux n'est pas théorique : le premier filleul réel avait déclaré 400$ et déposé 200$.
+ */
+async function knownDepositFor(db: ReturnType<typeof sdb>, tgId: number): Promise<number> {
+  const { data } = await (db as any).from('member_actions')
+    .select('kind,detail').eq('tg_id', tgId).in('kind', ['deposit', 'kyc'])
+    .order('created_at', { ascending: false }).limit(20) as { data: Array<{ kind: string; detail: Record<string, unknown> | null }> | null };
+  const rows = data ?? [];
+  const validated = rows.find((r) => r.kind === 'deposit' && Number(r.detail?.amount_usd ?? 0) > 0);
+  if (validated) return Number(validated.detail?.amount_usd);
+  const declared = rows.find((r) => r.kind === 'kyc' && Number(r.detail?.declared_deposit ?? 0) > 0);
+  return declared ? Number(declared.detail?.declared_deposit) : 0;
+}
+
+/**
+ * Réaligne la commission de parrainage d'un filleul sur son dépôt réel — appelé quand une ligne du
+ * registre des dépôts est créée ou corrigée.
+ *
+ * La commission naît à l'APPROBATION, alors que le dépôt validé n'est pas encore saisi : elle part donc
+ * du montant déclaré, qui peut être faux. Sans ce réalignement, une correction dans le registre laissait
+ * la commission sur l'ancien chiffre — invisible, et payée telle quelle.
+ * Ne touche QUE les commissions `pending` : une commission confirmée est un engagement pris, elle ne se
+ * révise plus à la baisse dans le dos du parrain.
+ */
+async function syncPendingReferralCommission(db: ReturnType<typeof sdb>, tgId: number, depositUsd: number): Promise<void> {
+  if (!Number.isFinite(depositUsd) || depositUsd <= 0) return;
+  const { data: com } = await (db as any).from('referral_commissions')
+    .select('id,referrer_tg_id,amount,detail').eq('referred_tg_id', tgId).eq('kind', 'referral').eq('status', 'pending').limit(1) as
+    { data: Array<{ id: string; referrer_tg_id: number; amount: number; detail: Record<string, unknown> | null }> | null };
+  const row = com?.[0];
+  if (!row) return;
+  // COMMISSIONS ANTÉRIEURES AU BARÈME (14/08) : celles nées sous le forfait à 50$ portent `grandfathered`
+  // et ne se recalculent JAMAIS. Le montant affiché au parrain au moment où il a parrainé est un
+  // engagement — le premier affilié d'Algoria ne doit pas voir sa commission fondre parce qu'on a changé
+  // la règle après coup. Une simple correction du dépôt aurait suffi à la ramener de 50$ à 20$.
+  if ((row.detail as { grandfathered?: boolean } | null)?.grandfathered) return;
+  // rang du parrain AU MOMENT de cette activation : on ne compte que ses commissions antérieures
+  const { data: prior } = await (db as any).from('referral_commissions')
+    .select('id').eq('referrer_tg_id', row.referrer_tg_id).eq('kind', 'referral').neq('status', 'canceled').neq('id', row.id) as { data: Array<{ id: string }> | null };
+  const amount = commissionForActivation(prior?.length ?? 0, depositUsd);
+  if (amount === Number(row.amount)) return;
+  await (db as any).from('referral_commissions')
+    .update({ amount, detail: { ...(row.detail ?? {}), deposit_usd: depositUsd } })
+    .eq('id', row.id);
+}
+
 export async function GET(req: NextRequest) {
   // PAS DE SESSION vs SESSION NON-ADMIN (01/08) — la distinction manquait et créait une boucle insoluble :
   // on répondait 403 dans les deux cas, sans jamais dire QUEL compte venait de se connecter. Quelqu'un
@@ -263,6 +311,8 @@ export async function POST(req: NextRequest) {
       } as never,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // le montant validé fait foi : si ce membre a un parrain, sa commission s'aligne dessus
+    await syncPendingReferralCommission(db, Number(d.tg_id), amount);
     return NextResponse.json({ ok: true });
   }
   if (body.updateDeposit) {
@@ -298,6 +348,11 @@ export async function POST(req: NextRequest) {
     }
     const { error } = await db.from('member_actions').update({ detail: det as never }).eq('id', u.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // montant corrigé → la commission de parrainage suit (elle avait pu naître sur le montant déclaré)
+    if (u.amount != null) {
+      const { data: owner } = await db.from('member_actions').select('tg_id').eq('id', u.id).limit(1);
+      if (owner?.[0]?.tg_id) await syncPendingReferralCommission(db, Number(owner[0].tg_id), Number(det.amount_usd));
+    }
     return NextResponse.json({ ok: true });
   }
   if (body.deleteDeposit) {
@@ -900,7 +955,10 @@ export async function POST(req: NextRequest) {
       });
       // PARRAINAGE : filleul approuvé → commission créée en PENDING (elle ne devient retirable que quand
       // TU confirmes avoir reçu la commission broker — c'est le verrou anti dépôt-retrait éclair).
-      // Montant : 50$, puis 75$ à partir du palier 10 (grille dans lib/member/affiliate.ts).
+      // Montant : 10% du dépôt plafonné à 200$, 15%/300$ après le palier 10 (lib/member/affiliate.ts).
+      // À cet instant le dépôt VALIDÉ n'est en général pas encore saisi (le prompt vient juste après), on
+      // part donc du montant DÉCLARÉ au wizard — et le registre des dépôts corrige le montant dès qu'il
+      // connaît le vrai (syncPendingReferralCommission), tant que la commission est encore `pending`.
       const { data: mm } = await db.from('members').select('referred_by,member_no').eq('tg_id', act[0].tg_id).limit(1);
       const refBy = mm?.[0]?.referred_by ? Number(mm[0].referred_by) : null;
       if (refBy) {
@@ -908,12 +966,13 @@ export async function POST(req: NextRequest) {
         if (!dupe?.length) {
           // le même filleul ne génère JAMAIS deux commissions (re-connect après pause, etc.)
           const { data: prior } = await db.from('referral_commissions').select('id').eq('referrer_tg_id', refBy).eq('kind', 'referral').neq('status', 'canceled');
+          const deposit = await knownDepositFor(db, Number(act[0].tg_id));
           await db.from('referral_commissions').insert({
             referrer_tg_id: refBy,
             referred_tg_id: act[0].tg_id,
             kind: 'referral',
-            amount: commissionForActivation(prior?.length ?? 0),
-            detail: { referred_member_no: mm?.[0]?.member_no ?? null } as never,
+            amount: commissionForActivation(prior?.length ?? 0, deposit),
+            detail: { referred_member_no: mm?.[0]?.member_no ?? null, deposit_usd: deposit || null } as never,
           });
         }
       }

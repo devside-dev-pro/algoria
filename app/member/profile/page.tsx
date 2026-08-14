@@ -182,10 +182,12 @@ export default function Profile() {
               </span>
             </div>
           ) : (
-            <p style={{ margin: 0, fontSize: 11.5, color: 'var(--gold)' }}>🏆 PARTNER status — you earn ${referral.rewardUsd} per activated referral.</p>
+            <p style={{ margin: 0, fontSize: 11.5, color: 'var(--gold)' }}>🏆 PARTNER status — your rate is up to {Math.round(referral.rewardRate * 100)}% per activated referral.</p>
           )}
+          {/* La commission dépend désormais du DÉPÔT du filleul : on annonce le taux, le plancher concret
+              (ce que rapporte le dépôt d'entrée) et le plafond — un pourcentage seul ne se projette pas. */}
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-            You earn <b className="goldText">${referral.rewardUsd}</b> for every friend whose account is <b style={{ color: 'var(--text)' }}>activated</b> (minimum deposit verified). Paid in USDT, straight to your wallet.
+            You earn <b className="goldText">{Math.round(referral.rewardRate * 100)}% of what your friend deposits</b>, every time an account is <b style={{ color: 'var(--text)' }}>activated</b> — from <b style={{ color: 'var(--text)' }}>${referral.rewardMinUsd}</b> and up to <b style={{ color: 'var(--text)' }}>${referral.rewardCapUsd}</b> each. The bigger they start, the more you make. Paid in USDT, straight to your wallet.
           </p>
 
           {/* lien de partage */}
