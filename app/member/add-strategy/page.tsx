@@ -169,8 +169,10 @@ export default function AddStrategy() {
                   <input value={server} onChange={(e) => setServer(e.target.value)} placeholder="type it EXACTLY as MetaTrader shows it" style={inp} />
                 )}
               </label>
-              <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} />
-                <span style={hint}>Your <b style={{ color: 'var(--muted)' }}>main</b> password — not the read-only &ldquo;investor&rdquo; one.</span></label>
+              {/* même correction qu'à l'inscription : « ton mot de passe principal » se lisait « celui de
+                  mon espace client broker », d'où le 1er motif de refus (identifiants invalides). */}
+              <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} />
+                <span style={hint}>The password of the <b style={{ color: 'var(--muted)' }}>trading account</b> — the one the broker emailed you, the one you type into MetaTrader. Not your broker website password, and not the read-only &ldquo;investor&rdquo; one.</span></label>
               <label style={lbl}>Full name on the account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
               <label style={lbl}>Amount deposited ($ — min {minDep})<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder={String(minDep)} style={inp} /></label>
               {/* MÊMES ENGAGEMENTS QU'À L'INSCRIPTION (14/08) : un second compte est aussi un compte NEUF,

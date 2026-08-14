@@ -118,6 +118,9 @@ export default function Onboarding() {
   // Le dépôt vient du champ local (saisi à l'étape 2) ou de la fiche KYC (reprise du wizard plus tard).
   // serveur de démonstration : son nom le dit toujours (« …-Demo », « Demo-Server »). 7% des refus.
   const demoServer = /demo/i.test(server);
+  // un login MetaTrader est un NUMÉRO (6-10 chiffres en base). Une adresse email ou des lettres = la
+  // personne a saisi l'identifiant de son espace client broker — 1er motif de refus. On avertit seulement.
+  const loginLooksWrong = login.trim().length > 0 && !/^\d{4,12}$/.test(login.trim());
   const budgetUsd = Number(deposit) > 0 ? Number(deposit) : declaredDeposit ?? undefined;
   const affordable = budgetUsd == null || budgetUsd >= (STRATEGY_MIN_DEPOSIT[strategy] ?? 500);
   const stratChoice = affordable ? strategy : bestStrategyFor(budgetUsd) ?? 0; // 0 = rien de débloqué (dépôt < $200)
@@ -292,7 +295,14 @@ export default function Onboarding() {
                 <span style={hint}>We&rsquo;ll connect your account by hand — someone will confirm within a few hours.</span>
               </label>
             )}
-            <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} /></label>
+            {/* LOGIN — 1er motif de refus (48%) : identifiants invalides, presque toujours parce que la
+                personne donne ceux de l'ESPACE CLIENT du broker au lieu de ceux du compte MetaTrader.
+                On avertit sans bloquer : 66 des 67 comptes en base ont un login numérique, mais le 67ᵉ
+                ne l'est pas — bloquer refuserait un compte parfaitement valide. */}
+            <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} login<input value={login} onChange={(e) => setLogin(e.target.value)} inputMode="numeric" placeholder="12345678" style={inp} />
+              <span style={hint}>{t('ob.loginHint')}</span>
+              {loginLooksWrong && <span style={{ fontSize: 11.5, color: 'var(--gold)', lineHeight: 1.5, textTransform: 'none', letterSpacing: 0 }}>⚠️ {t('ob.loginWarn')}</span>}
+            </label>
             <label style={lbl}>Server
               {brokerServers.length > 0 && !serverManual ? (
                 <select value={server} onChange={(e) => { const v = e.target.value; if (v === '__other__') { setServerManual(true); setServer(''); } else setServer(v); }} style={inp}>
@@ -306,7 +316,14 @@ export default function Onboarding() {
               <span style={hint}>{t('ob.serverHint')}</span>
               {brokerServers.length > 0 && serverManual && <button type="button" onClick={() => { setServerManual(false); setServer(''); }} style={{ ...linkBtn, marginTop: 4, textAlign: 'left' }}>{t('ob.serverBack')}</button>}
             </label>
-            <label style={lbl}>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} /><span style={hint}>{t('ob.pwdHint')}</span></label>
+            {/* MOT DE PASSE — la cause n°1 des refus « invalid account ». L'ancien texte disait « the one
+                you log in with », qui se lit « celui de mon espace client broker » : il fabriquait
+                l'erreur qu'il était censé prévenir. On dit maintenant d'OÙ vient ce mot de passe (l'email
+                d'ouverture du compte), ce qu'il n'est PAS (le site du broker), et comment le retrouver. */}
+            <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} />
+              <span style={{ ...hint, color: 'var(--muted)' }}>{t('ob.pwdHint')}</span>
+              <span style={hint}>{t('ob.pwdLost')}</span>
+            </label>
           </div>
 
           {/* BLOC 2 — vérification (nom + dépôt) : le support recoupe avec le broker avant d'activer la copie. */}

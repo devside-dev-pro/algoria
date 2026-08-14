@@ -123,7 +123,15 @@ export const UI: Dict = {
   'ob.serverType': { en: 'type it EXACTLY as MetaTrader shows it', it: 'scrivilo ESATTAMENTE come appare in MetaTrader' },
   'ob.serverHint': { en: 'Must match your broker\'s server exactly — copy it from MetaTrader (caps & spaces count).', it: 'Deve corrispondere esattamente al server del broker — copialo da MetaTrader (maiuscole e spazi contano).' },
   'ob.serverBack': { en: '← Pick from the list instead', it: '← Scegli invece dall\'elenco' },
-  'ob.pwdHint': { en: 'Your main password (the one you log in with) — not the read-only "investor" one, or the copy can\'t trade.', it: 'La tua password principale (quella con cui accedi) — non quella "investor" di sola lettura, altrimenti la copia non può operare.' },
+  // ⚠️ TEXTE RÉÉCRIT (14/08/2026) — il DISAIT « the one you log in with », ce qui se lit « celui avec
+  // lequel je me connecte chez le broker ». C'est exactement la confusion qui produit le premier motif de
+  // refus : 20 demandes sur 42 refusées pour identifiants invalides, presque toujours le mot de passe de
+  // l'espace client saisi à la place de celui du compte MetaTrader. On ne dit plus « celui avec lequel tu
+  // te connectes » — on dit d'OÙ il vient, et ce qu'il n'est pas.
+  'ob.pwdHint': { en: 'The password of your TRADING account — the one the broker emailed you when the account was created, the one you type into MetaTrader. NOT the password of the broker\'s website. Not the read-only "investor" one either, or the copy can\'t trade.', it: 'La password del tuo conto DI TRADING — quella che il broker ti ha inviato via email alla creazione del conto, quella che digiti in MetaTrader. NON la password del sito del broker. E nemmeno quella "investor" di sola lettura, altrimenti la copia non può operare.' },
+  'ob.pwdLost': { en: 'Lost it? Reset it from your broker\'s client area, on the trading account itself — look for "Change password" / "Trading password" (not the website login).', it: 'Persa? Reimpostala dall\'area clienti del broker, sul conto di trading stesso — cerca "Cambia password" / "Password di trading" (non quella del sito).' },
+  'ob.loginHint': { en: 'The account NUMBER shown in MetaTrader — usually 6 to 10 digits. Not your email.', it: 'Il NUMERO di conto mostrato in MetaTrader — di solito 6-10 cifre. Non la tua email.' },
+  'ob.loginWarn': { en: 'That looks like your broker website login. Algoria needs the MetaTrader account number — the digits shown at the top of MetaTrader, also in the broker\'s email.', it: 'Sembra il login del sito del broker. Algoria ha bisogno del numero di conto MetaTrader — le cifre mostrate in alto in MetaTrader, presenti anche nell\'email del broker.' },
   'ob.verif': { en: 'FOR VERIFICATION', it: 'PER LA VERIFICA' },
   'ob.fullName': { en: 'Full name on your broker account', it: 'Nome completo sul tuo conto broker' },
   'ob.amount': { en: 'Amount deposited ($ — min 200)', it: 'Importo depositato ($ — min 200)' },
