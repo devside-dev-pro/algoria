@@ -4,7 +4,8 @@
 //     iPhone → tuto Safari détaillé (pas d'API Apple) ; déjà installée → OPEN.
 //   · piège n°1 du funnel TikTok : le navigateur INTÉGRÉ (TikTok/Instagram) ne sait PAS installer
 //     une PWA → bannière « ouvre dans ton vrai navigateur » détectée à l'user-agent.
-//   · screenshots = maquettes CSS (toujours raccord avec la vraie app, zéro asset à maintenir).
+//   · screenshots = VRAIES captures de l'app (public/adshots → WebP 600 px). C'étaient des maquettes
+//     CSS jusqu'au 14/08, dérivées au point de ne plus rien montrer de l'app.
 import { useEffect, useRef, useState } from 'react';
 
 const REVIEWS = [
@@ -272,56 +273,35 @@ export default function DownloadPage() {
           ))}
         </div>
 
-        {/* ── SCREENSHOTS (maquettes CSS dans des cadres téléphone) ── */}
+        {/* ── SCREENSHOTS — LES VRAIES (14/08/2026) ────────────────────────────────────────────────
+            C'étaient des MAQUETTES CSS. L'intention était bonne — « zéro asset à maintenir » — mais sans
+            personne pour les tenir à jour elles avaient dérivé jusqu'à ne plus rien montrer de l'app :
+            onglets inventés (Live/Copy/Learn/Alerts au lieu de HOME/HISTORY/ALGORIA AI/ACADEMY/PROFILE),
+            écrans qui n'existent pas, chiffres inventés. Sur une page qui se présente comme une fiche
+            d'app, montrer autre chose que l'app est le seul défaut qu'un visiteur vérifie lui-même en
+            trente secondes — et celui-là ne pardonne pas.
+            Les vraies captures dormaient dans public/adshots depuis le 30/07, référencées nulle part.
+            Servies en WebP 600 px : 2,6 Mo → ~50 Ko pièce, l'original reste pour les visuels publicitaires.
+            ⚠️ Quand l'app change d'allure, refaire les captures PUIS régénérer :
+               sharp(src).resize({ width: 600 }).webp({ quality: 82 }) */}
         <div className="deskscroll" style={{ display: 'flex', gap: 12, overflowX: 'auto', padding: '4px 2px 10px' }}>
-          <Shot title="Live AI feed">
-            <MockHeader label="ALGORIA · LIVE" live />
-            <div style={{ background: 'rgba(31,216,176,.1)', border: '1px solid rgba(31,216,176,.35)', borderRadius: 8, padding: '7px 9px' }}>
-              <div style={{ fontSize: 6.5, color: 'var(--muted)', letterSpacing: 0.5 }}>TODAY</div>
-              <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: 'var(--up)' }}>+247$</div>
+          {[
+            { src: '/adshots/web/cockpit.webp', title: 'Live AI feed' },
+            { src: '/adshots/web/history.webp', title: 'Your gains, trade by trade' },
+            { src: '/adshots/web/home.webp', title: 'Copying status' },
+            { src: '/adshots/web/strategies.webp', title: 'Pick your strategy' },
+          ].map((sh) => (
+            <div key={sh.src} style={{ flex: 'none', display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center' }}>
+              <img
+                src={sh.src} alt={`Algoria app — ${sh.title}`} width={196} height={426} loading="lazy" decoding="async"
+                style={{
+                  width: 196, height: 426, objectFit: 'cover', objectPosition: 'top', display: 'block', borderRadius: 26,
+                  border: '1px solid rgba(43,227,245,.22)', boxShadow: '0 14px 40px rgba(2,6,16,.65)',
+                }}
+              />
+              <span style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 0.4 }}>{sh.title}</span>
             </div>
-            <MockLine icon="✓" color="var(--up)" text="Trade closed · gold · +86$" />
-            <MockLine icon="▲" color="var(--cyan)" text="Long opened · Bitcoin" />
-            <MockLine icon="◆" color="var(--gold)" text="Liquidity swept — watching" />
-            <MockLine icon="✓" color="var(--up)" text="Trade closed · BTC · +54$" />
-            <MockLine icon="●" color="var(--muted)" text="Range regime · standing by" />
-            <MockNav active={0} />
-          </Shot>
-          <Shot title="Copy the AI">
-            <MockHeader label="COPYING" />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(31,216,176,.1)', border: '1px solid rgba(31,216,176,.35)', borderRadius: 8, padding: '8px 9px' }}>
-              <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--up)' }} />
-              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--up)', letterSpacing: 0.6 }}>COPYING ACTIVE</span>
-            </div>
-            {['Balance', 'Equity', 'Open trades'].map((l, i) => (
-              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(255,255,255,.03)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 9px' }}>
-                <span style={{ fontSize: 7.5, color: 'var(--muted)' }}>{l}</span>
-                <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: i === 2 ? 'var(--cyan)' : 'var(--text)' }}>{['12,480$', '12,533$', '2'][i]}</span>
-              </div>
-            ))}
-            <div style={{ fontSize: 6.5, color: 'var(--dim)', letterSpacing: 0.4 }}>RISK PER TRADE</div>
-            <div style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,.06)', position: 'relative' }}>
-              <div style={{ position: 'absolute', inset: 0, width: '35%', borderRadius: 3, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }} />
-            </div>
-            <MockNav active={1} />
-          </Shot>
-          <Shot title="Win alerts">
-            <MockHeader label="ALERTS" />
-            {[['Algoria', 'Trade closed on gold ✓ +124$', 'now'], ['Algoria', 'Swing target hit on Bitcoin ✓ +212$', '1h'], ['Algoria', 'New setup forming on gold', '3h']].map(([app, msg, t], i) => (
-              <div key={i} style={{ display: 'flex', gap: 6, background: 'rgba(255,255,255,.04)', border: '1px solid var(--border)', borderRadius: 9, padding: '7px 8px' }}>
-                <img src="/brand/algoria-mark.png" alt="" width={14} height={14} style={{ objectFit: 'contain', marginTop: 1 }} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                    <span style={{ fontSize: 7, fontWeight: 700, color: 'var(--text)' }}>{app}</span>
-                    <span style={{ fontSize: 6.5, color: 'var(--dim)' }}>{t}</span>
-                  </div>
-                  <div style={{ fontSize: 7.5, color: 'var(--muted)', lineHeight: 1.35 }}>{msg}</div>
-                </div>
-              </div>
-            ))}
-            <div style={{ fontSize: 7, color: 'var(--dim)', textAlign: 'center', marginTop: 2 }}>right on your lock screen</div>
-            <MockNav active={3} />
-          </Shot>
+          ))}
         </div>
 
         {/* ── DESCRIPTION ── */}
@@ -474,56 +454,6 @@ function Step({ n, glyph, children }: { n: string; glyph: React.ReactNode; child
       <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--cyan)', width: 14, flex: 'none' }}>{n}</span>
       <span style={{ display: 'inline-flex', width: 24, justifyContent: 'center', flex: 'none' }}>{glyph}</span>
       <span style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 }}>{children}</span>
-    </div>
-  );
-}
-
-/** Cadre téléphone : une maquette CSS de la vraie app (raccord marque, zéro screenshot à maintenir). */
-function Shot({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center' }}>
-      <div style={{
-        width: 196, height: 380, borderRadius: 26, padding: '14px 11px', overflow: 'hidden',
-        display: 'flex', flexDirection: 'column', gap: 7,
-        background: 'linear-gradient(180deg, #0f1e39 0%, #0a1425 100%)',
-        border: '1px solid rgba(43,227,245,.22)', boxShadow: '0 14px 40px rgba(2,6,16,.65), inset 0 1px 0 rgba(255,255,255,.06)',
-      }}>
-        {children}
-      </div>
-      <span style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 0.4 }}>{title}</span>
-    </div>
-  );
-}
-
-function MockHeader({ label, live }: { label: string; live?: boolean }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 3 }}>
-      <img src="/brand/algoria-mark.png" alt="" width={13} height={13} style={{ objectFit: 'contain' }} />
-      <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: 1, background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{label}</span>
-      {live && <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: '#ff6b8a', marginLeft: 'auto' }} />}
-    </div>
-  );
-}
-
-/** Barre d'onglets factice collée en bas du cadre — la silhouette de la vraie app. */
-function MockNav({ active }: { active: number }) {
-  return (
-    <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-around', borderTop: '1px solid var(--border)', paddingTop: 7 }}>
-      {[['◉', 'Live'], ['⇄', 'Copy'], ['🎓', 'Learn'], ['🔔', 'Alerts']].map(([ic, l], i) => (
-        <div key={l} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: i === active ? 1 : 0.4 }}>
-          <span style={{ fontSize: 9, color: i === active ? 'var(--cyan)' : 'var(--muted)' }}>{ic}</span>
-          <span style={{ fontSize: 5.5, letterSpacing: 0.4, color: i === active ? 'var(--cyan)' : 'var(--muted)' }}>{l}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MockLine({ icon, color, text }: { icon: string; color: string; text: string }) {
-  return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', background: 'rgba(255,255,255,.03)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 8px' }}>
-      <span style={{ fontSize: 7.5, color }}>{icon}</span>
-      <span style={{ fontSize: 7.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
     </div>
   );
 }
