@@ -1111,6 +1111,15 @@ export default function AdminCRM() {
                           <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             VERIFY → {label ? label.toUpperCase() : broker ? broker.toUpperCase() : '⚠ broker ?'} · {bname ?? '⚠ no name — ask'} · {dep ? `$${dep} declared` : '⚠ no deposit declared — ask'}{uname ? <span style={{ color: 'var(--cyan)' }}> · @{uname}</span> : ''}
                           </div>
+                          {/* CE QUE LE MEMBRE A JURÉ (14/08) : compte né du lien Algoria + compte financé.
+                              Les demandes ANTÉRIEURES au formulaire n'ont pas ces champs — on affiche donc
+                              « not asked » plutôt qu'une croix, pour ne pas faire porter au membre une
+                              case qu'on ne lui a jamais montrée. */}
+                          <div style={{ fontSize: 10, marginTop: 2, color: 'var(--dim)' }}>
+                            {a.detail?.ack_link == null && a.detail?.ack_funded == null
+                              ? 'claims: not asked (request predates the checkboxes)'
+                              : <>claims: <b style={{ color: a.detail?.ack_link ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_link ? '✓ opened via our link' : '✗ NOT via our link'}</b> · <b style={{ color: a.detail?.ack_funded ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_funded ? '✓ funded' : '✗ not funded'}</b></>}
+                          </div>
                         </>
                       );
                     })()}

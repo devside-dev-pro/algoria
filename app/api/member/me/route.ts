@@ -146,6 +146,18 @@ export async function POST(req: NextRequest) {
     if (!login || !server || !password) return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 });
     if (fullName.length < 3) return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 });
     if (!Number.isFinite(deposit) || deposit <= 0) return NextResponse.json({ error: 'deposit amount is required' }, { status: 400 });
+    // LES DEUX ENGAGEMENTS (14/08) — 43% des demandes de connexion étaient refusées, dont ~74% pour la
+    // même raison : un compte ouvert AVANT Algoria, donc jamais rattaché au broker et introuvable dans le
+    // dashboard partenaire (souvent refusé sous l'étiquette « invalid account »). Le front pose la
+    // question et détourne le cas ; ce contrôle-ci est le verrou, et surtout il ARCHIVE la déclaration —
+    // à l'examen, on sait ce que le membre a affirmé, ce qui rend la conversation possible en cas de refus.
+    const ackLink = body.ackLink === true;
+    const ackFunded = body.ackFunded === true;
+    if (!ackLink || !ackFunded)
+      return NextResponse.json({ error: 'please confirm both boxes: the account was created through the Algoria link, and it is funded' }, { status: 400 });
+    // Un serveur de démonstration se nomme toujours ainsi — 7% des refus, refusables ici sans attente.
+    if (/demo/i.test(server))
+      return NextResponse.json({ error: 'that is a demo server — Algoria can only copy a live account with real funds' }, { status: 400 });
     patch.mt5_login = login;
     patch.mt5_server = server;
     patch.mt5_password_enc = encryptSecret(password); // AES-256-GCM — jamais en clair, jamais renvoyé
@@ -158,7 +170,7 @@ export async function POST(req: NextRequest) {
       // broker_label : nom saisi à la main quand le broker n'est PAS partenaire (résidents US, qui paient
       // l'accès directement). Porté jusqu'à la carte admin — sans lui, le support voit « other » et doit
       // demander au membre de quel broker il parle.
-      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ack_link: ackLink, ack_funded: ackFunded, ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
     });
   } else if (body.action === 'strategy') {
     // CHOIX DE STRATÉGIE (remplace le sélecteur de lot — le lot copieur est FIXE 0.01, le levier de risque
@@ -277,6 +289,12 @@ export async function POST(req: NextRequest) {
     if (fullName.length < 3) return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 });
     if (!Number.isFinite(deposit) || deposit < minDepositFor(strat))
       return NextResponse.json({ error: `this strategy needs a $${minDepositFor(strat)}+ deposit` }, { status: 400 });
+    // MÊMES ENGAGEMENTS QU'À L'INSCRIPTION : un second compte est aussi un compte neuf, et se fait
+    // refuser pour les mêmes raisons (ouvert hors de nos liens, ou démo). Voir l'action 'mt5'.
+    if (body.ackLink !== true || body.ackFunded !== true)
+      return NextResponse.json({ error: 'please confirm both boxes: the account was opened through the Algoria link, and it is funded' }, { status: 400 });
+    if (/demo/i.test(server))
+      return NextResponse.json({ error: 'that is a demo server — Algoria can only copy a live account with real funds' }, { status: 400 });
     const raw = db as unknown as { from: (t: string) => any };
     const { data: mrow } = await db.from('members').select('member_no,broker,strategy,tg_username').eq('tg_id', s.tgId).limit(1);
     const { data: extras } = (await raw.from('member_accounts').select('account_no,broker,strategy,status').eq('tg_id', s.tgId)) as { data: Array<{ account_no: number; broker: string | null; strategy: number; status: string }> | null };
@@ -300,7 +318,7 @@ export async function POST(req: NextRequest) {
       account_no: accountNo,
       login, server, strategy: strat, lot: '0.01', broker,
       username: mrow?.[0]?.tg_username ?? null,
-      broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4',
+      broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ack_link: true, ack_funded: true,
       add_strategy: true, // affichage file : "compte supplémentaire", pas une premières connexion
     });
     const { data: fresh } = (await raw.from('member_accounts').select('account_no,broker,strategy,status,mt5_login,created_at').eq('tg_id', s.tgId).order('account_no', { ascending: true })) as { data: Array<Record<string, unknown>> | null };
