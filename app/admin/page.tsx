@@ -1120,6 +1120,13 @@ export default function AdminCRM() {
                               ? 'claims: not asked (request predates the checkboxes)'
                               : <>claims: <b style={{ color: a.detail?.ack_link ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_link ? '✓ opened via our link' : '✗ NOT via our link'}</b> · <b style={{ color: a.detail?.ack_funded ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_funded ? '✓ funded' : '✗ not funded'}</b></>}
                           </div>
+                          {/* IDENTIFIANTS DÉJÀ TESTÉS À L'INSCRIPTION : 'ok' = STH a réellement joint ce
+                              compte MetaTrader. Inutile de le refuser pour « invalid account » — s'il y a
+                              un problème il est ailleurs (rattachement, dépôt). Ça enlève le premier motif
+                              de refus du champ des hypothèses avant même d'ouvrir le dashboard broker. */}
+                          {a.detail?.verify === 'ok' && (
+                            <div style={{ fontSize: 10, marginTop: 2, color: 'var(--up)', fontWeight: 700 }}>🔐 credentials verified at signup — MetaTrader login/password/server all work</div>
+                          )}
                         </>
                       );
                     })()}
