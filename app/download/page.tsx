@@ -32,7 +32,12 @@ type BipEvent = { prompt: () => Promise<void>; userChoice?: Promise<{ outcome: s
 type Browser = { platform: Platform; inApp: boolean; appName: string | null };
 
 // (non exportée : un fichier de page Next ne peut exporter que ses symboles réservés)
-function detectBrowser(ua: string): Browser {
+// `hints` = signaux relevés sur window. L'user-agent de Telegram ne le nomme NI sur iPhone NI sur Android,
+// mais son WebView injecte `TelegramWebviewProxy` : c'est le seul moyen de nommer l'app à l'écran, et le
+// nommer change tout — « tap ⋯ then Open in Safari » se suit, « cherche un menu quelque part » se subit.
+// Signal purement cosmétique : le drapeau `inApp` est déjà correct sans lui, donc s'il manque on retombe
+// simplement sur la formulation générique.
+function detectBrowser(ua: string, hints: { telegram?: boolean } = {}): Browser {
   const ios = /iphone|ipad|ipod/i.test(ua);
   const android = /android/i.test(ua);
   const platform: Platform = ios ? 'ios' : android ? 'android' : 'desktop';
@@ -45,10 +50,17 @@ function detectBrowser(ua: string): Browser {
     [/\bline\//i, 'LINE'],
     [/micromessenger/i, 'WeChat'],
   ];
-  const appName = named.find(([re]) => re.test(ua))?.[1] ?? null;
-  // iOS : pas de `Version/` = WebView intégrée (Telegram y compris, qui ne se nomme jamais sur iPhone).
-  // Android : `; wv` = WebView. Un nom d'app trouvé dans l'UA tranche dans tous les cas.
-  const iosInApp = ios && !/version\/\d/i.test(ua);
+  const appName = hints.telegram ? 'Telegram' : named.find(([re]) => re.test(ua))?.[1] ?? null;
+  // ⚠️ CORRECTIF (14/08) : « pas de Version/ » ne suffit PAS à conclure à une WebView. Les navigateurs
+  // TIERS sur iPhone — Chrome (CriOS), Firefox (FxiOS), Edge, Opera, DuckDuckGo — n'ont pas ce jeton non
+  // plus : seul Safari le pose. La règle brute les accusait donc tous d'être des navigateurs intégrés, et
+  // affichait « sors d'ici » à quelqu'un sur Chrome qui pouvait parfaitement installer (constaté aussitôt
+  // en production). On les reconnaît nommément avant d'appliquer l'heuristique.
+  // Ces navigateurs installent bien une PWA sur iOS 16.4+, via la même feuille de partage que Safari.
+  const realIosBrowser = /crios|fxios|edgios|opios|opt\/|duckduckgo|yabrowser|puffin|focus\//i.test(ua);
+  // iOS : ni navigateur tiers connu, ni `Version/` ⇒ WebView intégrée (Telegram compris, qui ne se nomme
+  // jamais sur iPhone). Android : `; wv`. Un nom d'app trouvé dans l'UA tranche dans tous les cas.
+  const iosInApp = ios && !realIosBrowser && !/version\/\d/i.test(ua);
   const androidInApp = android && /;\s*wv\b/i.test(ua);
   return { platform, inApp: appName != null || iosInApp || androidInApp, appName };
 }
@@ -111,7 +123,8 @@ export default function DownloadPage() {
 
   useEffect(() => {
     const ua = navigator.userAgent;
-    setBrowser(detectBrowser(ua));
+    const w = window as unknown as Record<string, unknown>;
+    setBrowser(detectBrowser(ua, { telegram: w.TelegramWebviewProxy != null || w.TelegramWebview != null }));
     const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
     if (standalone) setInstalled(true);
     if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/member-sw.js').catch(() => {});
@@ -375,11 +388,15 @@ export default function DownloadPage() {
           {/* ILLUSTRÉ, pas seulement décrit (13/08) : « le carré avec une flèche » ne parle qu'à ceux qui
               savent déjà. On DESSINE le bouton et on montre où il se trouve dans la barre Safari — c'est
               exactement ce que Mathieu refaisait à la main, capture par capture, pour chaque membre. */}
+          {/* ⚠️ Ne PAS écrire « Safari uniquement » : depuis iOS 16.4, Chrome, Firefox et Edge installent
+              aussi, par la même feuille de partage — vérifié en production le 14/08. Ce qui ne marche
+              jamais, c'est le navigateur INTÉGRÉ d'une app. Exiger Safari à tort, c'est envoyer faire un
+              détour inutile quelqu'un qui était déjà au bon endroit. */}
           <Step n="1" glyph={<span style={{ fontSize: 17 }}>🧭</span>}>
-            Open this page in <b style={{ color: 'var(--text)' }}>Safari</b> — installing is impossible from any other browser
+            Open this page in a <b style={{ color: 'var(--text)' }}>real browser</b> — Safari, Chrome or Firefox all work. What never works is a browser opened inside another app
           </Step>
           <Step n="2" glyph={<ShareGlyph />}>
-            Tap the <b style={{ color: 'var(--text)' }}>Share</b> button, at the <b style={{ color: 'var(--text)' }}>bottom centre</b> of the screen (top right on iPad)
+            Tap the <b style={{ color: 'var(--text)' }}>Share</b> button — <b style={{ color: 'var(--text)' }}>bottom centre</b> in Safari, <b style={{ color: 'var(--text)' }}>top right</b> in Chrome (and on iPad)
           </Step>
           {/* barre Safari reconstituée : la personne compare l'image à son écran et trouve le bouton */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', gap: 4, padding: '11px 14px', borderRadius: 12, background: 'rgba(255,255,255,.045)', border: '1px solid var(--border)' }}>
@@ -406,7 +423,7 @@ export default function DownloadPage() {
             Open <b style={{ color: 'var(--cyan)' }}>Algoria</b> from your home screen — full screen, like a native app
           </Step>
           <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
-            No &ldquo;Add to Home Screen&rdquo; in the list? You&rsquo;re not in Safari — go back to step 1.
+            No &ldquo;Add to Home Screen&rdquo; in the list? Then you&rsquo;re in a browser opened inside another app — go back to step 1.
             <br />Tip: enable notifications inside the app (Profile → Alerts) to get the win alerts on your lock screen.
           </div>
         </section>
