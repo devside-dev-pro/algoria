@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { JOIN_DM, INBOX_ACK, SIGNED_IN, SIGNED_IN_BTN, SIGNED_IN_CODE_HINT, LOGIN_CODE_MSG, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
+import { JOIN_DM, INBOX_ACK, INBOX_ACK_BTN, SUPPORT_TG_URL, SIGNED_IN, SIGNED_IN_BTN, SIGNED_IN_CODE_HINT, LOGIN_CODE_MSG, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
 import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 
@@ -432,8 +432,12 @@ export async function POST(req: Request) {
       const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1500) || '[media]';
       const tgId = Number(msg.from.id);
       const { data: mrow } = await (db as any).from('members').select('member_no,locale').eq('tg_id', tgId).limit(1);
+      // ANTI-SPAM ramené de 6 h à 2 h (14/08) : à 6 h, quelqu'un qui repose une question deux heures plus
+      // tard n'avait plus RIEN en retour — donc exactement le silence qu'on cherche à supprimer. Deux
+      // heures suffisent à ne pas répéter le message dans un même échange, sans laisser une question
+      // ultérieure sans réponse.
       const { data: recent } = await (db as any).from('member_actions').select('id').eq('tg_id', tgId).eq('kind', 'bot_reply')
-        .gte('created_at', new Date(Date.now() - 6 * 3_600_000).toISOString()).limit(1);
+        .gte('created_at', new Date(Date.now() - 2 * 3_600_000).toISOString()).limit(1);
       await (db as any).from('member_actions').insert({
         tg_id: tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'bot_reply', status: 'done', done_by: 'telegram',
         detail: { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null },
@@ -446,6 +450,9 @@ export async function POST(req: Request) {
             chat_id: tgId,
             text: INBOX_ACK[asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale)],
             disable_web_page_preview: true,
+            // BOUTON plutôt qu'un pseudo à recopier : un tap ouvre la conversation avec Mathieu. C'est
+            // toute la différence entre « router » et « mentionner ».
+            reply_markup: { inline_keyboard: [[{ text: INBOX_ACK_BTN[asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale)], url: SUPPORT_TG_URL }]] },
           }),
         }).catch(() => {});
       }

@@ -64,10 +64,25 @@ export const JOIN_DM: Record<Locale, string> = {
 };
 
 /** Accusé de réception d'un DM entrant (boîte de réception du bot). */
+// ⚠️ RÉÉCRIT (14/08/2026). L'ancien texte PROMETTAIT une réponse ici même — « Mathieu will get back to
+// you personally » — et ne proposait son compte qu'en option secondaire, « pour une réponse plus rapide ».
+// Les gens lisaient la promesse et attendaient. Or ce bot n'est pas une messagerie : il gère les
+// connexions et les alertes, ses messages arrivent dans une boîte que Mathieu ne relève pas en continu.
+// Une question posée ici pouvait donc rester sans réponse pendant des jours, ce qui est bien pire que de
+// dire franchement où écrire.
+// On ne promet plus rien ici, on ROUTE : le bouton vaut mieux qu'un pseudo à recopier, et le texte dit
+// explicitement que ce bot ne répond pas aux questions.
 export const INBOX_ACK: Record<Locale, string> = {
-  en: "Got your message 🙌 A real human reads these — Mathieu will get back to you personally.\n\nFor a faster answer, message him directly: @mathieu_algoria\nYour app: app.algoria.tech/member",
-  it: "Messaggio ricevuto 🙌 Qui legge una persona vera — Mathieu ti risponderà di persona.\n\nPer una risposta più rapida, scrivigli direttamente: @mathieu_algoria\nLa tua app: app.algoria.tech/member",
+  en: "Thanks for writing 👋 One thing though — this bot doesn't answer questions. It only handles logins and trade alerts, so a message here can sit unread for a while.\n\nMathieu replies himself, from his own account. Tap below and ask him there — that's where you'll get an answer.",
+  it: "Grazie per il messaggio 👋 Una cosa però — questo bot non risponde alle domande. Gestisce solo accessi e notifiche, quindi un messaggio qui può restare non letto per un po'.\n\nMathieu risponde di persona, dal suo account. Tocca qui sotto e scrivigli lì — è lì che otterrai una risposta.",
 };
+/** Le bouton qui accompagne l'accusé de réception — un tap, pas un pseudo à recopier à la main. */
+export const INBOX_ACK_BTN: Record<Locale, string> = {
+  en: '💬 Ask Mathieu directly',
+  it: '💬 Scrivi direttamente a Mathieu',
+};
+/** Compte HUMAIN du support — la seule adresse où une question obtient vraiment une réponse. */
+export const SUPPORT_TG_URL = 'https://t.me/mathieu_algoria';
 
 /** Confirmation de connexion (deep-link /start lg_…). Le message porte un BOUTON (SIGNED_IN_BTN) : « reviens
  *  sur l'app » ne suffisait pas quand la personne arrive du navigateur intégré de Telegram — l'onglet qui

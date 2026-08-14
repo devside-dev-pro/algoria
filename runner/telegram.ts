@@ -42,13 +42,19 @@ export async function approveJoinRequest(chatId: number, userId: number): Promis
 
 /** DM direct du bot à UN utilisateur (relance onboarding…). Ne marche que si la personne a déjà ouvert le
  *  chat du bot (login natif /start → oui). Renvoie true si envoyé — 403 = chat jamais ouvert, on l'accepte. */
-export async function sendDm(tgId: number, text: string): Promise<boolean> {
+/** @param button bouton optionnel sous le message (libellé + URL) — un tap vaut mieux qu'un pseudo à
+ *  recopier, et les relances automatiques doivent TOUJOURS offrir une porte vers l'humain : ce bot ne
+ *  répond pas aux questions, une réponse à un de ses DM peut rester longtemps sans réaction. */
+export async function sendDm(tgId: number, text: string, button?: { text: string; url: string }): Promise<boolean> {
   if (!TOKEN) return false;
   try {
     const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: tgId, text, disable_web_page_preview: true }),
+      body: JSON.stringify({
+        chat_id: tgId, text, disable_web_page_preview: true,
+        ...(button ? { reply_markup: { inline_keyboard: [[button]] } } : {}),
+      }),
     });
     return res.ok;
   } catch {

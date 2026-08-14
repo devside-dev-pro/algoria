@@ -965,7 +965,10 @@ async function main() {
       let sent = 0;
       for (const c of candidates) {
         const m = nudgeMessage(c.step, c.days);
-        const dm = await sendDm(c.tg_id, m.dm);
+        // BOUTON VERS L'HUMAIN sur CHAQUE relance auto (14/08) : deux variantes sur six ne donnaient
+        // aucun point de contact, et surtout, quelqu'un qui RÉPOND à ce DM écrit au bot — qui ne répond
+        // pas. Le bouton évite ce cul-de-sac sans dépendre du texte de la variante.
+        const dm = await sendDm(c.tg_id, m.dm, { text: '💬 Ask Mathieu directly', url: 'https://t.me/mathieu_algoria' });
         const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: c.step <= 0 ? '/member/academy' : '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
         await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} step${c.step} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`, dm ? m.dm : undefined);
         if (dm || push) sent++;
