@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
   if (!isAdmin(sess.username)) return NextResponse.json({ error: 'forbidden', username: sess.username ?? null }, { status: 403 });
   const s = sess;
   const db = sdb();
-  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ] = await Promise.all([
+  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ, spokeQ, rejectedQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
     allMembers(db),
@@ -114,6 +114,13 @@ export async function GET(req: NextRequest) {
     // NOMS LÉGAUX (kyc.broker_name, déclarés au wizard) : LE pont entre les 3 identités d'une personne
     // (nom Telegram ≠ @pseudo ≠ nom sur le compte broker) — affiché partout + cherchable dans l'admin.
     db.from('member_actions').select('tg_id,detail,created_at').eq('kind', 'kyc').order('created_at', { ascending: false }).limit(500),
+    // QUI A DÉJÀ ÉCRIT AU BOT — sert à trancher « relance » vs « PREMIER CONTACT » dans la file du jour.
+    // 196 des 219 personnes de cette file n'ont jamais écrit une ligne : leur envoyer un message de
+    // relance (« alors, tu en es où ? ») n'a aucun sens, elles ne savent même pas qui écrit.
+    // botActivity ne suffit pas : il est plafonné à 120 lignes et sert l'affichage du fil, pas un test.
+    db.from('member_actions').select('tg_id').eq('kind', 'bot_reply').limit(5000),
+    // CONNEXIONS REFUSÉES : ces gens-là ne sont pas à relancer mais à RATTRAPER — ils ont essayé.
+    db.from('member_actions').select('tg_id').eq('kind', 'connect').eq('status', 'rejected').limit(2000),
   ]);
   // COMPTES SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut)
   const { data: extraAccounts } = await (db as any).from('member_accounts')
@@ -212,7 +219,11 @@ export async function GET(req: NextRequest) {
     const n = String((k.detail as { broker_name?: string })?.broker_name ?? '').trim();
     if (n && !legalNames[t]) legalNames[t] = n;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats });
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
+    // segmentation de la file du jour : qui a déjà écrit (→ vraie relance) et qui s'est fait refuser (→ rattrapage)
+    spokeTgIds: [...new Set((spokeQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
+    rejectedTgIds: [...new Set((rejectedQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
+  });
 }
 
 export async function POST(req: NextRequest) {
