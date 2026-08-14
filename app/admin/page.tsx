@@ -24,6 +24,30 @@ interface Row {
   strategy?: number | null; // S1 / S2 / S3 — le master STH auquel son compte est abonné
   lot?: number | null; // la VRAIE taille de copie (risk_tier n'est qu'un libellé dérivé)
 }
+// SCRIPTS PAR SEGMENT — le message de relance générique ne fonctionne QUE sur des gens à qui on a déjà
+// parlé. Sur les 219 personnes de la file, 196 n'avaient jamais écrit une ligne : leur envoyer « alors, tu
+// en es où ? » revenait à relancer une conversation qui n'a jamais eu lieu.
+// Le script de premier contact se termine donc par une QUESTION et pas par un lien : on cherche une
+// réponse, pas un clic — et beaucoup ont quitté le canal depuis, ce qui rend un lien collé inutile alors
+// qu'une proposition de le renvoyer relance l'échange.
+/** « Hey! » → « Hey Marc! » quand on connaît le prénom. Un message qui commence par le prénom se lit
+ *  comme écrit à la main ; sans prénom on garde le « Hey! » nu plutôt qu'un « Hey undefined ». */
+const personalise = (text: string, name?: string | null): string => {
+  const first = String(name ?? '').trim().split(/\s+/)[0];
+  return /^[\p{L}][\p{L}'-]{1,20}$/u.test(first) ? text.replace(/^Hey!/, `Hey ${first}!`) : text;
+};
+
+const SCRIPTS: Record<string, string> = {
+  deposited:
+    "Hey! Mathieu here, from Algoria. I can see your deposit came through — thank you, and sorry you had to wait.\n\nYour account just isn't connected to the copier yet, so the AI isn't trading for you. That's on us to finish and it takes 2 minutes. Can you confirm the broker and account number you funded, and I'll switch it on right now?",
+  rejected:
+    "Hey! Mathieu from Algoria. Your account connection didn't go through — and I want to be clear it's not you being refused, it's almost always one detail that doesn't match.\n\nMost of the time it's the password: MetaTrader needs your TRADING password (the one the broker emailed you when the account was created), not the one you use on the broker's website. Send me your account number and I'll check what's blocking it on my side.",
+  first:
+    "Hey! Mathieu here — I'm the founder of Algoria, the AI that trades gold and Bitcoin live. You created an account on our app a few days ago (that's how I have your name), but never finished setting it up.\n\nNo pressure at all — I'm just going through the list one by one. Are you still interested? If you've lost the channel, tell me and I'll send you the invite back.",
+  followup:
+    "Hey! Following up on our conversation — where are you at with your setup?\n\nIf something's blocking you, tell me what it is and I'll sort it out. Algoria's been trading every day in the meantime.",
+};
+
 interface Action { id: string; tg_id?: number; member_no: number | null; kind: string; status?: string; done_by?: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Comm { id: string; referrer_tg_id: number; referred_tg_id: number | null; kind: string; amount: number; status: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }
 interface Payout { id: string; tg_id: number; amount: number; address: string; status: string; tx_hash: string | null; reason: string | null; created_at: string }
@@ -55,6 +79,11 @@ export default function AdminCRM() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [pushTgIds, setPushTgIds] = useState<number[]>([]); // tg_id ayant au moins 1 appareil abonné aux alertes
   const [nudges, setNudges] = useState<{ tg_id: number; created_at: string; done_by?: string }[]>([]); // historique des relances (auto + manuelles)
+  // SEGMENTATION de la file du jour : qui a déjà écrit au bot, qui s'est fait refuser une connexion.
+  const [spokeTgIds, setSpokeTgIds] = useState<number[]>([]);
+  const [rejectedTgIds, setRejectedTgIds] = useState<number[]>([]);
+  const [relSeg, setRelSeg] = useState<string | null>(null); // onglet de segment choisi (null = le plus prioritaire non vide)
+  const [copiedScript, setCopiedScript] = useState<string | null>(null);
   const [runnerLastSeen, setRunnerLastSeen] = useState<number | null>(null); // heartbeat runner (dernière bougie écrite)
   const [legalNames, setLegalNames] = useState<Record<string, string>>({}); // tg_id → nom légal broker (kyc) : LE pont entre les 3 identités
   // comptes SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut + STH id)
@@ -143,7 +172,7 @@ export default function AdminCRM() {
         setDeniedAs(d.username ?? null);
         return setState('forbidden');
       }
-      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[] };
+      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[]; spokeTgIds?: number[]; rejectedTgIds?: number[] };
       setWl(d.whitelist);
       setRows(d.members);
       setActions(d.actions ?? []);
@@ -151,6 +180,8 @@ export default function AdminCRM() {
       setDeposits(d.deposits ?? []);
       setPushTgIds(d.pushTgIds ?? []);
       setNudges(d.nudges ?? []);
+      setSpokeTgIds(d.spokeTgIds ?? []);
+      setRejectedTgIds(d.rejectedTgIds ?? []);
       setRunnerLastSeen((d as { runnerLastSeen?: number | null }).runnerLastSeen ?? null);
       setLegalNames((d as { legalNames?: Record<string, string> }).legalNames ?? {});
       setExtraAccounts(((d as unknown as { extraAccounts?: typeof extraAccounts }).extraAccounts) ?? []);
@@ -606,6 +637,22 @@ export default function AdminCRM() {
     if (pushAud !== 'self' && !window.confirm(`Send this push to ${pushAud.toUpperCase()}? Test it on yourself first if you haven't.`)) return;
     sendCustomPush({ audience: pushAud, title: pushTitle, body: pushBody, url: pushUrl }, pushAud.toUpperCase());
   };
+  // ENVOI PAR LE BOT — indispensable depuis la file du jour : 109 des 219 personnes n'ont pas de @pseudo,
+  // donc AUCUN lien t.me ne mène à elles. Le bot, lui, peut toujours écrire : tout le monde ici a tapé
+  // START pour se connecter à l'app. On confirme avant d'envoyer (c'est un message réel à un vrai
+  // prospect, pas un brouillon) et on marque la personne comme touchée dans la foulée.
+  const sendViaBot = (tgId: number, text: string) => {
+    if (!window.confirm(`Send this to ${tgId} through the Algoria bot?\n\n${text}`)) return;
+    setBusy(true);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botDm: { tg_id: tgId, text } }) })
+      .then(async (r) => {
+        const d = (await r.json()) as { error?: string };
+        if (d.error) window.alert(`⚠ ${d.error}`);
+        else load(); // le botDm trace déjà un nudge → la personne sort de la file pour 3 jours
+      })
+      .finally(() => setBusy(false));
+  };
+
   // relance individuelle d'un lead coincé — message fixe, bienveillant, qui renvoie vers le wizard
   const nudge = (r: Row) => {
     sendCustomPush({
@@ -875,33 +922,83 @@ export default function AdminCRM() {
               const now = Date.now();
               const lastNudge = new Map<number, number>();
               for (const n of nudges) { const t = Number(n.tg_id); const at = Date.parse(n.created_at); if ((lastNudge.get(t) ?? 0) < at) lastNudge.set(t, at); }
-              const queue = rows
+              // ═══ SEGMENTATION (14/08) ═══════════════════════════════════════════════════════════════
+              // La file mélangeait des situations qui n'appellent PAS le même message. Mesuré sur les 219
+              // personnes qu'elle contenait : 196 n'avaient JAMAIS écrit une ligne au bot. Leur envoyer une
+              // relance (« alors, tu en es où ? ») n'avait aucun sens — elles ne savent même pas qui écrit,
+              // et beaucoup ont quitté le canal depuis. Deux avaient déjà DÉPOSÉ sans finir : les plus
+              // chaudes de toute la base, noyées au milieu. Douze s'étaient fait REFUSER leur connexion :
+              // celles-là ont essayé, elles méritent un rattrapage, pas une relance.
+              // Un ordre unique ne pouvait pas servir quatre conversations différentes. On sépare.
+              const spoke = new Set(spokeTgIds);
+              const rejectedSet = new Set(rejectedTgIds);
+              const depositedSet = new Set(deposits.map((d) => Number(d.tg_id)));
+              type Seg = 'deposited' | 'rejected' | 'first' | 'followup';
+              const segOf = (tg: number): Seg =>
+                depositedSet.has(tg) ? 'deposited' : rejectedSet.has(tg) ? 'rejected' : spoke.has(tg) ? 'followup' : 'first';
+              const all = rows
                 .filter((r) => r.status === 'onboarding')
-                .map((r) => ({ r, days: Math.floor((now - Date.parse(r.created_at)) / 86_400_000), touched: lastNudge.get(Number(r.tg_id)) }))
+                .map((r) => ({ r, days: Math.floor((now - Date.parse(r.created_at)) / 86_400_000), touched: lastNudge.get(Number(r.tg_id)), seg: segOf(Number(r.tg_id)) }))
                 .filter((x) => x.days >= 1 && x.days <= 21 && (!x.touched || now - x.touched > 3 * 86_400_000))
-                // LE PLUS ANCIEN D'ABORD (12/08). C'était l'inverse : la file s'ouvrait sur les J+1 et
-                // enterrait les J+15 tout en bas — or ce sont eux qui attendent depuis le plus longtemps,
-                // et eux que le `slice(0, 15)` coupait quand la file était longue. Ceux qui avaient le plus
-                // besoin d'un mot étaient exactement ceux qu'on ne voyait jamais. On déroule maintenant du
-                // plus vieux au plus frais : la session de relance commence par la dette la plus ancienne.
+                // le plus ancien d'abord : la session commence par la dette la plus vieille (12/08)
                 .sort((a, b) => b.days - a.days);
-              if (queue.length === 0) return <section className="panel" style={{ padding: 16, color: 'var(--dim)', fontSize: 12.5 }}>📞 Relance queue clear — every recent lead was touched in the last 3 days.</section>;
+              if (all.length === 0) return <section className="panel" style={{ padding: 16, color: 'var(--dim)', fontSize: 12.5 }}>📞 Relance queue clear — every recent lead was touched in the last 3 days.</section>;
+              // ordre des onglets = ordre de PRIORITÉ commerciale, pas alphabétique : l'argent déjà déposé
+              // d'abord, puis ceux qui ont essayé, puis la masse froide.
+              const SEGS: Array<{ key: Seg; label: string; hint: string; color: string }> = [
+                { key: 'deposited', label: '💰 DEPOSITED, NOT LIVE', hint: 'They already put money in and never finished. Nothing in this admin is more urgent — finish it for them, or call.', color: 'var(--up)' },
+                { key: 'rejected', label: '🛠 REJECTED, TO RESCUE', hint: 'Their connection was declined. They tried. Tell them exactly what to fix — most think they were refused as a person.', color: '#ff8a5c' },
+                { key: 'first', label: '👋 FIRST CONTACT', hint: 'They have NEVER written to us. This is not a follow-up — introduce yourself, say which channel this is, and give the invite back: many have left it since.', color: 'var(--cyan)' },
+                { key: 'followup', label: '💬 REAL FOLLOW-UP', hint: 'You already have a conversation with them. Pick it back up where it stopped.', color: 'var(--gold)' },
+              ];
+              const counts = Object.fromEntries(SEGS.map((s) => [s.key, all.filter((x) => x.seg === s.key).length])) as Record<Seg, number>;
+              const active = SEGS.find((s) => s.key === relSeg && counts[s.key] > 0) ?? SEGS.find((s) => counts[s.key] > 0) ?? SEGS[0];
+              const queue = all.filter((x) => x.seg === active.key);
               return (
-                <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <h2 style={secH}>📞 RELANCES DU JOUR · {queue.length} — oldest first, your personal DM/voice beats any bot</h2>
+                <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
+                  <h2 style={secH}>📞 RELANCES DU JOUR · {all.length} — oldest first, your personal DM/voice beats any bot</h2>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {SEGS.map((sg) => (
+                      <button key={sg.key} onClick={() => setRelSeg(sg.key)} disabled={counts[sg.key] === 0}
+                        style={{ padding: '6px 10px', borderRadius: 8, cursor: counts[sg.key] ? 'pointer' : 'default', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4,
+                          border: `1px solid ${active.key === sg.key ? sg.color : 'var(--border)'}`,
+                          background: active.key === sg.key ? 'rgba(255,255,255,.06)' : 'transparent',
+                          color: counts[sg.key] === 0 ? 'var(--dim)' : active.key === sg.key ? sg.color : 'var(--muted)', opacity: counts[sg.key] === 0 ? 0.45 : 1 }}>
+                        {sg.label} · {counts[sg.key]}
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>{active.hint}</p>
+                  {/* SCRIPT PRÊT À COLLER, propre au segment. Le message de relance générique ne marche que
+                      sur le dernier segment — sur les trois autres il tombe à côté, et ça se voit. */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                    <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55, whiteSpace: 'pre-wrap', flex: 1 }}>{SCRIPTS[active.key]}</span>
+                    <button onClick={() => { void navigator.clipboard?.writeText(SCRIPTS[active.key]); setCopiedScript(active.key); window.setTimeout(() => setCopiedScript(null), 1800); }}
+                      style={{ ...miniBtn, flex: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>
+                      {copiedScript === active.key ? '✓ copied' : '⧉ copy'}
+                    </button>
+                  </div>
                   {queue.slice(0, 15).map(({ r, days, touched }) => (
                     <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)', flexWrap: 'wrap' }}>
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{r.member_no}</span>
                       <span style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
                       {legalOf(r.tg_id) && <span className="mono" style={{ fontSize: 10, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }} title="name on the broker account">🏦 {legalOf(r.tg_id)}</span>}
                       <span className="mono" style={{ fontSize: 10, fontWeight: 800, color: days >= 5 ? '#ff8a5c' : 'var(--gold)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 6px' }}>J+{days}</span>
+                      {/* OÙ IL EN EST : sans ça, impossible de savoir quoi lui dire sans ouvrir sa fiche */}
+                      <span style={{ fontSize: 10.5, color: 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{STEP_LABEL[r.onboarding_step] ?? STEP_LABEL[0]}</span>
                       {touched && <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>last touch {Math.floor((now - touched) / 86_400_000)}d ago</span>}
                       <span style={{ flex: 1 }} />
-                      {r.tg_username && <a href={`https://t.me/${r.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
+                      {/* PAS DE @PSEUDO = PAS DE LIEN t.me. La moitié de la file est dans ce cas (109 sur 219),
+                          et le bouton DM manquant donnait une ligne sans aucune action possible. Le bot, lui,
+                          peut TOUJOURS écrire : tout le monde ici a tapé START pour se connecter à l'app. */}
+                      {r.tg_username
+                        ? <a href={`https://t.me/${r.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>
+                        : <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }} title="no @username — Telegram gives no direct link, use the bot">no @ · bot only</span>}
+                      <button disabled={busy} onClick={() => sendViaBot(Number(r.tg_id), personalise(SCRIPTS[active.key], r.tg_name))} title="send this segment's script through the Algoria bot — works even without a @username" style={{ ...miniBtn, color: 'var(--gold)', borderColor: 'rgba(245,194,74,.45)' }}>🤖 BOT</button>
                       <button disabled={busy} onClick={() => post({ nudged: r.tg_id })} title="I sent my personal message/voice note — remove from the queue for 3 days" style={okBtn}>✓ FAIT</button>
                     </div>
                   ))}
-                  {queue.length > 15 && <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)' }}>+{queue.length - 15} more, all newer than these — the 10:00 UTC auto-nudge (push + bot DM) catches whoever you don&rsquo;t reach.</p>}
+                  {queue.length > 15 && <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)' }}>+{queue.length - 15} more in this segment, all newer than these — the 10:00 UTC auto-nudge catches whoever you don&rsquo;t reach.</p>}
                 </section>
               );
             })()}
