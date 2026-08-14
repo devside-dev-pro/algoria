@@ -939,7 +939,12 @@ export default function AdminCRM() {
               const all = rows
                 .filter((r) => r.status === 'onboarding')
                 .map((r) => ({ r, days: Math.floor((now - Date.parse(r.created_at)) / 86_400_000), touched: lastNudge.get(Number(r.tg_id)), seg: segOf(Number(r.tg_id)) }))
-                .filter((x) => x.days >= 1 && x.days <= 21 && (!x.touched || now - x.touched > 3 * 86_400_000))
+                // FENÊTRE 21 → 60 JOURS (14/08). À 21 jours, 46 personnes inscrites entre 22 et 39 jours
+                // n'apparaissaient NULLE PART : jamais contactées à la main, sorties de la file sans que
+                // personne ne le décide. « Froid » n'est pas « perdu » quand on ne leur a jamais parlé.
+                // La borne basse reste à 1 jour : quelqu'un qui vient de s'inscrire mérite quelques heures
+                // avant qu'on lui saute dessus, et l'auto-nudge passe de toute façon.
+                .filter((x) => x.days >= 1 && x.days <= 60 && (!x.touched || now - x.touched > 3 * 86_400_000))
                 // le plus ancien d'abord : la session commence par la dette la plus vieille (12/08)
                 .sort((a, b) => b.days - a.days);
               if (all.length === 0) return <section className="panel" style={{ padding: 16, color: 'var(--dim)', fontSize: 12.5 }}>📞 Relance queue clear — every recent lead was touched in the last 3 days.</section>;
