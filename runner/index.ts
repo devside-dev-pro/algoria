@@ -948,9 +948,23 @@ async function main() {
       return s0
         ? { dm: `Hey, it's worth 2 minutes of your time 🙂\nIf anything held you back — the broker, the deposit, a doubt — just tell me. Message @mathieu_algoria directly and I'll sort it with you personally. No pressure, no sales pitch.\n\nP.S. Your code ALGORIA100 is still active — 100% deposit bonus at RaiseFX, it doubles your trading power the day you start.`, title: '👋 Anything holding you back?', body: 'Message Mathieu directly — and your ALGORIA100 bonus code is still active.' }
         : { dm: `Hey, it's worth 2 minutes of your time 🙂\nIf anything held you back — the broker, the deposit, a doubt — just tell me. Message @mathieu_algoria directly and I'll sort it with you personally. No pressure, no sales pitch.`, title: '👋 Anything holding you back?', body: 'Message Mathieu directly — he’ll sort it with you personally.' };
-    return s0
-      ? { dm: `Last note from me 🤝\nYour Algoria access is still open — and so is your code ALGORIA100 (100% deposit bonus at RaiseFX, doubles your trading power). I can't keep it active forever.\n👉 app.algoria.tech/member/onboarding\n\nAnd @mathieu_algoria is one message away if you want a hand.`, title: '🤝 Your access — and your bonus — are still open', body: 'Code ALGORIA100 is still active: 100% deposit bonus at RaiseFX. Not forever.' }
-      : { dm: `Last note from me 🤝\nYour Algoria access is still open. When you're ready to let the AI work for you, everything's a couple of clicks away:\n👉 app.algoria.tech/member/onboarding\n\nAnd @mathieu_algoria is one message away if you want a hand.`, title: '🤝 Your access is still open', body: 'Whenever you’re ready, the AI is waiting. Mathieu’s one message away.' };
+    // ===== LA TRAÎNE (J+15 → J+60) — réécrite le 14/08 en élargissant la fenêtre =====
+    // Le « Last note from me » était le SEUL message au-delà de J+14. Sur une fenêtre de 21 jours il
+    // partait deux fois ; sur 60 jours il serait parti une dizaine de fois, et un adieu répété dix fois
+    // n'est plus un adieu, c'est une farce qui abîme la marque. Surtout, il ferme la porte alors que la
+    // raison d'élargir est précisément qu'elle reste ouverte : « certains ont besoin de 30/40 jours ».
+    // Trois temps, du plus engageant au plus sobre — et un seul vrai adieu, tout à la fin.
+    if (days <= 21)
+      return s0
+        ? { dm: `No rush, really 🙂\nAlgoria keeps trading whether you're in or not — that's the point of it. Your access stays open, and your code ALGORIA100 (100% deposit bonus at RaiseFX) is still on your account.\n👉 app.algoria.tech/member/onboarding`, title: '🎁 Your bonus code is still on your account', body: 'ALGORIA100 — 100% deposit bonus at RaiseFX, whenever you start.' }
+        : { dm: `No rush 🙂 Your MT5 connection is the only thing left, and it takes 60 seconds whenever you're ready.\n👉 app.algoria.tech/member/onboarding`, title: '⏱️ 60 seconds left', body: 'Just the MT5 connection. Whenever you’re ready.' };
+    // J+22 → J+45 : on ne redemande RIEN. On donne des nouvelles — les résultats sont le seul argument
+    // qui travaille tout seul pendant qu'on attend que le moment soit bon.
+    if (days <= 45)
+      return { dm: `Still running 📈\nAlgoria has been trading every single day since you signed up — gold and Bitcoin, three strategies, wins and stops posted publicly. Nothing to do on your side, but the door is still open when your timing is right.\n\n🎥 ${ACADEMY}`, title: '📈 Algoria is still trading every day', body: 'Wins and stops posted publicly. Your access is still open.' };
+    // J+46+ : le vrai dernier message, envoyé une fois toutes les deux semaines. Il DIT qu'il est le
+    // dernier automatique, et laisse la porte humaine ouverte — sans ça, on perd les gens qui reviennent.
+    return { dm: `Last automatic message from me 🤝\nI'll stop the reminders here — but your Algoria access doesn't expire, and neither does the invitation. The day your timing is right, everything is where you left it:\n👉 app.algoria.tech/member/onboarding\n\nAnd @mathieu_algoria stays one message away, whenever that is.`, title: '🤝 Your access doesn’t expire', body: 'Last automatic reminder — the door stays open whenever you’re ready.' };
   };
   let lastNudgeDay = ''; // relance déjà faite ce jour ? (survit au tick horaire, pas au reboot — recordNudge dédup en base)
   const maybeNudge = async () => {
