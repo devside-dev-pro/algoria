@@ -132,6 +132,8 @@ export const UI: Dict = {
   'ob.pwdLost': { en: 'Lost it? Reset it from your broker\'s client area, on the trading account itself — look for "Change password" / "Trading password" (not the website login).', it: 'Persa? Reimpostala dall\'area clienti del broker, sul conto di trading stesso — cerca "Cambia password" / "Password di trading" (non quella del sito).' },
   'ob.loginHint': { en: 'The account NUMBER shown in MetaTrader — usually 6 to 10 digits. Not your email.', it: 'Il NUMERO di conto mostrato in MetaTrader — di solito 6-10 cifre. Non la tua email.' },
   'ob.loginWarn': { en: 'That looks like your broker website login. Algoria needs the MetaTrader account number — the digits shown at the top of MetaTrader, also in the broker\'s email.', it: 'Sembra il login del sito del broker. Algoria ha bisogno del numero di conto MetaTrader — le cifre mostrate in alto in MetaTrader, presenti anche nell\'email del broker.' },
+  // le bouton d'envoi attend une vraie connexion MetaTrader (~30 s) — « encrypting » mentait sur la durée
+  'ob.checking': { en: 'CHECKING YOUR ACCOUNT…', it: 'VERIFICA DEL TUO CONTO…' },
   'ob.verif': { en: 'FOR VERIFICATION', it: 'PER LA VERIFICA' },
   'ob.fullName': { en: 'Full name on your broker account', it: 'Nome completo sul tuo conto broker' },
   'ob.amount': { en: 'Amount deposited ($ — min 200)', it: 'Importo depositato ($ — min 200)' },
