@@ -4,7 +4,8 @@
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StrategyPicker, bestStrategyFor, LoadFailed, useUILocale } from '../ui';
+import { useMe, StrategyPicker, bestStrategyFor, LoadFailed, useUILocale, SUPPORT_TG, Check } from '../ui';
+import { tgHref } from '@/lib/telegram';
 import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
@@ -76,6 +77,11 @@ export default function Onboarding() {
   // (localStorage). Celui qui avance tout seul ne la voit jamais : pas besoin de sortir un bonus
   // pour quelqu'un de déjà convaincu. Hook AVANT les early-returns (règle des hooks).
   const [bonusPop, setBonusPop] = useState(false);
+  // ORIGINE DU COMPTE + les deux engagements — voir le bloc « Where does this account come from? » :
+  // 74% des refus de connexion venaient d'un compte ouvert avant Algoria, donc invisible côté broker.
+  const [origin, setOrigin] = useState<'new' | 'existing' | null>(null);
+  const [ackLink, setAckLink] = useState(false);
+  const [ackFunded, setAckFunded] = useState(false);
   useEffect(() => {
     if (!member || member.status !== 'onboarding' || bonusPop) return;
     if ((step ?? member.onboarding_step) !== 0 || (brokerPick ?? member.broker) != null) return;
@@ -110,6 +116,8 @@ export default function Onboarding() {
   // bouton START muet, et aucun moyen de comprendre qu'il fallait cliquer STEADY. Plusieurs adhésions
   // bloquées là. On ramène ici la valeur affichée ET envoyée dans ce que le dépôt débloque réellement.
   // Le dépôt vient du champ local (saisi à l'étape 2) ou de la fiche KYC (reprise du wizard plus tard).
+  // serveur de démonstration : son nom le dit toujours (« …-Demo », « Demo-Server »). 7% des refus.
+  const demoServer = /demo/i.test(server);
   const budgetUsd = Number(deposit) > 0 ? Number(deposit) : declaredDeposit ?? undefined;
   const affordable = budgetUsd == null || budgetUsd >= (STRATEGY_MIN_DEPOSIT[strategy] ?? 500);
   const stratChoice = affordable ? strategy : bestStrategyFor(budgetUsd) ?? 0; // 0 = rien de débloqué (dépôt < $200)
@@ -206,6 +214,50 @@ export default function Onboarding() {
           <h2 style={{ fontSize: 15, margin: 0 }}>{t('ob.step2')}</h2>
           <p style={pMuted}>{t('ob.step2.sub')} <strong style={{ color: 'var(--text)' }}>{t('ob.step2.enc')}</strong>{t('ob.step2.encEnd')}</p>
 
+          {/* ═══ ORIGINE DU COMPTE — LE FILTRE (14/08/2026) ═══════════════════════════════════════════
+              43% des demandes de connexion étaient REFUSÉES (42 sur 98 tranchées). En classant les
+              motifs : 26% « compte non rattaché à Algoria » et 48% « compte introuvable / invalid
+              account » — ce second motif étant très largement le premier déguisé, puisqu'un compte
+              absent du dashboard broker s'écrit « invalid account ». Trois refus sur quatre viennent
+              donc de la MÊME cause : la personne avait déjà un compte chez ce broker, ouvert sans
+              notre lien, donc invisible côté partenaire et impossible à commissionner.
+              Rien dans le formulaire ne posait la question. On la pose AVANT les identifiants, et on
+              détourne le cas au lieu de le laisser devenir un refus — un refus coûte un aller-retour
+              au support, et souvent le prospect. */}
+          <div style={grp}>
+            <span style={grpLbl}>Where does this account come from?</span>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {([['new', '✨ I just created it with the Algoria link'], ['existing', '🕗 I already had this account']] as const).map(([k, label]) => (
+                <button key={k} type="button" onClick={() => setOrigin(k)}
+                  style={{ flex: '1 1 150px', padding: '12px 13px', borderRadius: 11, cursor: 'pointer', textAlign: 'left', fontSize: 12.5, fontWeight: 700, lineHeight: 1.4,
+                    border: `1px solid ${origin === k ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
+                    background: origin === k ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)',
+                    color: origin === k ? 'var(--cyan)' : 'var(--muted)' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* COMPTE PRÉEXISTANT → on ne laisse PAS soumettre. Ce compte n'est pas rattaché à Algoria :
+              il ne se trouve pas dans le dashboard partenaire, la copie ne peut pas être activée, et la
+              demande finirait refusée après plusieurs heures d'attente. Deux issues, tout de suite. */}
+          {origin === 'existing' && (
+            <div className="cardIn" style={{ border: '1px solid rgba(245,194,74,.5)', background: 'rgba(245,194,74,.07)', borderRadius: 12, padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 11 }}>
+              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}>
+                <b>An account opened before Algoria can&rsquo;t be connected as-is.</b> Brokers only link an account to us when it&rsquo;s created through our link — yours won&rsquo;t show up on our side, so we can&rsquo;t switch the copying on.
+                <br /><span style={{ color: 'var(--muted)' }}>It&rsquo;s not lost — most brokers can re-attach an existing account, or you open a fresh one in two minutes. Message Mathieu, he sorts this out every day.</span>
+              </div>
+              <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '13px 16px', borderRadius: 12, textDecoration: 'none', fontWeight: 800, fontSize: 13.5, color: '#04223a', background: 'linear-gradient(90deg,#f5c24a,#e0a52e)' }}>
+                💬 MESSAGE MATHIEU FIRST — he&rsquo;ll check your account
+              </a>
+              <button onClick={() => { setOrigin(null); setStep(0); }} style={linkBtn}>← or open a new account with a partner broker</button>
+            </div>
+          )}
+
+          {/* Les identifiants n'apparaissent qu'une fois l'origine déclarée : demander un mot de passe de
+              trading à quelqu'un dont on va refuser le compte est le pire moment de tout le parcours. */}
+          {origin === 'new' && (<>
           {/* BLOC 1 — le compte : broker → plateforme → login → serveur → mdp, dans l'ordre, au même endroit
               (plus de « revenir en arrière » pour changer le serveur). */}
           <div style={grp}>
@@ -265,11 +317,36 @@ export default function Onboarding() {
             <span style={hint}>{t('ob.verifHint')}</span>
           </div>
 
-          <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit)} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit }, 2)} style={ctaMain}>
+          {/* SERVEUR DÉMO — 7% des refus. Un serveur de démonstration se repère à son nom, et le membre
+              ne sait souvent pas qu'il en a choisi un : MT5 ouvre un compte démo par défaut. On le dit
+              ici plutôt que trois heures plus tard par un refus. */}
+          {demoServer && (
+            <div style={{ border: '1px solid rgba(255,107,138,.4)', background: 'rgba(255,107,138,.07)', borderRadius: 11, padding: '11px 13px', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text)' }}>
+              ⚠️ <b>That looks like a demo server.</b> Algoria can only copy a <b>live</b> account with real funds — a demo account can&rsquo;t be connected. Pick your live server, or message us if you&rsquo;re unsure which one it is.
+            </div>
+          )}
+
+          {/* LES DEUX ENGAGEMENTS — ils ne vérifient rien à eux seuls, mais ils INFORMENT (beaucoup
+              ignorent que le compte doit naître de notre lien) et ils laissent une trace de ce que le
+              membre a déclaré, visible à l'examen. Cases décochées par défaut, et obligatoires. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <Check checked={ackLink} onToggle={() => setAckLink((v) => !v)}>
+              I created this trading account <b style={{ color: 'var(--text)' }}>through the Algoria broker link</b> — not an account I already had.
+            </Check>
+            <Check checked={ackFunded} onToggle={() => setAckFunded((v) => !v)}>
+              I have <b style={{ color: 'var(--text)' }}>deposited real money</b> into it — it&rsquo;s a live account, not a demo.
+            </Check>
+          </div>
+
+          <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit) || !ackLink || !ackFunded || demoServer} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded }, 2)} style={ctaMain}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
+          {(!ackLink || !ackFunded) && !demoServer && (
+            <p style={{ margin: '-6px 0 0', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>Tick both boxes above to continue — we check them against the broker.</p>
+          )}
           <button onClick={() => setStep(0)} style={linkBtn}>{t('ob.noBroker')}</button>
           <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
+          </>)}
         </section>
       )}
 

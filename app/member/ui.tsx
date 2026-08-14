@@ -547,6 +547,21 @@ export function StrategyPicker({ value, onPick, busy, budget, exclude }: { value
   );
 }
 
+/** Case à cocher lisible au pouce : toute la ligne est cliquable, pas seulement le carré de 16 px. */
+export function Check({ checked, onToggle, children }: { checked: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onToggle} aria-pressed={checked}
+      style={{ display: 'flex', gap: 11, alignItems: 'flex-start', textAlign: 'left', padding: '11px 13px', borderRadius: 11, cursor: 'pointer',
+        border: `1px solid ${checked ? 'rgba(31,216,176,.45)' : 'var(--border)'}`, background: checked ? 'rgba(31,216,176,.07)' : 'rgba(10,17,31,.55)' }}>
+      <span style={{ flex: 'none', width: 19, height: 19, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, marginTop: 1,
+        border: `1.5px solid ${checked ? 'var(--up)' : 'var(--border)'}`, background: checked ? 'var(--up)' : 'transparent', color: '#04223a' }}>
+        {checked ? '✓' : ''}
+      </span>
+      <span style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--muted)' }}>{children}</span>
+    </button>
+  );
+}
+
 export function RiskPicker({ value, onPick, busy }: { value: string; onPick: (k: 'low' | 'balanced' | 'high') => void; busy?: boolean }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>

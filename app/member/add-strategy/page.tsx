@@ -5,7 +5,7 @@
 // commission broker par compte. Brokers déjà utilisés exclus, minimum par stratégie ($200/$500/$1000).
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StrategyPicker, STRATEGY_UI, LoadFailed } from '../ui';
+import { useMe, StrategyPicker, STRATEGY_UI, LoadFailed, Check } from '../ui';
 import { BROKERS, selectableBrokers } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { bracketForAmount, brokerOrderFor } from '@/lib/member/brokerSteering';
@@ -27,6 +27,10 @@ export default function AddStrategy() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // engagements identiques à l'inscription — voir onboarding : 74% des refus venaient d'un compte
+  // ouvert hors de nos liens, invisible dans le dashboard broker
+  const [ackLink, setAckLink] = useState(false);
+  const [ackFunded, setAckFunded] = useState(false);
 
   const activeExtras = useMemo(() => accounts.filter((a) => a.status !== 'rejected'), [accounts]);
   const usedStrategies = useMemo(() => new Set<number>([Number(member?.strategy ?? 2), ...activeExtras.map((a) => a.strategy)]), [member, activeExtras]);
@@ -57,7 +61,7 @@ export default function AddStrategy() {
     setErr(null);
     void fetch('/api/member/me', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'add_account', strategy, broker: brokerPick, platform, login, server, password, name: fullName, deposit }),
+      body: JSON.stringify({ action: 'add_account', strategy, broker: brokerPick, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded }),
     })
       .then(async (r) => {
         if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? 'request failed');
@@ -169,7 +173,22 @@ export default function AddStrategy() {
                 <span style={hint}>Your <b style={{ color: 'var(--muted)' }}>main</b> password — not the read-only &ldquo;investor&rdquo; one.</span></label>
               <label style={lbl}>Full name on the account<input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" autoComplete="name" style={inp} /></label>
               <label style={lbl}>Amount deposited ($ — min {minDep})<input value={deposit} onChange={(e) => setDeposit(e.target.value)} inputMode="numeric" placeholder={String(minDep)} style={inp} /></label>
-              <button disabled={busy || !login || !server || !password || fullName.trim().length < 3 || !(Number(deposit) >= (minDep ?? 0))} onClick={submit} style={ctaMain}>
+              {/* MÊMES ENGAGEMENTS QU'À L'INSCRIPTION (14/08) : un second compte est aussi un compte NEUF,
+                  et il se fait refuser pour exactement les mêmes raisons — ouvert hors de nos liens, donc
+                  introuvable côté broker. Le membre est déjà LIVE, il connaît la mécanique, mais c'est
+                  précisément celui qui a « un vieux compte qui traîne » chez un autre broker. */}
+              {/demo/i.test(server) && (
+                <div style={{ border: '1px solid rgba(255,107,138,.4)', background: 'rgba(255,107,138,.07)', borderRadius: 11, padding: '10px 12px', fontSize: 12, lineHeight: 1.5, color: 'var(--text)' }}>
+                  ⚠️ <b>That looks like a demo server.</b> Only a live account with real funds can be copied.
+                </div>
+              )}
+              <Check checked={ackLink} onToggle={() => setAckLink((v) => !v)}>
+                I opened this account <b style={{ color: 'var(--text)' }}>through the Algoria link above</b> — it&rsquo;s a brand-new account.
+              </Check>
+              <Check checked={ackFunded} onToggle={() => setAckFunded((v) => !v)}>
+                I have <b style={{ color: 'var(--text)' }}>deposited real money</b> into it — live account, not a demo.
+              </Check>
+              <button disabled={busy || !login || !server || !password || fullName.trim().length < 3 || !(Number(deposit) >= (minDep ?? 0)) || !ackLink || !ackFunded || /demo/i.test(server)} onClick={submit} style={ctaMain}>
                 {busy ? 'ENCRYPTING…' : `⚡ ADD ${STRAT_NAME[strategy]} →`}
               </button>
               <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY</p>
