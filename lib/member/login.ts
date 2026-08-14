@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { sdb, signSession, newReferralCode } from './server';
 import { localeForChat } from './i18n';
@@ -21,6 +22,72 @@ export type LoginOutcome =
 
 export const LOGIN_CODE_RE = /^[A-Za-z0-9]{16,64}$/;
 
+// ===== TROISIÈME PORTE : le CODE À 6 CHIFFRES (13/08/2026) =====
+// Les deux portes existantes transportent la session depuis Telegram vers le navigateur — le polling la
+// pose dans l'onglet qui attend, le bouton la pose dans le navigateur qui l'ouvre. Aucune des deux
+// n'atteint une app AJOUTÉE À L'ÉCRAN D'ACCUEIL sur iPhone : celle-ci a son PROPRE magasin de cookies,
+// séparé de Safari. Le bouton du bot s'ouvre dans Safari, donc il connecte Safari ; l'app installée, elle,
+// reste sans session et renvoie au login — qui renvoie sur Telegram. Boucle sans issue, signalée par un
+// prospect le 13/08. Le polling y arrive en théorie (il faut revenir par le sélecteur d'apps sans toucher
+// au bouton), mais iOS décharge volontiers la page pendant le détour par Telegram.
+// Le code court renverse le sens : plus rien à transporter d'un navigateur à l'autre, la personne RECOPIE
+// six chiffres là où elle veut se connecter. C'est la seule forme qui traverse deux magasins de cookies.
+export const SHORT_CODE_RE = /^[0-9]{6}$/;
+const SHORT_CODE_TTL_MIN = 10; // même fenêtre que le code long
+// ⚠️ 6 chiffres = 1e6 combinaisons seulement. Avec quelques codes vivants à un instant donné, un tirage au
+// sort devient payant en quelques heures de requêtes : la limitation par IP ci-dessous n'est pas un
+// confort, c'est ce qui rend ce chemin acceptable. Ne jamais l'enlever sans allonger le code.
+const MAX_ATTEMPTS = 8;
+const ATTEMPT_WINDOW_MIN = 10;
+
+/** true = cette IP a épuisé ses essais (fenêtre glissante). À vérifier AVANT de consommer un code court. */
+export async function tooManyAttempts(ip: string): Promise<boolean> {
+  if (!ip) return false;
+  const since = new Date(Date.now() - ATTEMPT_WINDOW_MIN * 60_000).toISOString();
+  const { count } = await (sdb() as any)
+    .from('login_attempts').select('id', { count: 'exact', head: true }).eq('ip', ip).gte('at', since);
+  return (count ?? 0) >= MAX_ATTEMPTS;
+}
+
+/** Trace un essai INFRUCTUEUX (un succès ne compte pas — se connecter ne doit pas rapprocher du blocage). */
+export async function recordFailedAttempt(ip: string): Promise<void> {
+  if (!ip) return;
+  await (sdb() as any).from('login_attempts').insert({ ip }).then(
+    () => {},
+    () => {}, // best effort : une panne du compteur ne doit pas casser la connexion
+  );
+}
+
+/**
+ * Émet un code à 6 chiffres DÉJÀ CONFIRMÉ pour un utilisateur Telegram authentifié (l'expéditeur du
+ * message reçu par le webhook). Renvoie null si la place ne s'est pas libérée après quelques tirages.
+ *
+ * Le code est écrit avec le statut `confirmed` parce que l'identité est établie à l'émission : c'est le
+ * bot qui parle à un compte Telegram précis, il n'y a personne d'autre à attendre. Consommation, usage
+ * unique, fenêtre de 10 minutes et contrôle du bannissement restent ceux de consumeLoginCode.
+ */
+export async function issueShortCode(
+  db: any,
+  u: { id: number; username?: string | null; first_name?: string | null; last_name?: string | null },
+  photoUrl?: string | null,
+): Promise<string | null> {
+  const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || String(u.id);
+  for (let i = 0; i < 6; i++) {
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    // `code` est la clé primaire : un code périmé qui traîne bloquerait ce tirage pour toujours. On purge
+    // l'ancienne ligne SI ET SEULEMENT SI elle est hors fenêtre — jamais un code encore vivant, qui
+    // appartient à quelqu'un d'autre en train de s'en servir.
+    await db.from('member_login_codes').delete()
+      .eq('code', code).lt('created_at', new Date(Date.now() - SHORT_CODE_TTL_MIN * 60_000).toISOString());
+    const { error } = await db.from('member_login_codes').insert({
+      code, status: 'confirmed', tg_id: u.id, tg_username: u.username ?? null, tg_name: name,
+      ...(photoUrl ? { photo_url: photoUrl } : {}), confirmed_at: new Date().toISOString(),
+    });
+    if (!error) return code;
+  }
+  return null;
+}
+
 /** Valide le code, crée/met à jour la fiche membre, renvoie le cookie de session signé (non posé). */
 export async function consumeLoginCode(
   req: NextRequest,
@@ -31,7 +98,7 @@ export async function consumeLoginCode(
   // bot a écrit depuis l'expéditeur authentifié, et le lien ne vit que dans la conversation privée du membre.
   opts: { allowUsed?: boolean } = {},
 ): Promise<LoginOutcome> {
-  if (!LOGIN_CODE_RE.test(code)) return { kind: 'bad' };
+  if (!LOGIN_CODE_RE.test(code) && !SHORT_CODE_RE.test(code)) return { kind: 'bad' };
   const db = sdb();
   const { data } = await db.from('member_login_codes').select('*').eq('code', code).limit(1);
   const row = data?.[0] as

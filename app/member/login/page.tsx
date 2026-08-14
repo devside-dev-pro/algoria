@@ -104,10 +104,81 @@ export default function MemberLogin() {
         </div>
       )}
 
+      {/* ===== CODE À 6 CHIFFRES — la SEULE porte qui atteint l'app ajoutée à l'écran d'accueil.
+          Sur iPhone celle-ci a son propre magasin de cookies : le bouton du bot s'ouvre dans Safari et y
+          pose la session, l'app installée n'en voit jamais rien et renvoie au login, qui renvoie sur
+          Telegram — boucle sans fin signalée par un prospect le 13/08. Le polling y arriverait si la page
+          survivait au détour par Telegram, ce qu'iOS ne garantit pas. Ici rien ne transite : la personne
+          recopie six chiffres LÀ où elle veut sa session.
+          Toujours affiché, y compris en attente : c'est justement au retour de Telegram, quand l'app s'est
+          rechargée et que l'écran d'attente a disparu, qu'on en a besoin. ===== */}
+      <CodeEntry t={t} />
+
       {phase === 'expired' && <Err>{t('login.expired')}</Err>}
       {phase === 'error' && <Err>{t('login.error')}</Err>}
       <p className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 1 }}>{t('login.footer')}</p>
     </main>
+  );
+}
+
+/** Saisie du code à 6 chiffres émis par le bot (/code). Replié par défaut : le chemin normal reste le
+ *  bouton Telegram — ceci est le secours de ceux que les deux autres portes n'atteignent pas. */
+function CodeEntry({ t }: { t: (k: string) => string }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const router = useRouter();
+
+  const submit = async () => {
+    if (busy || code.length !== 6) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch('/api/member/login/code', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+      });
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; denied?: boolean; error?: string };
+      if (d.denied) { router.replace('/member/denied'); return; }
+      if (!r.ok || !d.ok) { setErr(d.error ?? 'this code is not valid'); setCode(''); return; }
+      router.replace(window.location.hostname.startsWith('admin.') ? '/admin' : '/member');
+    } catch {
+      setErr('network error — try again');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open)
+    return (
+      <button onClick={() => setOpen(true)} style={{ border: 'none', background: 'transparent', color: 'var(--dim)', fontSize: 12.5, cursor: 'pointer', textDecoration: 'underline' }}>
+        {t('login.codeToggle')}
+      </button>
+    );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9, maxWidth: 330 }}>
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.55 }}>{t('login.codeHelp')}</p>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          value={code}
+          onChange={(e) => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setErr(null); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+          // inputMode numeric + autoComplete one-time-code : clavier chiffres, et iOS propose le code
+          // directement depuis la notification Telegram sans avoir à basculer d'app.
+          inputMode="numeric" autoComplete="one-time-code" placeholder="123456" maxLength={6} aria-label="6-digit code"
+          className="mono"
+          style={{ width: 130, textAlign: 'center', letterSpacing: 4, fontSize: 17, fontWeight: 800, padding: '11px 10px', borderRadius: 11, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)' }}
+        />
+        <button
+          onClick={() => void submit()} disabled={busy || code.length !== 6}
+          style={{ padding: '11px 18px', borderRadius: 11, border: 'none', cursor: code.length === 6 ? 'pointer' : 'default', fontWeight: 800, fontSize: 12.5, letterSpacing: 0.5, color: '#fff', background: code.length === 6 ? 'linear-gradient(90deg,#2AABEE,#229ED9)' : 'rgba(130,152,190,.25)' }}
+        >
+          {busy ? t('login.codeBusy') : t('login.codeCta')}
+        </button>
+      </div>
+      {err && <Err>{err}</Err>}
+    </div>
   );
 }
 
