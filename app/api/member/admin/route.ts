@@ -894,13 +894,22 @@ export async function POST(req: NextRequest) {
     if (!d.ok) return NextResponse.json({ error: `Telegram: ${d.description ?? 'setWebhook failed'}` }, { status: 400 });
     return NextResponse.json({ ok: true, description: d.description ?? 'webhook set' });
   }
-  // ===== PUBLIER SUR UN CANAL, AVEC UN BOUTON (16/08/2026) =====
+  // ===== PUBLIER SUR LES CANAUX, AVEC UN BOUTON (16/08/2026) ==========================================
   // Telegram ne permet PAS de poser un bouton inline à la main : un clavier ne peut venir que d'un bot,
-  // par l'API. Mathieu ne pouvait donc pas publier un CTA cliquable — il devait se contenter d'un lien nu
-  // dans le texte, qui convertit nettement moins bien.
-  // On publie sur le CANAL SOURCE et on laisse le fan-out existant faire le reste : le miroir UK et le
-  // pont italien transportent désormais le clavier (voir app/api/telegram/route.ts). Publier sur les trois
-  // canaux depuis ici créerait des DOUBLONS, puisque le fan-out se déclenche sur le post source.
+  // par l'API. Mathieu ne pouvait donc pas publier un CTA cliquable — seulement un lien nu dans le texte.
+  //
+  // ⚠️ POURQUOI ON PUBLIE SUR LES TROIS CANAUX D'ICI, et pas seulement sur la source.
+  // Première version : publier sur la source et laisser le fan-out habituel (miroir UK + pont italien)
+  // faire le reste. Ça n'a RIEN envoyé ailleurs, et la raison est une règle de fond du Bot API :
+  // UN BOT NE REÇOIT JAMAIS D'UPDATE POUR SES PROPRES MESSAGES. Le fan-out se déclenche sur
+  // `channel_post` ; quand c'est le bot qui publie, cet update n'existe pas. Le relais fonctionne pour
+  // les posts écrits À LA MAIN dans le canal, jamais pour ceux envoyés par l'API.
+  // On diffuse donc explicitement : source telle quelle, miroir UK à l'identique (même langue), canal
+  // italien avec le texte TRADUIT et le même bouton.
+  //
+  // ANTI-DOUBLON : on pose quand même les verrous dans channel_translations. Si un update arrivait
+  // malgré tout, mirrorChannelPost et bridgeChannelPost verraient la ligne déjà là et s'arrêteraient —
+  // c'est l'insert qui gagne la course dans leur logique, pas une lecture.
   if (body.channelPost) {
     const c = body.channelPost as { chatId?: unknown; text?: unknown; buttonText?: unknown; buttonUrl?: unknown };
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -910,25 +919,71 @@ export async function POST(req: NextRequest) {
     const btnText = String(c.buttonText ?? '').trim().slice(0, 60);
     const btnUrl = String(c.buttonUrl ?? '').trim().slice(0, 300);
     if (!chatId || !text) return NextResponse.json({ error: 'channel and text are required' }, { status: 400 });
-    // Un bouton EXIGE une URL, et une URL https — Telegram rejette le message entier sinon, et le refus
-    // arrive après coup : autant le dire ici plutôt que de laisser un envoi échouer sans explication.
+    // Un bouton EXIGE une URL https — Telegram rejette le message ENTIER sinon, avec un motif opaque.
     if (btnText && !/^https:\/\/\S+$/.test(btnUrl))
       return NextResponse.json({ error: 'the button needs a valid https:// link' }, { status: 400 });
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({
-        chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true,
-        ...(btnText ? { reply_markup: { inline_keyboard: [[{ text: btnText, url: btnUrl }]] } } : {}),
-      }),
-    }).catch(() => null);
-    const d = (await res?.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
-    if (!d?.ok) return NextResponse.json({ error: `Telegram refused: ${d?.description ?? 'no response'}` }, { status: 400 });
-    // trace : un post de canal est public et définitif, on garde qui l'a envoyé et quoi
+    const kb = btnText ? { reply_markup: { inline_keyboard: [[{ text: btnText, url: btnUrl }]] } } : {};
+    const send = async (dst: string, body_: string): Promise<{ ok: boolean; messageId: number | null; error: string }> => {
+      try {
+        const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+          body: JSON.stringify({ chat_id: dst, text: body_, parse_mode: 'HTML', disable_web_page_preview: true, ...kb }),
+        });
+        const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+        return d.ok ? { ok: true, messageId: d.result?.message_id ?? null, error: '' } : { ok: false, messageId: null, error: d.description ?? 'unknown' };
+      } catch (e) {
+        return { ok: false, messageId: null, error: String((e as { message?: string })?.message ?? e) };
+      }
+    };
+
+    const src = (process.env.TELEGRAM_CHANNEL_EN ?? '').trim();
+    const mirror = (process.env.TELEGRAM_CHANNEL_MIRROR ?? '').trim();
+    const it = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
+    const report: Array<{ channel: string; ok: boolean; error?: string }> = [];
+
+    // 1) le canal demandé
+    const main = await send(chatId, text);
+    report.push({ channel: 'source', ok: main.ok, ...(main.ok ? {} : { error: main.error }) });
+    if (!main.ok) return NextResponse.json({ error: `Telegram refused: ${main.error}`, report }, { status: 400 });
+
+    // 2) les relais — UNIQUEMENT si on vient de publier sur la source (sinon on serait en train de
+    //    rediffuser un post déjà destiné à un canal précis).
+    if (chatId === src) {
+      const lock = async (dst: string, messageId: number | null, kind: string, error?: string) => {
+        try {
+          await db.from('channel_translations').insert({
+            src_chat_id: Number(chatId), src_message_id: Number(main.messageId ?? 0), dst_chat_id: Number(dst),
+            dst_message_id: messageId, status: error ? 'failed' : 'sent', kind, error: error?.slice(0, 200) ?? null,
+          } as never);
+        } catch { /* le verrou est un confort, pas une condition */ }
+      };
+      if (mirror) {
+        const m = await send(mirror, text); // même langue : le miroir UK reçoit le texte tel quel
+        report.push({ channel: 'mirror UK', ok: m.ok, ...(m.ok ? {} : { error: m.error }) });
+        await lock(mirror, m.messageId, 'mirror_api', m.ok ? undefined : m.error);
+      }
+      if (it) {
+        // Le canal italien reçoit une TRADUCTION, avec le même bouton (son libellé reste en anglais :
+        // le traduire demanderait un second appel au modèle pour deux mots, avec le risque de bavardage
+        // documenté dans lib/member/translate.ts).
+        const { translateToItalian } = await import('@/lib/member/translate');
+        const translated = await translateToItalian(text);
+        if (!translated) {
+          report.push({ channel: 'canale IT', ok: false, error: 'translation rejected — post it by hand' });
+          await lock(it, null, 'text_api', 'translation rejected');
+        } else {
+          const i = await send(it, translated);
+          report.push({ channel: 'canale IT', ok: i.ok, ...(i.ok ? {} : { error: i.error }) });
+          await lock(it, i.messageId, 'text_api', i.ok ? undefined : i.error);
+        }
+      }
+    }
+
     await db.from('member_actions').insert({
       tg_id: s.tgId, member_no: null, kind: 'channel_post', status: 'done', done_by: who,
-      detail: { chat_id: chatId, message_id: d.result?.message_id ?? null, text: text.slice(0, 500), button: btnText || null, url: btnUrl || null } as never,
+      detail: { chat_id: chatId, message_id: main.messageId, text: text.slice(0, 500), button: btnText || null, url: btnUrl || null, report } as never,
     });
-    return NextResponse.json({ ok: true, messageId: d.result?.message_id ?? null });
+    return NextResponse.json({ ok: true, messageId: main.messageId, report });
   }
   if (body.botDm) {
     // 💬 RÉPONDRE VIA LE BOT — depuis le fil BOT ACTIVITY : la réponse part DANS la conversation que la
