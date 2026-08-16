@@ -28,7 +28,7 @@ import { pushToAdmins } from '../lib/push/send';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -966,6 +966,37 @@ async function main() {
     // dernier automatique, et laisse la porte humaine ouverte — sans ça, on perd les gens qui reviennent.
     return { dm: `Last automatic message from me 🤝\nI'll stop the reminders here — but your Algoria access doesn't expire, and neither does the invitation. The day your timing is right, everything is where you left it:\n👉 app.algoria.tech/member/onboarding\n\nAnd @mathieu_algoria stays one message away, whenever that is.`, title: '🤝 Your access doesn’t expire', body: 'Last automatic reminder — the door stays open whenever you’re ready.' };
   };
+  // ===== ALARME TUNNEL (16/08/2026) — le capteur qui manquait ==========================================
+  // Une vérification ajoutée le 14/08 refusait TOUTES les connexions de compte. Personne ne l'a su
+  // pendant 24 h : la panne a été découverte parce que des membres ont écrit au support. Le tunnel
+  // n'avait aucun capteur, et un « ça compile, c'est vert » ne dit rien du comportement réel.
+  // ON NE SURVEILLE PAS LE VOLUME : sur 31 jours observés, 6 sont naturellement à zéro inscription et il
+  // y a même 3 paires de deux jours consécutifs à zéro. Une alarme de volume sonnerait un jour sur cinq,
+  // donc serait ignorée — et une alarme ignorée est pire que pas d'alarme.
+  // On surveille le TAUX DE REFUS, qui ne dépend pas du trafic : au moins 3 tentatives sur 6 h et AUCUNE
+  // acceptée, c'est anormal n'importe quel jour de la semaine. Le seuil de 3 évite de sonner sur un seul
+  // membre qui se trompe deux fois de mot de passe.
+  let lastFunnelAlert = 0;
+  const checkFunnel = async () => {
+    try {
+      const h = await funnelHealth(6);
+      if (h.total < 3 || h.ok > 0) return; // trop peu de signal, ou ça passe : rien à dire
+      if (Date.now() - lastFunnelAlert < 6 * 3600_000) return; // au plus une alerte par 6 h
+      lastFunnelAlert = Date.now();
+      const msg = `${h.total} account-connection attempts in 6h, ALL refused${h.topReason ? ` (${h.topReason})` : ''}`;
+      console.error('[algoria] ALARME TUNNEL :', msg);
+      await logNote(`🚨 signup funnel is refusing everyone — ${msg}`, 'veto');
+      const { pushToAdmins } = await import('../lib/push/send');
+      await pushToAdmins({
+        title: '🚨 TUNNEL BLOQUÉ — plus personne ne peut connecter son compte',
+        body: msg, url: '/member/admin', tag: 'funnel-down',
+      }).catch(() => {});
+    } catch (e) {
+      console.error('[algoria] contrôle tunnel échoué:', (e as { message?: string })?.message ?? e);
+    }
+  };
+  if (!SECONDARY) setInterval(() => void checkFunnel(), 30 * 60_000); // toutes les 30 min, un seul runner
+
   let lastNudgeDay = ''; // relance déjà faite ce jour ? (survit au tick horaire, pas au reboot — recordNudge dédup en base)
   const maybeNudge = async () => {
     const now = new Date();

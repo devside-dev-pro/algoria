@@ -84,6 +84,12 @@ export default function AdminCRM() {
   const [rejectedTgIds, setRejectedTgIds] = useState<number[]>([]);
   const [relSeg, setRelSeg] = useState<string | null>(null); // onglet de segment choisi (null = le plus prioritaire non vide)
   const [copiedScript, setCopiedScript] = useState<string | null>(null);
+  // COMPOSEUR DE POST CANAL (avec bouton) — Telegram n'autorise un clavier inline QUE via un bot.
+  const [cpText, setCpText] = useState('');
+  const [cpBtn, setCpBtn] = useState('🚀 OPEN ALGORIA');
+  const [cpUrl, setCpUrl] = useState('https://app.algoria.tech/member');
+  const [cpChat, setCpChat] = useState<string>('');
+  const [cpSent, setCpSent] = useState<string | null>(null);
   const [runnerLastSeen, setRunnerLastSeen] = useState<number | null>(null); // heartbeat runner (dernière bougie écrite)
   const [legalNames, setLegalNames] = useState<Record<string, string>>({}); // tg_id → nom légal broker (kyc) : LE pont entre les 3 identités
   // comptes SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut + STH id)
@@ -649,6 +655,29 @@ export default function AdminCRM() {
         const d = (await r.json()) as { error?: string };
         if (d.error) window.alert(`⚠ ${d.error}`);
         else load(); // le botDm trace déjà un nudge → la personne sort de la file pour 3 jours
+      })
+      .finally(() => setBusy(false));
+  };
+
+  /** Publie sur le canal choisi, avec bouton. Confirmation OBLIGATOIRE : un post de canal part devant
+   *  des milliers de personnes et ne se rattrape pas — l'aperçu montre exactement ce qui va partir. */
+  const sendChannelPost = () => {
+    const text = cpText.trim();
+    if (!text || !cpChat) return;
+    const target = tgChats.find((c) => String(c.chat_id) === cpChat);
+    const label = target?.title ?? cpChat;
+    const btn = cpBtn.trim() ? `\n\n[ ${cpBtn.trim()} ] → ${cpUrl.trim()}` : '\n\n(aucun bouton)';
+    if (!window.confirm(`Publier sur « ${label} » ?\n\n${text}${btn}\n\nLe miroir UK et le canal IT suivront automatiquement (bouton compris).`)) return;
+    setBusy(true);
+    setCpSent(null);
+    void fetch('/api/member/admin', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelPost: { chatId: cpChat, text, buttonText: cpBtn.trim(), buttonUrl: cpUrl.trim() } }),
+    })
+      .then(async (r) => {
+        const d = (await r.json()) as { ok?: boolean; error?: string };
+        if (d.error) window.alert(`⚠ ${d.error}`);
+        else { setCpSent(label); setCpText(''); }
       })
       .finally(() => setBusy(false));
   };
@@ -1790,6 +1819,52 @@ export default function AdminCRM() {
                   <button disabled={carding === `${t.ticket}-landscape`} onClick={() => void downloadCard(t, 'landscape')} style={goldBtn}>{carding === `${t.ticket}-landscape` ? '…' : '⬇ WIDE'}</button>
                 </div>
               ))}
+            </section>
+
+            {/* ===== POST DE CANAL AVEC BOUTON (16/08/2026) =====================================
+                Telegram n'autorise un clavier inline QUE via un bot : impossible de poser un bouton à la
+                main depuis l'app Telegram. Mathieu devait donc se contenter d'un lien nu dans le texte,
+                qui convertit nettement moins bien qu'un bouton.
+                On publie sur UN canal — le source — et le fan-out existant s'occupe du reste : le miroir
+                UK et le pont italien transportent maintenant le clavier. Publier sur les trois d'ici
+                créerait des doublons, puisque le fan-out se déclenche sur le post source. */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
+              <h2 style={secH}>📣 POST A CTA TO A CHANNEL — with a real button</h2>
+              <p style={dimP}>
+                Telegram only lets a <b>bot</b> attach a button, which is why you can&rsquo;t do it by hand. Post to the
+                <b> source channel</b>: the UK mirror and the IT channel follow automatically, button included — the
+                Italian text is translated, the button label stays as you write it.
+              </p>
+              <select value={cpChat} onChange={(e) => setCpChat(e.target.value)} style={{ ...inp, maxWidth: 380 }}>
+                <option value="">Choose the channel…</option>
+                {tgChats.map((c) => (
+                  <option key={c.chat_id} value={String(c.chat_id)}>{c.title ?? c.chat_id}{c.role ? ` · ${c.role}` : ''}</option>
+                ))}
+              </select>
+              <textarea
+                value={cpText} onChange={(e) => setCpText(e.target.value)} rows={5}
+                placeholder={'Your message. HTML allowed: <b>bold</b>, <i>italic</i>, <a href="...">link</a>'}
+                style={{ ...inp, width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+              />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input value={cpBtn} onChange={(e) => setCpBtn(e.target.value)} placeholder="Button label" style={{ ...inp, flex: '1 1 170px' }} />
+                <input value={cpUrl} onChange={(e) => setCpUrl(e.target.value)} placeholder="https://…" style={{ ...inp, flex: '2 1 240px' }} />
+              </div>
+              {/* APERÇU : ce qui part est définitif et public — on le montre avant, pas après. */}
+              {cpText.trim() && (
+                <div style={{ border: '1px solid rgba(43,227,245,.3)', background: 'rgba(43,227,245,.05)', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{cpText}</div>
+                  {cpBtn.trim() && (
+                    <div style={{ textAlign: 'center', padding: '9px 12px', borderRadius: 9, background: 'rgba(43,227,245,.14)', border: '1px solid rgba(43,227,245,.4)', color: 'var(--cyan)', fontWeight: 700, fontSize: 12.5 }}>{cpBtn}</div>
+                  )}
+                </div>
+              )}
+              <button disabled={busy || !cpText.trim() || !cpChat} onClick={sendChannelPost}
+                style={{ padding: '12px 18px', borderRadius: 11, border: 'none', cursor: cpText.trim() && cpChat ? 'pointer' : 'default', fontWeight: 800, fontSize: 13, letterSpacing: 0.5,
+                  color: '#04223a', background: cpText.trim() && cpChat ? 'linear-gradient(90deg,#2be3f5,#39a0ff)' : 'rgba(130,152,190,.25)' }}>
+                {busy ? 'POSTING…' : '📣 POST TO CHANNEL'}
+              </button>
+              {cpSent && <p style={{ margin: 0, fontSize: 12, color: 'var(--up)' }}>✓ Posted to {cpSent} — the mirror and the IT channel follow within seconds.</p>}
             </section>
 
             {/* RELANCE — les leads coincés dans le funnel, du plus ancien au plus récent : ta liste de closing */}

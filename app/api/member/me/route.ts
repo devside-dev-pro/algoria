@@ -29,6 +29,23 @@ async function queueAction(tgId: number, kind: string, detail: Record<string, un
   await db.from('member_actions').insert({ tg_id: tgId, member_no: data?.[0]?.member_no ?? null, kind, detail: detail as never });
 }
 
+/**
+ * Trace une tentative d'envoi du formulaire de connexion de compte, acceptée ou refusée.
+ *
+ * NÉ D'UNE PANNE DE 24 H (16/08/2026) : une vérification ajoutée la veille refusait TOUTES les
+ * soumissions, et rien ne l'a signalé — la panne a été découverte parce que des membres ont écrit au
+ * support. Le tunnel n'avait aucun capteur.
+ * On ne peut PAS alarmer sur le volume : sur 31 jours, 6 sont naturellement à zéro (et 3 paires de deux
+ * jours consécutifs). Une alarme de volume sonnerait un jour sur cinq, donc serait ignorée. On mesure
+ * donc le TAUX DE REFUS — trois tentatives d'affilée toutes refusées est anormal n'importe quel jour.
+ * Best effort et jamais bloquant : un capteur ne doit jamais pouvoir casser ce qu'il observe.
+ */
+async function logAttempt(action: 'mt5' | 'add_account', ok: boolean, reason?: string): Promise<void> {
+  try {
+    await sdb().from('funnel_attempts').insert({ action, ok, reason: reason ?? null } as never);
+  } catch { /* le capteur se tait plutôt que de gêner */ }
+}
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -144,9 +161,9 @@ export async function POST(req: NextRequest) {
     const password = String(body.password ?? '');
     const fullName = String(body.name ?? '').trim().slice(0, 80);
     const deposit = Math.round(Number(body.deposit ?? 0));
-    if (!login || !server || !password) return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 });
-    if (fullName.length < 3) return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 });
-    if (!Number.isFinite(deposit) || deposit <= 0) return NextResponse.json({ error: 'deposit amount is required' }, { status: 400 });
+    if (!login || !server || !password) { void logAttempt('mt5', false, 'missing_field'); return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 }); }
+    if (fullName.length < 3) { void logAttempt('mt5', false, 'missing_name'); return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 }); }
+    if (!Number.isFinite(deposit) || deposit <= 0) { void logAttempt('mt5', false, 'missing_deposit'); return NextResponse.json({ error: 'deposit amount is required' }, { status: 400 }); }
     // LES DEUX ENGAGEMENTS (14/08) — 43% des demandes de connexion étaient refusées, dont ~74% pour la
     // même raison : un compte ouvert AVANT Algoria, donc jamais rattaché au broker et introuvable dans le
     // dashboard partenaire (souvent refusé sous l'étiquette « invalid account »). Le front pose la
@@ -154,8 +171,10 @@ export async function POST(req: NextRequest) {
     // à l'examen, on sait ce que le membre a affirmé, ce qui rend la conversation possible en cas de refus.
     const ackLink = body.ackLink === true;
     const ackFunded = body.ackFunded === true;
-    if (!ackLink || !ackFunded)
+    if (!ackLink || !ackFunded) {
+      void logAttempt('mt5', false, 'missing_ack');
       return NextResponse.json({ error: 'please confirm both boxes: the account was created through the Algoria link, and it is funded' }, { status: 400 });
+    }
     // Un serveur de démonstration se nomme toujours ainsi — 7% des refus, refusables ici sans attente.
     if (/demo/i.test(server))
       return NextResponse.json({ error: 'that is a demo server — Algoria can only copy a live account with real funds' }, { status: 400 });
@@ -307,10 +326,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `this strategy needs a $${minDepositFor(strat)}+ deposit` }, { status: 400 });
     // MÊMES ENGAGEMENTS QU'À L'INSCRIPTION : un second compte est aussi un compte neuf, et se fait
     // refuser pour les mêmes raisons (ouvert hors de nos liens, ou démo). Voir l'action 'mt5'.
-    if (body.ackLink !== true || body.ackFunded !== true)
+    if (body.ackLink !== true || body.ackFunded !== true) {
+      void logAttempt('add_account', false, 'missing_ack');
       return NextResponse.json({ error: 'please confirm both boxes: the account was opened through the Algoria link, and it is funded' }, { status: 400 });
-    if (/demo/i.test(server))
+    }
+    if (/demo/i.test(server)) {
+      void logAttempt('add_account', false, 'demo_server');
       return NextResponse.json({ error: 'that is a demo server — Algoria can only copy a live account with real funds' }, { status: 400 });
+    }
+    void logAttempt('add_account', true);
     // (vérification des identifiants retirée le 15/08 — voir l'action 'mt5' ci-dessus)
     const raw = db as unknown as { from: (t: string) => any };
     const { data: mrow } = await db.from('members').select('member_no,broker,strategy,tg_username').eq('tg_id', s.tgId).limit(1);

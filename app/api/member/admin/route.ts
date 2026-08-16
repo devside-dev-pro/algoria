@@ -238,7 +238,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number;
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
     setCountry?: { tg_id: number; country: string };
     editMember?: { tg_id: number; field: string; value: string | null };
@@ -893,6 +893,42 @@ export async function POST(req: NextRequest) {
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
     if (!d.ok) return NextResponse.json({ error: `Telegram: ${d.description ?? 'setWebhook failed'}` }, { status: 400 });
     return NextResponse.json({ ok: true, description: d.description ?? 'webhook set' });
+  }
+  // ===== PUBLIER SUR UN CANAL, AVEC UN BOUTON (16/08/2026) =====
+  // Telegram ne permet PAS de poser un bouton inline à la main : un clavier ne peut venir que d'un bot,
+  // par l'API. Mathieu ne pouvait donc pas publier un CTA cliquable — il devait se contenter d'un lien nu
+  // dans le texte, qui convertit nettement moins bien.
+  // On publie sur le CANAL SOURCE et on laisse le fan-out existant faire le reste : le miroir UK et le
+  // pont italien transportent désormais le clavier (voir app/api/telegram/route.ts). Publier sur les trois
+  // canaux depuis ici créerait des DOUBLONS, puisque le fan-out se déclenche sur le post source.
+  if (body.channelPost) {
+    const c = body.channelPost as { chatId?: unknown; text?: unknown; buttonText?: unknown; buttonUrl?: unknown };
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN missing' }, { status: 500 });
+    const chatId = String(c.chatId ?? '').trim();
+    const text = String(c.text ?? '').trim().slice(0, 4000);
+    const btnText = String(c.buttonText ?? '').trim().slice(0, 60);
+    const btnUrl = String(c.buttonUrl ?? '').trim().slice(0, 300);
+    if (!chatId || !text) return NextResponse.json({ error: 'channel and text are required' }, { status: 400 });
+    // Un bouton EXIGE une URL, et une URL https — Telegram rejette le message entier sinon, et le refus
+    // arrive après coup : autant le dire ici plutôt que de laisser un envoi échouer sans explication.
+    if (btnText && !/^https:\/\/\S+$/.test(btnUrl))
+      return NextResponse.json({ error: 'the button needs a valid https:// link' }, { status: 400 });
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+      body: JSON.stringify({
+        chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true,
+        ...(btnText ? { reply_markup: { inline_keyboard: [[{ text: btnText, url: btnUrl }]] } } : {}),
+      }),
+    }).catch(() => null);
+    const d = (await res?.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+    if (!d?.ok) return NextResponse.json({ error: `Telegram refused: ${d?.description ?? 'no response'}` }, { status: 400 });
+    // trace : un post de canal est public et définitif, on garde qui l'a envoyé et quoi
+    await db.from('member_actions').insert({
+      tg_id: s.tgId, member_no: null, kind: 'channel_post', status: 'done', done_by: who,
+      detail: { chat_id: chatId, message_id: d.result?.message_id ?? null, text: text.slice(0, 500), button: btnText || null, url: btnUrl || null } as never,
+    });
+    return NextResponse.json({ ok: true, messageId: d.result?.message_id ?? null });
   }
   if (body.botDm) {
     // 💬 RÉPONDRE VIA LE BOT — depuis le fil BOT ACTIVITY : la réponse part DANS la conversation que la
