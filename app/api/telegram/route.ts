@@ -117,7 +117,10 @@ async function mirrorChannelPost(db: any, post: any, dst: string): Promise<void>
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/${testimonial ? 'forwardMessage' : 'copyMessage'}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({ chat_id: dst, from_chat_id: chatId, message_id: messageId }),
+      // ⚠️ copyMessage N'EMPORTE PAS le clavier inline : sans reply_markup explicite, un post à bouton
+      // arrive NU sur le miroir. On repasse donc celui de la source telle quelle — même libellé, même
+      // URL. (forwardMessage, lui, conserve tout : le champ est ignoré dans ce cas.)
+      body: JSON.stringify({ chat_id: dst, from_chat_id: chatId, message_id: messageId, ...(post?.reply_markup ? { reply_markup: post.reply_markup } : {}) }),
     });
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
     if (d.ok) await finish({ status: 'sent', dst_message_id: d.result?.message_id ?? null });
@@ -215,9 +218,15 @@ async function bridgeChannelPost(db: any, post: any, dst: string): Promise<void>
     // média + légende → copyMessage rejoue le média avec la légende traduite (une seule requête).
     // texte pur → sendMessage.
     const endpoint = caption && !text ? 'copyMessage' : 'sendMessage';
+    // BOUTON CONSERVÉ (16/08) : un CTA publié sur le canal source arrivait sans son bouton côté italien —
+    // le message traduit est un message NEUF, il n'hérite de rien. On rattache le clavier de la source.
+    // Le libellé reste dans la langue d'origine : le traduire demanderait un second appel au modèle pour
+    // deux mots, avec le risque de bavardage qu'on connaît (incident du 11/08). Un CTA court passe très
+    // bien tel quel ; si tu veux un libellé italien, publie ce post-là directement sur le canal IT.
+    const kb = post?.reply_markup ? { reply_markup: post.reply_markup } : {};
     const body = caption && !text
-      ? { chat_id: dst, from_chat_id: chatId, message_id: messageId, caption: translated, parse_mode: 'HTML' }
-      : { chat_id: dst, text: translated, parse_mode: 'HTML', disable_web_page_preview: true };
+      ? { chat_id: dst, from_chat_id: chatId, message_id: messageId, caption: translated, parse_mode: 'HTML', ...kb }
+      : { chat_id: dst, text: translated, parse_mode: 'HTML', disable_web_page_preview: true, ...kb };
     const r = await fetch(`https://api.telegram.org/bot${token}/${endpoint}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
       body: JSON.stringify(body),
