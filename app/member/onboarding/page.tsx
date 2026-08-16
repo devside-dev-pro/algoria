@@ -356,16 +356,8 @@ export default function Onboarding() {
           </div>
 
           <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit) || !ackLink || !ackFunded || demoServer} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded }, 2)} style={ctaMain}>
-            {busy ? t('ob.checking') : t('ob.connectCta')}
+            {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
-          {/* L'ATTENTE EST LONGUE ET C'EST NORMAL : on tente une vraie connexion MetaTrader, asynchrone
-              côté STH — jusqu'à ~30 s. Sans cette phrase, un bouton figé une demi-minute se lit comme un
-              plantage, et la personne recharge la page au milieu du contrôle. */}
-          {busy && (
-            <p style={{ margin: '-6px 0 0', fontSize: 11.5, color: 'var(--cyan)', textAlign: 'center', lineHeight: 1.5 }}>
-              We&rsquo;re logging into your trading account to check it works — this can take up to 30 seconds. Don&rsquo;t close this page.
-            </p>
-          )}
           {(!ackLink || !ackFunded) && !demoServer && (
             <p style={{ margin: '-6px 0 0', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>Tick both boxes above to continue — we check them against the broker.</p>
           )}

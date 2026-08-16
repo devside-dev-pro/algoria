@@ -31,9 +31,7 @@ async function queueAction(tgId: number, kind: string, detail: Record<string, un
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// La VÉRIFICATION DES IDENTIFIANTS à l'inscription sonde STH jusqu'à ~27 s (la connexion MetaTrader est
-// asynchrone côté STH — voir sthVerifyCredentials). Même budget que la route admin, qui fait de même.
-export const maxDuration = 60;
+
 
 // Champs SÛRS renvoyés au client — jamais les identifiants MT5 (même chiffrés).
 const SAFE = 'member_no,tg_username,tg_name,photo_url,status,broker,risk_tier,strategy,lot,onboarding_step,created_at,mt5_login,mt5_server,referral_code,usdt_trc20';
@@ -161,25 +159,18 @@ export async function POST(req: NextRequest) {
     // Un serveur de démonstration se nomme toujours ainsi — 7% des refus, refusables ici sans attente.
     if (/demo/i.test(server))
       return NextResponse.json({ error: 'that is a demo server — Algoria can only copy a live account with real funds' }, { status: 400 });
-    // ===== ON ESSAIE DE SE CONNECTER MAINTENANT, PAS DANS TROIS HEURES =====
-    // Premier motif de refus (48%) : des identifiants qui ne marchent pas — le plus souvent ceux de
-    // l'espace client du broker. L'erreur se découvrait à l'examen, longtemps après que la personne a
-    // fermé l'app. Ici elle l'apprend avec le formulaire encore sous les yeux, et corrige seule.
-    // 'unknown' (STH muet ou non configuré) laisse passer : on ne bloque JAMAIS une inscription valide
-    // pour une panne de notre côté — l'examen humain reste le filet. Voir sthVerifyCredentials.
-    // ⚠️ IDENTITÉ JETABLE `verify-<tg_id>`, JAMAIS l'identifiant STH réel du membre. La vérification
-    // encadre son test par deux disconnect : lancée sur l'identité réelle, elle COUPERAIT la copie d'un
-    // membre déjà live qui repasse par ce formulaire (rien n'interdit à un membre live d'appeler cette
-    // action). Une identité dédiée rend le test inoffensif par construction.
-    const { sthVerifyCredentials } = await import('@/lib/member/sth');
-    const check = await sthVerifyCredentials({ userId: `verify-${s.tgId}`, login, password, server, isMt4: platform === 'mt4' });
-    if (check.verdict === 'bad')
-      return NextResponse.json({
-        error: check.error && /server/i.test(check.error)
-          ? `we couldn't reach that server (${check.error}) — copy the server name exactly as MetaTrader shows it`
-          : "we couldn't log into your trading account with these details. Check three things: the LOGIN is the account number from MetaTrader (not your email), the PASSWORD is your trading password from the broker's email (not your broker website password, and not the read-only investor one), and the SERVER matches exactly.",
-        verifyFailed: true,
-      }, { status: 400 });
+    // ⚠️ VÉRIFICATION DES IDENTIFIANTS RETIRÉE (15/08/2026) — elle bloquait TOUT LE MONDE.
+    // Elle tentait une vraie connexion MetaTrader à l'envoi et refusait le formulaire si le compte
+    // n'était pas joignable en 27 secondes. Résultat en production : 0 inscription en 24 h, contre 5 à 7
+    // par jour la semaine précédente. Deux membres avec des identifiants PARFAITEMENT valides (mot de
+    // passe de l'email d'ouverture, serveur RaiseGlobal-Live) se sont fait refuser en boucle.
+    // La cause était écrite dans notre propre code, et je ne l'ai pas lue : sthConnectAndJoin dit déjà,
+    // à 25 s d'attente, « STH is still connecting — retry CONNECT in 1-2 min ». Autrement dit, l'absence
+    // de pont après 27 secondes ne prouve RIEN — c'est le délai NORMAL de provisioning côté STH. J'ai
+    // construit un refus dur sur un signal que la base de code documentait comme non concluant.
+    // LEÇON : ne jamais bloquer une inscription sur un signal dont on ne maîtrise pas le délai. Si on
+    // veut re-tenter ce contrôle un jour, il doit être ASYNCHRONE et seulement INDICATIF sur la fiche
+    // admin — jamais dans le chemin de l'envoi, jamais bloquant.
     patch.mt5_login = login;
     patch.mt5_server = server;
     patch.mt5_password_enc = encryptSecret(password); // AES-256-GCM — jamais en clair, jamais renvoyé
@@ -195,7 +186,7 @@ export async function POST(req: NextRequest) {
       // verify : 'ok' = STH a réellement joint le compte MetaTrader avec ces identifiants ; 'unknown' =
       // contrôle impossible (STH muet). Affiché sur la carte admin — un compte vérifié ne se refuse plus
       // pour « invalid account », le doute porte alors sur le rattachement ou le dépôt.
-      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ack_link: ackLink, ack_funded: ackFunded, verify: check.verdict, ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ack_link: ackLink, ack_funded: ackFunded, ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
     });
   } else if (body.action === 'strategy') {
     // CHOIX DE STRATÉGIE (remplace le sélecteur de lot — le lot copieur est FIXE 0.01, le levier de risque
@@ -320,17 +311,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'please confirm both boxes: the account was opened through the Algoria link, and it is funded' }, { status: 400 });
     if (/demo/i.test(server))
       return NextResponse.json({ error: 'that is a demo server — Algoria can only copy a live account with real funds' }, { status: 400 });
-    // Même vérification qu'à l'inscription, et même identité JETABLE : ce membre est déjà LIVE, tester
-    // sous son identifiant STH réel couperait la copie de son compte principal.
-    const { sthVerifyCredentials: verifyExtra } = await import('@/lib/member/sth');
-    const checkExtra = await verifyExtra({ userId: `verify-${s.tgId}`, login, password, server, isMt4: platform === 'mt4' });
-    if (checkExtra.verdict === 'bad')
-      return NextResponse.json({
-        error: checkExtra.error && /server/i.test(checkExtra.error)
-          ? `we couldn't reach that server (${checkExtra.error}) — copy the server name exactly as MetaTrader shows it`
-          : "we couldn't log into that trading account. Check the LOGIN (the account number from MetaTrader), the PASSWORD (your trading password from the broker's email — not the website one, not the investor one) and the SERVER name.",
-        verifyFailed: true,
-      }, { status: 400 });
+    // (vérification des identifiants retirée le 15/08 — voir l'action 'mt5' ci-dessus)
     const raw = db as unknown as { from: (t: string) => any };
     const { data: mrow } = await db.from('members').select('member_no,broker,strategy,tg_username').eq('tg_id', s.tgId).limit(1);
     const { data: extras } = (await raw.from('member_accounts').select('account_no,broker,strategy,status').eq('tg_id', s.tgId)) as { data: Array<{ account_no: number; broker: string | null; strategy: number; status: string }> | null };
@@ -354,7 +335,7 @@ export async function POST(req: NextRequest) {
       account_no: accountNo,
       login, server, strategy: strat, lot: '0.01', broker,
       username: mrow?.[0]?.tg_username ?? null,
-      broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ack_link: true, ack_funded: true, verify: checkExtra.verdict,
+      broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ack_link: true, ack_funded: true,
       add_strategy: true, // affichage file : "compte supplémentaire", pas une premières connexion
     });
     const { data: fresh } = (await raw.from('member_accounts').select('account_no,broker,strategy,status,mt5_login,created_at').eq('tg_id', s.tgId).order('account_no', { ascending: true })) as { data: Array<Record<string, unknown>> | null };

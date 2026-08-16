@@ -108,57 +108,17 @@ export async function sthPauseCopy(userId: string): Promise<{ ok: boolean; error
   return r.ok ? { ok: true, error: '' } : { ok: false, error: r.errorMessage };
 }
 
-/**
- * VÉRIFICATION DES IDENTIFIANTS À L'INSCRIPTION (14/08/2026) — le premier motif de refus, et de loin :
- * 20 demandes sur 42 refusées pour « invalid account », presque toujours le mot de passe de l'espace
- * client du broker saisi à la place de celui du compte MetaTrader. Jusqu'ici l'erreur ne se découvrait
- * qu'à l'examen, des heures plus tard, et coûtait un aller-retour au support — souvent le prospect.
- * Ici, la personne l'apprend pendant qu'elle a encore le formulaire sous les yeux.
- *
- * TROIS PIÈGES, tous vérifiés dans le code au-dessus :
- *  1. connect-customer-copier rend la main AVANT que le bridge MetaTrader soit établi. Un connect « réussi »
- *     ne prouve donc RIEN sur les identifiants : la seule preuve est tradingAccountConnected, qu'il faut
- *     aller chercher en sondant. C'est aussi pour ça qu'un mauvais mot de passe se manifeste par un
- *     silence, pas par une erreur — d'où le sondage plutôt qu'une lecture du libellé d'erreur.
- *  2. STH répond « Invalid account » pour un compte DÉJÀ enregistré (incident du 03/08, membre #7). On ne
- *     conclut donc jamais sur le texte de l'erreur : on redemande l'état réel.
- *  3. Le contrôle NE DOIT JAMAIS bloquer une inscription valide à cause de NOTRE infrastructure. Si STH
- *     n'est pas configuré ou ne répond pas, on renvoie 'unknown' et l'inscription passe — l'examen humain
- *     reste le filet. On ne conclut à l'échec que si STH répond correctement ET que le compte refuse de se
- *     connecter : STH joignable + compte injoignable = ce sont bien les identifiants.
- *
- * On DÉCONNECTE toujours à la fin, succès comme échec : ce n'est qu'un test, il ne doit pas consommer une
- * place de licence pour un compte pas encore approuvé (219 personnes en onboarding). L'approbation
- * reconnecte ensuite normalement — sthConnectAndJoin sait repartir d'un utilisateur déconnecté.
- */
-export async function sthVerifyCredentials(o: {
-  userId: string; login: string | number; password: string; server: string; isMt4: boolean;
-}): Promise<{ verdict: 'ok' | 'bad' | 'unknown'; error: string }> {
-  if (!sthReady()) return { verdict: 'unknown', error: '' };
-  try {
-    // repartir propre : d'anciens identifiants mémorisés feraient répondre « already » au connect, et on
-    // testerait alors le compte de la tentative précédente au lieu de celui qu'on vient de saisir.
-    await sthDisconnect(o.userId).catch(() => {});
-    const c = await sthConnectCustomer({ ...o, lots: 0.01 });
-    // Erreur de SERVEUR : verdict immédiat, inutile de sonder 30 secondes un nom de serveur qui n'existe pas.
-    if (!c.ok && /server/i.test(c.errorMessage) && /not found|invalid|unknown/i.test(c.errorMessage))
-      return { verdict: 'bad', error: c.errorMessage };
-    let sthAnswered = false;
-    for (let attempt = 0; attempt < 9; attempt++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const st = await sthStatus(o.userId);
-      if (st.ok) sthAnswered = true;
-      if (st.ok && st.data.tradingAccountConnected === true) return { verdict: 'ok', error: '' };
-    }
-    // STH n'a jamais répondu correctement → c'est NOTRE côté qui est muet, pas le compte du membre.
-    if (!sthAnswered) return { verdict: 'unknown', error: '' };
-    return { verdict: 'bad', error: c.ok ? '' : c.errorMessage };
-  } catch {
-    return { verdict: 'unknown', error: '' }; // toute panne imprévue laisse passer : l'examen tranchera
-  } finally {
-    await sthDisconnect(o.userId).catch(() => {}); // le test ne garde jamais une place de licence
-  }
-}
+// ⚠️ NE PAS RECONSTRUIRE UNE VÉRIFICATION D'IDENTIFIANTS BLOQUANTE À L'INSCRIPTION (leçon du 15/08/2026).
+// Une fonction sthVerifyCredentials a existé ici pendant 24 h : elle tentait un connect puis sondait
+// tradingAccountConnected pendant 27 s, et le formulaire d'inscription REFUSAIT l'envoi si le pont
+// n'était pas monté. Effet en production : 0 inscription en 24 h (5 à 7 par jour la semaine d'avant), et
+// des membres aux identifiants parfaitement valides refusés en boucle.
+// La raison est écrite dix lignes plus bas, dans sthConnectAndJoin : après ~25 s d'attente, le message
+// dit lui-même « STH is still connecting — retry CONNECT in 1-2 min ». L'absence de pont à 27 secondes
+// est donc le cas NORMAL, pas un signe d'identifiants faux. Le provisioning MetaTrader côté STH prend
+// souvent plus longtemps que ce qu'une requête HTTP peut attendre.
+// Si le besoin revient : contrôle ASYNCHRONE après enregistrement, résultat INDICATIF sur la fiche admin,
+// et jamais dans le chemin de l'envoi.
 
 /** Flux complet « brancher un client » : connect PUIS join master (id via env ou auto-découverte si unique).
  *  ORDRE IMPORTANT : get-user-status sur un utilisateur JAMAIS connecté renvoie une liste de masters VIDE
