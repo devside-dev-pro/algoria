@@ -285,6 +285,26 @@ export async function fetchLatestContext(): Promise<{ regime: string; adx: numbe
 }
 
 /** Bulletin de santé d'un edge (sentinelle hebdo) → table edge_health. */
+/**
+ * Le formulaire de connexion de compte refuse-t-il tout le monde ? Renvoie les tentatives des `hours`
+ * dernières heures : total, acceptées, et le motif dominant des refus.
+ *
+ * NÉ D'UNE PANNE DE 24 H (16/08/2026) — une vérification ajoutée la veille refusait TOUTES les
+ * soumissions, découverte seulement parce que des membres ont écrit au support.
+ * On ne surveille PAS le volume : sur 31 jours, 6 sont naturellement à zéro inscription. Une alarme de
+ * volume sonnerait un jour sur cinq et serait ignorée. Le taux de refus, lui, ne dépend pas du trafic.
+ */
+export async function funnelHealth(hours = 6): Promise<{ total: number; ok: number; topReason: string | null }> {
+  const since = new Date(Date.now() - hours * 3600_000).toISOString();
+  const { data } = await (db as unknown as { from: (t: string) => any })
+    .from('funnel_attempts').select('ok,reason').gte('at', since) as { data: Array<{ ok: boolean; reason: string | null }> | null };
+  const rows = data ?? [];
+  const counts = new Map<string, number>();
+  for (const r of rows) if (!r.ok && r.reason) counts.set(r.reason, (counts.get(r.reason) ?? 0) + 1);
+  const topReason = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  return { total: rows.length, ok: rows.filter((r) => r.ok).length, topReason };
+}
+
 export async function recordEdgeHealth(row: { strategy: string; windowDays: number; trades: number; winRate: number | null; profitFactor: number | null; net: number; status: string }) {
   const { error } = await (db as any).from('edge_health').insert({
     strategy: row.strategy, window_days: row.windowDays, trades: row.trades,
