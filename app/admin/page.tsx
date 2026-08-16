@@ -37,6 +37,70 @@ const personalise = (text: string, name?: string | null): string => {
   return /^[\p{L}][\p{L}'-]{1,20}$/u.test(first) ? text.replace(/^Hey!/, `Hey ${first}!`) : text;
 };
 
+// ===== MODÈLES DE CTA POUR LES CANAUX (16/08/2026) =====================================================
+// Écrire un bon CTA devant 2 000 personnes à froid, à chaque fois, c'est le genre de tâche qu'on repousse.
+// Ces modèles pré-remplissent le composeur et restent ENTIÈREMENT modifiables — ce sont des points de
+// départ, pas des textes figés.
+//
+// DEUX FAMILLES, parce que les deux ne servent pas au même moment :
+//   · → APP  : pour ceux qui avanceront seuls. Un lien, ils s'inscrivent, personne n'intervient.
+//   · → TOI  : pour ceux qui ont besoin d'un humain. Ça remplit ta boîte, mais c'est là que se ferment
+//              les dossiers coincés — et sur 288 personnes en attente, la plupart ne bougeront que
+//              si quelqu'un leur parle.
+//
+// ⚠️ Le texte est traduit automatiquement vers l'italien, PAS le libellé du bouton (il resterait
+// anglais). D'où des libellés courts et universels, qui se comprennent dans les deux langues.
+// Le corps se lit en trois secondes : une accroche, une raison d'y aller, rien de plus. Un post de
+// canal qui demande un effort de lecture ne convertit pas.
+// (non exportée : un fichier de page Next ne peut exporter que ses symboles réservés)
+const CTA_TEMPLATES: Array<{ id: string; label: string; target: 'app' | 'mathieu'; text: string; btn: string; url: string }> = [
+  {
+    id: 'results', label: '📈 Résultats du jour → app', target: 'app',
+    text: "📈 <b>Algoria has been trading all day.</b>\n\nEvery trade, every win, every stop — live in the app, at your own copy size. Nothing hidden, nothing rounded up.\n\nSee what your account would have done today 👇",
+    btn: '🚀 OPEN ALGORIA', url: 'https://app.algoria.tech/member',
+  },
+  {
+    id: 'start', label: '⚡ Commencer à copier → wizard', target: 'app',
+    text: "⚡ <b>The AI trades, your account copies. That's the whole thing.</b>\n\nYou keep your money in <i>your own</i> broker account — we never touch it. Withdraw whenever you want. Start from $200.\n\nSetup takes about 5 minutes 👇",
+    btn: '⚡ START COPYING', url: 'https://app.algoria.tech/member/onboarding',
+  },
+  {
+    id: 'install', label: '📲 Installer l\'app → download', target: 'app',
+    text: "📲 <b>Algoria on your home screen.</b>\n\nThe live AI feed, your copying status, and a notification the moment a trade closes green. No App Store, installs in seconds, free forever.",
+    btn: '📲 INSTALL THE APP', url: 'https://app.algoria.tech/download',
+  },
+  {
+    id: 'proof', label: '🎥 Comprendre en 2 min → academy', target: 'app',
+    text: "🎥 <b>New here? Start with this.</b>\n\nTwo minutes to understand exactly what Algoria is, how it trades gold and Bitcoin, and why your money never leaves your own account.",
+    btn: '▶ WATCH THE INTRO', url: 'https://app.algoria.tech/academy',
+  },
+  {
+    id: 'stuck', label: '💬 Bloqué dans ton inscription → toi', target: 'mathieu',
+    text: "💬 <b>Stuck somewhere in your setup?</b>\n\nThe broker, the deposit, the MT5 connection — whatever it is, it takes me two minutes to unblock. Write to me directly, I answer myself.\n\nNo sales pitch. Just tell me where you're stuck 👇",
+    btn: '💬 MESSAGE MATHIEU', url: 'https://t.me/mathieu_algoria',
+  },
+  {
+    id: 'question', label: '💬 Une question ? → toi', target: 'mathieu',
+    text: "💬 <b>Any question about Algoria?</b>\n\nHow the copying works, which broker to pick, how much to start with — ask me. A real human answers, usually within the hour.",
+    btn: '💬 ASK MATHIEU', url: 'https://t.me/mathieu_algoria',
+  },
+  {
+    id: 'call', label: '📞 Réserver un appel → toi', target: 'mathieu',
+    text: "📞 <b>Want to go through it together?</b>\n\nTen minutes on a call and your account is live. I walk you through the broker, the deposit and the connection, step by step.",
+    btn: '📞 BOOK A CALL', url: "https://t.me/mathieu_algoria?text=" + encodeURIComponent("Hey Mathieu! I'd like to book a quick call to activate my Algoria access 📞"),
+  },
+  {
+    id: 'bonus', label: '🎁 Code bonus ALGORIA100 → toi', target: 'mathieu',
+    text: "🎁 <b>100% deposit bonus at RaiseFX — code ALGORIA100.</b>\n\nDeposit $300, the AI trades with $600 of buying power. The bonus is broker trading credit — <i>your</i> deposit stays yours, withdrawable anytime.\n\nWrite to me and I'll set it up with you 👇",
+    btn: '🎁 CLAIM THE BONUS', url: 'https://t.me/mathieu_algoria',
+  },
+  {
+    id: 'referral', label: '💸 Parrainage 10% → app', target: 'app',
+    text: "💸 <b>Bring a friend, earn 10% of what they deposit.</b>\n\nUp to $200 per friend, paid in USDT straight to your wallet. They fund their account, you get paid — and they get the same AI you're running.\n\nYour personal link is in the app 👇",
+    btn: '💸 GET MY LINK', url: 'https://app.algoria.tech/member/profile',
+  },
+];
+
 const SCRIPTS: Record<string, string> = {
   deposited:
     "Hey! Mathieu here, from Algoria. I can see your deposit came through — thank you, and sorry you had to wait.\n\nYour account just isn't connected to the copier yet, so the AI isn't trading for you. That's on us to finish and it takes 2 minutes. Can you confirm the broker and account number you funded, and I'll switch it on right now?",
@@ -1835,6 +1899,27 @@ export default function AdminCRM() {
                 <b> source channel</b>: the UK mirror and the IT channel follow automatically, button included — the
                 Italian text is translated, the button label stays as you write it.
               </p>
+              {/* MODÈLES — deux familles, parce qu'elles ne servent pas au même moment : « → app » pour
+                  ceux qui avanceront seuls, « → toi » pour ceux qui ne bougeront que si un humain leur
+                  parle. Un clic pré-remplit tout, et tout reste modifiable ensuite. */}
+              {(['app', 'mathieu'] as const).map((fam) => (
+                <div key={fam} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <span className="mono" style={{ fontSize: 9, letterSpacing: 1.4, color: 'var(--dim)', fontWeight: 800 }}>
+                    {fam === 'app' ? '→ VERS L’APP · ils avancent seuls' : '→ VERS TOI · ils ont besoin de te parler'}
+                  </span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {CTA_TEMPLATES.filter((t) => t.target === fam).map((t) => (
+                      <button key={t.id} onClick={() => { setCpText(t.text.replace(/\\n/g, '\n')); setCpBtn(t.btn); setCpUrl(t.url); setCpSent(null); }}
+                        style={{ padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                          border: `1px solid ${cpBtn === t.btn ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
+                          background: cpBtn === t.btn ? 'rgba(43,227,245,.08)' : 'transparent',
+                          color: cpBtn === t.btn ? 'var(--cyan)' : 'var(--muted)' }}>
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
               <select value={cpChat} onChange={(e) => setCpChat(e.target.value)} style={{ ...inp, maxWidth: 380 }}>
                 <option value="">Choose the channel…</option>
                 {tgChats.map((c) => (
