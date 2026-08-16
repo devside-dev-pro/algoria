@@ -153,7 +153,7 @@ export default function AdminCRM() {
   const [cpBtn, setCpBtn] = useState('🚀 OPEN ALGORIA');
   const [cpUrl, setCpUrl] = useState('https://app.algoria.tech/member');
   const [cpChat, setCpChat] = useState<string>('');
-  const [cpSent, setCpSent] = useState<string | null>(null);
+  const [cpReport, setCpReport] = useState<Array<{ channel: string; ok: boolean; error?: string }> | null>(null);
   const [runnerLastSeen, setRunnerLastSeen] = useState<number | null>(null); // heartbeat runner (dernière bougie écrite)
   const [legalNames, setLegalNames] = useState<Record<string, string>>({}); // tg_id → nom légal broker (kyc) : LE pont entre les 3 identités
   // comptes SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut + STH id)
@@ -733,15 +733,18 @@ export default function AdminCRM() {
     const btn = cpBtn.trim() ? `\n\n[ ${cpBtn.trim()} ] → ${cpUrl.trim()}` : '\n\n(aucun bouton)';
     if (!window.confirm(`Publier sur « ${label} » ?\n\n${text}${btn}\n\nLe miroir UK et le canal IT suivront automatiquement (bouton compris).`)) return;
     setBusy(true);
-    setCpSent(null);
+    setCpReport(null);
     void fetch('/api/member/admin', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channelPost: { chatId: cpChat, text, buttonText: cpBtn.trim(), buttonUrl: cpUrl.trim() } }),
     })
       .then(async (r) => {
-        const d = (await r.json()) as { ok?: boolean; error?: string };
+        const d = (await r.json()) as { ok?: boolean; error?: string; report?: Array<{ channel: string; ok: boolean; error?: string }> };
+        // Le rapport s'affiche MÊME en cas d'échec : savoir que le miroir est passé mais pas l'italien
+        // vaut infiniment mieux qu'un « erreur » global qui laisse deviner ce qui a été publié.
+        if (d.report) setCpReport(d.report);
         if (d.error) window.alert(`⚠ ${d.error}`);
-        else { setCpSent(label); setCpText(''); }
+        else setCpText('');
       })
       .finally(() => setBusy(false));
   };
@@ -1895,9 +1898,9 @@ export default function AdminCRM() {
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
               <h2 style={secH}>📣 POST A CTA TO A CHANNEL — with a real button</h2>
               <p style={dimP}>
-                Telegram only lets a <b>bot</b> attach a button, which is why you can&rsquo;t do it by hand. Post to the
-                <b> source channel</b>: the UK mirror and the IT channel follow automatically, button included — the
-                Italian text is translated, the button label stays as you write it.
+                Telegram only lets a <b>bot</b> attach a button, which is why you can&rsquo;t do it by hand. Pick the
+                <b> source channel</b> and this posts to <b>all three</b> in one go: source and UK mirror as written,
+                IT channel translated — same button everywhere. The button label itself stays in English, as you type it.
               </p>
               {/* MODÈLES — deux familles, parce qu'elles ne servent pas au même moment : « → app » pour
                   ceux qui avanceront seuls, « → toi » pour ceux qui ne bougeront que si un humain leur
@@ -1909,7 +1912,7 @@ export default function AdminCRM() {
                   </span>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {CTA_TEMPLATES.filter((t) => t.target === fam).map((t) => (
-                      <button key={t.id} onClick={() => { setCpText(t.text.replace(/\\n/g, '\n')); setCpBtn(t.btn); setCpUrl(t.url); setCpSent(null); }}
+                      <button key={t.id} onClick={() => { setCpText(t.text.replace(/\\n/g, '\n')); setCpBtn(t.btn); setCpUrl(t.url); setCpReport(null); }}
                         style={{ padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700,
                           border: `1px solid ${cpBtn === t.btn ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
                           background: cpBtn === t.btn ? 'rgba(43,227,245,.08)' : 'transparent',
@@ -1949,7 +1952,15 @@ export default function AdminCRM() {
                   color: '#04223a', background: cpText.trim() && cpChat ? 'linear-gradient(90deg,#2be3f5,#39a0ff)' : 'rgba(130,152,190,.25)' }}>
                 {busy ? 'POSTING…' : '📣 POST TO CHANNEL'}
               </button>
-              {cpSent && <p style={{ margin: 0, fontSize: 12, color: 'var(--up)' }}>✓ Posted to {cpSent} — the mirror and the IT channel follow within seconds.</p>}
+              {cpReport && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {cpReport.map((r) => (
+                    <p key={r.channel} style={{ margin: 0, fontSize: 12, color: r.ok ? 'var(--up)' : 'rgba(210,150,165,.9)' }}>
+                      {r.ok ? '✓' : '✗'} {r.channel}{r.error ? ` — ${r.error}` : ''}
+                    </p>
+                  ))}
+                </div>
+              )}
             </section>
 
             {/* RELANCE — les leads coincés dans le funnel, du plus ancien au plus récent : ta liste de closing */}
