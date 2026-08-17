@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker, bestStrategyFor, LoadFailed, useUILocale, SUPPORT_TG, Check } from '../ui';
 import { tgHref } from '@/lib/telegram';
 import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/member/brokers';
+import { brokerAttachMessage } from '@/lib/member/ui-text';
 import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 
@@ -80,6 +81,13 @@ export default function Onboarding() {
   // ORIGINE DU COMPTE + les deux engagements — voir le bloc « Where does this account come from? » :
   // 74% des refus de connexion venaient d'un compte ouvert avant Algoria, donc invisible côté broker.
   const [origin, setOrigin] = useState<'new' | 'existing' | null>(null);
+  // COMPTE PRÉEXISTANT : de quoi composer le message de rattachement à envoyer au support du broker.
+  const [exBroker, setExBroker] = useState('');
+  const [exAccount, setExAccount] = useState('');
+  const [exCopied, setExCopied] = useState(false);
+  const exEntry = BROKERS.find((b) => b.key === exBroker);
+  const exAffiliate = exEntry?.affiliateId ?? null;
+  const exMessage = exEntry && exAffiliate ? brokerAttachMessage(exEntry.name, exAffiliate, exAccount) : '';
   const [ackLink, setAckLink] = useState(false);
   const [ackFunded, setAckFunded] = useState(false);
   useEffect(() => {
@@ -242,19 +250,47 @@ export default function Onboarding() {
             </div>
           </div>
 
-          {/* COMPTE PRÉEXISTANT → on ne laisse PAS soumettre. Ce compte n'est pas rattaché à Algoria :
-              il ne se trouve pas dans le dashboard partenaire, la copie ne peut pas être activée, et la
-              demande finirait refusée après plusieurs heures d'attente. Deux issues, tout de suite. */}
+          {/* COMPTE PRÉEXISTANT → LA DÉMARCHE, PAS UN RENVOI (17/08/2026).
+              Première version : « écris à Mathieu d'abord ». Mauvais destinataire. Mathieu ne peut que
+              CONSTATER que le compte n'apparaît pas dans le dashboard partenaire — il ne peut pas le
+              rattacher. Seul le TITULAIRE peut le demander au support de son broker. Le renvoyer vers
+              Mathieu ajoutait donc plusieurs jours d'aller-retour AVANT que la vraie démarche commence :
+              le membre écrit, Mathieu vérifie, constate, renvoie vers le support, et là seulement le
+              délai broker démarre. On donne donc le message tout prêt, avec le numéro d'affilié — la
+              démarche part le jour même, en parallèle du reste. */}
           {origin === 'existing' && (
-            <div className="cardIn" style={{ border: '1px solid rgba(245,194,74,.5)', background: 'rgba(245,194,74,.07)', borderRadius: 12, padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 11 }}>
+            <div className="cardIn" style={{ border: '1px solid rgba(245,194,74,.5)', background: 'rgba(245,194,74,.07)', borderRadius: 12, padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}>
-                <b>An account opened before Algoria can&rsquo;t be connected as-is.</b> Brokers only link an account to us when it&rsquo;s created through our link — yours won&rsquo;t show up on our side, so we can&rsquo;t switch the copying on.
-                <br /><span style={{ color: 'var(--muted)' }}>It&rsquo;s not lost — most brokers can re-attach an existing account, or you open a fresh one in two minutes. Message Mathieu, he sorts this out every day.</span>
+                <b>{t('ob.exist.title')}</b> <span style={{ color: 'var(--muted)' }}>{t('ob.exist.body')}</span>
+                <br />{t('ob.exist.good')}
               </div>
-              <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '13px 16px', borderRadius: 12, textDecoration: 'none', fontWeight: 800, fontSize: 13.5, color: '#04223a', background: 'linear-gradient(90deg,#f5c24a,#e0a52e)' }}>
-                💬 MESSAGE MATHIEU FIRST — he&rsquo;ll check your account
-              </a>
-              <button onClick={() => { setOrigin(null); setStep(0); }} style={linkBtn}>← or open a new account with a partner broker</button>
+              <label style={lbl}>{t('ob.exist.which')}
+                <select value={exBroker} onChange={(e) => { setExBroker(e.target.value); setExCopied(false); }} style={inp}>
+                  <option value="">{t('ob.choose')}</option>
+                  {selectableBrokers().map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
+                </select>
+              </label>
+              {/* broker hors partenaires : il n'y a aucun numéro d'affilié à rattacher, donc aucune
+                  démarche à faire — c'est le seul cas où Mathieu reste le bon interlocuteur. */}
+              {exBroker && !exAffiliate && (
+                <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--muted)' }}>{t('ob.exist.notPartner')}</div>
+              )}
+              {exAffiliate && (<>
+                <label style={lbl}>{t('ob.exist.acc')}
+                  <input value={exAccount} onChange={(e) => { setExAccount(e.target.value.replace(/\D/g, '').slice(0, 12)); setExCopied(false); }}
+                    inputMode="numeric" placeholder={t('ob.exist.accPh')} style={inp} />
+                </label>
+                <div style={{ fontSize: 11, letterSpacing: 1, color: 'var(--dim)', textTransform: 'uppercase' }}>{t('ob.exist.send')}</div>
+                <pre style={{ margin: 0, padding: '11px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{exMessage}</pre>
+                <button
+                  onClick={() => { void navigator.clipboard.writeText(exMessage).then(() => setExCopied(true)).catch(() => setExCopied(false)); }}
+                  style={{ ...ctaGold, border: 'none', cursor: 'pointer', ...(exCopied ? { background: 'linear-gradient(90deg,#22e0a6,#12b98a)' } : {}) }}>
+                  {exCopied ? t('ob.exist.copied') : t('ob.exist.copy')}
+                </button>
+                <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--muted)' }}>{t('ob.exist.after')}</div>
+              </>)}
+              <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--dim)', textDecoration: 'underline' }}>{t('ob.exist.ask')}</a>
+              <button onClick={() => { setOrigin(null); setStep(0); }} style={linkBtn}>{t('ob.exist.newInstead')}</button>
             </div>
           )}
 

@@ -155,7 +155,55 @@ export const UI: Dict = {
   'status.live': { en: 'LIVE', it: 'ATTIVO' },
   'status.paused': { en: 'PAUSED', it: 'IN PAUSA' },
   'support.ask': { en: 'A question? Message us', it: 'Una domanda? Scrivici' },
+  // ===== COMPTE PRÉEXISTANT — LA DÉMARCHE QUE SEUL LE TITULAIRE PEUT FAIRE (17/08/2026) ==============
+  // Avant, cet écran disait « écris à Mathieu d'abord ». C'était le mauvais destinataire : Mathieu ne
+  // peut que CONSTATER que le compte n'apparaît pas chez le partenaire, il ne peut pas le rattacher.
+  // Seul le titulaire peut le demander au support de son broker. Le renvoyer vers Mathieu ajoutait donc
+  // un aller-retour de plusieurs jours avant même que la vraie démarche commence.
+  'ob.exist.title': { en: 'An account opened before Algoria has to be attached first.', it: 'Un conto aperto prima di Algoria va prima collegato.' },
+  'ob.exist.body': {
+    en: 'Your broker only links an account to us when it was created through our link. Yours wasn’t, so it doesn’t show up on our side and we can’t switch the copying on — even if you already funded it.',
+    it: 'Il tuo broker collega un conto a noi solo se è stato aperto dal nostro link. Il tuo non lo è stato, quindi non compare dalla nostra parte e non possiamo attivare la copia — anche se lo hai già finanziato.',
+  },
+  'ob.exist.good': {
+    en: 'Good news: your broker can attach it. Only you can ask them — send them the message below, it takes two minutes.',
+    it: 'La buona notizia: il tuo broker può collegarlo. Solo tu puoi chiederlo — invia loro il messaggio qui sotto, sono due minuti.',
+  },
+  'ob.exist.which': { en: 'Which broker is this account with?', it: 'Con quale broker è questo conto?' },
+  'ob.exist.acc': { en: 'Your account number at that broker', it: 'Il numero del tuo conto presso quel broker' },
+  'ob.exist.accPh': { en: 'e.g. 29011666', it: 'es. 29011666' },
+  'ob.exist.send': { en: 'Send this to your broker’s support (live chat or email):', it: 'Invia questo al supporto del tuo broker (chat o email):' },
+  'ob.exist.copy': { en: '📋 COPY THE MESSAGE', it: '📋 COPIA IL MESSAGGIO' },
+  'ob.exist.copied': { en: '✓ COPIED — now paste it to your broker', it: '✓ COPIATO — ora incollalo al tuo broker' },
+  'ob.exist.after': {
+    en: 'They usually confirm within a few days. Once they do, come back here and connect your account — nothing else to redo.',
+    it: 'Di solito confermano in pochi giorni. Quando lo fanno, torna qui e collega il tuo conto — niente altro da rifare.',
+  },
+  'ob.exist.notPartner': {
+    en: 'That broker isn’t one of our partners, so there’s nothing to attach. Message Mathieu — residents of some countries pay for access directly and keep their own broker.',
+    it: 'Quel broker non è tra i nostri partner, quindi non c’è nulla da collegare. Scrivi a Mathieu — i residenti di alcuni paesi pagano l’accesso direttamente e tengono il proprio broker.',
+  },
+  'ob.exist.newInstead': { en: '← or open a new account with a partner broker (instant)', it: '← oppure apri un nuovo conto con un broker partner (immediato)' },
+  'ob.exist.ask': { en: '💬 Ask Mathieu if you’re stuck', it: '💬 Chiedi a Mathieu se sei bloccato' },
 };
+
+/** Message que le MEMBRE envoie au support de son broker pour faire rattacher un compte préexistant.
+ *  Écrit à la première personne, court, et il contient les deux seules choses que le support demande :
+ *  le numéro de compte et l'identifiant d'affilié à rattacher. Volontairement en anglais quelle que soit
+ *  la langue de l'app : les supports brokers répondent en anglais, et un message en italien ferait
+ *  repartir un aller-retour de traduction. */
+export function brokerAttachMessage(brokerName: string, affiliateId: string, accountNo: string): string {
+  return [
+    `Hello,`,
+    ``,
+    `I already have a live account with ${brokerName} (account number: ${accountNo || '________'}).`,
+    ``,
+    `I would like this account to be attached to your partner/IB with the affiliate ID ${affiliateId} (Algoria).`,
+    `Could you please link my account to that partner ID?`,
+    ``,
+    `Thank you.`,
+  ].join('\n');
+}
 
 /** Traduit une clé. Clé inconnue → la clé elle-même (visible en dev, jamais vide en prod). */
 export function tr(locale: Locale, key: string): string {
