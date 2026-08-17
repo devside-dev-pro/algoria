@@ -407,6 +407,31 @@ export async function POST(req: Request) {
     }
   }
 
+  // ATTRIBUTION PUBLICITAIRE : /start <tag> (deep-link de pub, ex. t.me/<bot>?start=ad_sa).
+  //
+  // POURQUOI ICI ET PAS PAR COOKIE : le cookie alg_src du middleware ne se pose que sur un clic UTM vers
+  // algoria.tech, or les pubs pointent vers le CANAL Telegram — le prospect ne touche jamais notre site
+  // avant d'être inscrit. Résultat mesuré le 17/08 : members.source vide sur les 516 fiches, alors que
+  // 1 231 $/semaine étaient répartis sur cinq sets de pub sans savoir lequel produit des membres financés.
+  //
+  // ⚠️ CE BLOC NE TOUCHE PAS AU LOGIN. Le login est /start lg_<code> et vit dans son propre bloc au-dessus,
+  // avec sa propre expression régulière, inchangée. Ici on EXCLUT explicitement le préfixe lg_ : même si
+  // les deux motifs ne peuvent pas se recouper (lg_ exige 16 à 64 caractères), l'exclusion est écrite en
+  // clair pour que personne — moi compris — ne puisse élargir ce motif un jour et avaler un code de
+  // connexion. Aucune écriture, aucune lecture, aucun message partagé avec le chemin de connexion.
+  //
+  // PREMIER CONTACT GAGNE : la clé primaire sur tg_id sert de verrou. On ignore l'erreur de doublon —
+  // quelqu'un qui reclique une autre pub garde son origine d'origine, comme referred_by.
+  // SILENCIEUX : aucun message envoyé. Un capteur d'attribution n'a rien à dire au prospect, et le DM
+  // d'accueil part déjà sur la demande d'adhésion au canal (sendJoinDm).
+  const adPayload = typeof msg?.text === 'string' ? msg.text.trim().match(/^\/start\s+(?!lg_)([a-z0-9][a-z0-9_:-]{1,39})$/i) : null;
+  if (db && adPayload && msg?.from?.id) {
+    try {
+      await (db as any).from('acquisition_sources')
+        .insert({ tg_id: Number(msg.from.id), source: adPayload[1].toLowerCase() });
+    } catch { /* doublon = premier contact déjà enregistré : c'est le comportement voulu */ }
+  }
+
   // /code — DONNER UN CODE À 6 CHIFFRES à la demande. Indispensable pour l'app ajoutée à l'écran d'accueil :
   // son stockage est séparé de celui du navigateur, donc ni le polling ni le bouton ne l'atteignent, et la
   // personne tourne en boucle entre l'app et Telegram (signalé par un prospect le 13/08). Six chiffres se
