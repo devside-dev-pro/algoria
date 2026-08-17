@@ -233,6 +233,7 @@ export async function POST(req: NextRequest) {
     add?: string; remove?: string; done?: string; reveal?: string; liveAlert?: boolean;
     confirmCommission?: string; cancelCommission?: string; payoutPaid?: string; payoutReject?: string; reason?: string; tx?: string;
     rejectConnect?: string;
+    waitBroker?: string; // carte bloquée chez le broker (rattachement affilié) — bascule, voir plus bas
     addDeposit?: { tg_id: number; broker?: string; amount: number; commission?: number; date?: string; note?: string };
     updateDeposit?: { id: string; amount?: number; commission?: number; comStatus?: string; note?: string; broker?: string; date?: string; bookedYm?: string | null };
     deleteDeposit?: string;
@@ -371,6 +372,33 @@ export async function POST(req: NextRequest) {
     const { error } = await db.from('member_actions').delete().eq('id', body.deleteDeposit).eq('kind', 'deposit');
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
+  }
+
+  // ===== EN ATTENTE DU BROKER (17/08/2026) ==============================================================
+  // Un cas fréquent et lent : la personne avait DÉJÀ un compte chez le broker, a déposé dessus, mais son
+  // compte n'est pas rattaché à notre numéro d'affilié — il n'apparaît donc pas dans le dashboard
+  // partenaire. Seul le TITULAIRE peut demander le rattachement au support du broker. Le délai n'est ni
+  // celui du membre ni le nôtre : il est chez le broker, et il dure des jours.
+  //
+  // La carte doit RESTER en attente (le travail n'est pas fait), mais elle ne doit plus se lire comme
+  // « oubliée ». Sans cet état, une carte bloquée depuis cinq jours est indistinguable d'une carte jamais
+  // regardée : la file perd son sens, et la surveillance a alerté Mathieu sur une carte qu'il avait déjà
+  // traitée. On marque donc l'attente dans `detail` — pas de nouveau statut, pas de migration, et la carte
+  // continue d'offrir CONNECT et REJECT quand la réponse du broker arrive.
+  if (body.waitBroker) {
+    const { data: rows } = await db.from('member_actions').select('*').eq('id', body.waitBroker).eq('status', 'pending').limit(1);
+    const act = rows?.[0];
+    if (!act) return NextResponse.json({ error: 'card not found (already processed?)' }, { status: 404 });
+    const cur = (act.detail as Record<string, unknown> | null) ?? {};
+    // second appel sur une carte déjà marquée = on lève l'attente (le broker a répondu)
+    const already = (cur as { waiting_broker?: unknown }).waiting_broker != null;
+    const note = String(body.reason ?? '').slice(0, 200);
+    const next = { ...cur };
+    if (already) delete (next as { waiting_broker?: unknown }).waiting_broker;
+    else (next as { waiting_broker?: unknown }).waiting_broker = { since: new Date().toISOString(), by: who, note: note || null };
+    const { error } = await db.from('member_actions').update({ detail: next as never }).eq('id', act.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, waiting: !already });
   }
 
   // ===== REFUSER une demande de connexion (vérification broker échouée) — SANS bloquer le membre :

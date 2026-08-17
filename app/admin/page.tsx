@@ -319,6 +319,17 @@ export default function AdminCRM() {
   const rejectPayout = (id: string) => { const reason = window.prompt('Reject reason (shown to the member):'); if (reason !== null) post({ payoutReject: id, reason }); };
   // refuser une CONNEXION (vérification broker échouée) : le membre repasse en onboarding avec la raison — jamais bloqué
   const rejectConnect = (id: string) => { const reason = window.prompt('Decline reason (shown to the member, e.g. "no deposit found under this name"):'); if (reason !== null && reason.trim()) post({ rejectConnect: id, reason }); };
+  // EN ATTENTE DU BROKER — le cas « compte préexistant non rattaché à notre numéro d'affilié » : il
+  // n'apparaît pas dans le dashboard partenaire, et seul le titulaire peut demander le rattachement au
+  // support du broker. Le délai est chez le broker, pas chez nous. Marquer l'attente évite que la carte se
+  // lise comme oubliée — et que la surveillance alerte sur un dossier déjà traité. Deuxième clic = attente
+  // levée. Rien n'est envoyé au membre : ce marquage est une note interne, pas une décision.
+  const waitBroker = (a: Action) => {
+    const waiting = a.detail?.waiting_broker != null;
+    if (waiting) { if (window.confirm('Broker replied — clear the “waiting on broker” flag?')) post({ waitBroker: a.id }); return; }
+    const note = window.prompt('⏳ Waiting on the broker to attach this account to your affiliate ID.\n\nOptional note (e.g. "support ticket opened 17/08, member contacted them"):', '');
+    if (note !== null) post({ waitBroker: a.id, reason: note });
+  };
   const liveAlert = () => { if (window.confirm('Send "🔴 ALGORIA IS LIVE" to every subscribed member?')) post({ liveAlert: true }); };
   // révéler les identifiants d'un membre À TOUT MOMENT (déchiffrés côté serveur, tracés en timeline)
   const showCreds = (tgId: number) => {
@@ -825,7 +836,14 @@ export default function AdminCRM() {
   // résumé d'une action pour la timeline de la fiche — chaque kind a sa ligne parlante
   const actSummary = (a: Action) => {
     const d = (a.detail ?? {}) as Record<string, unknown>;
-    if (a.kind === 'connect') return `MT5 ${String(d.login ?? '?')} @ ${String(d.server ?? '?')} · lot ${String(d.lot ?? '?')}${d.reject_reason ? ` · ✗ ${String(d.reject_reason)}` : ''}`;
+    if (a.kind === 'connect') {
+      // l'attente broker se lit SUR la carte, avec son ancienneté : c'est ce qui distingue « bloqué chez le
+      // broker depuis 5 jours » de « jamais regardé depuis 5 jours ».
+      const w = d.waiting_broker as { since?: string; note?: string | null } | undefined;
+      const days = w?.since ? Math.floor((Date.now() - Date.parse(w.since)) / 86_400_000) : null;
+      const wait = w ? ` · ⏳ waiting on broker${days ? ` ${days}d` : ''}${w.note ? ` (${w.note})` : ''}` : '';
+      return `MT5 ${String(d.login ?? '?')} @ ${String(d.server ?? '?')} · lot ${String(d.lot ?? '?')}${d.reject_reason ? ` · ✗ ${String(d.reject_reason)}` : ''}${wait}`;
+    }
     if (a.kind === 'kyc') return `${String(d.broker_name ?? '?')} · declared $${String(d.declared_deposit ?? '?')}`;
     if (a.kind === 'risk_change') return `→ ${String(d.to ?? '?')} (lot ${String(d.lot ?? '?')})`;
     if (a.kind === 'deposit') return `$${Number(d.amount_usd ?? 0)} deposited · com $${Number(d.commission_usd ?? 0)} (${String(d.commission_status ?? 'pending')})`;
@@ -1405,6 +1423,9 @@ export default function AdminCRM() {
                     <button disabled={busy} onClick={() => moveViaSth(a.id)} title="move this member's receiver to their new strategy's master via the STH API (API-connected members only — manually-added receivers must be moved in the STH dashboard)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔀 MOVE (STH)</button>
                   )}
                   <button disabled={busy} onClick={() => post({ done: a.id }, () => { setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }); if (a.kind === 'connect') recordDepositAfterConnect(a); })} title="mark done manually (if you connected the account in STH yourself) — connect cards also offer to log the deposit" style={okBtn}>✓ DONE</button>
+                  {a.kind === 'connect' && (
+                    <button disabled={busy} onClick={() => waitBroker(a)} title="account not attached to your affiliate ID — the member must ask the broker's support to attach it. Marks the card as blocked upstream so it stops reading as forgotten. Click again once the broker replied." style={a.detail?.waiting_broker ? { ...goldBtn, color: 'var(--gold)', fontWeight: 800 } : miniBtn}>{a.detail?.waiting_broker ? '⏳ WAITING' : '⏳ BROKER'}</button>
+                  )}
                   {a.kind === 'connect' && (
                     <button disabled={busy} onClick={() => rejectConnect(a.id)} title="verification failed → member goes back to the wizard with your reason, can resubmit" style={dangerBtn}>REJECT</button>
                   )}
