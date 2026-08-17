@@ -131,17 +131,59 @@ export async function consumeLoginCode(
   // ATTRIBUTION : canal d'origine (cookie alg_src posé par le middleware au premier clic UTM) — figé à la
   // CRÉATION uniquement, comme referred_by. Absent = organique/cross-device (attribution partielle assumée).
   const srcCookie = (req.cookies.get('alg_src')?.value ?? '').toLowerCase().slice(0, 60);
-  const source = /^[a-z0-9:_-]{2,60}$/.test(srcCookie) ? srcCookie : null;
+  let source = /^[a-z0-9:_-]{2,60}$/.test(srcCookie) ? srcCookie : null;
+  // TROIS SECOURS AU COOKIE (17/08). Le cookie seul n'a jamais rien rempli : 0 fiche sur 516 avait une
+  // origine, parce qu'il exige un clic UTM vers algoria.tech alors que les pubs pointent vers le CANAL
+  // Telegram — le prospect arrive sur l'app par le lien du bot, sans jamais passer par notre site.
+  //   1. acquisition_sources : le tag d'un deep-link de pub (/start ad_sa), capté par le webhook du bot.
+  //   2. invite_name : le NOM du lien d'invitation du canal, déjà enregistré sur chaque demande d'adhésion.
+  //      Gratuit et rétroactif — il suffit de nommer un lien par set de pub dans Telegram.
+  //   3. geo:<pays> lu sur l'en-tête Vercel — le seul qui ne demande RIEN à personne (voir plus bas).
+  // Ordre = du plus précis au plus large : une déduction ne doit jamais écraser une mesure. Comme
+  // referred_by, l'origine est figée à la CRÉATION de la fiche et ne bouge plus ensuite.
+  if (!source) {
+    const { data: acq } = (await (db as any)
+      .from('acquisition_sources').select('source').eq('tg_id', row.tg_id).limit(1)) as { data: Array<{ source: string }> | null };
+    const tag = (acq?.[0]?.source ?? '').toLowerCase();
+    if (/^[a-z0-9:_-]{2,60}$/.test(tag)) source = tag;
+  }
 
   // MARCHÉ (01/08) : la langue vient du canal par lequel la personne est arrivée. On la retrouve via sa
   // demande d'adhésion la plus récente — c'est le seul lien fiable entre un compte et son canal d'origine.
+  // invite_name est lu dans LA MÊME requête (secours d'attribution n°2) : la page de connexion est le
+  // chemin le plus sensible de l'app, on n'y ajoute pas un aller-retour en base pour une statistique.
   const { data: jr } = (await (db as any)
     .from('telegram_joins')
-    .select('chat_id')
+    .select('chat_id,invite_name')
     .eq('user_id', row.tg_id)
     .order('joined_at', { ascending: false })
-    .limit(1)) as { data: Array<{ chat_id: number | null }> | null };
-  const locale = localeForChat(jr?.[0]?.chat_id);
+    .limit(20)) as { data: Array<{ chat_id: number | null; invite_name: string | null }> | null };
+  const locale = localeForChat(jr?.[0]?.chat_id); // le plus RÉCENT — sémantique inchangée
+  if (!source && jr?.length) {
+    // le plus ANCIEN nommé : l'attribution suit « premier contact gagne », à l'inverse de la langue.
+    // Le nom du lien est saisi à la main dans Telegram (« Pub mcy », « Algoria.tech ») — on le normalise
+    // pour qu'il tienne dans le même format que les tags de pub : minuscules, tirets, rien d'autre.
+    for (let i = jr.length - 1; i >= 0; i--) {
+      const slug = (jr[i].invite_name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+      if (slug.length >= 2) { source = slug; break; }
+    }
+  }
+  // SECOURS N°3, LE PAYS (17/08) — celui qui marche sans la coopération de personne.
+  //
+  // Les trois voies précédentes exigent que quelqu'un pose un paramètre ou nomme un lien. Or les pubs sont
+  // gérées par un media buyer externe, et l'entonnoir amont fabrique un lien d'invitation à usage unique
+  // PAR VISITEUR (569 liens distincts pour 613 arrivées sur une semaine, un seul canal) : ni invite_name
+  // ni chat_id ne peuvent donc séparer les sets de pub.
+  // Mais chaque set de pub EST un pays — SA, NZ, AU, UK, UAE. Le pays d'origine de la requête suffit donc
+  // à attribuer, et Vercel le fournit gratuitement sur chaque requête. Aucune dépendance externe, rien à
+  // demander au media buyer, rien à changer dans les créas.
+  // LIMITE ASSUMÉE : un VPN fausse la lecture (une minorité chez des traders, mais pas zéro), et le pays
+  // reste un PROXY du set de pub, pas le set lui-même. Le préfixe geo: le dit explicitement pour que
+  // personne ne confonde plus tard une déduction avec une mesure.
+  if (!source) {
+    const cc = (req.headers.get('x-vercel-ip-country') ?? '').toLowerCase();
+    if (/^[a-z]{2}$/.test(cc)) source = `geo:${cc}`;
+  }
 
   const patch = { tg_username: row.tg_username, tg_name: row.tg_name, ...(row.photo_url ? { photo_url: row.photo_url } : {}), updated_at: new Date().toISOString() };
   const { data: existing } = await (db as any).from('members').select('id,locale_chosen_at').eq('tg_id', row.tg_id).limit(1);
