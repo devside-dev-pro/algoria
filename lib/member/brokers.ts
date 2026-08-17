@@ -23,6 +23,12 @@ export interface Broker {
   // une saisie libre du nom du broker et du serveur. La connexion au copieur se fait à la main : le nom
   // exact du serveur MT ne s'invente pas, et une erreur de frappe côté membre bloquerait la copie.
   nonPartner?: boolean;
+  // NUMÉRO D'AFFILIÉ ALGORIA chez ce broker — le `bta=` du lien de parrainage, confirmé par Mathieu le
+  // 17/08 comme étant bien l'identifiant à citer. Il sert à UNE chose : le membre qui avait déjà un compte
+  // chez ce broker doit demander LUI-MÊME au support de le rattacher à ce numéro. Personne d'autre ne peut
+  // le faire — ni nous, ni le support sans la demande du titulaire — et sans rattachement le compte reste
+  // invisible dans le dashboard partenaire, donc incommissionnable et impossible à valider.
+  affiliateId?: string;
   // RETIRÉ DE LA BOUCLE (10/08/2026, décision Mathieu) : le partenariat s'arrête. Un broker retiré
   // DISPARAÎT de tout endroit où un client CHOISIT (étape « ouvre ton compte », menu broker de
   // l'onboarding, ajout d'un second compte, ordres de mise en avant) — plus aucun nouveau compte ne
@@ -40,20 +46,21 @@ export const BROKERS: Broker[] = [
     name: 'RaiseFX',
     url: 'https://partners.raisefx.com/visit/?bta=168726&brand=raisefx&afp=ALGORIA',
     featured: true,
+    affiliateId: '168726',
     note: "Algoria's own broker — the exact same spreads as the AI you watch live.",
     servers: ['RaiseGlobal-Live'], // société "RaiseGlobal"
     bonus: { code: 'ALGORIA100', pct: 100 }, // 100% de bonus de dépôt — confirmé RaiseFX 27/07/2026
   },
-  { key: 'vtmarkets', name: 'VT Markets', url: 'https://go.vtaffiliates.com/visit/?bta=35824&brand=vt', servers: ['VTMarkets-Live', 'VTMarkets-Live 2', 'VTMarkets-Live 3', 'VTMarkets-Live 5', 'VTMarkets-Live 6', 'VTMarkets-Live 7', 'VTMarkets-Live 8'] },
+  { key: 'vtmarkets', name: 'VT Markets', url: 'https://go.vtaffiliates.com/visit/?bta=35824&brand=vt', affiliateId: '35824', servers: ['VTMarkets-Live', 'VTMarkets-Live 2', 'VTMarkets-Live 3', 'VTMarkets-Live 5', 'VTMarkets-Live 6', 'VTMarkets-Live 7', 'VTMarkets-Live 8'] },
   // PU Prime — attention : « PUPrime-Live2 » (sans espace) ET « PUPrime-Live 2 » (avec espace) sont DEUX serveurs distincts.
-  { key: 'puprime', name: 'PU Prime', url: 'https://go.puprime.partners/visit/?bta=35491&brand=pu&campaign=230205&afp=ALGORIA', servers: ['PUPrime-Live', 'PUPrime-Live 2', 'PUPrime-Live2', 'PUPrime-Live 4', 'PUPrime-Live 5', 'PUPrime-Live 6', 'PUPrime-Live 7'] },
+  { key: 'puprime', name: 'PU Prime', url: 'https://go.puprime.partners/visit/?bta=35491&brand=pu&campaign=230205&afp=ALGORIA', affiliateId: '35491', servers: ['PUPrime-Live', 'PUPrime-Live 2', 'PUPrime-Live2', 'PUPrime-Live 4', 'PUPrime-Live 5', 'PUPrime-Live 6', 'PUPrime-Live 7'] },
   // FXCESS — RETIRÉ le 10/08/2026 : le broker arrête et s'auto-remplace par TradingSphere, sa seconde
   // société (déjà partenaire ci-dessous). Lien d'affiliation VIDÉ : même si un chemin oublié affichait
   // encore la carte, il n'y aurait rien à cliquer. 5 membres étaient chez eux au moment du retrait
   // (2 live, 2 onboarding, 1 pending_copier) — leurs fiches continuent de fonctionner grâce à cette
   // entrée conservée, serveurs MT5 compris. Voir le champ `retired` pour le détail.
   { key: 'fxcess', name: 'FXCESS', url: '', retired: true, servers: ['FXCESS-Live01', 'FXCESS-Live02', 'FXCess-Live02'] },
-  { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', servers: ['TradingSphere-Real1'] },
+  { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', affiliateId: '35182', servers: ['TradingSphere-Real1'] },
   { key: 'other', name: 'Other broker (I already have one)', url: '', nonPartner: true },
 ];
 
