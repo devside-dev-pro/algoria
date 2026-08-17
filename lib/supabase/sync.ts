@@ -294,15 +294,18 @@ export async function fetchLatestContext(): Promise<{ regime: string; adx: numbe
  * On ne surveille PAS le volume : sur 31 jours, 6 sont naturellement à zéro inscription. Une alarme de
  * volume sonnerait un jour sur cinq et serait ignorée. Le taux de refus, lui, ne dépend pas du trafic.
  */
-export async function funnelHealth(hours = 6): Promise<{ total: number; ok: number; topReason: string | null }> {
+export async function funnelHealth(hours = 6): Promise<{ total: number; ok: number; members: number; topReason: string | null }> {
   const since = new Date(Date.now() - hours * 3600_000).toISOString();
   const { data } = await (db as unknown as { from: (t: string) => any })
-    .from('funnel_attempts').select('ok,reason').gte('at', since) as { data: Array<{ ok: boolean; reason: string | null }> | null };
+    .from('funnel_attempts').select('ok,reason,tg_id').gte('at', since) as { data: Array<{ ok: boolean; reason: string | null; tg_id: number | null }> | null };
   const rows = data ?? [];
   const counts = new Map<string, number>();
   for (const r of rows) if (!r.ok && r.reason) counts.set(r.reason, (counts.get(r.reason) ?? 0) + 1);
   const topReason = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  return { total: rows.length, ok: rows.filter((r) => r.ok).length, topReason };
+  // members : nombre de PERSONNES distinctes, pas de tentatives. C'est ce qui sépare une panne d'un
+  // membre qui s'acharne — voir le seuil dans le runner.
+  const members = new Set(rows.filter((r) => r.tg_id != null).map((r) => r.tg_id)).size;
+  return { total: rows.length, ok: rows.filter((r) => r.ok).length, members, topReason };
 }
 
 export async function recordEdgeHealth(row: { strategy: string; windowDays: number; trades: number; winRate: number | null; profitFactor: number | null; net: number; status: string }) {

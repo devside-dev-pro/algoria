@@ -974,16 +974,22 @@ async function main() {
   // y a même 3 paires de deux jours consécutifs à zéro. Une alarme de volume sonnerait un jour sur cinq,
   // donc serait ignorée — et une alarme ignorée est pire que pas d'alarme.
   // On surveille le TAUX DE REFUS, qui ne dépend pas du trafic : au moins 3 tentatives sur 6 h et AUCUNE
-  // acceptée, c'est anormal n'importe quel jour de la semaine. Le seuil de 3 évite de sonner sur un seul
-  // membre qui se trompe deux fois de mot de passe.
+  // acceptée, c'est anormal n'importe quel jour de la semaine.
+  // DEUX MEMBRES DISTINCTS AU MINIMUM. Le seuil de 3 tentatives ne suffisait pas : un seul membre perdu
+  // dans le formulaire produit facilement trois refus (champ vide, nom trop court, case non cochée), et
+  // sur une journée calme il n'y a personne pour compenser avec un succès. L'alarme aurait donc sonné
+  // pour un incident inexistant — et une alarme qui a crié au loup une fois ne sera plus lue.
+  // Ce seuil reste aveugle au MOTIF, volontairement : la panne du 15/08 avait un motif qui n'existait pas
+  // encore dans le code la veille. Filtrer sur une liste de motifs « graves » n'aurait pas vu la panne
+  // qu'on cherche à détecter. Le critère qui survit aux causes inconnues, c'est « personne ne passe ».
   let lastFunnelAlert = 0;
   const checkFunnel = async () => {
     try {
       const h = await funnelHealth(6);
-      if (h.total < 3 || h.ok > 0) return; // trop peu de signal, ou ça passe : rien à dire
+      if (h.total < 3 || h.ok > 0 || h.members < 2) return; // trop peu de signal, ça passe, ou un seul membre
       if (Date.now() - lastFunnelAlert < 6 * 3600_000) return; // au plus une alerte par 6 h
       lastFunnelAlert = Date.now();
-      const msg = `${h.total} account-connection attempts in 6h, ALL refused${h.topReason ? ` (${h.topReason})` : ''}`;
+      const msg = `${h.total} account-connection attempts by ${h.members} members in 6h, ALL refused${h.topReason ? ` (${h.topReason})` : ''}`;
       console.error('[algoria] ALARME TUNNEL :', msg);
       await logNote(`🚨 signup funnel is refusing everyone — ${msg}`, 'veto');
       const { pushToAdmins } = await import('../lib/push/send');
