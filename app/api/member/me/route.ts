@@ -39,10 +39,16 @@ async function queueAction(tgId: number, kind: string, detail: Record<string, un
  * jours consécutifs). Une alarme de volume sonnerait un jour sur cinq, donc serait ignorée. On mesure
  * donc le TAUX DE REFUS — trois tentatives d'affilée toutes refusées est anormal n'importe quel jour.
  * Best effort et jamais bloquant : un capteur ne doit jamais pouvoir casser ce qu'il observe.
+ *
+ * ON ENREGISTRE LES SUCCÈS AUTANT QUE LES ÉCHECS. Le premier jet ne notait que les échecs : le
+ * dénominateur ne contenait alors que des refus, « aucune acceptée » était vrai par construction, et
+ * l'alarme aurait sonné le premier jour où trois personnes se trompent de mot de passe.
+ * tg_id est là pour la même raison : il permet d'exiger PLUSIEURS MEMBRES DISTINCTS avant de sonner, ce
+ * qui distingue « le tunnel refuse tout le monde » de « un membre s'acharne sur un formulaire ».
  */
-async function logAttempt(action: 'mt5' | 'add_account', ok: boolean, reason?: string): Promise<void> {
+async function logAttempt(tgId: number, action: 'mt5' | 'add_account', ok: boolean, reason?: string): Promise<void> {
   try {
-    await sdb().from('funnel_attempts').insert({ action, ok, reason: reason ?? null } as never);
+    await sdb().from('funnel_attempts').insert({ tg_id: tgId, action, ok, reason: reason ?? null } as never);
   } catch { /* le capteur se tait plutôt que de gêner */ }
 }
 
@@ -161,9 +167,9 @@ export async function POST(req: NextRequest) {
     const password = String(body.password ?? '');
     const fullName = String(body.name ?? '').trim().slice(0, 80);
     const deposit = Math.round(Number(body.deposit ?? 0));
-    if (!login || !server || !password) { void logAttempt('mt5', false, 'missing_field'); return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 }); }
-    if (fullName.length < 3) { void logAttempt('mt5', false, 'missing_name'); return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 }); }
-    if (!Number.isFinite(deposit) || deposit <= 0) { void logAttempt('mt5', false, 'missing_deposit'); return NextResponse.json({ error: 'deposit amount is required' }, { status: 400 }); }
+    if (!login || !server || !password) { void logAttempt(s.tgId, 'mt5', false, 'missing_field'); return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 }); }
+    if (fullName.length < 3) { void logAttempt(s.tgId, 'mt5', false, 'missing_name'); return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 }); }
+    if (!Number.isFinite(deposit) || deposit <= 0) { void logAttempt(s.tgId, 'mt5', false, 'missing_deposit'); return NextResponse.json({ error: 'deposit amount is required' }, { status: 400 }); }
     // LES DEUX ENGAGEMENTS (14/08) — 43% des demandes de connexion étaient refusées, dont ~74% pour la
     // même raison : un compte ouvert AVANT Algoria, donc jamais rattaché au broker et introuvable dans le
     // dashboard partenaire (souvent refusé sous l'étiquette « invalid account »). Le front pose la
@@ -172,12 +178,14 @@ export async function POST(req: NextRequest) {
     const ackLink = body.ackLink === true;
     const ackFunded = body.ackFunded === true;
     if (!ackLink || !ackFunded) {
-      void logAttempt('mt5', false, 'missing_ack');
+      void logAttempt(s.tgId, 'mt5', false, 'missing_ack');
       return NextResponse.json({ error: 'please confirm both boxes: the account was created through the Algoria link, and it is funded' }, { status: 400 });
     }
     // Un serveur de démonstration se nomme toujours ainsi — 7% des refus, refusables ici sans attente.
-    if (/demo/i.test(server))
+    if (/demo/i.test(server)) {
+      void logAttempt(s.tgId, 'mt5', false, 'demo_server');
       return NextResponse.json({ error: 'that is a demo server — Algoria can only copy a live account with real funds' }, { status: 400 });
+    }
     // ⚠️ VÉRIFICATION DES IDENTIFIANTS RETIRÉE (15/08/2026) — elle bloquait TOUT LE MONDE.
     // Elle tentait une vraie connexion MetaTrader à l'envoi et refusait le formulaire si le compte
     // n'était pas joignable en 27 secondes. Résultat en production : 0 inscription en 24 h, contre 5 à 7
@@ -207,6 +215,11 @@ export async function POST(req: NextRequest) {
       // pour « invalid account », le doute porte alors sur le rattachement ou le dépôt.
       detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ack_link: ackLink, ack_funded: ackFunded, ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
     });
+    // SUCCÈS — indispensable, et pas seulement pour la statistique : l'alarme se déclenche sur « aucune
+    // acceptée », donc sans cette ligne le dénominateur ne contient QUE des refus et l'alarme sonne au
+    // troisième mot de passe oublié de la journée. Un capteur qui n'enregistre pas le succès ne mesure
+    // pas un taux, il compte des échecs.
+    void logAttempt(s.tgId, 'mt5', true);
   } else if (body.action === 'strategy') {
     // CHOIX DE STRATÉGIE (remplace le sélecteur de lot — le lot copieur est FIXE 0.01, le levier de risque
     // du membre est la stratégie). Fin du wizard OU changement depuis le profil (→ file : move de master STH).
@@ -320,21 +333,22 @@ export async function POST(req: NextRequest) {
     const password = String(body.password ?? '');
     const fullName = String(body.name ?? '').trim().slice(0, 80);
     const deposit = Math.round(Number(body.deposit ?? 0));
-    if (!login || !server || !password) return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 });
-    if (fullName.length < 3) return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 });
-    if (!Number.isFinite(deposit) || deposit < minDepositFor(strat))
+    if (!login || !server || !password) { void logAttempt(s.tgId, 'add_account', false, 'missing_field'); return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 }); }
+    if (fullName.length < 3) { void logAttempt(s.tgId, 'add_account', false, 'missing_name'); return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 }); }
+    if (!Number.isFinite(deposit) || deposit < minDepositFor(strat)) {
+      void logAttempt(s.tgId, 'add_account', false, 'deposit_below_min');
       return NextResponse.json({ error: `this strategy needs a $${minDepositFor(strat)}+ deposit` }, { status: 400 });
+    }
     // MÊMES ENGAGEMENTS QU'À L'INSCRIPTION : un second compte est aussi un compte neuf, et se fait
     // refuser pour les mêmes raisons (ouvert hors de nos liens, ou démo). Voir l'action 'mt5'.
     if (body.ackLink !== true || body.ackFunded !== true) {
-      void logAttempt('add_account', false, 'missing_ack');
+      void logAttempt(s.tgId, 'add_account', false, 'missing_ack');
       return NextResponse.json({ error: 'please confirm both boxes: the account was opened through the Algoria link, and it is funded' }, { status: 400 });
     }
     if (/demo/i.test(server)) {
-      void logAttempt('add_account', false, 'demo_server');
+      void logAttempt(s.tgId, 'add_account', false, 'demo_server');
       return NextResponse.json({ error: 'that is a demo server — Algoria can only copy a live account with real funds' }, { status: 400 });
     }
-    void logAttempt('add_account', true);
     // (vérification des identifiants retirée le 15/08 — voir l'action 'mt5' ci-dessus)
     const raw = db as unknown as { from: (t: string) => any };
     const { data: mrow } = await db.from('members').select('member_no,broker,strategy,tg_username').eq('tg_id', s.tgId).limit(1);
@@ -343,15 +357,18 @@ export async function POST(req: NextRequest) {
     // une stratégie = un seul compte ; un broker = un seul compte (le doublon broker ne génère pas de commission)
     const usedStrategies = new Set<number>([Number(mrow?.[0]?.strategy ?? 2), ...activeExtras.map((a) => a.strategy)]);
     const usedBrokers = new Set<string>([String(mrow?.[0]?.broker ?? ''), ...activeExtras.map((a) => String(a.broker ?? ''))].filter(Boolean));
-    if (usedStrategies.has(strat)) return NextResponse.json({ error: 'you already run this strategy — pick another one' }, { status: 400 });
-    if (usedBrokers.has(broker)) return NextResponse.json({ error: 'you already have an account with this broker — open one with a different partner broker' }, { status: 400 });
+    if (usedStrategies.has(strat)) { void logAttempt(s.tgId, 'add_account', false, 'strategy_taken'); return NextResponse.json({ error: 'you already run this strategy — pick another one' }, { status: 400 }); }
+    if (usedBrokers.has(broker)) { void logAttempt(s.tgId, 'add_account', false, 'broker_taken'); return NextResponse.json({ error: 'you already have an account with this broker — open one with a different partner broker' }, { status: 400 }); }
     const accountNo = Math.max(1, ...(extras ?? []).map((a) => a.account_no)) + 1;
     const { data: inserted, error: insErr } = (await raw.from('member_accounts').insert({
       tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, account_no: accountNo, broker, strategy: strat,
       platform, mt5_login: login, mt5_server: server, mt5_password_enc: encryptSecret(password),
       holder_name: fullName, declared_deposit: deposit,
     }).select('id')) as { data: Array<{ id: string }> | null; error: { message: string } | null };
-    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+    if (insErr) { void logAttempt(s.tgId, 'add_account', false, 'db_error'); return NextResponse.json({ error: insErr.message }, { status: 500 }); }
+    // Le succès se note ICI, pas avant les contrôles de doublon : c'était le second défaut du capteur —
+    // un second compte refusé pour « stratégie déjà prise » était compté comme accepté.
+    void logAttempt(s.tgId, 'add_account', true);
     // carte CONNECT dans la file admin — account_id à bord : le support voit que c'est un compte n°2/3,
     // le CONNECT STH utilisera les identifiants du COMPTE (userId STH = "{tg_id}-{account_no}").
     await queueAction(s.tgId, 'connect', {
