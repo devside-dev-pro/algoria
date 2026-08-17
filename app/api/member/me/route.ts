@@ -177,6 +177,10 @@ export async function POST(req: NextRequest) {
     // à l'examen, on sait ce que le membre a affirmé, ce qui rend la conversation possible en cas de refus.
     const ackLink = body.ackLink === true;
     const ackFunded = body.ackFunded === true;
+    // Origine déclarée par le membre. ARCHIVÉE, JAMAIS BLOQUANTE : elle ne conditionne aucun refus, elle
+    // ne fait que changer le libellé de ce qu'on archive et étiqueter la carte à l'étape suivante. Toute
+    // valeur autre que 'existing' retombe sur le comportement d'avant, y compris l'absence de champ.
+    const preExistingAccount = body.origin === 'existing';
     if (!ackLink || !ackFunded) {
       void logAttempt(s.tgId, 'mt5', false, 'missing_ack');
       return NextResponse.json({ error: 'please confirm both boxes: the account was created through the Algoria link, and it is funded' }, { status: 400 });
@@ -213,7 +217,16 @@ export async function POST(req: NextRequest) {
       // verify : 'ok' = STH a réellement joint le compte MetaTrader avec ces identifiants ; 'unknown' =
       // contrôle impossible (STH muet). Affiché sur la carte admin — un compte vérifié ne se refuse plus
       // pour « invalid account », le doute porte alors sur le rattachement ou le dépôt.
-      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', ack_link: ackLink, ack_funded: ackFunded, ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
+      // origin : 'new' (compte né de notre lien) | 'existing' (compte préexistant, rattachement demandé
+      // au support du broker par le titulaire). ARCHIVÉ, JAMAIS BLOQUANT — il ne sert qu'à étiqueter la
+      // carte CONNECT « en attente du broker » à l'étape suivante, pour que l'admin sache d'avance
+      // pourquoi ce dossier va mettre des jours. Une valeur absente ou inattendue ne change rien.
+      // La case cochée ne dit PAS la même chose selon l'origine : « créé via le lien Algoria » pour un
+      // compte neuf, « j'ai demandé le rattachement à mon broker » pour un compte préexistant. On archive
+      // donc ce que la personne a RÉELLEMENT déclaré — écrire ack_link:true pour quelqu'un qui n'a jamais
+      // affirmé ça rendrait la déclaration inutilisable le jour où une connexion est contestée, et c'est
+      // précisément à ce moment-là qu'on la relit.
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
     });
     // SUCCÈS — indispensable, et pas seulement pour la statistique : l'alarme se déclenche sur « aucune
     // acceptée », donc sans cette ligne le dénominateur ne contient QUE des refus et l'alarme sonne au
@@ -238,6 +251,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `this strategy needs a $${minDepositFor(choice)}+ deposit (you declared $${declared}) — pick another strategy or fund more` }, { status: 400 });
       patch.onboarding_step = 3;
       patch.status = 'pending_copier';
+      // COMPTE PRÉEXISTANT → la carte arrive DÉJÀ ÉTIQUETÉE « en attente du broker » (17/08). Ce dossier
+      // ne peut pas être validé tant que le broker n'a pas rattaché le compte au numéro d'affilié, et
+      // c'est une démarche que seul le titulaire peut faire — elle dure des jours. Sans cette étiquette,
+      // l'admin ouvre la carte, cherche le compte dans le dashboard partenaire, ne le trouve pas, et
+      // découvre le problème lui-même : c'est exactement le temps qu'on cherche à lui rendre.
+      // Même forme que le marquage manuel de l'admin (⏳ BROKER), donc le bouton lève cette attente
+      // normalement le jour où le broker répond.
+      const kycDetail = (kyc?.[0]?.detail as Record<string, unknown> | undefined) ?? {};
+      const preExisting = kycDetail.origin === 'existing';
       await queueAction(s.tgId, 'connect', {
         login: mrow?.[0]?.mt5_login ?? null,
         server: mrow?.[0]?.mt5_server ?? null,
@@ -245,7 +267,8 @@ export async function POST(req: NextRequest) {
         lot: '0.01', // lot copieur FIXE pour tous — plus de tier
         broker: mrow?.[0]?.broker ?? null,
         username: mrow?.[0]?.tg_username ?? null,
-        ...(kyc?.[0]?.detail as Record<string, unknown> | undefined),
+        ...kycDetail,
+        ...(preExisting ? { waiting_broker: { since: new Date().toISOString(), by: 'member (pre-existing account)', note: 'member asked the broker to attach this account to the Algoria affiliate ID' } } : {}),
       });
     } else {
       // AUTO via STH (demande Mathieu 29/07 : il validait 100 % des cartes — la file ne sert plus qu'aux

@@ -185,6 +185,16 @@ export const UI: Dict = {
   },
   'ob.exist.newInstead': { en: '← or open a new account with a partner broker (instant)', it: '← oppure apri un nuovo conto con un broker partner (immediato)' },
   'ob.exist.ask': { en: '💬 Ask Mathieu if you’re stuck', it: '💬 Chiedi a Mathieu se sei bloccato' },
+  'ob.exist.cont': { en: '✓ I’ve sent it — continue my setup', it: '✓ L’ho inviato — continua la configurazione' },
+  'ob.exist.contHint': {
+    en: 'You can finish here now. We’ll hold your account until your broker confirms the link — you won’t have to do this twice.',
+    it: 'Puoi finire qui adesso. Terremo il tuo conto in attesa finché il broker conferma il collegamento — non dovrai rifarlo.',
+  },
+  'ob.exist.ackAttach': { en: 'I asked my broker to attach this account to Algoria', it: 'Ho chiesto al mio broker di collegare questo conto ad Algoria' },
+  'ob.exist.pending': {
+    en: 'Waiting on your broker to confirm the link. Nothing else to do — we’ll switch the copying on as soon as they do.',
+    it: 'In attesa che il tuo broker confermi il collegamento. Nient’altro da fare — attiveremo la copia appena lo fanno.',
+  },
 };
 
 /** Message que le MEMBRE envoie au support de son broker pour faire rattacher un compte préexistant.

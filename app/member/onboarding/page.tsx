@@ -85,6 +85,10 @@ export default function Onboarding() {
   const [exBroker, setExBroker] = useState('');
   const [exAccount, setExAccount] = useState('');
   const [exCopied, setExCopied] = useState(false);
+  const [exContinued, setExContinued] = useState(false);
+  // Le formulaire d'identifiants s'ouvre pour un compte NEUF, ou pour un compte préexistant dont le
+  // titulaire a copié la demande de rattachement et choisi de finir maintenant.
+  const showCreds = origin === 'new' || (origin === 'existing' && exContinued);
   const exEntry = BROKERS.find((b) => b.key === exBroker);
   const exAffiliate = exEntry?.affiliateId ?? null;
   const exMessage = exEntry && exAffiliate ? brokerAttachMessage(exEntry.name, exAffiliate, exAccount) : '';
@@ -288,6 +292,18 @@ export default function Onboarding() {
                   {exCopied ? t('ob.exist.copied') : t('ob.exist.copy')}
                 </button>
                 <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--muted)' }}>{t('ob.exist.after')}</div>
+                {/* ON LE LAISSE FINIR MAINTENANT (17/08, décision Mathieu). Avant, un compte préexistant
+                    était un cul-de-sac : le membre repartait et devait tout reprendre des jours plus tard,
+                    quand le broker avait répondu — beaucoup ne revenaient pas. Il termine donc son
+                    inscription tout de suite, et sa carte arrive chez l'admin DÉJÀ étiquetée « en attente
+                    du broker » (voir l'action strategy côté serveur). Le geste de vérification de Mathieu
+                    ne change pas : il valide quand le broker a confirmé, ni avant ni après.
+                    Le bouton n'apparaît qu'une fois le message copié — sans la démarche, l'attente ne
+                    commencerait jamais et la carte dormirait pour rien. */}
+                {exCopied && (
+                  <button onClick={() => setExContinued(true)} style={{ ...ctaMain, marginTop: 2 }}>{t('ob.exist.cont')}</button>
+                )}
+                {exCopied && <div style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--dim)', textAlign: 'center' }}>{t('ob.exist.contHint')}</div>}
               </>)}
               <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--dim)', textDecoration: 'underline' }}>{t('ob.exist.ask')}</a>
               <button onClick={() => { setOrigin(null); setStep(0); }} style={linkBtn}>{t('ob.exist.newInstead')}</button>
@@ -296,7 +312,7 @@ export default function Onboarding() {
 
           {/* Les identifiants n'apparaissent qu'une fois l'origine déclarée : demander un mot de passe de
               trading à quelqu'un dont on va refuser le compte est le pire moment de tout le parcours. */}
-          {origin === 'new' && (<>
+          {showCreds && (<>
           {/* BLOC 1 — le compte : broker → plateforme → login → serveur → mdp, dans l'ordre, au même endroit
               (plus de « revenir en arrière » pour changer le serveur). */}
           <div style={grp}>
@@ -383,15 +399,23 @@ export default function Onboarding() {
               ignorent que le compte doit naître de notre lien) et ils laissent une trace de ce que le
               membre a déclaré, visible à l'examen. Cases décochées par défaut, et obligatoires. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {/* Un compte préexistant ne peut PAS cocher « je l'ai créé via le lien Algoria » — ce serait
+                lui faire signer un mensonge, et la déclaration archivée deviendrait inexploitable à
+                l'examen. Il confirme donc ce qu'il a RÉELLEMENT fait : demandé le rattachement. */}
             <Check checked={ackLink} onToggle={() => setAckLink((v) => !v)}>
-              I created this trading account <b style={{ color: 'var(--text)' }}>through the Algoria broker link</b> — not an account I already had.
+              {origin === 'existing'
+                ? <>{t('ob.exist.ackAttach')} — <b style={{ color: 'var(--text)' }}>ID {exAffiliate ?? '—'}</b></>
+                : <>I created this trading account <b style={{ color: 'var(--text)' }}>through the Algoria broker link</b> — not an account I already had.</>}
             </Check>
             <Check checked={ackFunded} onToggle={() => setAckFunded((v) => !v)}>
               I have <b style={{ color: 'var(--text)' }}>deposited real money</b> into it — it&rsquo;s a live account, not a demo.
             </Check>
           </div>
+          {origin === 'existing' && (
+            <p style={{ margin: '-4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--gold)' }}>⏳ {t('ob.exist.pending')}</p>
+          )}
 
-          <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit) || !ackLink || !ackFunded || demoServer} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded }, 2)} style={ctaMain}>
+          <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit) || !ackLink || !ackFunded || demoServer} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, origin: origin ?? undefined }, 2)} style={ctaMain}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
           {(!ackLink || !ackFunded) && !demoServer && (
