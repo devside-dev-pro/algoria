@@ -347,7 +347,28 @@ export default function AdminCRM() {
     const dup = deposits.some((d) => Number(d.tg_id) === Number(a.tg_id) && Number(d.detail?.amount_usd ?? 0) === amount && String(d.detail?.deposited_at ?? d.created_at).slice(0, 10) === today);
     if (dup) return window.alert('Already logged today for this member (same amount) — nothing added.');
     const commission = estimateCommission(broker, amount);
-    post({ addDeposit: { tg_id: Number(a.tg_id), broker: broker ?? undefined, amount, commission: commission ?? 0, note: 'logged at connect' } });
+    // LE PAYS DANS LA MÊME FOULÉE (17/08). Avant : valider le dépôt, puis RETOURNER dans le CRM chercher le
+    // membre pour renseigner son pays. À quatre ou cinq clients par jour, autant d'allers-retours pour une
+    // donnée qu'on tient déjà — et c'est cette friction qui a laissé 472 fiches sur 516 sans pays.
+    // Le pays détecté à l'inscription (geo:<iso2>) est PRÉ-REMPLI : dans le cas normal il n'y a plus qu'à
+    // valider. On ne demande rien si le pays est déjà connu, et laisser vide n'annule pas le dépôt — le
+    // pays est une donnée de compta, il ne doit jamais bloquer l'enregistrement d'un encaissement.
+    let country: string | null = null;
+    if (!m?.country) {
+      const guess = geoCountryOf(m?.source);
+      const c = window.prompt(
+        `🌍 Country of this member?\n\n${guess ? `Detected at signup: ${guess} — press OK to accept.` : 'Not detected (VPN, or member created before geo capture) — type it.'}\n\nAd geos: South Africa · New Zealand · Australia · UK · UAE\nLeave empty to skip (the deposit is logged either way).`,
+        guess ?? '',
+      );
+      const v = (c ?? '').trim();
+      // on réaligne la casse sur la liste : « south africa » tapé à la main doit devenir « South Africa »,
+      // sinon l'export compta et les regroupements par pays se retrouvent avec deux libellés pour un pays.
+      if (v) country = COUNTRIES.find((x) => x.toLowerCase() === v.toLowerCase()) ?? v;
+    }
+    post(
+      { addDeposit: { tg_id: Number(a.tg_id), broker: broker ?? undefined, amount, commission: commission ?? 0, note: 'logged at connect' } },
+      country ? () => post({ setCountry: { tg_id: Number(a.tg_id), country } }) : undefined,
+    );
   };
   // connexion AUTO via STH : branche le compte dans le copieur, puis enchaîne `done` (passage LIVE) si OK,
   // puis propose d'enregistrer le dépôt (un prompt) — les 3 gestes en un seul clic.
@@ -385,27 +406,53 @@ export default function AdminCRM() {
   };
   // PAYS du membre (compta fin de mois + ciblage pubs) — dropdown des pays principaux + « other… » libre.
   // Le pays vit sur le MEMBRE (les dépôts l'héritent) ; éditable depuis la fiche ET les lignes DEPOSITS (rattrapage).
-  const COUNTRIES = ['UAE', 'UK', 'Germany', 'Australia', 'France'];
+  // LES PAYS CIBLÉS PAR LES PUBS D'ABORD (17/08) : South Africa et New Zealand manquaient à la liste, donc
+  // les premiers dépôts venus de ces deux campagnes ont dû être classés en « other… » et tapés à la main.
+  // Un pays visé par une campagne doit être à un clic — c'est lui qu'on saisira le plus souvent.
+  // Le reste de la liste couvre les pays déjà présents en base plus les marchés voisins évidents.
+  const COUNTRIES = [
+    'South Africa', 'New Zealand', 'Australia', 'UK', 'UAE', // les cinq géos des sets de pub
+    'USA', 'Canada', 'Ireland', 'Germany', 'France', 'Italy', 'Spain', 'Portugal',
+    'Netherlands', 'Belgium', 'Switzerland', 'Malta', 'Singapore', 'Philippines', 'India', 'Nigeria', 'Kenya',
+  ];
+  // geo:<iso2> → libellé de la liste. Le code pays est posé à la CRÉATION de la fiche depuis l'en-tête
+  // Vercel (voir lib/member/login.ts) : il sert ici de valeur PAR DÉFAUT au moment de valider le dépôt.
+  const GEO_LABEL: Record<string, string> = {
+    za: 'South Africa', nz: 'New Zealand', au: 'Australia', gb: 'UK', ae: 'UAE',
+    us: 'USA', ca: 'Canada', ie: 'Ireland', de: 'Germany', fr: 'France', it: 'Italy', es: 'Spain', pt: 'Portugal',
+    nl: 'Netherlands', be: 'Belgium', ch: 'Switzerland', mt: 'Malta', sg: 'Singapore', ph: 'Philippines', in: 'India', ng: 'Nigeria', ke: 'Kenya',
+  };
+  const geoCountryOf = (src: string | null | undefined): string | null => {
+    const m = /^geo:([a-z]{2})$/.exec(String(src ?? '').toLowerCase());
+    return m ? GEO_LABEL[m[1]] ?? null : null;
+  };
   const setCountry = (tgId: number, value: string) => {
     const country = value === '__other' ? (window.prompt('Country?') ?? '').trim() : value;
     if (value === '__other' && !country) return;
     post({ setCountry: { tg_id: tgId, country } });
   };
-  const countrySelect = (tgId: number, current: string | null) => (
-    <select
-      disabled={busy}
-      value={current && !COUNTRIES.includes(current) ? '__custom' : (current ?? '')}
-      onChange={(e) => { if (e.target.value !== '__custom') setCountry(tgId, e.target.value); }}
-      className="mono"
-      title="member's country (for the monthly accounting export + ads targeting)"
-      style={{ fontSize: 10.5, padding: '3px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: current ? 'var(--text)' : 'var(--dim)', cursor: 'pointer' }}
-    >
-      <option value="">🌍 country…</option>
-      {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
-      {current && !COUNTRIES.includes(current) && <option value="__custom">{current}</option>}
-      <option value="__other">other…</option>
-    </select>
-  );
+  const countrySelect = (tgId: number, current: string | null, source?: string | null) => {
+    // Pays DÉTECTÉ à l'inscription, proposé en tête de liste quand la case est vide : un clic au lieu d'une
+    // recherche dans vingt-deux entrées. Marqué « (detected) » — c'est une déduction sur IP, pas une
+    // certitude, et rien n'est écrit en base avant que Mathieu ne l'ait choisi.
+    const guess = current ? null : geoCountryOf(source);
+    return (
+      <select
+        disabled={busy}
+        value={current && !COUNTRIES.includes(current) ? '__custom' : (current ?? '')}
+        onChange={(e) => { if (e.target.value !== '__custom') setCountry(tgId, e.target.value); }}
+        className="mono"
+        title="member's country (for the monthly accounting export + ads targeting)"
+        style={{ fontSize: 10.5, padding: '3px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: current ? 'var(--text)' : 'var(--dim)', cursor: 'pointer' }}
+      >
+        <option value="">🌍 country…</option>
+        {guess && <option value={guess}>✨ {guess} (detected)</option>}
+        {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        {current && !COUNTRIES.includes(current) && <option value="__custom">{current}</option>}
+        <option value="__other">other…</option>
+      </select>
+    );
+  };
   // changement de stratégie en un clic : join STH déclaratif → le receiver bascule sur le master de la nouvelle
   // stratégie, puis `done` clôt la carte. Membres ajoutés à la main dans STH → erreur explicite (à faire à la main).
   const moveViaSth = (id: string) => {
@@ -1446,7 +1493,7 @@ export default function AdminCRM() {
               {/* l'ID que STH affiche pour les receivers connectés via l'API (UserID = tg_id) — la clé pour
                   rapprocher « 7557770646 » vu dans STH ↔ le bon membre ici. Copiable en un clic. */}
               <span>STH id <b style={{ color: 'var(--gold)' }}>{sel.tg_id}</b> <button onClick={() => void navigator.clipboard?.writeText(String(sel.tg_id))} style={miniBtn}>copy</button></span>
-              <span>country {countrySelect(sel.tg_id, sel.country)}</span>
+              <span>country {countrySelect(sel.tg_id, sel.country, sel.source)}</span>
               {/* adresse de retrait du parrain : une adresse fausse, et le virement part dans le vide sans
                   retour possible. Affichée en ENTIER ici (elle était tronquée à 8 caractères, donc invérifiable). */}
               <span>USDT {editText(sel.tg_id, 'usdt_trc20', 'USDT TRC20 payout address', sel.usdt_trc20, sel.usdt_trc20 ?? '—', 'Paste the full TRC20 address (starts with T, 34 characters). Empty = clear it.')}</span>
@@ -1687,7 +1734,7 @@ export default function AdminCRM() {
                       <span style={{ fontSize: 12, color: 'var(--text)' }}>{(() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? '—'); })()}</span>
                       {legalOf(d.tg_id) && <span className="mono" style={{ fontSize: 10.5, color: 'var(--gold)' }} title="name on the broker account">🏦 {legalOf(d.tg_id)}</span>}
                       {/* pays : hérité du membre — éditable ICI pour rattraper les dépôts déjà saisis en 2 clics */}
-                      {countrySelect(d.tg_id, rows.find((r) => Number(r.tg_id) === Number(d.tg_id))?.country ?? null)}
+                      {countrySelect(d.tg_id, rows.find((r) => Number(r.tg_id) === Number(d.tg_id))?.country ?? null, rows.find((r) => Number(r.tg_id) === Number(d.tg_id))?.source ?? null)}
                       <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{(d.detail?.broker ?? '—').toUpperCase()}</span>
                       <button onClick={() => editDepositAmount(d)} title="edit deposit amount (e.g. member deposited in several chunks)" className="mono" style={{ ...miniBtn, fontSize: 12.5, fontWeight: 800, color: 'var(--cyan)' }}>${Number(d.detail?.amount_usd ?? 0)} ✎</button>
                       <span style={{ color: 'var(--dim)', fontSize: 11 }}>→ com</span>
