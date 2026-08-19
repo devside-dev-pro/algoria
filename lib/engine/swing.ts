@@ -72,7 +72,44 @@ export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.1
 // ⚠️ HONNÊTETÉ STATISTIQUE : sur 92 trades, les écarts d'ESPÉRANCE entre 0.15 et 0.50 sont dans le bruit
 // (erreur-type ~0.09R). Ce qui est solide, et purement mécanique, c'est que le nombre de stops pleins baisse
 // de façon MONOTONE quand on abaisse le seuil (43→34→24→17→16→11), et que 1R est nettement le pire.
-export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 1, beTrigger: 0.5, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] };
+// PALIERS 0.75/1/1.5/2 (19/08/2026, décision Mathieu). Le palier unique [[2, 0.5]] laissait un TROU entre
+// 0.5R et 2R : sur toute cette portion, un swing n'était protégé qu'au breakeven. Constaté en direct le
+// 19/08 — un swing or à +1,72R (+3 496$ master) avec son stop à +0,75 point, soit +75$ verrouillés ; sans
+// intervention manuelle, un aller-retour rendait la totalité. C'est le MÊME défaut que celui corrigé le
+// 12/08 sur le breakeven (« passer de +1 000$ à −1 300$ sur un mouvement, ce n'est pas normal »), un cran
+// plus loin sur la courbe : le BE couvre le début du parcours, le trailing couvre la fin, et personne ne
+// couvrait le milieu.
+//
+// Rejeu de 72 swings or RÉELS (06/07→19/08, bougies M1, horizon 3 j, remplissage conservateur — le stop est
+// testé contre le sommet atteint AVANT la bougie), en ne changeant QUE l'échelle de paliers :
+//   réglage                                    espérance   % verts   STOPS PLEINS   gain moyen
+//   [[2,0.5]]                    ← l'actuel      0.138 R      78%          16          0.464 R
+//   [[1,0.3],[2,0.5]]                            0.163 R      78%          16          0.495 R
+//   [[1,0.5],[1.5,1],[2,1.5]]                    0.212 R      78%          16          0.559 R
+//   [[0.75,0.3],[1,0.5],[1.5,1],[2,1.5]]         0.238 R      78%          16            —     ← retenu
+//   trailing avancé à 1.5R (dist 1.0)            0.151 R      78%          16          0.480 R
+//   trailing avancé à 1R  (dist 0.75)            0.132 R      78%          16          0.456 R
+//
+// ⚠️ HONNÊTETÉ STATISTIQUE : en comparaison APPARIÉE sur les mêmes 72 trades, le gain vaut +0.0996 R avec
+// une erreur-type de 0.0699, soit t = 1.43 — PAS significatif. On ne retient donc PAS ce réglage sur son
+// espérance. Ce qui est solide est mécanique :
+//   • le nombre de STOPS PLEINS est IDENTIQUE (16) dans toutes les variantes, et le % de verts aussi (78%).
+//     Normal : aucun de ces paliers n'agit en dessous de +0.5R, donc aucun ne peut transformer un gagnant
+//     en perdant. Le risque à la baisse est INCHANGÉ — c'est un pari dont le pire cas est « sans effet ».
+//   • l'asymétrie : 28 trades améliorés contre 4 dégradés (7 contre 1). Les 4 dégradés sont des trades où
+//     le palier a verrouillé avant que le prix ne reparte — le prix de l'assurance, connu et accepté.
+// ⚠️ Le harnais est OPTIMISTE en niveau absolu (+0.125 R simulé contre +0.004 R réellement constaté) : il
+// ne modélise ni le spread, ni la commission, ni les caps journaliers, ni les fermetures manuelles.
+// Corrélation rejeu/réel 0.70 sur 58 trades. Seules les COMPARAISONS entre lignes du tableau sont valides.
+//
+// PORTÉE : GOLD uniquement. BTC_SWING et NAS_SWING ne sont PAS touchés — ils n'ont pas été rejoués, et
+// leur ATR, leur slAtr (2 au lieu de 1) et leur beTrigger (1R) donnent une géométrie différente.
+//
+// Effet de bord assumé : avec le palier 2R→1.5, le trailing (2.5/2.5) ne prend la main qu'au-delà de 4R
+// (2.5 de distance ⇒ il ne dépasse 1.5R qu'à partir de peak 4R). En dessous, ce sont les paliers qui
+// pilotent. Aucune variante « paliers + trailing resserré » n'a été retenue : la seule testée (trail 2.0,
+// dist 1.0) ressort à t = 0.06, donc sans effet — on n'ajoute pas un changement non prouvé à un autre.
+export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 1, beTrigger: 0.5, trailActivate: 2.5, trailDist: 2.5, ladder: [[0.75, 0.3], [1, 0.5], [1.5, 1.0], [2, 1.5]] };
 /** NAS100 — cassure du range 72h (labo 2.2 ans : PF 1.94, +$3086, DD 6.9%, tiers ✅ · tenue moy 8.5 j). */
 export const NAS_SWING: SwingConfig = { kind: 'breakout', N: 72, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 3, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
 
