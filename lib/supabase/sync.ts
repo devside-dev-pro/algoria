@@ -464,6 +464,32 @@ export async function fetchDayTradeStats(): Promise<{ trades: number; wins: numb
   return { trades: rows.length, wins, net };
 }
 
+/**
+ * DISCIPLINE DU JOUR — la matière factuelle d'un bilan de journée ROUGE.
+ *
+ * Un jour rouge, le membre n'a pas besoin qu'on lui promette demain : il a besoin de voir qu'un système
+ * a tourné. Ces trois chiffres le prouvent sans rien affirmer — combien de signaux ont été REFUSÉS par
+ * les filtres, combien de positions ont été remontées à un stop protégé, et quelle a été la pire perte
+ * de la journée en R (c'est-à-dire : le risque a-t-il tenu dans ce qui était prévu à l'entrée).
+ * Le 17/08, la machine a refusé 21 signaux pour 3 pris — c'est ça, la preuve qu'il y a une méthode.
+ */
+export async function fetchDayDiscipline(): Promise<{ vetoed: number; secured: number; worstR: number | null }> {
+  const dayStart = new Date();
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const iso = dayStart.toISOString();
+  const [ev, tr] = await Promise.all([
+    (db as any).from('events').select('level,msg').gte('ts', iso) as Promise<{ data: Array<{ level: string; msg: string }> | null }>,
+    db.from('trades').select('r').gte('closed_at', iso).not('r', 'is', null),
+  ]);
+  const rows = ev.data ?? [];
+  const worst = (tr.data ?? []).map((t) => Number(t.r)).filter((r) => Number.isFinite(r));
+  return {
+    vetoed: rows.filter((e) => e.level === 'veto').length,
+    secured: rows.filter((e) => e.level === 'order' && e.msg.includes('stop secured')).length,
+    worstR: worst.length ? Math.min(...worst) : null,
+  };
+}
+
 export async function pushState(ctx: MarketContext, state: EngineState, mode: Mode = 'normal') {
   if (SECONDARY) return; // le cockpit affiche l'état du master S2 uniquement
   await db.from('state_snapshots').insert({
