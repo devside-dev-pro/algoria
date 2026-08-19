@@ -28,7 +28,7 @@ import { pushToAdmins } from '../lib/push/send';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -1063,10 +1063,18 @@ async function main() {
   // canal VIT et donne des messages « forwardables » vers le public. Postés par le SEUL runner primaire (S2).
   const VIP_TAGS: Record<number, string> = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' };
   const VIP_TIPS = [
-    "🎓 <b>Why the stop moves</b>\nWhen a trade goes our way, Algoria trails the stop up — first to breakeven, then behind price. A trade that reverses exits <b>in profit</b> instead of at zero. Winners protected, not cut short.",
+    // RÉÉCRITE le 19/08 — l'ancienne version affirmait « winners protected, not cut short » alors que 56 %
+    // des trades sortent à +0,035 R en moyenne, ce qui EST les couper court. On ne peut pas enseigner à des
+    // clients payants l'inverse de ce que montrent nos propres chiffres. La version honnête assume
+    // l'arbitrage — et elle rassure davantage, parce qu'un arbitrage explicite prouve qu'il y a une méthode.
+    "🎓 <b>Why the stop moves up</b>\nAs soon as a trade gets ahead, Algoria pulls its stop above the entry. The cost: on a choppy day, some trades come back out near zero. What it buys: <b>a winning trade can never turn into a losing one</b>. We'd rather book a lot of nothings than one avoidable loss.",
     "🎓 <b>Why we stand aside around news</b>\nHigh-impact releases turn spreads into a casino. Algoria simply doesn't trade the minutes around them — no edge, no trade. Discipline over FOMO.",
     "🎓 <b>What the daily cap means</b>\nEach strategy has a hard floor for the day. Hit it and Algoria stops — your downside is bounded <b>before the session even starts</b>. No revenge trading, ever.",
-    "🎓 <b>Why small wins compound</b>\nAlgoria banks many small high-probability wins rather than swinging for heroes. Boring by design — because boring survives, and survivors compound.",
+    // REMPLACE « why small wins compound » (19/08) : cette fiche affirmait que les petits gains composent,
+    // alors que six semaines sur sept sont négatives en R. On la remplace par ce qui est VÉRIFIABLE par le
+    // membre lui-même, et qui est le vrai argument « ce n'est pas du hasard » : on publie avant de savoir.
+    "🎓 <b>Why we post before we know</b>\nEvery trade appears in this channel as it opens — not after it closes. We don't get to choose what to show you. Red days are as visible as green ones, and that's the only way you can judge a system on something other than screenshots.",
+    "🎓 <b>Why a losing day isn't a broken system</b>\nAlgoria trades a defined edge, and an edge is a statistic, not a promise about today. What's fixed in advance is the <b>risk</b>: a stop on every trade, one size, a hard daily floor. The result of any single day varies — what it's allowed to cost you doesn't.",
     "🎓 <b>Three strategies, one engine</b>\n🌱 Steady books quick daily targets · ⚖️ Balanced runs the reference edge · 🚀 Turbo trades more for more variance. Pick the temperament that fits you.",
     "🎓 <b>The ratchet</b>\nOnce a day is nicely green, Algoria locks it and stops — a strong morning can't be given back by an afternoon. Protecting a good day is half the game.",
   ];
@@ -1129,13 +1137,38 @@ async function main() {
             // Tout rouge → discipline (caps + track record public). Le mot « red » n'apparaît QUE s'il y a du rouge.
             const anyRed = active.some((b) => b.net < 0);
             const allGreen = active.length > 0 && active.every((b) => b.net >= 0);
+            // ⚠️ L'ORDRE DES TESTS COMPTE, et il était faux (corrigé 19/08). « anyRed » est vrai DÈS QU'UNE
+            // stratégie est rouge — donc aussi quand les trois le sont. La branche « tout rouge » était
+            // du code mort, et le 19/08, avec S1/S2/S3 toutes négatives, les membres ont lu « un jour rouge
+            // sur l'une est rarement un jour rouge sur toutes ». Le message le plus faux possible, le jour
+            // où il compte le plus. On teste donc « tout rouge » AVANT « au moins une rouge ».
+            const allRed = active.length > 0 && active.every((b) => b.net < 0);
             const tagline = allGreen
               ? "Every strategy green today. 🟢 This is the fleet working — your profile is set in the app. 👊"
-              : anyRed
-                ? "Three strategies, three personalities — a red day on one is rarely a red day on all. Yours is set in the app. 👊"
-                : "Risk stayed capped across the board and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁";
+              : allRed
+                ? "A red day across the board. Every trade carried its stop from the moment it opened, so the day cost what it was allowed to cost — no averaging down, no revenge trade. That is the system doing its job."
+                : anyRed
+                  ? "Three strategies, three personalities — a red day on one is rarely a red day on all. Yours is set in the app. 👊"
+                  : "Risk stayed capped across the board and the desk stays disciplined. 🔁";
+            // JOUR ROUGE : on montre la MÉCANIQUE, on ne promet pas demain. Quelqu'un qui arrive le jour
+            // d'une perte doit pouvoir vérifier qu'il y a une méthode derrière — combien de signaux ont été
+            // REFUSÉS, combien de positions ont été protégées, et si la pire perte est restée dans son
+            // enveloppe. Ce sont des faits du jour, pas une prévision. Demandé par Mathieu le 19/08 :
+            // « ils doivent juste comprendre qu'il y a une stratégie derrière, ce n'est pas du hasard. »
+            let discipline = '';
+            if (allRed || anyRed) {
+              const d = await fetchDayDiscipline().catch(() => null);
+              if (d) {
+                const bits: string[] = [];
+                if (d.vetoed > 0) bits.push(`<b>${d.vetoed}</b> signal${d.vetoed > 1 ? 's' : ''} refused by the filters`);
+                if (d.secured > 0) bits.push(`<b>${d.secured}</b> position${d.secured > 1 ? 's' : ''} moved to a protected stop`);
+                if (d.worstR != null) bits.push(`worst trade <b>${d.worstR.toFixed(2)}R</b> — inside its planned risk`);
+                if (bits.length) discipline = `\n\n🛡️ <b>What held today</b>\n${bits.map((b) => '· ' + b).join('\n')}`;
+              }
+            }
+            const proof = anyRed ? '\n\n<i>Every trade is posted here as it opens — before anyone knows how it ends.</i>' : '';
             if (lines.length)
-              void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · master-account scale</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}`);
+              void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · master-account scale</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}${discipline}${proof}`);
             else if (stats.net >= 0) void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  green day 🟢\n\nAll copied to your account. See you tomorrow. 👊`);
             else void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  ${wr}% win\n\nRisk stayed capped and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁`);
 
@@ -1177,14 +1210,29 @@ async function main() {
           }
         }
         // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
-        if (h === 21 && stats.net > 0) {
+        // JOUR ROUGE : ON PARLE AUSSI (19/08). Jusqu'ici la notification du soir ne partait que si la
+        // journée était verte — le membre voyait son compte baisser et n'entendait RIEN de nous. C'est ce
+        // silence-là qui fait déconnecter, pas la perte : celui qui vient d'arriver ne peut pas distinguer
+        // « mauvaise journée d'un système qui tourne » de « personne aux commandes ». On ne promet pas de
+        // rebond, on renvoie vers le bilan où la mécanique du jour est détaillée.
+        if (h === 21) {
           const { pushToAll } = await import('../lib/push/send');
-          void pushToAll({
-            title: `Algoria today: +$${Math.round(stats.net)}`,
-            body: `${stats.trades} trades · ${Math.round((stats.wins / stats.trades) * 100)}% win rate — copied to your account.`,
-            url: '/member/history',
-            tag: 'algoria-recap',
-          }).catch(() => {});
+          const wrPct = Math.round((stats.wins / stats.trades) * 100);
+          void pushToAll(
+            stats.net > 0
+              ? {
+                  title: `Algoria today: +$${Math.round(stats.net)}`,
+                  body: `${stats.trades} trades · ${wrPct}% win rate — copied to your account.`,
+                  url: '/member/history',
+                  tag: 'algoria-recap',
+                }
+              : {
+                  title: 'Algoria today: a red day',
+                  body: `${stats.trades} trades · ${wrPct}% win rate. Every trade carried its stop — see exactly what the desk did.`,
+                  url: '/member/history',
+                  tag: 'algoria-recap',
+                },
+          ).catch(() => {});
         }
       } catch (e) {
         console.error('[algoria] recap échoué:', e);
