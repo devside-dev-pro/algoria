@@ -9,6 +9,7 @@ import { pushState, enablePush } from '@/lib/push/client';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { asLocale, type Locale } from '@/lib/member/i18n';
 import { tr, guessLocale, rememberLocale } from '@/lib/member/ui-text';
+import { inMaintenance } from '@/lib/member/maintenance';
 
 export interface Member {
   member_no: number;
@@ -482,7 +483,9 @@ export const RISK_TIERS = [
 // ===== STRATÉGIES — le levier de risque du membre (le lot copieur est FIXE 0.01, plus de sélecteur de lot).
 // AVAILABLE : seules les stratégies dont le master EXISTE sont sélectionnables. Les 3 masters $70k tournent
 // (runners S1/S2/S3 + STH) depuis le 20/07 → tout est ouvert. Les membres existants restent en S2 (défaut).
-export const STRATEGY_AVAILABLE = [1, 2, 3];
+// Une stratégie EN MAINTENANCE sort du sélecteur : personne ne peut plus la choisir tant qu'elle n'est
+// pas réparée. Source unique dans lib/member/maintenance.ts — voir le dossier S1 du 20/08.
+export const STRATEGY_AVAILABLE = [1, 2, 3].filter((id) => !inMaintenance(id));
 export const STRATEGY_UI = [
   { id: 1, icon: '🛡️', name: 'STEADY', tag: 'Small daily target, tight caps', blurb: 'Hunts a small profit every day, then stops. Daily loss capped tight. No overnight positions.' },
   { id: 2, icon: '⚖️', name: 'BALANCED', tag: 'The reference engine', blurb: 'The strategy behind our track record — scalp + core positions, balanced daily caps.' },
@@ -534,7 +537,7 @@ export function StrategyPicker({ value, onPick, busy, budget, exclude }: { value
                 {s.name}
                 <span className="mono" style={{ marginLeft: 8, fontSize: 9, letterSpacing: 0.8, color: underBudget ? 'var(--gold)' : 'var(--dim)', fontWeight: 700 }}>min ${min}</span>
                 {s.id === 2 && <span style={{ color: 'var(--dim)', fontWeight: 500 }}> · default</span>}
-                {!STRATEGY_AVAILABLE.includes(s.id) && <span className="mono" style={{ marginLeft: 8, fontSize: 8.5, letterSpacing: 1, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 4, padding: '1px 5px' }}>COMING SOON</span>}
+                {!STRATEGY_AVAILABLE.includes(s.id) && <span className="mono" style={{ marginLeft: 8, fontSize: 8.5, letterSpacing: 1, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 4, padding: '1px 5px' }}>{inMaintenance(s.id) ? '🔧 UNDER MAINTENANCE' : 'COMING SOON'}</span>}
               </span>
               <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>{s.tag} — {s.blurb}</span>
               {underBudget && <span style={{ fontSize: 10.5, color: 'var(--gold)' }}>needs a ${min}+ deposit — fund more to unlock this profile</span>}

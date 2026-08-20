@@ -53,6 +53,36 @@ const personalise = (text: string, name?: string | null): string => {
 // Le corps se lit en trois secondes : une accroche, une raison d'y aller, rien de plus. Un post de
 // canal qui demande un effort de lecture ne convertit pas.
 // (non exportée : un fichier de page Next ne peut exporter que ses symboles réservés)
+// ===== ANNONCE S1 → S2 (20/08/2026) ====================================================================
+// Demande de Mathieu : prévenir les membres basculés « qu'ils ont été upgradés gratuitement sur S2 suite
+// aux mauvais résultats de S1 ».
+//
+// Deux partis pris sur le ton, et ils sont délibérés :
+//   · ON DIT LA CAUSE, pas juste le résultat. « Vos résultats étaient mauvais » inquiète ; « voici le
+//     défaut de construction qu'on a trouvé, le voici corrigé » rassure — parce que ça prouve que
+//     quelqu'un regarde. C'est la même règle que pour le canal VIP : montrer la méthode, pas promettre.
+//   · ON NE PROMET RIEN SUR S2. Elle perd aussi aujourd'hui (−17$/trade contre −33$ pour S1 sur 6
+//     semaines). Écrire « maintenant ça va gagner » serait un mensonge daté, et c'est le genre de phrase
+//     qu'un membre ressort trois semaines plus tard. On dit ce qui est vrai : S1 avait un défaut mesurable,
+//     on l'a mesuré, on l'a retiré.
+// Le mot « upgrade » est employé au sens factuel — S2 est le moteur de référence et perd deux fois moins
+// par trade — jamais comme une promesse de gain.
+const S1_TO_S2_ANNOUNCE = `Hey{name} 👋
+
+An important update about your account — nothing you need to do, but you should know.
+
+We audited <b>S1 STEADY</b> and found a design flaw. It stopped a winning day at +1%, but let a losing day run to −3%. A structure like that loses over time even when most individual trades win — and that is exactly what was happening.
+
+So we have <b>paused S1</b> while we fix it, and moved you to <b>S2 BALANCED</b> — our reference engine, the one behind the track record we publish — <b>at no extra cost</b>.
+
+Nothing changes on your side. Same account, same broker, same lot size. The copying continues automatically.
+
+One thing I want to be straight with you about: I am not going to promise you that S2 prints money. No strategy does, and any service that tells you otherwise is selling you something. What I can tell you is that S1 had a flaw we could measure, we measured it, and we took it out rather than let it keep running on your account.
+
+Any question, just reply here — I read everything.
+
+— Mathieu`;
+
 const CTA_TEMPLATES: Array<{ id: string; label: string; target: 'app' | 'mathieu'; text: string; btn: string; url: string }> = [
   {
     id: 'results', label: '📈 Résultats du jour → app', target: 'app',
@@ -154,6 +184,28 @@ export default function AdminCRM() {
   const [cpUrl, setCpUrl] = useState('https://app.algoria.tech/member');
   const [cpChat, setCpChat] = useState<string>('');
   const [cpReport, setCpReport] = useState<Array<{ channel: string; ok: boolean; error?: string }> | null>(null);
+  // 📣 ANNONCE GROUPÉE VIA LE BOT — prévenir un segment entier d'un changement, en une fois.
+  // Le texte par défaut est celui du basculement S1 → S2 du 20/08. L'étiquette (tag) sert d'anti-doublon
+  // côté serveur : quiconque l'a déjà reçue est sauté, donc un second clic ne renvoie rien à personne.
+  const [bcText, setBcText] = useState(S1_TO_S2_ANNOUNCE);
+  const [bcTag, setBcTag] = useState('s1-to-s2-2026-08-20');
+  const [bcAudience, setBcAudience] = useState<'ex_s1' | 'live'>('ex_s1');
+  const [bcReport, setBcReport] = useState<{ sent: number; skipped: number; failed: number; report: Array<{ member_no: number | null; ok: boolean; error?: string; skipped?: boolean }> } | null>(null);
+  const sendBroadcast = () => {
+    if (!bcText.trim() || !bcTag.trim()) return;
+    const who = bcAudience === 'ex_s1' ? 'the members still awaiting their S1 → S2 move' : 'ALL live + paused members';
+    if (!window.confirm(`Send this message through the bot to ${who}?\n\nAnyone who already received the tag "${bcTag}" is skipped automatically.`)) return;
+    setBusy(true);
+    setBcReport(null);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botBroadcast: { audience: bcAudience, text: bcText, tag: bcTag } }) })
+      .then(async (r) => {
+        const d = (await r.json()) as { error?: string; sent?: number; skipped?: number; failed?: number; report?: Array<{ member_no: number | null; ok: boolean; error?: string; skipped?: boolean }> };
+        if (d.error) return window.alert(`⚠ ${d.error}`);
+        setBcReport({ sent: d.sent ?? 0, skipped: d.skipped ?? 0, failed: d.failed ?? 0, report: d.report ?? [] });
+        load();
+      })
+      .finally(() => setBusy(false));
+  };
   const [runnerLastSeen, setRunnerLastSeen] = useState<number | null>(null); // heartbeat runner (dernière bougie écrite)
   const [legalNames, setLegalNames] = useState<Record<string, string>>({}); // tg_id → nom légal broker (kyc) : LE pont entre les 3 identités
   // comptes SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut + STH id)
@@ -1857,6 +1909,34 @@ export default function AdminCRM() {
         {/* ===== TOOLS — la boîte à outils de l'opérateur : push composer, relance des leads, legacy ===== */}
         {tab === 'tools' && (
           <>
+            {/* 📣 ANNONCE GROUPÉE — née du basculement S1 → S2 : prévenir 17 membres un par un depuis le
+                fil BOT ACTIVITY, c'est 17 clics et la certitude d'en oublier un. L'audience est résolue
+                CÔTÉ SERVEUR (le navigateur n'envoie qu'un nom de segment), et l'étiquette empêche qu'un
+                double clic renvoie le même message à quelqu'un qui l'a déjà reçu. */}
+            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
+              <h2 style={secH}>📣 ANNOUNCE TO A SEGMENT (bot DM)</h2>
+              <p style={dimP}>One message, sent through the Algoria bot to a whole segment. The tag below is the anti-duplicate lock: anyone who already received it is skipped, so clicking twice is safe.</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select value={bcAudience} onChange={(e) => setBcAudience(e.target.value as 'ex_s1' | 'live')} className="mono" style={{ fontSize: 11.5, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)' }}>
+                  <option value="ex_s1">ex-S1 — awaiting their move to S2</option>
+                  <option value="live">all live + paused members</option>
+                </select>
+                <input value={bcTag} onChange={(e) => setBcTag(e.target.value)} placeholder="anti-duplicate tag" className="mono" style={{ fontSize: 11.5, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', flex: '1 1 190px' }} />
+              </div>
+              <textarea value={bcText} onChange={(e) => setBcText(e.target.value)} rows={13}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', fontSize: 12.5, lineHeight: 1.5, fontFamily: 'inherit', resize: 'vertical' }} />
+              <p style={{ ...dimP, margin: 0 }}>{'{name}'} becomes the member&rsquo;s first name when we know it, and disappears cleanly when we don&rsquo;t. Basic HTML (&lt;b&gt;, &lt;i&gt;) is supported.</p>
+              <button disabled={busy || !bcText.trim()} onClick={sendBroadcast} style={{ padding: '10px 16px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: busy ? 0.5 : 1, alignSelf: 'flex-start' }}>📣 SEND</button>
+              {bcReport && (
+                <div className="mono" style={{ fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--border)', paddingTop: 9 }}>
+                  <span><b style={{ color: 'var(--up)' }}>{bcReport.sent} sent</b>{bcReport.skipped > 0 && <> · {bcReport.skipped} already had it</>}{bcReport.failed > 0 && <> · <b style={{ color: '#ff6b8a' }}>{bcReport.failed} failed</b></>}</span>
+                  {bcReport.report.filter((r) => !r.ok).map((r, i) => (
+                    <span key={i} style={{ color: '#ff6b8a' }}>#{r.member_no ?? '?'} — {r.error}</span>
+                  ))}
+                </div>
+              )}
+            </section>
+
             {/* AUDIT STH (03/08) — ne dans le cas #7 : une cliente affichee LIVE chez nous, connectee chez
                 STH, mais abonnee a AUCUN master. Elle ne recevait plus un seul trade, et RIEN dans notre
                 base ne permettait de le voir — seul STH connait cet etat. C'est le pire defaut possible
