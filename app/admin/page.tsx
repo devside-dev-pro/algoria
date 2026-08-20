@@ -54,32 +54,30 @@ const personalise = (text: string, name?: string | null): string => {
 // canal qui demande un effort de lecture ne convertit pas.
 // (non exportée : un fichier de page Next ne peut exporter que ses symboles réservés)
 // ===== ANNONCE S1 → S2 (20/08/2026) ====================================================================
-// Demande de Mathieu : prévenir les membres basculés « qu'ils ont été upgradés gratuitement sur S2 suite
-// aux mauvais résultats de S1 ».
+// Demande de Mathieu : prévenir les membres basculés, « sans phrase trop inquiétante » — on annonce la
+// maintenance et la migration, pas un post-mortem.
 //
-// Deux partis pris sur le ton, et ils sont délibérés :
-//   · ON DIT LA CAUSE, pas juste le résultat. « Vos résultats étaient mauvais » inquiète ; « voici le
-//     défaut de construction qu'on a trouvé, le voici corrigé » rassure — parce que ça prouve que
-//     quelqu'un regarde. C'est la même règle que pour le canal VIP : montrer la méthode, pas promettre.
-//   · ON NE PROMET RIEN SUR S2. Elle perd aussi aujourd'hui (−17$/trade contre −33$ pour S1 sur 6
-//     semaines). Écrire « maintenant ça va gagner » serait un mensonge daté, et c'est le genre de phrase
-//     qu'un membre ressort trois semaines plus tard. On dit ce qui est vrai : S1 avait un défaut mesurable,
-//     on l'a mesuré, on l'a retiré.
-// Le mot « upgrade » est employé au sens factuel — S2 est le moteur de référence et perd deux fois moins
-// par trade — jamais comme une promesse de gain.
+// TON : court et calme. La première version détaillait le défaut de construction (caps journaliers
+// asymétriques) ; Mathieu l'a jugée trop lourde, et il a raison — le membre n'a rien à faire, il n'a pas
+// besoin d'un rapport d'incident. On dit ce qui change et ce qui ne change pas, point.
+//
+// LA PHRASE SUR S2 EST UN FAIT PASSÉ, VÉRIFIABLE, JAMAIS UNE PROJECTION. « solidly positive these last
+// few weeks » = +8 519$ master sur 4 semaines, dont +8 254$ sur la dernière. On évite délibérément « la
+// meilleure des trois » : sur 7 jours c'est S3 qui mène (+881$ contre +825$ à 0,1 lot), et le membre a ce
+// comparatif SOUS LES YEUX dans l'app — une phrase que son propre écran contredit coûte plus cher que le
+// silence. Et jamais de promesse sur la suite : un « maintenant ça va gagner » se ressort trois semaines
+// plus tard.
 const S1_TO_S2_ANNOUNCE = `Hey{name} 👋
 
-An important update about your account — nothing you need to do, but you should know.
+Quick update on your account — nothing for you to do.
 
-We audited <b>S1 STEADY</b> and found a design flaw. It stopped a winning day at +1%, but let a losing day run to −3%. A structure like that loses over time even when most individual trades win — and that is exactly what was happening.
+We are putting <b>S1 STEADY</b> into maintenance after its recent results, and moving you over to <b>S2 BALANCED</b>, our reference profile, <b>at no extra cost</b>.
 
-So we have <b>paused S1</b> while we fix it, and moved you to <b>S2 BALANCED</b> — our reference engine, the one behind the track record we publish — <b>at no extra cost</b>.
+S2 has been solidly positive these last few weeks, and it is the engine behind the track record we publish.
 
-Nothing changes on your side. Same account, same broker, same lot size. The copying continues automatically.
+Nothing changes on your side: same account, same broker, same lot size. The copying carries on automatically on S2 — you will see it in the app.
 
-One thing I want to be straight with you about: I am not going to promise you that S2 prints money. No strategy does, and any service that tells you otherwise is selling you something. What I can tell you is that S1 had a flaw we could measure, we measured it, and we took it out rather than let it keep running on your account.
-
-Any question, just reply here — I read everything.
+Any question, just reply here.
 
 — Mathieu`;
 
