@@ -108,7 +108,9 @@ export async function GET(req: NextRequest) {
     // ABONNEMENTS PUSH : qui a activé les alertes (au moins 1 appareil). Sert au tableau « qui relancer ».
     db.from('member_push_subs').select('tg_id'),
     // RELANCES (kind='nudge', auto + manuelles) : nourrit la file « RELANCES DU JOUR » (qui a été touché quand).
-    db.from('member_actions').select('tg_id,created_at,done_by').eq('kind', 'nudge').order('created_at', { ascending: false }).limit(500),
+    // `status='done'` : un envoi ÉCHOUÉ n'est pas un contact. Sans cette garde, un membre que le bot
+    // n'a pas pu joindre sortirait de la file pendant 3 jours — on masquerait la personne à rattraper.
+    db.from('member_actions').select('tg_id,created_at,done_by').eq('kind', 'nudge').eq('status', 'done').order('created_at', { ascending: false }).limit(500),
     // HEARTBEAT runner : la dernière bougie écrite (BTC 24/7 → toujours attendue) — bandeau rouge si > 20 min.
     db.from('candles').select('time').order('time', { ascending: false }).limit(1),
     // NOMS LÉGAUX (kyc.broker_name, déclarés au wizard) : LE pont entre les 3 identités d'une personne
@@ -127,7 +129,9 @@ export async function GET(req: NextRequest) {
     .select('id,tg_id,member_no,account_no,broker,strategy,status,mt5_login,mt5_server,declared_deposit,holder_name,created_at')
     .order('created_at', { ascending: false }).limit(300) as { data: Array<Record<string, unknown>> | null };
   // 🤖 BOT ACTIVITY : fil unifié envoyé (nudge, avec le texte du DM) / reçu (bot_reply) — le plus récent d'abord
-  const { data: botActivity } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by')
+  // `status` remonte : le fil doit distinguer un DM PARTI d'un DM REFUSÉ par Telegram — sans lui,
+  // une ligne « → auto-nudge sent » s'afficherait pour un message que personne n'a jamais reçu.
+  const { data: botActivity } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by,status')
     .in('kind', ['nudge', 'bot_reply']).order('created_at', { ascending: false }).limit(120);
   // 📣 SOURCES DES DEMANDES D'ADHÉSION (30/07) : agrégat par lien d'invitation Telegram — un lien nommé
   // par campagne relie enfin une pub à ses demandes (les ads pointent vers le canal, pas vers l'app, donc
@@ -1079,11 +1083,28 @@ export async function POST(req: NextRequest) {
       targets = (ms ?? []) as typeof targets;
     } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });
 
-    // déjà prévenus sous cette étiquette → on les saute
-    const { data: already } = await db.from('member_actions').select('tg_id').eq('kind', 'nudge').contains('detail', { broadcast: tag } as never);
+    // DÉJÀ PRÉVENUS SOUS CETTE ÉTIQUETTE → on les saute. `status='done'` est ESSENTIEL et non
+    // décoratif : depuis qu'on trace aussi les ÉCHECS sous la même étiquette (ci-dessous), l'omettre
+    // ferait sauter précisément les gens que la relance doit rattraper — un membre injoignable une
+    // fois le resterait pour toujours, et le bouton « relancer » deviendrait un bouton « ne rien faire ».
+    const { data: already } = await db.from('member_actions').select('tg_id').eq('kind', 'nudge').eq('status', 'done').contains('detail', { broadcast: tag } as never);
     const done = new Set((already ?? []).map((r) => Number(r.tg_id)));
 
     const report: Array<{ member_no: number | null; ok: boolean; error?: string; skipped?: boolean }> = [];
+    // ÉCHEC D'ENVOI = un fait qui doit SURVIVRE à l'onglet. Avant le 21/08 il ne vivait que dans la
+    // réponse HTTP : le 20/08, 2 membres sur 17 n'ont pas reçu l'annonce S1→S2 et le motif était
+    // définitivement perdu — impossible de savoir s'ils avaient bloqué le bot, supprimé leur compte,
+    // ou si c'était un simple raté réseau. On écrit donc une ligne `status='failed'` portant l'erreur
+    // Telegram telle quelle. Elle n'entre dans AUCUNE file (la file support ne lit que 'pending') et
+    // ne compte pas comme un contact (voir les deux gardes `status='done'` sur les cooldowns).
+    const logFailure = async (m: { tg_id: number; member_no: number | null }, error: string, sent: string) => {
+      try {
+        await db.from('member_actions').insert({
+          tg_id: Number(m.tg_id), member_no: m.member_no, kind: 'nudge', status: 'failed', done_by: who,
+          detail: { via: 'broadcast', broadcast: tag, error, text: sent } as never,
+        });
+      } catch { /* le journal ne doit jamais faire échouer l'envoi des suivants */ }
+    };
     for (const m of targets) {
       if (done.has(Number(m.tg_id))) { report.push({ member_no: m.member_no, ok: true, skipped: true }); continue; }
       // {name} → prénom quand on le connaît ; sinon la formule nue, jamais « Hey undefined »
@@ -1096,7 +1117,9 @@ export async function POST(req: NextRequest) {
         });
         if (!r.ok) {
           const err = (await r.json().catch(() => ({}))) as { description?: string };
-          report.push({ member_no: m.member_no, ok: false, error: err.description ?? `HTTP ${r.status}` });
+          const why = err.description ?? `HTTP ${r.status}`;
+          await logFailure(m, why, body_);
+          report.push({ member_no: m.member_no, ok: false, error: why });
           continue;
         }
         await db.from('member_actions').insert({
@@ -1105,7 +1128,9 @@ export async function POST(req: NextRequest) {
         });
         report.push({ member_no: m.member_no, ok: true });
       } catch (e) {
-        report.push({ member_no: m.member_no, ok: false, error: (e as { message?: string })?.message ?? 'send failed' });
+        const why = (e as { message?: string })?.message ?? 'send failed';
+        await logFailure(m, why, body_);
+        report.push({ member_no: m.member_no, ok: false, error: why });
       }
       await new Promise((res) => setTimeout(res, 120)); // Telegram n'aime pas les rafales — 8 msg/s max
     }
