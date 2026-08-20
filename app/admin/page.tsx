@@ -209,7 +209,7 @@ export default function AdminCRM() {
   // comptes SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut + STH id)
   const [extraAccounts, setExtraAccounts] = useState<Array<{ id: string; tg_id: number; account_no: number; broker: string | null; strategy: number; status: string; mt5_login: string | null; declared_deposit: number | null }>>([]);
   // 🤖 BOT ACTIVITY : fil envoyé (nudge, texte du DM) / reçu (bot_reply) — visibilité totale sur le bot
-  const [botActivity, setBotActivity] = useState<Array<{ id: string; tg_id: number; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string }>>([]);
+  const [botActivity, setBotActivity] = useState<Array<{ id: string; tg_id: number; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string; status?: string | null }>>([]);
   const [tgInboxOn, setTgInboxOn] = useState(false); // état réel du webhook Telegram (getWebhookInfo)
   // 🌍 FILTRE MARCHÉ (01/08 — ouverture de l'Italie, deux entités comptables séparées) : 'all' | 'en' | 'it'.
   // Il pilote la liste des membres ET le registre des dépôts : « où en est l'Italie ce mois-ci ? » devient
@@ -1345,17 +1345,21 @@ export default function AdminCRM() {
                 {botActivity.slice(0, 60).map((b) => {
                   const d = b.detail ?? {};
                   const incoming = b.kind === 'bot_reply';
+                  // NON DÉLIVRÉ — Telegram a refusé le message (bot bloqué, compte supprimé…). La ligne
+                  // reste au fil : un DM qui n'arrive pas est une information, pas un blanc à cacher.
+                  const failed = !incoming && String(b.status ?? '') === 'failed';
+                  const failReason = failed ? String((d as { error?: string }).error ?? 'not delivered') : '';
                   const who = rows.find((r) => Number(r.tg_id) === Number(b.tg_id));
                   const label = who ? (who.tg_username ? '@' + who.tg_username : (who.tg_name ?? `#${who.member_no}`)) : String((d as { username?: string }).username ? '@' + (d as { username?: string }).username : ((d as { name?: string }).name ?? b.tg_id));
                   const text = String((d as { text?: string }).text ?? (d as { note?: string }).note ?? '');
                   return (
-                    <div key={b.id} style={{ display: 'flex', gap: 9, padding: '8px 11px', borderRadius: 9, border: `1px solid ${incoming ? 'rgba(245,194,74,.4)' : 'var(--border)'}`, background: incoming ? 'rgba(245,194,74,.05)' : 'rgba(10,17,31,.5)' }}>
-                      <span style={{ fontSize: 13, fontWeight: 800, color: incoming ? 'var(--gold)' : 'var(--cyan)', minWidth: 16 }}>{incoming ? '←' : '→'}</span>
+                    <div key={b.id} style={{ display: 'flex', gap: 9, padding: '8px 11px', borderRadius: 9, border: `1px solid ${failed ? 'rgba(255,90,90,.45)' : incoming ? 'rgba(245,194,74,.4)' : 'var(--border)'}`, background: failed ? 'rgba(255,90,90,.06)' : incoming ? 'rgba(245,194,74,.05)' : 'rgba(10,17,31,.5)' }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: failed ? '#ff5a5a' : incoming ? 'var(--gold)' : 'var(--cyan)', minWidth: 16 }}>{failed ? '⨯' : incoming ? '←' : '→'}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                           <span style={{ fontSize: 12, fontWeight: 750, color: 'var(--text)' }}>{label}</span>
                           {who?.member_no != null && <span className="mono goldText" style={{ fontSize: 10, fontWeight: 800 }}>#{who.member_no}</span>}
-                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{incoming ? 'replied to the bot' : (d as { via?: string }).via === 'manual' ? '👤 your personal touch (logged)' : (d as { via?: string }).via === 'admin' ? '💬 you replied via the bot' : 'auto-nudge sent'}</span>
+                          <span className="mono" style={{ fontSize: 9.5, fontWeight: failed ? 800 : 400, color: failed ? '#ff5a5a' : 'var(--dim)' }}>{failed ? `NOT DELIVERED — ${failReason}` : incoming ? 'replied to the bot' : (d as { via?: string }).via === 'manual' ? '👤 your personal touch (logged)' : (d as { via?: string }).via === 'admin' ? '💬 you replied via the bot' : (d as { via?: string }).via === 'broadcast' ? '📣 broadcast sent' : 'auto-nudge sent'}</span>
                           <span style={{ flex: 1 }} />
                           <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{new Date(b.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                         </div>

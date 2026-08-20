@@ -191,6 +191,11 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
   const { data: nudges } = await raw
     .from('member_actions').select('tg_id,created_at')
     .eq('kind', 'nudge')
+    // SEULS LES ENVOIS RÉUSSIS COMPTENT. Un cooldown mesure « depuis quand cette personne n'a pas été
+    // DÉRANGÉE » — un DM que Telegram a refusé n'a dérangé personne. Sans cette garde, un membre que le
+    // bot n'arrive pas à joindre se ferait imposer 3 à 14 jours de silence à chaque tentative ratée,
+    // c'est-à-dire exactement l'inverse de ce que la relance doit faire.
+    .eq('status', 'done')
     .gte('created_at', new Date(now - 15 * 86_400_000).toISOString()); // couvre le plus long cooldown
   const lastNudge = new Map<number, number>();
   for (const n of (nudges ?? []) as Array<{ tg_id: number; created_at: string }>) {
