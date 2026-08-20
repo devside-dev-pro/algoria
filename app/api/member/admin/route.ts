@@ -241,6 +241,7 @@ export async function POST(req: NextRequest) {
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
     setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
+    botBroadcast?: { audience: 'ex_s1' | 'live'; text: string; tag: string };
     setCountry?: { tg_id: number; country: string };
     editMember?: { tg_id: number; field: string; value: string | null };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
@@ -1035,6 +1036,75 @@ export async function POST(req: NextRequest) {
     await db.from('member_actions').insert({ tg_id: dmTg, member_no: mrow?.[0]?.member_no ?? null, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'admin', note: `reply via bot by ${who}`, text } as never });
     return NextResponse.json({ ok: true });
   }
+  // 📣 ENVOI GROUPÉ VIA LE BOT — annoncer un changement à un segment entier, en une fois.
+  //
+  // Né du basculement S1 → S2 du 20/08 : 17 membres branchés au copieur devaient être prévenus qu'on
+  // avait mis leur stratégie en maintenance. Les prévenir un par un depuis le fil BOT ACTIVITY, c'est 17
+  // clics et la certitude d'en oublier un.
+  //
+  // L'AUDIENCE EST CALCULÉE ICI, jamais fournie par le navigateur : une liste d'ids envoyée par le client
+  // pourrait viser n'importe qui si l'écran a une vieille donnée en mémoire. On accepte un NOM de segment,
+  // et le serveur résout qui il contient au moment de l'envoi.
+  //
+  // ANTI-DOUBLON PAR TAG : chaque envoi porte une étiquette, et quiconque a déjà reçu un message portant
+  // cette étiquette est SAUTÉ. Un double clic, un rechargement de page ou une seconde tentative après une
+  // erreur réseau ne peuvent pas envoyer deux fois la même annonce à la même personne.
+  if (body.botBroadcast) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured (Vercel)' }, { status: 400 });
+    const text = String(body.botBroadcast.text ?? '').trim().slice(0, 1500);
+    const tag = String(body.botBroadcast.tag ?? '').trim().slice(0, 60);
+    const audience = String(body.botBroadcast.audience ?? '');
+    if (!text || !tag) return NextResponse.json({ error: 'text and tag required' }, { status: 400 });
+
+    // ── qui reçoit ──────────────────────────────────────────────────────────────────────────────────
+    let targets: Array<{ tg_id: number; member_no: number | null; tg_name: string | null }> = [];
+    if (audience === 'ex_s1') {
+      // les membres BRANCHÉS au copieur qui portent une carte de mouvement S1 → S2 encore en attente
+      const { data } = await db.from('member_actions').select('tg_id').eq('kind', 'strategy_change').eq('status', 'pending');
+      const ids = [...new Set((data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
+      if (ids.length) {
+        const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name').in('tg_id', ids).is('banned_at', null);
+        targets = (ms ?? []) as typeof targets;
+      }
+    } else if (audience === 'live') {
+      const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name').in('status', ['live', 'paused']).is('banned_at', null);
+      targets = (ms ?? []) as typeof targets;
+    } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });
+
+    // déjà prévenus sous cette étiquette → on les saute
+    const { data: already } = await db.from('member_actions').select('tg_id').eq('kind', 'nudge').contains('detail', { broadcast: tag } as never);
+    const done = new Set((already ?? []).map((r) => Number(r.tg_id)));
+
+    const report: Array<{ member_no: number | null; ok: boolean; error?: string; skipped?: boolean }> = [];
+    for (const m of targets) {
+      if (done.has(Number(m.tg_id))) { report.push({ member_no: m.member_no, ok: true, skipped: true }); continue; }
+      // {name} → prénom quand on le connaît ; sinon la formule nue, jamais « Hey undefined »
+      const first = String(m.tg_name ?? '').trim().split(/\s+/)[0] ?? '';
+      const body_ = /^[\p{L}][\p{L}'-]{1,20}$/u.test(first) ? text.replace(/\{name\}/g, ' ' + first) : text.replace(/\{name\}/g, '');
+      try {
+        const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chat_id: Number(m.tg_id), text: body_, parse_mode: 'HTML', disable_web_page_preview: true }),
+        });
+        if (!r.ok) {
+          const err = (await r.json().catch(() => ({}))) as { description?: string };
+          report.push({ member_no: m.member_no, ok: false, error: err.description ?? `HTTP ${r.status}` });
+          continue;
+        }
+        await db.from('member_actions').insert({
+          tg_id: Number(m.tg_id), member_no: m.member_no, kind: 'nudge', status: 'done', done_by: who,
+          detail: { via: 'broadcast', broadcast: tag, text: body_ } as never,
+        });
+        report.push({ member_no: m.member_no, ok: true });
+      } catch (e) {
+        report.push({ member_no: m.member_no, ok: false, error: (e as { message?: string })?.message ?? 'send failed' });
+      }
+      await new Promise((res) => setTimeout(res, 120)); // Telegram n'aime pas les rafales — 8 msg/s max
+    }
+    return NextResponse.json({ ok: true, sent: report.filter((r) => r.ok && !r.skipped).length, skipped: report.filter((r) => r.skipped).length, failed: report.filter((r) => !r.ok).length, report });
+  }
+
   if (body.nudged) {
     // « ✓ FAIT » de la file RELANCES : Mathieu a envoyé son message/vocal perso → on trace (kind='nudge',
     // via manual) pour sortir le lead de la file 3 jours et mesurer la conversion post-contact.
