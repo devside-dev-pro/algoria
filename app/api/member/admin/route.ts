@@ -1060,8 +1060,15 @@ export async function POST(req: NextRequest) {
     // ── qui reçoit ──────────────────────────────────────────────────────────────────────────────────
     let targets: Array<{ tg_id: number; member_no: number | null; tg_name: string | null }> = [];
     if (audience === 'ex_s1') {
-      // les membres BRANCHÉS au copieur qui portent une carte de mouvement S1 → S2 encore en attente
-      const { data } = await db.from('member_actions').select('tg_id').eq('kind', 'strategy_change').eq('status', 'pending');
+      // Tous les membres qui portent une carte de mouvement DEPUIS S1 — quel que soit son statut.
+      //
+      // ⚠️ CORRIGÉ LE 20/08, ET C'ÉTAIT UN VRAI DÉFAUT. La première version ne prenait que les cartes
+      // encore 'pending'. Or la marche à suivre que j'avais moi-même donnée à Mathieu était : faire les
+      // mouvements STH D'ABORD, envoyer l'annonce ENSUITE — ce qui vidait l'audience au fur et à mesure.
+      // Résultat en production : sur 17 destinataires, l'annonce n'est partie qu'aux 4 dont le mouvement
+      // avait échoué. Les 13 correctement déplacés n'ont rien reçu, précisément parce que tout s'était
+      // bien passé pour eux. Une audience ne doit pas dépendre de l'avancement d'une tâche.
+      const { data } = await db.from('member_actions').select('tg_id').eq('kind', 'strategy_change').eq('detail->>from' as never, '1' as never);
       const ids = [...new Set((data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
       if (ids.length) {
         const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name').in('tg_id', ids).is('banned_at', null);
