@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, isVip } from '@/lib/member/server';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
+import { inMaintenance } from '@/lib/member/maintenance';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,8 +38,13 @@ export async function GET(req: NextRequest) {
   // Voir qu'une autre stratégie était verte le jour où la sienne saigne évite le réflexe de retrait, et
   // aide à choisir avant d'ouvrir un second compte. Consultation seule : ça ne change AUCUN branchement.
   const asked = Number(req.nextUrl.searchParams.get('strategy') ?? 0);
-  const viewStrategy = [1, 2, 3].includes(asked) ? asked : memberStrategy;
-  const clean = (tradesQ.data ?? []).filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100');
+  // STRATÉGIE EN MAINTENANCE : ni consultable, ni affichée. On retombe sur S2 (le moteur de référence)
+  // plutôt que de servir un écran vide — un membre déplacé depuis une stratégie retirée doit voir
+  // QUELQUE CHOSE, pas un trou. Décision Mathieu du 20/08 sur S1.
+  const viewStrategy = [1, 2, 3].includes(asked) && !inMaintenance(asked) ? asked : (inMaintenance(memberStrategy) ? 2 : memberStrategy);
+  // Les trades des stratégies en maintenance sont RETIRÉS DE L'AFFICHAGE, pas de la base : le filtre est
+  // ici, les lignes restent intactes dans `trades` et reviennent dès qu'on retire l'id de la liste.
+  const clean = (tradesQ.data ?? []).filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100' && !inMaintenance(Number((t as { strategy?: number }).strategy ?? 2)));
   let trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === viewStrategy);
   // PROSPECTS : la BANDE-ANNONCE, pas le flux brut — un curieux qui arrive sur 2 SL d'affilée ne rejoint
   // jamais, même après des semaines vertes. On ne montre que les GAINS (l'UI l'assume : "highlights") ;
@@ -90,7 +96,7 @@ export async function GET(req: NextRequest) {
   // est FIXE, donc identique quelle que soit la stratégie — la comparaison est exacte, pas une projection.
   // Réservé aux accès débloqués : un prospect ne voit que des gains filtrés, un net y serait mensonger.
   const strategyStats = unlocked
-    ? [1, 2, 3].map((id) => {
+    ? [1, 2, 3].filter((id) => !inMaintenance(id)).map((id) => {
         const rows = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === id);
         const net = rows.reduce((a, t) => a + Number(t.pnl) * clientLot / (Number(t.lot) > 0 ? Number(t.lot) : 1), 0);
         return { id, trades: rows.length, wins: rows.filter((t) => Number(t.pnl) > 0).length, net };

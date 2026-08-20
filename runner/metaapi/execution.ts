@@ -1,4 +1,6 @@
 import type { Signal } from '../../lib/engine/types';
+import { ACTIVE_STRATEGY } from '../../lib/engine/strategies';
+import { inMaintenance } from '../../lib/member/maintenance';
 
 /**
  * Prépare lot + SL/TP selon les contraintes DU BROKER.
@@ -44,6 +46,15 @@ function prepareOrder(stream: any, s: Signal, symbol: string): { sl?: number; tp
 
 /** Place l'ordre sur le compte master. `symbol` = nom CHEZ LE BROKER (ex. "Gold"). */
 export async function placeSignal(stream: any, s: Signal, symbol: string) {
+  // ═══ VERROU DE MAINTENANCE ═══════════════════════════════════════════════════════════════════════
+  // Une stratégie retirée de la circulation n'ouvre plus AUCUNE position. Le contrôle est ici, dans le
+  // goulot par lequel passe TOUTE création d'ordre — scalp, breakout, swing, modes show — plutôt que
+  // dispersé sur chaque chemin d'entrée, où il suffirait d'en oublier un pour que la stratégie continue
+  // de trader l'argent des membres. On lève une erreur : les appelants la traitent déjà comme un refus
+  // broker et enregistrent le signal en 'rejected', donc la trace reste.
+  // Les positions DÉJÀ OUVERTES ne sont pas touchées : elles gardent leur gestion (stop, paliers,
+  // trailing) jusqu'à leur sortie normale. On ne liquide rien dans le dos des membres.
+  if (inMaintenance(ACTIVE_STRATEGY.id)) throw new Error(`strategy S${ACTIVE_STRATEGY.id} is in maintenance — no new positions`);
   const { sl, tp, lot } = prepareOrder(stream, s, symbol);
   const opts = { comment: 'algoria' }; // PAS de clientId : MetaApi impose un pattern strict et on suit nos trades par positionId
   const result =
