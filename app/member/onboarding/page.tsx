@@ -421,9 +421,20 @@ export default function Onboarding() {
           {(!ackLink || !ackFunded) && !demoServer && (
             <p style={{ margin: '-6px 0 0', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>Tick both boxes above to continue — we check them against the broker.</p>
           )}
-          <button onClick={() => setStep(0)} style={linkBtn}>{t('ob.noBroker')}</button>
           <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
           </>)}
+
+          {/* ═══ RETOUR À L'ÉTAPE BROKER — TOUJOURS VISIBLE (21/08/2026) ═════════════════════════════
+              Ce lien existait déjà, mais il était À L'INTÉRIEUR du bloc `showCreds`, donc invisible tant
+              que l'origine du compte n'était pas déclarée. Or c'est EXACTEMENT là qu'on atterrit en
+              revenant : « Disconnect / change trading account » repasse le membre en onboarding avec
+              onboarding_step = 1 (le broker est conservé, on vise le seul changement d'identifiants).
+              Résultat : l'écran n'offrait que deux boutons d'origine et aucune sortie — pour changer de
+              BROKER il fallait d'abord répondre à une question portant sur le compte qu'on abandonne,
+              puis dénicher le lien en bas du formulaire. Personne ne devine ça.
+              Le libellé suit la situation : « je n'en ai pas encore » n'a aucun sens pour quelqu'un dont
+              la fiche porte déjà un broker — celui-là veut en CHANGER. */}
+          <button onClick={() => { setOrigin(null); setStep(0); }} style={linkBtn}>{picked ? t('ob.changeBroker') : t('ob.noBroker')}</button>
         </section>
       )}
 
