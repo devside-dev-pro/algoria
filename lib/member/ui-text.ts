@@ -141,6 +141,10 @@ export const UI: Dict = {
   'ob.encrypting': { en: 'ENCRYPTING…', it: 'CRITTOGRAFIA…' },
   'ob.connectCta': { en: 'CONNECT MY ACCOUNT →', it: 'COLLEGA IL MIO CONTO →' },
   'ob.noBroker': { en: 'Don\'t have a broker account yet? Open one →', it: 'Non hai ancora un conto broker? Aprine uno →' },
+  // Même lien, autre situation : celui qui a DÉJÀ un broker enregistré ne « n'en a pas encore ». Il
+  // revient (déconnexion, refus) et veut en changer — lui proposer « aprine uno » le laisse croire
+  // qu'il n'est pas au bon endroit.
+  'ob.changeBroker': { en: '← Change broker or open a new account', it: '← Cambia broker o apri un nuovo conto' },
   'ob.step3': { en: '3 · Choose your strategy', it: '3 · Scegli la tua strategia' },
   'ob.step3.sub': { en: 'Every strategy copies at the same fixed size — your risk lever is the strategy itself. You can switch anytime from your Profile.', it: 'Tutte le strategie copiano con la stessa size fissa — la tua leva di rischio è la strategia stessa. Puoi cambiarla quando vuoi dal Profilo.' },
   'ob.saving': { en: 'SAVING…', it: 'SALVATAGGIO…' },
