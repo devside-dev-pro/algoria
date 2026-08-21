@@ -4,9 +4,11 @@
 //
 // Étude 2/6→14/7 (M5 gold réel, 8 258 bougies, jours rouges inclus, master $70k lot 1, par JOURNÉE) :
 //   S1 (thr .25 · RR 0.4 · sans Asie · +1%/−3%) : 67% de jours verts · série rouge max 3 j · rouge moyen −$990 · net +$7 807
-//     → le profil qui MAXIMISE le taux de jours verts : TP court (86% de réussite/trade) pour banker vite,
-//       session Asie coupée (c'est la nuit que les journées commencent mal), objectif +1% puis stop.
-//       Sans swing ni breakout : la promesse « journée bouclée » est incompatible avec une position tenue des jours.
+//     ⚠️ CETTE S1 N'EXISTE PLUS (reconstruite le 21/08 — voir son bloc dans STRATEGIES). Le backtest lui
+//     promettait +$7 807 ; le RÉEL a rendu −$5 361 sur 162 trades. L'écart s'est logé dans le TP à 0.4R,
+//     dont l'espérance mesurée en rejeu est nulle. On garde la ligne comme archive, pas comme description :
+//     tout ce qu'elle dit de S1 (RR 0.4, +1%/−3%, « banker vite ») est périmé. Restent vrais : sans Asie,
+//     sans swing — « journée bouclée » est bien incompatible avec une position tenue des jours.
 //   S2 (live actuel : thr .25 · RR 1.0 · +4%/−4%) : 53% verts · net +$7 045 — la référence.
 //   S3 (thr .20 · RR 1.0 · +8%/−6%) : 58% verts · net +$24 496 sur la fenêtre — MAIS seuil bas = sur-trading
 //     historiquement fragile hors échantillon → à re-valider sur une fenêtre longue avant tout client réel.
@@ -19,7 +21,9 @@ export interface StrategyProfile {
   // R:R MINIMUM accepté après le clamp structure (TP posé sur le premier mur S/R). Étude 2/6→20/7 (robuste
   // sur les DEUX moitiés) : à 0.2, les trades « +197$ pour risquer 800$ » saignent les mois difficiles
   // (juillet −8 814$) ; à 0.75, juillet passe POSITIF (+2 621$) et le net total ×4.5 (+1 999→+9 174$).
-  // S1 garde 0.2 : son design EST le petit TP rapide (targetRR 0.4 validé tel quel). S3 : étude à part.
+  // S1 est passée de 0.2 à 0.75 le 21/08 : elle était la DERNIÈRE sur 0.2, et son live a payé exactement ce
+  // que l'étude annonçait. Le motif qui l'en exemptait (« son design EST le petit TP rapide ») est tombé
+  // avec le TP court lui-même. S3 : étude à part.
   minRR: number;
   // ARMEMENT DU BREAKEVEN (× riskDist) — LE levier des « gros stops », étude 10/08 sur 853 signaux scalp
   // XAUUSD RÉELS (02/07→10/08) dont le chemin a été rejoué bougie à bougie en M1 (59 314 bougies), en ne
@@ -55,13 +59,16 @@ export interface StrategyProfile {
   // Étude 2/6→20/7 (plateau 24/24 combinaisons robustes sur les deux moitiés) :
   //   S2 : net +9 174→+14 957$ · juillet −1 722→+1 885$ · jours verts 61→63% · gain moyen réel ~+305$
   //   S3 (avec minRR 0.75) : net +22 619$ · juin +20 708/juil +1 910 ✅ (sa config minRR 0.2 : juil −8 929 ❌)
-  // S1 non concernée : son TP à 0.4R est atteint avant tout déclenchement à 0.6R.
+  // S1 ÉTAIT non concernée (son TP à 0.4R était atteint avant tout déclenchement) — elle l'est depuis le
+  // 21/08 : sous TP 1.0R, le trailing 0.30/0.18 est précisément ce qui devait manquer à ses 73 sorties à +29 $.
   trailActivate?: number;
   trailDist?: number;
   // GATE RÉGIME (décorrélation, étude 22/7) : la stratégie ne scalpe que SON régime de marché.
   //   S3 'trend' : net +26 313→+27 155$, juillet +1 910→+4 569$, trades partagés avec S2 168→135. ✅
   //   S1 'range' TESTÉ ET TUÉ : −10 806$ (les deux moitiés rouges) — les rejets en range seuls n'ont pas
-  //   d'edge ; S1 reste non-gatée (déjà la moins corrélée : 0.31-0.37 via sessions + TP court).
+  //   d'edge ; S1 reste non-gatée. ⚠️ Sa faible corrélation (0.31-0.37) tenait aux sessions ET au TP court ;
+  //   ce dernier ayant disparu le 21/08, elle va se rapprocher de S2 — seul le filtre de sessions l'en écarte
+  //   encore. Contrepartie assumée de la reconstruction, à mesurer une fois qu'elle aura assez de trades.
   //   Constat honnête : S2×S3 restent frères (corr 0.89) tant qu'ils partagent le même générateur de
   //   signaux — la VRAIE décorrélation demandera une famille de signaux différente (labo à venir).
   regimeGate?: 'trend' | 'range';
@@ -80,7 +87,9 @@ export interface StrategyProfile {
   // LARGEUR (slAtrMult) tue l'edge (re-confirmé : tout ≤1.0/cap 2.5 casse juillet), mais REFUSER les setups à
   // stop extrême paie : cap 3.2→2.8 sur S2 : net +19 701→+23 336$, verts 66→71%, perte moyenne −13%, pire
   // trade −2 425→−2 036$ (ligne cap 2.8 robuste sur mult 1.05-1.2). S3 : +25 910→+28 681$, verts 64→72%.
-  // S1 : cap 2.8 la DÉGRADE (7 622→6 071$) — son TP court vit des setups à stop large → garde 3.2 (défaut).
+  // S1 : le cap 2.8 la dégradait (7 622→6 071$) « parce que son TP court vit des setups à stop large » —
+  // motif adossé au TP à 0.4R, supprimé le 21/08. Elle passe donc à 2.8 comme S2/S3. C'est le paramètre le
+  // moins bien étayé de sa reconstruction : à re-tester EN PREMIER si ses chiffres déçoivent.
   maxStopAtr?: number;
   tradeAsia: boolean; // trader la session Asie ?
   dailyProfitTargetPct: number; // objectif du jour → latch dayDone
@@ -129,9 +138,55 @@ export interface StrategyProfile {
 // (ensureManagement les réadopte par leur ref `-bk-`) : on coupe les ENTRÉES, pas la gestion des sorties.
 // ─────────────────────────────────────────────────────────────────────────────
 export const STRATEGIES: Record<string, StrategyProfile> = {
-  // S1 : BE armé à 0.10 (voir beTrigger). PAS de trailing — son TP est à 0.4R, un trailing qui s'active à
-  // 0.45R ne se déclencherait jamais. Le reste de son design (TP court, sans Asie, +1%/−3%) est inchangé.
-  '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 0.4, minRR: 0.2, beTrigger: 0.10, tradeAsia: false, dailyProfitTargetPct: 0.01, maxDailyLossPct: 0.03, swing: false, breakout: false },
+  // ═══ S1 RECONSTRUITE LE 21/08/2026 (décision Mathieu) ════════════════════════════════════════════════
+  // Elle sort de six semaines à −5 361 $ sur 162 trades, avec 82% de réussite. Ce n'est pas un paradoxe,
+  // c'est une géométrie : gain moyen +130 $, perte moyenne −779 $ — 1 pour 6, quand 82% de réussite exige
+  // de rester sous 1 pour 4,5. 73 trades (45%) sortaient au breakeven pour +29 $ pendant que 25 stops
+  // pleins coûtaient −826 $ pièce : UN stop annulait vingt-huit break-even.
+  //
+  // CE QUE J'AVAIS ACCUSÉ À TORT — les caps asymétriques +1%/−3%. Rejeu des 162 trades réels en ne
+  // changeant QUE le plancher (un trade déjà ouvert finit sa course, les suivants ne sont pas pris) :
+  //   −3% (live) −5 509 $ · −2,5% −4 153 $ · −2% −2 024 $ · −1,5% −4 015 $ · −1% −3 968 $
+  // Aucun plancher ne la rend rentable, et la courbe n'est pas monotone : sur 24 journées, choisir −2%
+  // aurait été du sur-ajustement au bruit. L'asymétrie aggravait, elle ne causait pas.
+  //
+  // LA VRAIE CAUSE, UN SEUL PARAMÈTRE : `targetRR: 0.4`. L'étude du 10/08 consignée plus haut (853 signaux
+  // réels rejoués bougie à bougie en M1, en ne changeant QUE la sortie) est sans équivoque sur cet axe —
+  // le taux de réussite est fixé par le BE, PAS par le TP (82.4% de verts que le TP soit à 0.4R ou 2.0R),
+  // et seule l'espérance bouge : 0.4R → +0.001R · 1.0R → +0.041R · 1.5R → +0.050R. Un TP à 0.4R a une
+  // espérance NULLE avant les coûts. Couper les gagnants tôt ne fabrique aucun trade vert de plus : ça
+  // rétrécit les gains pendant que les stops, eux, ne bougent pas. C'était l'identité de S1 ET son défaut.
+  //
+  // S1 adopte donc la sortie ÉPROUVÉE de S2, et le transfert est légitime : les deux partagent déjà le
+  // même générateur de signaux — `thresholdScalp` 0.25 et `beTrigger` 0.10 sont identiques. Seule la
+  // sortie différait, et c'est exactement la variable que l'étude faisait varier.
+  //   · targetRR 0.4 → 1.0 et minRR 0.2 → 0.75 (S1 était la DERNIÈRE sur 0.2, que l'étude 2/6→20/7
+  //     condamnait : « +197$ pour risquer 800$ », juillet −8 814 $ ; à 0.75 juillet passe positif).
+  //   · paliers + trailing 0.30/0.18 : la réponse directe aux 73 sorties à +29 $.
+  //   · maxStopAtr 2.8 : refuse les setups à stop extrême. ⚠️ SEUL paramètre dont l'évidence S1-spécifique
+  //     pointait dans l'autre sens (« cap 2.8 la dégrade, 7 622→6 071 $ ») — mais ce constat était adossé
+  //     au TP court qu'on supprime justement : « son TP court vit des setups à stop large ». Sous TP 1.0R,
+  //     c'est la mesure S2/S3 qui s'applique (pire trade −2 425 → −2 036 $). À re-vérifier en premier si
+  //     les chiffres déçoivent.
+  //   · blocage 12-17 UTC : mesuré sur ses PROPRES trades — 46 entrées dans cette fenêtre, −1 960 $.
+  //     (Honnêteté : S1 perdait dans toutes les fenêtres, −30 $/trade dehors contre −43 $ dedans. Ce
+  //     blocage aide, il ne sauve rien à lui seul.)
+  //
+  // CE QU'ELLE GARDE, et qui fait vraiment son identité : pas d'Asie, pas de swing — donc rien qui dort
+  // la nuit, la journée est réellement bouclée — et des caps SYMÉTRIQUES, la correction de fond.
+  // Le niveau 3%/3% n'est PAS optimisé sur les données (24 journées, ce serait du sur-ajustement) : il est
+  // choisi pour que le plancher absorbe ~2,5 stops pleins. Plus serré étrangle la stratégie — à ±1,5% un
+  // SEUL stop moyen (−826 $) suffisait à fermer la journée, et S1 n'aurait quasiment plus tradé.
+  // C'est le RATCHET qui tient désormais la promesse « prendre un petit gain puis s'arrêter » : armé dès
+  // +1,5% de pic, il ferme la journée en vert si l'equity retombe à +1,0%, donc bien avant l'objectif à 3%.
+  // Un objectif dur bas ne protégeait rien ; un ratchet, si.
+  // ⚠️ dayLockTrigger DOIT rester sous dailyProfitTarget, sinon la journée latche à l'objectif avant que le
+  // ratchet puisse s'armer et le ratchet devient du code mort.
+  //
+  // NON VALIDÉE EN RÉEL : cette config n'a jamais tourné. S1 reste donc CACHÉE aux membres (voir
+  // lib/member/maintenance.ts) pendant qu'elle trade sur le master — zéro membre attaché, donc test en
+  // avant à exposition client nulle. Rouverture aux membres et retour de S2 à $500 seulement sur chiffres.
+  '1': { id: 1, key: 'steady', label: 'S1 STEADY — small daily target, tight caps', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, beTrigger: 0.10, ladder: [[0.18, 0.12], [0.28, 0.20], [0.38, 0.30]], trailActivate: 0.30, trailDist: 0.18, maxStopAtr: 2.8, tradeAsia: false, dailyProfitTargetPct: 0.03, maxDailyLossPct: 0.03, dayLockTriggerPct: 0.015, dayLockFloorPct: 0.010, swing: false, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
   // S2 : BE armé à 0.10 + trailing resserré à 0.45/0.25 — la ligne la plus robuste de la grille du 10/08
   // (+0.0502R, première moitié +0.0269, seconde +0.0779, 128 stops pleins au lieu de 150, 85.0% de verts).
   '2': { id: 2, key: 'balanced', label: 'S2 BALANCED — the reference engine', thresholdScalp: 0.25, targetRR: 1.0, minRR: 0.75, beTrigger: 0.10, ladder: [[0.18, 0.12], [0.28, 0.20], [0.38, 0.30]], trailActivate: 0.30, trailDist: 0.18, maxStopAtr: 2.8, tradeAsia: true, dailyProfitTargetPct: 0.04, maxDailyLossPct: 0.04, dayLockTriggerPct: 0.02, dayLockFloorPct: 0.015, swing: true, breakout: false, blockScalpEntryUtcHours: [[12, 17]] },
