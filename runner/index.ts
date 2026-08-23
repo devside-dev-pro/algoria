@@ -29,6 +29,7 @@ import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { ctaKeyboard } from '../lib/member/i18n';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -1016,10 +1017,15 @@ async function main() {
       let sent = 0;
       for (const c of candidates) {
         const m = nudgeMessage(c.step, c.days);
-        // BOUTON VERS L'HUMAIN sur CHAQUE relance auto (14/08) : deux variantes sur six ne donnaient
-        // aucun point de contact, et surtout, quelqu'un qui RÉPOND à ce DM écrit au bot — qui ne répond
-        // pas. Le bouton évite ce cul-de-sac sans dépendre du texte de la variante.
-        const dm = await sendDm(c.tg_id, m.dm, { text: '💬 Ask Mathieu directly', url: 'https://t.me/mathieu_algoria' });
+        // TROIS PORTES sur CHAQUE relance auto. Le bouton « parler à Mathieu » existait depuis le 14/08
+        // (deux variantes sur six ne donnaient aucun point de contact, et répondre à ce DM revient à écrire
+        // au bot, qui ne lit rien). Il en manquait deux, constatées le 24/08 : REPRENDRE — l'app, l'action
+        // qu'on veut réellement voir cliquée — et REVENIR — le canal, parce qu'on relance en majorité des
+        // gens qui l'ont quitté et qu'un lien à redemander est un aller-retour de trop pour un tiède.
+        // 'en' assumé : les six variantes de nudgeMessage sont écrites en anglais uniquement, des boutons
+        // italiens sous un texte anglais seraient incohérents. Le jour où les variantes seront traduites,
+        // c'est ici qu'il faudra passer la langue du membre (fetchNudgeCandidates ne la remonte pas encore).
+        const dm = await sendDm(c.tg_id, m.dm, ctaKeyboard('en', '/member/onboarding'));
         const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: c.step <= 0 ? '/member/academy' : '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
         await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} step${c.step} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`, dm ? m.dm : undefined);
         if (dm || push) sent++;
@@ -1036,11 +1042,22 @@ async function main() {
   // serverless) : c'est le runner, allumé en permanence, qui balaie la file chaque minute. Le délai laisse
   // au DM d'onboarding le temps d'être lu et évite l'effet « accepté à la milliseconde ».
   // ALGORIA_AUTOJOIN_MIN = délai en minutes (défaut 3) · 0 ou négatif = fonction DÉSACTIVÉE (retour au manuel).
+  //
+  // ⚠️ LE CANAL VIP EN EST EXCLU (24/08/2026, décision Mathieu). Le balayage ne filtrait AUCUN canal : il
+  // acceptait donc aussi bien le canal public que le VIP, trois minutes après la demande. Mesuré sur la
+  // période : 14 demandes VIP, 14 auto-approuvées, ZÉRO jamais restée en attente — Mathieu n'a pas pu en
+  // voir une seule passer, alors que c'est LUI qui envoie ce lien, un par un, aux gens qu'il a choisis.
+  // Aucun intrus au moment du constat (les 14 étaient des membres avec dépôt), mais un lien VIP transféré
+  // faisait entrer n'importe qui sans le moindre contrôle. Le VIP se valide désormais à la main : ses
+  // demandes restent 'waiting' et réapparaissent dans la liste d'attente Telegram, là où il les attend.
   const AUTOJOIN_MIN = Number(process.env.ALGORIA_AUTOJOIN_MIN ?? 3);
   const autoApproveJoins = async () => {
     try {
-      const { approveJoinRequest } = await import('./telegram');
-      const ripe = await listRipeJoinRequests(AUTOJOIN_MIN);
+      const { approveJoinRequest, VIP_CHAT } = await import('./telegram');
+      // VIP_CHAT vide ou non numérique = on ne sait pas identifier le canal VIP, donc rien à exclure :
+      // on retombe sur le comportement d'avant plutôt que de bloquer toutes les adhésions par excès de zèle.
+      const vipId = Number(VIP_CHAT);
+      const ripe = await listRipeJoinRequests(AUTOJOIN_MIN, 25, Number.isFinite(vipId) ? [vipId] : []);
       if (!ripe.length) return;
       let ok = 0;
       for (const r of ripe) {

@@ -10,6 +10,11 @@ const VIP = process.env.TELEGRAM_VIP_CHAT ?? '';
 /** Le canal VIP est-il configuré ? (sinon tous les posts sont des no-op silencieux). */
 export const vipReady = (): boolean => Boolean(TOKEN && VIP);
 
+/** Id du canal VIP, tel que posé dans TELEGRAM_VIP_CHAT ('' si non configuré).
+ *  Exporté pour que l'auto-approbation des adhésions puisse EXCLURE ce canal : le VIP se valide à la
+ *  main (décision Mathieu du 24/08 — voir autoApproveJoins dans runner/index.ts). */
+export const VIP_CHAT: string = VIP;
+
 /** Étiquette de LA stratégie de ce runner — chaque message VIP dit QUI parle (les 3 runners postent). */
 export const VIP_TAG: string = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' }[ACTIVE_STRATEGY.id] ?? `S${ACTIVE_STRATEGY.id}`;
 
@@ -45,15 +50,22 @@ export async function approveJoinRequest(chatId: number, userId: number): Promis
 /** @param button bouton optionnel sous le message (libellé + URL) — un tap vaut mieux qu'un pseudo à
  *  recopier, et les relances automatiques doivent TOUJOURS offrir une porte vers l'humain : ce bot ne
  *  répond pas aux questions, une réponse à un de ses DM peut rester longtemps sans réaction. */
-export async function sendDm(tgId: number, text: string, button?: { text: string; url: string }): Promise<boolean> {
+export async function sendDm(
+  tgId: number,
+  text: string,
+  // Un bouton simple, OU un clavier complet (plusieurs rangées — voir ctaKeyboard dans lib/member/i18n.ts).
+  // La forme « un bouton » reste acceptée pour ne pas casser les appels existants.
+  button?: { text: string; url: string } | { inline_keyboard: Array<Array<{ text: string; url: string }>> },
+): Promise<boolean> {
   if (!TOKEN) return false;
+  const markup = button && ('inline_keyboard' in button ? button : { inline_keyboard: [[button]] });
   try {
     const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         chat_id: tgId, text, disable_web_page_preview: true,
-        ...(button ? { reply_markup: { inline_keyboard: [[button]] } } : {}),
+        ...(markup ? { reply_markup: markup } : {}),
       }),
     });
     return res.ok;

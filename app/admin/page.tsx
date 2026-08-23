@@ -135,7 +135,7 @@ const SCRIPTS: Record<string, string> = {
   rejected:
     "Hey! Mathieu from Algoria. Your account connection didn't go through — and I want to be clear it's not you being refused, it's almost always one detail that doesn't match.\n\nMost of the time it's the password: MetaTrader needs your TRADING password (the one the broker emailed you when the account was created), not the one you use on the broker's website. Send me your account number and I'll check what's blocking it on my side.",
   first:
-    "Hey! Mathieu here — I'm the founder of Algoria, the AI that trades gold and Bitcoin live. You created an account on our app a few days ago (that's how I have your name), but never finished setting it up.\n\nNo pressure at all — I'm just going through the list one by one. Are you still interested? If you've lost the channel, tell me and I'll send you the invite back.",
+    "Hey! Mathieu here — I'm the founder of Algoria, the AI that trades gold and Bitcoin live. You created an account on our app a few days ago (that's how I have your name), but never finished setting it up.\n\nNo pressure at all — I'm just going through the list one by one. Are you still interested?\n\nEverything you need is right below: pick up where you left off, get back into the channel if you left it, or just message me.",
   followup:
     "Hey! Following up on our conversation — where are you at with your setup?\n\nIf something's blocking you, tell me what it is and I'll sort it out. Algoria's been trading every day in the meantime.",
 };
@@ -195,7 +195,7 @@ export default function AdminCRM() {
     if (!window.confirm(`Send this message through the bot to ${who}?\n\nAnyone who already received the tag "${bcTag}" is skipped automatically.`)) return;
     setBusy(true);
     setBcReport(null);
-    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botBroadcast: { audience: bcAudience, text: bcText, tag: bcTag } }) })
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botBroadcast: { audience: bcAudience, text: bcText, tag: bcTag, cta: true } }) })
       .then(async (r) => {
         const d = (await r.json()) as { error?: string; sent?: number; skipped?: number; failed?: number; report?: Array<{ member_no: number | null; ok: boolean; error?: string; skipped?: boolean }> };
         if (d.error) return window.alert(`⚠ ${d.error}`);
@@ -819,10 +819,13 @@ export default function AdminCRM() {
   // donc AUCUN lien t.me ne mène à elles. Le bot, lui, peut toujours écrire : tout le monde ici a tapé
   // START pour se connecter à l'app. On confirme avant d'envoyer (c'est un message réel à un vrai
   // prospect, pas un brouillon) et on marque la personne comme touchée dans la foulée.
+  // cta: true → le message part avec ses trois boutons (app / canal / Mathieu). C'est une RELANCE :
+  // sans eux la personne n'a aucun moyen d'agir, et répondre au bot ne mène nulle part. La réponse
+  // conversationnelle du fil BOT ACTIVITY, elle, n'en met pas — voir botDm côté serveur.
   const sendViaBot = (tgId: number, text: string) => {
-    if (!window.confirm(`Send this to ${tgId} through the Algoria bot?\n\n${text}`)) return;
+    if (!window.confirm(`Send this to ${tgId} through the Algoria bot?\n\n${text}\n\n[+ buttons: open the app · join the channel · ask Mathieu]`)) return;
     setBusy(true);
-    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botDm: { tg_id: tgId, text } }) })
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botDm: { tg_id: tgId, text, cta: true } }) })
       .then(async (r) => {
         const d = (await r.json()) as { error?: string };
         if (d.error) window.alert(`⚠ ${d.error}`);

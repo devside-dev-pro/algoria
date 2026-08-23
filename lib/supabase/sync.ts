@@ -339,14 +339,22 @@ export async function hasOpenSwingTrade(symbol: string): Promise<boolean> {
  * déploiement n'en ont pas → elles restent manuelles). Le délai laisse au DM d'onboarding le temps
  * d'être lu et évite l'effet « robot qui accepte à la milliseconde ».
  */
-export async function listRipeJoinRequests(minAgeMin: number, limit = 25): Promise<Array<{ id: number; chat_id: number; user_id: number; username: string | null }>> {
+export async function listRipeJoinRequests(minAgeMin: number, limit = 25, excludeChatIds: number[] = []): Promise<Array<{ id: number; chat_id: number; user_id: number; username: string | null }>> {
   const cutoff = new Date(Date.now() - minAgeMin * 60_000).toISOString();
-  const { data } = await (db as any).from('telegram_joins')
+  // L'EXCLUSION SE FAIT ICI, EN SQL, ET C'EST VOLONTAIRE. Filtrer côté appelant après coup paraîtrait
+  // équivalent — ça ne l'est pas : le tri est « les plus anciennes d'abord » et la limite s'applique AVANT
+  // le filtre. Des demandes exclues qui restent en attente (le VIP, que Mathieu valide à la main) sont donc
+  // les plus vieilles de la file : au bout de 25 accumulées, elles rempliraient la page à elles seules et
+  // plus AUCUNE adhésion du canal public ne serait approuvée. Une file d'attente volontaire ne doit jamais
+  // affamer le reste du système.
+  let q = (db as any).from('telegram_joins')
     .select('id,chat_id,user_id,username')
     .eq('status', 'waiting').is('approved_at', null)
     .not('chat_id', 'is', null).not('user_id', 'is', null)
-    .lt('joined_at', cutoff)
-    .order('joined_at', { ascending: true }).limit(limit) as { data: Array<{ id: number; chat_id: number; user_id: number; username: string | null }> | null };
+    .lt('joined_at', cutoff);
+  const excl = excludeChatIds.filter((id) => Number.isFinite(id) && id !== 0);
+  if (excl.length) q = q.not('chat_id', 'in', `(${excl.join(',')})`);
+  const { data } = await q.order('joined_at', { ascending: true }).limit(limit) as { data: Array<{ id: number; chat_id: number; user_id: number; username: string | null }> | null };
   return data ?? [];
 }
 

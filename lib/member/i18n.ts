@@ -84,6 +84,46 @@ export const INBOX_ACK_BTN: Record<Locale, string> = {
 /** Compte HUMAIN du support — la seule adresse où une question obtient vraiment une réponse. */
 export const SUPPORT_TG_URL = 'https://t.me/mathieu_algoria';
 
+// ═══ BOUTONS D'ACTION DES MESSAGES DU BOT (24/08/2026) ═══════════════════════════════════════════════
+// Né d'un test de Mathieu sur un de ses propres comptes : le script de relance partait en TEXTE NU.
+// Ni lien vers l'app, ni pseudo, ni canal — la personne lisait « are you still interested ? » sans avoir
+// le moindre moyen de dire oui. La relance automatique du runner portait pourtant déjà un bouton depuis
+// le 14/08 ; c'est l'envoi manuel depuis la file (bouton 🤖 BOT) et l'envoi groupé qui n'en avaient pas.
+//
+// LIEN D'INVITATION AU CANAL, et c'est le point le plus important : on relance en majorité des gens qui
+// ont QUITTÉ le canal. Leur écrire « si tu as perdu le canal, dis-le-moi » ajoutait un aller-retour à
+// une personne déjà tiède. Le lien est un lien d'invitation traqué (fourni par Mathieu le 24/08) : il
+// est révocable côté Telegram, donc s'il cesse de fonctionner c'est ICI qu'on le remplace, à un seul
+// endroit. Ce n'est pas un secret — un lien d'invitation est fait pour être diffusé.
+export const CHANNEL_INVITE_URL = 'https://t.me/+n3THAxOYSok2ZjY8';
+/** Racine de l'espace membre — les relances visent l'onboarding, les annonces l'accueil. */
+export const APP_URL = 'https://app.algoria.tech';
+
+const CTA_APP: Record<Locale, string> = { en: '🚀 Open the app', it: "🚀 Apri l'app" };
+const CTA_CHANNEL: Record<Locale, string> = { en: '📡 Join the channel', it: '📡 Entra nel canale' };
+const CTA_ASK: Record<Locale, string> = { en: '💬 Ask Mathieu', it: '💬 Scrivi a Mathieu' };
+
+/**
+ * Clavier d'action à joindre à un message du bot (`reply_markup`).
+ *
+ * Trois portes, jamais une de moins : REPRENDRE (l'app), REVENIR (le canal, pour ceux qui l'ont quitté)
+ * et PARLER (Mathieu). Un message de relance sans elles est un cul-de-sac — la personne ne peut pas
+ * répondre au bot, qui ne lit rien, et n'a aucun lien sous la main.
+ *
+ * L'app est seule sur la première rangée : c'est l'action qu'on veut voir cliquée, les deux autres sont
+ * des secours. `appPath` cible la page utile ('/member/onboarding' pour une relance, '/member' pour une
+ * annonce à quelqu'un de déjà actif) — l'app redirige de toute façon si le membre n'est pas au bon stade.
+ */
+export function ctaKeyboard(locale: Locale = 'en', appPath = '/member'): { inline_keyboard: Array<Array<{ text: string; url: string }>> } {
+  const path = appPath.startsWith('/') ? appPath : `/${appPath}`;
+  return {
+    inline_keyboard: [
+      [{ text: CTA_APP[locale], url: `${APP_URL}${path}` }],
+      [{ text: CTA_CHANNEL[locale], url: CHANNEL_INVITE_URL }, { text: CTA_ASK[locale], url: SUPPORT_TG_URL }],
+    ],
+  };
+}
+
 /** Confirmation de connexion (deep-link /start lg_…). Le message porte un BOUTON (SIGNED_IN_BTN) : « reviens
  *  sur l'app » ne suffisait pas quand la personne arrive du navigateur intégré de Telegram — l'onglet qui
  *  attendait la confirmation a disparu, il n'y a plus rien où revenir. Le bouton la reconnecte en un tap. */
