@@ -4,6 +4,7 @@ import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
 import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } from '@/lib/member/sth';
 import { BROKERS } from '@/lib/member/brokers';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
+import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -244,8 +245,8 @@ export async function POST(req: NextRequest) {
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
     setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
-    setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string };
-    botBroadcast?: { audience: 'ex_s1' | 'live'; text: string; tag: string };
+    setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
+    botBroadcast?: { audience: 'ex_s1' | 'live'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
     editMember?: { tg_id: number; field: string; value: string | null };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
@@ -1027,16 +1028,23 @@ export async function POST(req: NextRequest) {
     const text = String(body.botDm.text ?? '').trim().slice(0, 1500);
     const dmTg = Number(body.botDm.tg_id);
     if (!text || !dmTg) return NextResponse.json({ error: 'tg_id and text required' }, { status: 400 });
+    // Fiche lue AVANT l'envoi : sa langue décide des libellés des boutons.
+    const { data: mrow } = await db.from('members').select('member_no,locale').eq('tg_id', dmTg).limit(1);
+    // CLAVIER D'ACTION, OPTIONNEL ET C'EST VOLONTAIRE. Un SCRIPT de relance doit toujours porter ses trois
+    // portes (app / canal / Mathieu) : sans elles la personne lit « are you still interested ? » sans aucun
+    // moyen de dire oui, et répondre au bot ne mène nulle part puisqu'il ne lit rien. Mais une RÉPONSE
+    // conversationnelle depuis le fil BOT ACTIVITY ne doit PAS traîner trois boutons d'appel à l'action :
+    // on répond à quelqu'un qui parle déjà. L'appelant tranche, et le défaut reste « pas de boutons ».
+    const dmMarkup = body.botDm.cta ? ctaKeyboard(asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale), '/member/onboarding') : undefined;
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: dmTg, text, disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: dmTg, text, disable_web_page_preview: true, ...(dmMarkup ? { reply_markup: dmMarkup } : {}) }),
     });
     if (!r.ok) {
       const err = (await r.json().catch(() => ({}))) as { description?: string };
       return NextResponse.json({ error: `Telegram: ${err.description ?? `HTTP ${r.status}`}` }, { status: 400 });
     }
-    const { data: mrow } = await db.from('members').select('member_no').eq('tg_id', dmTg).limit(1);
     await db.from('member_actions').insert({ tg_id: dmTg, member_no: mrow?.[0]?.member_no ?? null, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'admin', note: `reply via bot by ${who}`, text } as never });
     return NextResponse.json({ ok: true });
   }
@@ -1062,7 +1070,7 @@ export async function POST(req: NextRequest) {
     if (!text || !tag) return NextResponse.json({ error: 'text and tag required' }, { status: 400 });
 
     // ── qui reçoit ──────────────────────────────────────────────────────────────────────────────────
-    let targets: Array<{ tg_id: number; member_no: number | null; tg_name: string | null }> = [];
+    let targets: Array<{ tg_id: number; member_no: number | null; tg_name: string | null; locale?: string | null }> = [];
     if (audience === 'ex_s1') {
       // Tous les membres qui portent une carte de mouvement DEPUIS S1 — quel que soit son statut.
       //
@@ -1075,11 +1083,11 @@ export async function POST(req: NextRequest) {
       const { data } = await db.from('member_actions').select('tg_id').eq('kind', 'strategy_change').eq('detail->>from' as never, '1' as never);
       const ids = [...new Set((data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
       if (ids.length) {
-        const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name').in('tg_id', ids).is('banned_at', null);
+        const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name,locale').in('tg_id', ids).is('banned_at', null);
         targets = (ms ?? []) as typeof targets;
       }
     } else if (audience === 'live') {
-      const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name').in('status', ['live', 'paused']).is('banned_at', null);
+      const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name,locale').in('status', ['live', 'paused']).is('banned_at', null);
       targets = (ms ?? []) as typeof targets;
     } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });
 
@@ -1111,9 +1119,12 @@ export async function POST(req: NextRequest) {
       const first = String(m.tg_name ?? '').trim().split(/\s+/)[0] ?? '';
       const body_ = /^[\p{L}][\p{L}'-]{1,20}$/u.test(first) ? text.replace(/\{name\}/g, ' ' + first) : text.replace(/\{name\}/g, '');
       try {
+        // Boutons d'action optionnels, dans la langue du destinataire. Une annonce vise des membres DÉJÀ
+        // actifs → on les envoie sur l'accueil de l'app, pas sur l'onboarding qu'ils ont déjà franchi.
+        const bMarkup = body.botBroadcast.cta ? ctaKeyboard(asLocale(m.locale), '/member') : undefined;
         const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ chat_id: Number(m.tg_id), text: body_, parse_mode: 'HTML', disable_web_page_preview: true }),
+          body: JSON.stringify({ chat_id: Number(m.tg_id), text: body_, parse_mode: 'HTML', disable_web_page_preview: true, ...(bMarkup ? { reply_markup: bMarkup } : {}) }),
         });
         if (!r.ok) {
           const err = (await r.json().catch(() => ({}))) as { description?: string };

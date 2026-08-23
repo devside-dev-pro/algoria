@@ -50,15 +50,22 @@ export async function approveJoinRequest(chatId: number, userId: number): Promis
 /** @param button bouton optionnel sous le message (libellé + URL) — un tap vaut mieux qu'un pseudo à
  *  recopier, et les relances automatiques doivent TOUJOURS offrir une porte vers l'humain : ce bot ne
  *  répond pas aux questions, une réponse à un de ses DM peut rester longtemps sans réaction. */
-export async function sendDm(tgId: number, text: string, button?: { text: string; url: string }): Promise<boolean> {
+export async function sendDm(
+  tgId: number,
+  text: string,
+  // Un bouton simple, OU un clavier complet (plusieurs rangées — voir ctaKeyboard dans lib/member/i18n.ts).
+  // La forme « un bouton » reste acceptée pour ne pas casser les appels existants.
+  button?: { text: string; url: string } | { inline_keyboard: Array<Array<{ text: string; url: string }>> },
+): Promise<boolean> {
   if (!TOKEN) return false;
+  const markup = button && ('inline_keyboard' in button ? button : { inline_keyboard: [[button]] });
   try {
     const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         chat_id: tgId, text, disable_web_page_preview: true,
-        ...(button ? { reply_markup: { inline_keyboard: [[button]] } } : {}),
+        ...(markup ? { reply_markup: markup } : {}),
       }),
     });
     return res.ok;
