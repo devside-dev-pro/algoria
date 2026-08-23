@@ -513,7 +513,7 @@ export async function POST(req: NextRequest) {
     const { text, title, pushBody, url, dryRun } = body.offerBlast;
     if (!dryRun && (!text || text.trim().length < 10)) return NextResponse.json({ error: 'message text required' }, { status: 400 });
     const [{ data: mem }, { data: dep }, { data: sent }] = await Promise.all([
-      db.from('members').select('tg_id,member_no,status').in('status', ['onboarding', 'pending_copier']),
+      db.from('members').select('tg_id,member_no,status,locale').in('status', ['onboarding', 'pending_copier']),
       db.from('member_actions').select('tg_id').eq('kind', 'deposit'),
       // déjà touchés par CETTE campagne aujourd'hui (anti double-envoi si l'admin reclique)
       db.from('member_actions').select('tg_id').eq('kind', 'nudge').eq('done_by', 'admin (offer blast)')
@@ -531,10 +531,19 @@ export async function POST(req: NextRequest) {
       const tgId = Number(m.tg_id);
       let dm = false;
       if (token) {
+        // BOUTONS D'ACTION (24/08) : cette campagne est la plus commerciale de toutes — elle vante un code
+        // bonus à des prospects qui n'ont pas déposé — et elle partait sans le moindre lien. On y met les
+        // mêmes trois portes que sur les autres relances, dans la langue du destinataire. L'app pointe sur
+        // l'onboarding, cohérent avec la cible du push juste en dessous.
+        // ⚠️ `url` peut être ABSOLUE — le composer accepte '/chemin' comme 'https://…' (voir customPush).
+        // ctaKeyboard attend un CHEMIN qu'elle préfixe par APP_URL : lui passer une URL absolue produirait
+        // « https://app.algoria.tech/https://… », un bouton mort. On ne retient donc que la forme chemin.
+        const offerPath = typeof url === 'string' && url.startsWith('/') ? url : '/member/onboarding';
+        const offerMarkup = ctaKeyboard(asLocale((m as { locale?: string }).locale), offerPath);
         // le DM échoue (403) si la personne n'a jamais ouvert le chat du bot — normal, le push prend le relais
         const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(6000),
-          body: JSON.stringify({ chat_id: tgId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+          body: JSON.stringify({ chat_id: tgId, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: offerMarkup }),
         }).catch(() => null);
         dm = !!(r && ((await r.json().catch(() => ({}))) as { ok?: boolean }).ok);
       }
