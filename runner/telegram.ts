@@ -10,6 +10,11 @@ const VIP = process.env.TELEGRAM_VIP_CHAT ?? '';
 /** Le canal VIP est-il configuré ? (sinon tous les posts sont des no-op silencieux). */
 export const vipReady = (): boolean => Boolean(TOKEN && VIP);
 
+/** Id du canal VIP, tel que posé dans TELEGRAM_VIP_CHAT ('' si non configuré).
+ *  Exporté pour que l'auto-approbation des adhésions puisse EXCLURE ce canal : le VIP se valide à la
+ *  main (décision Mathieu du 24/08 — voir autoApproveJoins dans runner/index.ts). */
+export const VIP_CHAT: string = VIP;
+
 /** Étiquette de LA stratégie de ce runner — chaque message VIP dit QUI parle (les 3 runners postent). */
 export const VIP_TAG: string = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' }[ACTIVE_STRATEGY.id] ?? `S${ACTIVE_STRATEGY.id}`;
 

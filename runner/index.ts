@@ -1036,11 +1036,22 @@ async function main() {
   // serverless) : c'est le runner, allumé en permanence, qui balaie la file chaque minute. Le délai laisse
   // au DM d'onboarding le temps d'être lu et évite l'effet « accepté à la milliseconde ».
   // ALGORIA_AUTOJOIN_MIN = délai en minutes (défaut 3) · 0 ou négatif = fonction DÉSACTIVÉE (retour au manuel).
+  //
+  // ⚠️ LE CANAL VIP EN EST EXCLU (24/08/2026, décision Mathieu). Le balayage ne filtrait AUCUN canal : il
+  // acceptait donc aussi bien le canal public que le VIP, trois minutes après la demande. Mesuré sur la
+  // période : 14 demandes VIP, 14 auto-approuvées, ZÉRO jamais restée en attente — Mathieu n'a pas pu en
+  // voir une seule passer, alors que c'est LUI qui envoie ce lien, un par un, aux gens qu'il a choisis.
+  // Aucun intrus au moment du constat (les 14 étaient des membres avec dépôt), mais un lien VIP transféré
+  // faisait entrer n'importe qui sans le moindre contrôle. Le VIP se valide désormais à la main : ses
+  // demandes restent 'waiting' et réapparaissent dans la liste d'attente Telegram, là où il les attend.
   const AUTOJOIN_MIN = Number(process.env.ALGORIA_AUTOJOIN_MIN ?? 3);
   const autoApproveJoins = async () => {
     try {
-      const { approveJoinRequest } = await import('./telegram');
-      const ripe = await listRipeJoinRequests(AUTOJOIN_MIN);
+      const { approveJoinRequest, VIP_CHAT } = await import('./telegram');
+      // VIP_CHAT vide ou non numérique = on ne sait pas identifier le canal VIP, donc rien à exclure :
+      // on retombe sur le comportement d'avant plutôt que de bloquer toutes les adhésions par excès de zèle.
+      const vipId = Number(VIP_CHAT);
+      const ripe = await listRipeJoinRequests(AUTOJOIN_MIN, 25, Number.isFinite(vipId) ? [vipId] : []);
       if (!ripe.length) return;
       let ok = 0;
       for (const r of ripe) {
