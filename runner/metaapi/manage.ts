@@ -87,8 +87,42 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     if (wantR === -Infinity) continue; // rien à sécuriser encore
 
     const wantSL = r2(p.openPrice + dir * wantR * riskDist);
+
+    // ═══ DISTANCE MINIMALE AU PRIX — LE STOP DOIT AVOIR LE TEMPS DE VOYAGER (24/08/2026) ══════════════
+    // Un stop posé à 0,2 point du marché est correct pour NOUS et inutile pour le membre. Nous émettons
+    // l'ordre ; lui est à trois sauts de plus — runner → MetaApi → broker maître → STH → son broker. Quand
+    // le prix traverse le niveau dans la seconde, le maître sort et le membre reste dedans avec son stop
+    // D'ORIGINE. Il encaisse alors un stop plein pendant que l'app lui annonce un breakeven.
+    //
+    // Vécu le 24/08 sur le compte du membre #134, reconstitué trade par trade :
+    //   06:21:16  « stop secured · SL → 4657.29 (+0.05R) »   ← +0,05R au-dessus de l'entrée, 1,33 pt du prix
+    //   06:21:16  le maître sort à 4656.70 ...................  +13 $ (soit +0,13 $ à l'échelle du membre)
+    //   06:23:42  le membre sort à 4646.44 ..................  −8,63 $  ← son stop d'origine, 10 pts plus bas
+    // Ses quatre autres trades du jour ont suivi le maître À LA SECONDE. Celui-ci, non : l'écart entre le
+    // déplacement du stop et la fermeture était de ZÉRO seconde. Sur ce seul trade il perd sa journée
+    // entière (−9,25 $ au lieu de −0,49 $).
+    //
+    // POURQUOI ÇA ARRIVE : le breakeven s'arme sur le profit COURANT (`profit >= beTrigger * riskDist`) et
+    // verrouille à +0,05R. Quand le profit franchit le seuil de 0,10R EN REDESCENDANT, l'écart entre le
+    // stop posé et le prix vaut 0,05R — le minimum structurel de ce réglage. C'est précisément l'instant
+    // où le prix va le plus vite. Mesuré sur les 586 déplacements enregistrés : 3 % sont suivis d'une
+    // fermeture en moins de 2 secondes, 15 % en moins de 10.
+    //
+    // CE QU'ON FAIT : on ÉLOIGNE le stop au lieu de renoncer à le poser. Renoncer coûterait au maître un
+    // stop plein (−940 $ en moyenne) là où il sortait à +41 $ — le remède serait pire que le mal. On le
+    // pose donc au plus près à 0,05R du prix : le membre garde une protection copiable, le maître perd
+    // au pire la marge BE+ sur ces cas-là. Le stop ne peut QUE s'éloigner du prix, jamais se resserrer :
+    // ce garde-fou ne peut donc pas provoquer de sortie prématurée, seulement en éviter.
+    //
+    // Le 0,05R n'est pas un nombre inventé : c'est déjà l'écart que ce réglage produit naturellement
+    // (verrou à 0,05R, armement à 0,10R) et le seuil anti-spam ci-dessous. Dans le cas normal — le prix a
+    // couru loin au-delà du niveau — la borne ne mord pas et rien ne change.
+    const minGap = 0.05 * riskDist;
+    const gapToPrice = dir * (cur - wantSL); // >0 = stop du bon côté du marché
+    const safeSL = gapToPrice >= minGap ? wantSL : r2(cur - dir * minGap);
+
     // anti-spam : on ne modifie que si le SL avance d'au moins 5% du risque (et jamais à reculons)
-    if (long ? wantSL <= sl + 0.05 * riskDist : wantSL >= sl - 0.05 * riskDist) continue;
+    if (long ? safeSL <= sl + 0.05 * riskDist : safeSL >= sl - 0.05 * riskDist) continue;
 
     const firstSecure = !done.has(id); // 1er passage au-dessus de BE → une note ; ensuite silencieux
     const newsKey = guarded ? `${id}|${newsGuard}` : null; // une seule note par position ET par annonce
@@ -96,11 +130,16 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     done.set(id, true);
     if (newsKey) newsSecured.add(newsKey);
     try {
-      await stream.modifyPosition(id, wantSL, p.takeProfit);
-      console.log(`[algoria] stop → pos ${id} SL=${wantSL} (${wantR.toFixed(2)}R)${guarded ? ` [news: ${newsGuard}]` : ''}`);
-      void updateTradeStop(id, wantSL); // le cockpit fait suivre la zone SL en direct
-      if (firstGuard) void logNote(`🛡️ ${newsGuard} is imminent — stop pulled up on the open ${long ? 'long' : 'short'} (SL → ${wantSL}) · this trade can't lose through the release`, 'order');
-      else if (firstSecure && wantR >= 0) void logNote(`stop secured · ${long ? 'long' : 'short'} · SL → ${wantSL} (+${wantR.toFixed(2)}R) · trade can't lose now`, 'order');
+      await stream.modifyPosition(id, safeSL, p.takeProfit);
+      // L'ÉCART AU PRIX EST TRACÉ, et ce n'est pas cosmétique : c'est la donnée qui manquait le 24/08 pour
+      // comprendre pourquoi un membre encaissait un stop plein sur un trade annoncé breakeven. Sans elle on
+      // ne pouvait que supposer. Elle dit, pour chaque protection posée, si elle avait une chance d'arriver.
+      const gapPosed = r2(dir * (cur - safeSL));
+      const clamped = safeSL !== wantSL;
+      console.log(`[algoria] stop → pos ${id} SL=${safeSL} (${wantR.toFixed(2)}R · ${gapPosed} du prix${clamped ? ` · ÉLOIGNÉ, voulu ${wantSL}` : ''})${guarded ? ` [news: ${newsGuard}]` : ''}`);
+      void updateTradeStop(id, safeSL); // le cockpit fait suivre la zone SL en direct
+      if (firstGuard) void logNote(`🛡️ ${newsGuard} is imminent — stop pulled up on the open ${long ? 'long' : 'short'} (SL → ${safeSL}) · this trade can't lose through the release`, 'order');
+      else if (firstSecure && wantR >= 0) void logNote(`stop secured · ${long ? 'long' : 'short'} · SL → ${safeSL} (+${wantR.toFixed(2)}R · ${gapPosed} from price${clamped ? ' · widened so the copier can follow' : ''}) · trade can't lose now`, 'order');
     } catch (e) {
       if (firstSecure) done.delete(id); // échec au 1er passage → on réessaiera
       if (newsKey && firstGuard) newsSecured.delete(newsKey); // idem : la protection avant annonce doit repasser
