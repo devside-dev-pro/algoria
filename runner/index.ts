@@ -3,7 +3,7 @@ import './env-check'; // valide les variables d'env et arrête net avec un messa
 import { connectMaster } from './metaapi/client';
 import { loadHistory, makeAggregator, backfill } from './metaapi/candles';
 import { readState } from './metaapi/state';
-import { postVip, vipReady, VIP_TAG, usd, VIP_RULE } from './telegram';
+import { postVip, vipReady, VIP_TAG, usd, VIP_RULE, lastDmFailure } from './telegram';
 import { SECONDARY } from '../lib/supabase/sync';
 import { placeSignal, closeAll, closePosition } from './metaapi/execution';
 import { manageBreakeven, rememberManagement, hasManagement } from './metaapi/manage';
@@ -1026,8 +1026,13 @@ async function main() {
         // italiens sous un texte anglais seraient incohérents. Le jour où les variantes seront traduites,
         // c'est ici qu'il faudra passer la langue du membre (fetchNudgeCandidates ne la remonte pas encore).
         const dm = await sendDm(c.tg_id, m.dm, ctaKeyboard('en', '/member/onboarding'));
+        const dmErr = dm ? null : lastDmFailure(); // à lire JUSTE après l'appel (voir runner/telegram.ts)
         const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: c.step <= 0 ? '/member/academy' : '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
-        await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} step${c.step} · dm ${dm ? 'ok' : 'no-chat'} · push ${push ? 'ok' : 'none'}`, dm ? m.dm : undefined);
+        // Un DM refusé ne s'écrit plus 'done'. Nuance qui compte : si la PUSH est passée, la personne A
+        // bien été touchée — l'échec ne concerne que le canal Telegram, et écrire 'failed' la ferait
+        // relancer demain alors qu'elle vient de recevoir une notification. On ne marque donc l'échec que
+        // lorsque AUCUN des deux canaux n'a abouti.
+        await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} step${c.step} · dm ${dm ? 'ok' : `refusé (${dmErr ?? 'no-chat'})`} · push ${push ? 'ok' : 'none'}`, dm ? m.dm : undefined, !dm && !push ? (dmErr ?? 'no-chat') : null);
         if (dm || push) sent++;
       }
       if (candidates.length) console.log(`[algoria] activation : ${sent}/${candidates.length} prospect(s) touché(s)`);

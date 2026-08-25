@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import ws from 'ws';
 import type { Database } from './database.types';
 import type { Bar, EngineEvent, EngineState, MarketContext, Mode, Signal } from '../engine/types';
+import { isPermanentTelegramFailure } from '../member/telegramErrors';
 
 /** Client runner — clé SERVICE (bypass RLS). À n'utiliser QUE côté serveur/runner. */
 const db = createClient<Database>(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!, {
@@ -202,19 +203,45 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
     const t = Number(n.tg_id); const at = Date.parse(n.created_at);
     if ((lastNudge.get(t) ?? 0) < at) lastNudge.set(t, at);
   }
+  // ── QUI A FERMÉ LA PORTE AU BOT ────────────────────────────────────────────────────────────────────
+  // Sans ça, la relance automatique retente indéfiniment ceux qui ont bloqué le bot : chaque nuit, un
+  // appel Telegram qui échoue à coup sûr, et une ligne 'failed' de plus en base. Ça ne dérange personne
+  // (le message n'arrive pas) mais ça pollue le journal et ça masque les vrais problèmes d'envoi.
+  //
+  // La CHRONOLOGIE tranche, jamais la simple existence d'un refus passé : quelqu'un peut débloquer le bot.
+  // Un envoi réussi postérieur au dernier refus rouvre donc le canal, et la personne redevient candidate.
+  const { data: failed } = await raw
+    .from('member_actions').select('tg_id,detail,created_at')
+    .eq('kind', 'nudge').eq('status', 'failed');
+  const blockedSince = new Map<number, number>();
+  for (const f of (failed ?? []) as Array<{ tg_id: number; detail: { error?: string } | null; created_at: string }>) {
+    if (!isPermanentTelegramFailure(f.detail?.error)) continue;
+    const t = Number(f.tg_id); const at = Date.parse(f.created_at);
+    if ((blockedSince.get(t) ?? 0) < at) blockedSince.set(t, at);
+  }
   return (members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string; onboarding_step: number | null }>)
     .map((m) => ({ tg_id: Number(m.tg_id), member_no: m.member_no, tg_username: m.tg_username, days: Math.floor((now - Date.parse(m.created_at)) / 86_400_000), step: Number(m.onboarding_step ?? 0) }))
     .filter((m) => {
+      const blocked = blockedSince.get(m.tg_id);
+      if (blocked && (lastNudge.get(m.tg_id) ?? 0) < blocked) return false;
       const last = lastNudge.get(m.tg_id);
       return !last || now - last > cooldownDays(m.days) * 86_400_000;
     });
 }
 
 /** Trace une relance (auto ou manuelle) → kind='nudge', status='done' (jamais dans la file support). */
-export async function recordNudge(tgId: number, memberNo: number | null, via: 'auto' | 'manual', note: string, text?: string) {
+export async function recordNudge(tgId: number, memberNo: number | null, via: 'auto' | 'manual', note: string, text?: string, error?: string | null) {
   // text = le DM EXACT envoyé par le bot — tracé pour le panneau BOT ACTIVITY de l'admin (« je veux voir
   // ce que le bot raconte à mes prospects » — Mathieu, 27/07)
-  await (db as unknown as { from: (t: string) => any }).from('member_actions').insert({ tg_id: tgId, member_no: memberNo, kind: 'nudge', status: 'done', done_by: via, detail: { via, note, ...(text ? { text } : {}) } });
+  //
+  // `error` → status='failed' : un DM que Telegram a REFUSÉ n'est pas un contact, et l'écrire 'done' était
+  // le défaut à l'origine de la file de relances bouchée (25/08). Ces lignes-là comptaient comme « touché »
+  // — donc la personne disparaissait 3 jours puis revenait, indéfiniment, sans avoir jamais rien reçu.
+  // Le statut 'failed' la sort des cooldowns ET la rend reconnaissable par le filtre « a bloqué le bot ».
+  await (db as unknown as { from: (t: string) => any }).from('member_actions').insert({
+    tg_id: tgId, member_no: memberNo, kind: 'nudge', status: error ? 'failed' : 'done', done_by: via,
+    detail: { via, note, ...(text ? { text } : {}), ...(error ? { error } : {}) },
+  });
 }
 
 // ===== ÉTAT JOURNALIER PERSISTANT (table runner_day) — le latch « journée terminée » et le pic du jour

@@ -175,6 +175,9 @@ export default function AdminCRM() {
   // SEGMENTATION de la file du jour : qui a déjà écrit au bot, qui s'est fait refuser une connexion.
   const [spokeTgIds, setSpokeTgIds] = useState<number[]>([]);
   const [rejectedTgIds, setRejectedTgIds] = useState<number[]>([]);
+  // gens que le bot ne peut PLUS joindre (blocage, compte supprimé, jamais tapé START) — calculé côté
+  // serveur, chronologie comprise : une preuve de contact postérieure au refus les fait ressortir d'ici
+  const [botBlocked, setBotBlocked] = useState<number[]>([]);
   const [relSeg, setRelSeg] = useState<string | null>(null); // onglet de segment choisi (null = le plus prioritaire non vide)
   const [copiedScript, setCopiedScript] = useState<string | null>(null);
   // COMPOSEUR DE POST CANAL (avec bouton) — Telegram n'autorise un clavier inline QUE via un bot.
@@ -296,7 +299,7 @@ export default function AdminCRM() {
         setDeniedAs(d.username ?? null);
         return setState('forbidden');
       }
-      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[]; spokeTgIds?: number[]; rejectedTgIds?: number[] };
+      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[]; spokeTgIds?: number[]; rejectedTgIds?: number[]; botBlocked?: number[] };
       setWl(d.whitelist);
       setRows(d.members);
       setActions(d.actions ?? []);
@@ -307,6 +310,7 @@ export default function AdminCRM() {
       setBrokerLogins((d as unknown as { brokerLogins?: Record<string, string> }).brokerLogins ?? {});
       setSpokeTgIds(d.spokeTgIds ?? []);
       setRejectedTgIds(d.rejectedTgIds ?? []);
+      setBotBlocked(d.botBlocked ?? []);
       setRunnerLastSeen((d as { runnerLastSeen?: number | null }).runnerLastSeen ?? null);
       setLegalNames((d as { legalNames?: Record<string, string> }).legalNames ?? {});
       setExtraAccounts(((d as unknown as { extraAccounts?: typeof extraAccounts }).extraAccounts) ?? []);
@@ -1222,6 +1226,7 @@ export default function AdminCRM() {
               // celles-là ont essayé, elles méritent un rattrapage, pas une relance.
               // Un ordre unique ne pouvait pas servir quatre conversations différentes. On sépare.
               const spoke = new Set(spokeTgIds);
+              const blockedSet = new Set(botBlocked);
               const rejectedSet = new Set(rejectedTgIds);
               const depositedSet = new Set(deposits.map((d) => Number(d.tg_id)));
               type Seg = 'deposited' | 'rejected' | 'first' | 'followup';
@@ -1236,6 +1241,14 @@ export default function AdminCRM() {
                 // La borne basse reste à 1 jour : quelqu'un qui vient de s'inscrire mérite quelques heures
                 // avant qu'on lui saute dessus, et l'auto-nudge passe de toute façon.
                 .filter((x) => x.days >= 1 && x.days <= 60 && (!x.touched || now - x.touched > 3 * 86_400_000))
+                // ── INJOIGNABLES PAR LE BOT ────────────────────────────────────────────────────────
+                // On ne raye QUE ceux qui n'ont PAS de @pseudo. Un blocage du bot ne rend pas quelqu'un
+                // inatteignable : s'il a un pseudo, le DM personnel de Mathieu passe toujours — et c'est
+                // justement celui qui convertit. Les rayer tous viderait la file de prospects encore
+                // joignables, ce qui serait le même problème à l'envers.
+                // Sans pseudo ET bot bloqué = aucune porte : la ligne ne porte plus aucune action
+                // possible, elle n'a donc rien à faire dans une file de travail.
+                .filter((x) => !(blockedSet.has(Number(x.r.tg_id)) && !x.r.tg_username))
                 // le plus ancien d'abord : la session commence par la dette la plus vieille (12/08)
                 .sort((a, b) => b.days - a.days);
               if (all.length === 0) return <section className="panel" style={{ padding: 16, color: 'var(--dim)', fontSize: 12.5 }}>📞 Relance queue clear — every recent lead was touched in the last 3 days.</section>;
@@ -1293,7 +1306,13 @@ export default function AdminCRM() {
                       {r.tg_username
                         ? <a href={`https://t.me/${r.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>
                         : <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }} title="no @username — Telegram gives no direct link, use the bot">no @ · bot only</span>}
-                      <button disabled={busy} onClick={() => sendViaBot(Number(r.tg_id), personalise(SCRIPTS[active.key], r.tg_name))} title="send this segment's script through the Algoria bot — works even without a @username" style={{ ...miniBtn, color: 'var(--gold)', borderColor: 'rgba(245,194,74,.45)' }}>🤖 BOT</button>
+                      {/* BOT BLOQUÉ → le bouton disparaît et laisse un badge. Le garder proposerait une
+                          action dont on sait déjà qu'elle échouera : un clic, une alerte d'erreur, rien.
+                          Ces lignes-là ne restent visibles QUE parce qu'elles ont un @pseudo — le DM
+                          personnel reste ouvert, et le badge dit où frapper. */}
+                      {blockedSet.has(Number(r.tg_id))
+                        ? <span title="Telegram refuse les envois du bot vers cette personne (bloqué / compte supprimé / jamais tapé START). Le DM personnel, lui, passe toujours." style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4, color: 'var(--down)', border: '1px solid color-mix(in srgb, var(--down) 40%, transparent)', borderRadius: 6, padding: '3px 7px', whiteSpace: 'nowrap' }}>🚫 BOT BLOQUÉ</span>
+                        : <button disabled={busy} onClick={() => sendViaBot(Number(r.tg_id), personalise(SCRIPTS[active.key], r.tg_name))} title="send this segment's script through the Algoria bot — works even without a @username" style={{ ...miniBtn, color: 'var(--gold)', borderColor: 'rgba(245,194,74,.45)' }}>🤖 BOT</button>}
                       <button disabled={busy} onClick={() => post({ nudged: r.tg_id })} title="I sent my personal message/voice note — remove from the queue for 3 days" style={okBtn}>✓ FAIT</button>
                     </div>
                   ))}

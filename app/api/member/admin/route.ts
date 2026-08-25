@@ -7,6 +7,7 @@ import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
 import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
 import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, type OffboardReason } from '@/lib/member/winback';
+import { isPermanentTelegramFailure } from '@/lib/member/telegramErrors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -98,7 +99,7 @@ export async function GET(req: NextRequest) {
   if (!isAdmin(sess.username)) return NextResponse.json({ error: 'forbidden', username: sess.username ?? null }, { status: 403 });
   const s = sess;
   const db = sdb();
-  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ, spokeQ, rejectedQ, connectedQ] = await Promise.all([
+  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ, spokeQ, rejectedQ, connectedQ, failedDmQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
     allMembers(db),
@@ -132,6 +133,10 @@ export async function GET(req: NextRequest) {
     // Mesuré : 4 dépôts sur ~59 sont dans ce cas. Sans cette requête, l'export sortait pour eux un numéro
     // appartenant à un AUTRE broker — pire qu'une case vide, puisqu'on part le chercher pour rien.
     db.from('member_actions').select('tg_id,detail').eq('kind', 'connect').eq('status', 'done').limit(2000),
+    // ENVOIS REFUSÉS PAR TELEGRAM — sert à retirer de la file de relances les gens que le bot ne peut
+    // plus joindre. On remonte l'erreur ET la date : un blocage n'est PAS éternel (on peut débloquer un
+    // bot), donc c'est la chronologie qui tranche, pas la simple existence d'un échec passé.
+    db.from('member_actions').select('tg_id,detail,created_at').eq('kind', 'nudge').eq('status', 'failed').limit(2000),
   ]);
   // COMPTES SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut)
   const { data: extraAccounts } = await (db as any).from('member_accounts')
@@ -241,7 +246,31 @@ export async function GET(req: NextRequest) {
     const login = String(c.detail?.login ?? '');
     if (b && login) brokerLogins[`${c.tg_id}|${b}`] = login;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
+  // ── QUI EST INJOIGNABLE PAR LE BOT ──────────────────────────────────────────────────────────────────
+  // Un blocage n'est pas irréversible : la personne peut débloquer le bot, ou taper START. La CHRONOLOGIE
+  // tranche donc, jamais la simple existence d'un échec passé — un envoi réussi ou une réponse reçue APRÈS
+  // le dernier refus prouve que le canal est rouvert, et la personne doit alors retrouver sa place dans la
+  // file. Sans cette comparaison, un blocage d'un jour condamnait un prospect pour de bon.
+  const lastPermanentFail = new Map<number, number>();
+  for (const f of (failedDmQ.data ?? []) as Array<{ tg_id: number | null; detail: { error?: string } | null; created_at: string }>) {
+    if (!isPermanentTelegramFailure(f.detail?.error)) continue; // un raté réseau ne condamne personne
+    const t = Number(f.tg_id); const at = Date.parse(f.created_at);
+    if (t && (lastPermanentFail.get(t) ?? 0) < at) lastPermanentFail.set(t, at);
+  }
+  const lastReachable = new Map<number, number>(); // dernière preuve que le canal fonctionne
+  for (const n of (nudgesQ.data ?? []) as Array<{ tg_id: number | null; created_at: string }>) {
+    const t = Number(n.tg_id); const at = Date.parse(n.created_at);
+    if (t && (lastReachable.get(t) ?? 0) < at) lastReachable.set(t, at);
+  }
+  for (const r of (botActivity ?? []) as Array<{ tg_id: number | null; kind: string; created_at: string }>) {
+    if (r.kind !== 'bot_reply') continue; // il nous a ÉCRIT : le canal est forcément ouvert
+    const t = Number(r.tg_id); const at = Date.parse(r.created_at);
+    if (t && (lastReachable.get(t) ?? 0) < at) lastReachable.set(t, at);
+  }
+  const botBlocked = [...lastPermanentFail.entries()]
+    .filter(([tg, at]) => (lastReachable.get(tg) ?? 0) < at)
+    .map(([tg]) => tg);
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, botBlocked, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
     // segmentation de la file du jour : qui a déjà écrit (→ vraie relance) et qui s'est fait refuser (→ rattrapage)
     spokeTgIds: [...new Set((spokeQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
     rejectedTgIds: [...new Set((rejectedQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
@@ -1122,7 +1151,14 @@ export async function POST(req: NextRequest) {
     });
     if (!r.ok) {
       const err = (await r.json().catch(() => ({}))) as { description?: string };
-      return NextResponse.json({ error: `Telegram: ${err.description ?? `HTTP ${r.status}`}` }, { status: 400 });
+      const why = err.description ?? `HTTP ${r.status}`;
+      // L'ÉCHEC S'ÉCRIT, ET C'EST TOUT L'INTÉRÊT. Jusqu'ici il ne vivait que dans l'alerte du navigateur :
+      // la personne restait dans la file de relances, on recliquait le lendemain, on reprenait la même
+      // erreur. Rien ne pouvait la retirer parce que rien ne savait qu'elle était injoignable.
+      // `status='failed'` la sort des cooldowns (qui ne comptent que les 'done') ET alimente le filtre
+      // « a bloqué le bot » de la file — c'est cette ligne qui rend la file capable de se vider.
+      await db.from('member_actions').insert({ tg_id: dmTg, member_no: mrow?.[0]?.member_no ?? null, kind: 'nudge', status: 'failed', done_by: who, detail: { via: 'admin', error: why, text } as never });
+      return NextResponse.json({ error: `Telegram: ${why}` }, { status: 400 });
     }
     await db.from('member_actions').insert({ tg_id: dmTg, member_no: mrow?.[0]?.member_no ?? null, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'admin', note: `reply via bot by ${who}`, text } as never });
     return NextResponse.json({ ok: true });
