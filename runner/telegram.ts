@@ -50,6 +50,13 @@ export async function approveJoinRequest(chatId: number, userId: number): Promis
 /** @param button bouton optionnel sous le message (libellé + URL) — un tap vaut mieux qu'un pseudo à
  *  recopier, et les relances automatiques doivent TOUJOURS offrir une porte vers l'humain : ce bot ne
  *  répond pas aux questions, une réponse à un de ses DM peut rester longtemps sans réaction. */
+// Motif du DERNIER refus d'envoi, lu juste après l'appel. Volontairement un module-level simple plutôt
+// qu'un changement de signature : `sendDm` a plusieurs appelants qui n'ont que faire de l'erreur, et leur
+// imposer un type de retour composite pour un seul cas d'usage serait payer partout pour un besoin local.
+// Corollaire à respecter : le lire IMMÉDIATEMENT après l'appel, jamais plus tard.
+let lastDmError: string | null = null;
+export const lastDmFailure = (): string | null => lastDmError;
+
 export async function sendDm(
   tgId: number,
   text: string,
@@ -68,8 +75,17 @@ export async function sendDm(
         ...(markup ? { reply_markup: markup } : {}),
       }),
     });
+    // LE MOTIF DU REFUS EST RETENU, pas seulement le fait qu'il y en a eu un. `lastDmError` permet à
+    // l'appelant de distinguer « a bloqué le bot » (définitif — on cesse de le relancer) d'un raté réseau
+    // (on retente demain). Sans cette distinction, la relance auto retentait éternellement les mêmes
+    // blocages, et l'admin marquait ces gens comme « touchés » alors qu'ils n'avaient rien reçu.
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { description?: string };
+      lastDmError = err.description ?? `HTTP ${res.status}`;
+    } else lastDmError = null;
     return res.ok;
-  } catch {
+  } catch (e) {
+    lastDmError = (e as { message?: string })?.message ?? 'network error';
     return false;
   }
 }
