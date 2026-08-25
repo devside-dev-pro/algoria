@@ -16,7 +16,10 @@ export interface Member {
   tg_username: string | null;
   tg_name: string | null;
   photo_url: string | null;
-  status: 'onboarding' | 'pending_copier' | 'live' | 'paused';
+  // 'offboarded' = accès coupé par NOUS (retrait du capital). Volontairement DISTINCT de 'paused', qui est
+  // la pause choisie par le membre : 'paused' affiche « ▶ RESUME COPYING », et un membre off-boardé ne doit
+  // jamais pouvoir se rebrancher au copieur d'un geste sans redéposer (voir lib/member/winback.ts).
+  status: 'onboarding' | 'pending_copier' | 'live' | 'paused' | 'offboarded';
   broker: string | null;
   risk_tier: 'low' | 'balanced' | 'high';
   strategy?: number; // 1=Steady · 2=Balanced (défaut) · 3=Turbo — le levier de risque du membre
@@ -464,6 +467,7 @@ export function StatusPill({ status }: { status: Member['status'] }) {
     live: { label: '● COPYING LIVE', color: 'var(--up)', bg: 'rgba(31,216,176,.1)', pulse: true },
     paused: { label: '⏸ COPY PAUSED', color: 'var(--gold)', bg: 'rgba(245,194,74,.1)' },
     pending_copier: { label: '⧗ CONNECTING YOUR ACCOUNT', color: 'var(--cyan)', bg: 'rgba(43,227,245,.08)', pulse: true },
+    offboarded: { label: '⛔ ACCESS SWITCHED OFF', color: 'var(--gold)', bg: 'rgba(245,194,74,.08)', pulse: false },
     onboarding: { label: 'SETUP IN PROGRESS', color: 'var(--muted)', bg: 'rgba(130,152,190,.1)' },
   };
   const m = map[status] ?? map.onboarding;

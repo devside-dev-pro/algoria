@@ -6,6 +6,7 @@ import { BROKERS } from '@/lib/member/brokers';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
 import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
+import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, type OffboardReason } from '@/lib/member/winback';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -260,7 +261,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
     botBroadcast?: { audience: 'ex_s1' | 'live'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
@@ -656,11 +657,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, banned: true });
   }
   if (body.offboard) {
-    // OFF-BOARD : le client est parti (retrait). Statut → paused (sort du compte "actifs", fiche + creds conservés),
-    // déconnexion copieur (via STH si configuré, sinon empilée dans la file support), et note timeline explicite.
-    const { data: m } = await db.from('members').select('member_no,tg_id').eq('tg_id', body.offboard).limit(1);
+    // OFF-BOARD : le client est parti (retrait). Statut → 'offboarded', déconnexion copieur (via STH si
+    // configuré, sinon empilée dans la file support), note timeline, ET un message au membre avec sa porte
+    // de retour.
+    //
+    // ── 'offboarded' ET NON PLUS 'paused' (25/08/2026) ────────────────────────────────────────────────
+    // 'paused' est le statut d'un membre qui a mis SA copie en pause lui-même, et c'est exactement celui
+    // qui affiche « ▶ RESUME COPYING » dans son app. Un membre off-boardé y voyait donc un bouton capable
+    // de le rebrancher au copieur en un geste, sans redéposer un dollar. Le statut dédié sort de tous les
+    // tests `['live','paused']` de l'app et de l'API : le verrou vient de la structure, pas d'une garde.
+    //
+    // ── ET ON LUI ÉCRIT ──────────────────────────────────────────────────────────────────────────────
+    // Avant, off-boarder c'était perdre quelqu'un en silence : la personne découvrait son accès mort sans
+    // savoir pourquoi et sans chemin de retour. Sur 15 off-boards, un seul membre est revenu — de sa
+    // propre initiative. Le message ne reproche rien (retirer son argent est un droit), il explique la
+    // mécanique et il ouvre la porte.
+    const { data: m } = await db.from('members').select('member_no,tg_id,tg_name,locale').eq('tg_id', body.offboard).limit(1);
     if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
-    await db.from('members').update({ status: 'paused', updated_at: new Date().toISOString() }).eq('tg_id', body.offboard);
+    const reason: OffboardReason = isOffboardReason(body.reason) ? body.reason : 'withdrawal';
+    await db.from('members').update({ status: OFFBOARDED, updated_at: new Date().toISOString() }).eq('tg_id', body.offboard);
     let discLine = 'copier disconnect queued for STH';
     if (sthReady()) {
       const d = await sthDisconnect(String(m[0].tg_id));
@@ -672,8 +687,40 @@ export async function POST(req: NextRequest) {
     } else {
       await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'disconnect', status: 'pending', done_by: who, detail: { reason: 'off-board (client left)' } as never });
     }
-    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `⛔ off-boarded — client left · ${discLine}. Also remove them from the VIP Telegram channel.` } as never });
-    return NextResponse.json({ ok: true });
+    // MESSAGE AU MEMBRE — le cœur du process de récupération. L'échec d'envoi ne fait PAS échouer
+    // l'off-board : le débranchement du copieur est la partie qui ne peut pas attendre, et un membre
+    // injoignable (bot bloqué, compte supprimé) ne doit pas laisser un compte branché derrière lui. On
+    // trace ce qui s'est passé dans les deux cas, pour que « prévenu ou pas » soit une question à laquelle
+    // la fiche répond.
+    let dmLine = 'member not notified (notify off)';
+    if (body.notify !== false) {
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) dmLine = 'member NOT notified — TELEGRAM_BOT_TOKEN missing';
+      else {
+        const loc = asLocale((m[0] as { locale?: string }).locale);
+        const text = winbackMessage(reason, (m[0] as { tg_name?: string }).tg_name ?? null, loc);
+        try {
+          const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            // le bouton app pointe sur l'écran de RÉCUPÉRATION, pas sur l'accueil : un membre off-boardé
+            // qui atterrit sur un dashboard verrouillé n'y trouve aucune action, et repart.
+            body: JSON.stringify({ chat_id: Number(m[0].tg_id), text, disable_web_page_preview: true, reply_markup: ctaKeyboard(loc, '/member/recover') }),
+          });
+          if (r.ok) {
+            dmLine = 'member notified with a recovery link';
+            await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'offboard', reason, text } as never });
+          } else {
+            const err = (await r.json().catch(() => ({}))) as { description?: string };
+            dmLine = `member NOT notified (${err.description ?? `HTTP ${r.status}`})`;
+            await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'nudge', status: 'failed', done_by: who, detail: { via: 'offboard', reason, error: err.description ?? `HTTP ${r.status}`, text } as never });
+          }
+        } catch (e) {
+          dmLine = `member NOT notified (${(e as { message?: string })?.message ?? 'send failed'})`;
+        }
+      }
+    }
+    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `⛔ off-boarded — ${OFFBOARD_REASONS[reason].admin} · ${discLine} · ${dmLine}. Also remove them from the VIP Telegram channel.` } as never });
+    return NextResponse.json({ ok: true, notified: dmLine });
   }
   if (body.connectSth) {
     // CONNEXION AUTO via STH (option B) : le support clique « connect » sur la demande → on branche le compte
@@ -853,7 +900,7 @@ export async function POST(req: NextRequest) {
       // Rattrapage MANUEL du statut. Volontairement limité aux 4 états du parcours : un membre coincé en
       // 'pending_copier' alors qu'il copie déjà, ou un 'paused' qui revient, n'avait aucune sortie.
       // Ne touche NI le copieur NI le bannissement (→ OFF-BOARD / BAN / RECONNECT, qui eux agissent chez STH).
-      if (!['onboarding', 'pending_copier', 'live', 'paused'].includes(raw)) return NextResponse.json({ error: 'unknown status' }, { status: 400 });
+      if (!['onboarding', 'pending_copier', 'live', 'paused', OFFBOARDED].includes(raw)) return NextResponse.json({ error: 'unknown status' }, { status: 400 });
       patch.status = raw;
     } else if (field === 'lot' || field === 'strategy') {
       const n = Number(raw);

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, isVip } from '@/lib/member/server';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { inMaintenance } from '@/lib/member/maintenance';
+import { OFFBOARDED } from '@/lib/member/winback';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +28,10 @@ export async function GET(req: NextRequest) {
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
   ]);
   // même règle que /api/member/me : admin OU copie activée OU whitelist VIP/équipe (CM…)
-  const unlocked = isAdmin(s.username) || ['live', 'paused'].includes(String(memberQ.data?.[0]?.status ?? '')) || (await isVip(s.username));
+  // même règle que /api/member/me, y compris la priorité de l'off-board sur la whitelist VIP : le retrait
+  // du canal étant manuel, un membre off-boardé encore listé VIP continuerait de recevoir le flux.
+  const feedStatus = String(memberQ.data?.[0]?.status ?? '');
+  const unlocked = isAdmin(s.username) || (feedStatus !== OFFBOARDED && (['live', 'paused'].includes(feedStatus) || (await isVip(s.username))));
   // on écarte les micro-scalps BEAST/RAFALE (show du live, pas la stratégie copiée) ET le NAS100
   // (marché retiré : STH ne l'a jamais copié — ses pertes n'existent que sur le compte maître,
   // les montrer aux membres serait un rouge qui n'est pas le leur)

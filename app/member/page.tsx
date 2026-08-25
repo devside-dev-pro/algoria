@@ -4,6 +4,7 @@
 // « Algoria trade en ce moment, toi tu regardes de dehors » + UNLOCK (paywall broker) + support Telegram.
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount, type Referral } from './ui';
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
@@ -18,6 +19,7 @@ export default function MemberHome() {
   const [paywall, setPaywall] = useState(false);
   interface Social { members: number; live: number; joins48h: number; lastLiveNo: number | null; lastLiveHours: number | null }
   const [social, setSocial] = useState<Social | null>(null);
+  const router = useRouter();
   const [tick, setTick] = useState(0); // rotation du bandeau preuve sociale
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => {
@@ -36,6 +38,10 @@ export default function MemberHome() {
   const fmtYou = (v: number) => `${v > 0 ? '+' : ''}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)}$`;
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
+  // OFF-BOARDÉ → écran de récupération, jamais le dashboard verrouillé. Un membre dont l'accès vient d'être
+  // coupé n'a rien à faire devant une page grisée : elle ne lui dit ni pourquoi, ni comment revenir, et
+  // c'est exactement là qu'on le perd. Le lien du message Telegram mène au même endroit.
+  if (member.status === 'offboarded') { router.replace('/member/recover'); return null; }
 
   const act = (action: 'pause' | 'resume' | 'risk', tier?: string) => {
     setBusy(true);

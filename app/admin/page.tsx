@@ -547,10 +547,25 @@ export default function AdminCRM() {
       .catch(() => setBusy(false));
   };
   // off-board : le client est parti → paused + déconnexion copieur + note (le kick du canal Telegram reste manuel)
+  // OFF-BOARD + RÉCUPÉRATION. Le motif choisi ici décide du TEXTE envoyé au membre (jamais de l'effet
+  // technique : l'accès tombe pareil dans tous les cas). Le message part avec un bouton vers son écran de
+  // récupération — c'est tout l'intérêt : sur 15 off-boards passés, un seul membre est revenu, et de sa
+  // propre initiative. On peut couper l'envoi, mais c'est un choix explicite, pas le défaut.
+  const OFFBOARD_MENU: Array<{ key: string; label: string }> = [
+    { key: 'withdrawal', label: '1 — capital retiré du compte' },
+    { key: 'inactive', label: '2 — compte inactif / vide' },
+    { key: 'broker_detached', label: '3 — compte non rattaché au broker' },
+    { key: 'other', label: '4 — autre motif' },
+  ];
   const offboard = (r: Row) => {
     const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
-    if (!window.confirm(`Off-board ${who}?\n\n• status → paused\n• copier disconnect queued (remove from STH)\n• DON'T FORGET to remove them from the VIP Telegram channel (manual)`)) return;
-    post({ offboard: r.tg_id }, () => setSel((s) => (s ? { ...s, status: 'paused' } : s)));
+    const pick = window.prompt(`Off-board ${who} — motif (il choisit le message envoyé au membre) :\n\n${OFFBOARD_MENU.map((m) => m.label).join('\n')}\n\nTape 1-4, ou "0" pour off-boarder SANS prévenir le membre :`, '1');
+    if (pick === null) return;
+    const choice = pick.trim();
+    const notify = choice !== '0';
+    const reason = OFFBOARD_MENU[Number(choice) - 1]?.key ?? 'withdrawal';
+    if (!window.confirm(`Off-board ${who}?\n\n• status → offboarded (il ne peut PAS se rebrancher seul)\n• copier disconnect via STH\n• ${notify ? `message envoyé au membre (${reason}) avec son lien de récupération` : 'AUCUN message au membre'}\n• DON'T FORGET to remove them from the VIP Telegram channel (manual)`)) return;
+    post({ offboard: r.tg_id, reason, notify }, () => setSel((s) => (s ? { ...s, status: 'offboarded' } : s)));
   };
 
   // 🚫 BAN / UNBAN — révoque l'accès app d'un compte (concurrent qui copie, abus). Confirmation obligatoire :
@@ -1581,6 +1596,7 @@ export default function AdminCRM() {
               {editPick(sel.tg_id, 'status', sel.status, [
                 { v: 'onboarding', label: 'onboarding' }, { v: 'pending_copier', label: 'pending_copier' },
                 { v: 'live', label: 'live' }, { v: 'paused', label: 'paused' },
+                { v: 'offboarded', label: 'offboarded' },
               ], 'fix the status by hand — does NOT touch the copier (use RECONNECT / OFF-BOARD for that)',
                 (v) => `Set the status to "${v}" by hand?\n\nThis only changes the label in our database — the copier is NOT touched.`)}
               {sel.tg_username && <a href={`https://t.me/${sel.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
@@ -2229,7 +2245,7 @@ function Kpi({ label, value, accent, hot, sub }: { label: string; value: string;
   );
 }
 function StatusChip({ status }: { status: string }) {
-  const c = status === 'live' ? 'var(--up)' : status === 'paused' ? 'var(--gold)' : status === 'pending_copier' ? 'var(--cyan)' : 'var(--muted)';
+  const c = status === 'live' ? 'var(--up)' : status === 'offboarded' ? 'var(--down)' : status === 'paused' ? 'var(--gold)' : status === 'pending_copier' ? 'var(--cyan)' : 'var(--muted)';
   return <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, color: c, border: `1px solid color-mix(in srgb, ${c} 40%, transparent)`, borderRadius: 6, padding: '2px 7px', whiteSpace: 'nowrap' }}>{status.toUpperCase()}</span>;
 }
 function RowLine({ icon, text, sub, onClick, gold }: { icon: string; text: string; sub?: string; onClick: () => void; gold?: boolean }) {
