@@ -5,6 +5,7 @@ import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } 
 import { BROKERS } from '@/lib/member/brokers';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
+import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -259,7 +260,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
     botBroadcast?: { audience: 'ex_s1' | 'live'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
@@ -683,6 +684,13 @@ export async function POST(req: NextRequest) {
     const { data: act } = await db.from('member_actions').select('id,tg_id,detail').eq('id', body.connectSth).eq('kind', 'connect').limit(1);
     if (!act?.length) return NextResponse.json({ error: 'connect request not found (already processed?)' }, { status: 404 });
     const detail = (act[0].detail as Record<string, unknown>) ?? {};
+    // ⚠️ LE VERROU DES LOTS — il est ICI, côté serveur, et pas seulement sur le bouton. Un bouton grisé
+    // n'est qu'une suggestion : il suffit d'un onglet resté ouvert avant la validation pour le contourner.
+    // Sans volume validé, le copieur ne se branche pas. C'est le seul moment du tunnel où le membre a une
+    // raison forte de coopérer — il veut être connecté — donc c'est là que le contrôle doit vivre.
+    if (!lotsCleared(detail)) {
+      return NextResponse.json({ error: `activation lots not validated — check the partner dashboard for ${ACTIVATION_LOTS} lot traded, then hit ✓ LOTS (or force it with a written reason)` }, { status: 409 });
+    }
     const accountId = detail.account_id ? String(detail.account_id) : null;
     let creds: { login: unknown; server: unknown; enc: unknown; sthUser: string; strategy: number; memberNo: number | null };
     if (accountId) {
@@ -1180,6 +1188,35 @@ export async function POST(req: NextRequest) {
     await db.from('member_actions').insert({ tg_id: body.nudged, member_no: m[0].member_no, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'manual', note: `personal DM/voice by ${who}` } as never });
     return NextResponse.json({ ok: true });
   }
+  if (body.lotsOk) {
+    // VALIDATION DU VOLUME D'ACTIVATION — le geste qui déverrouille le copieur. Écrit qui a pointé, quand,
+    // et le volume constaté ; ou un motif de passage en force.
+    //
+    // LE MOTIF EST OBLIGATOIRE POUR FORCER, et ce n'est pas de la paperasse. Un bouton « forcer » sans
+    // justification redevient le comportement par défaut en une semaine — on l'a vu ailleurs : ce qui est
+    // gratuit devient systématique. Écrire une phrase coûte assez pour qu'on ne le fasse que quand il le
+    // faut, et laisse une trace lisible quand on relit le mois.
+    const cardId = String(body.lotsOk);
+    const force = String(body.reason ?? '').trim().slice(0, 200);
+    const lotsSeen = Number(body.lots);
+    const { data: act } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail').eq('id', cardId).eq('kind', 'connect').limit(1);
+    if (!act?.length) return NextResponse.json({ error: 'connect request not found' }, { status: 404 });
+    const detail = (act[0].detail as Record<string, unknown>) ?? {};
+    const patch: Record<string, unknown> = { ...detail, lots_ok_by: who, lots_ok_at: new Date().toISOString() };
+    if (force) {
+      patch.lots_override = force;
+      patch.lots_ok = false; // un forçage n'est PAS une validation : les deux doivent rester distinguables au bilan
+    } else {
+      patch.lots_ok = true;
+      if (Number.isFinite(lotsSeen) && lotsSeen > 0) patch.lots_traded = lotsSeen;
+    }
+    await db.from('member_actions').update({ detail: patch as never }).eq('id', cardId);
+    await db.from('member_actions').insert({
+      tg_id: act[0].tg_id, member_no: act[0].member_no, kind: 'note', status: 'done', done_by: who,
+      detail: { text: force ? `⚠️ activation lots FORCED — ${force}` : `✅ activation lots validated${Number.isFinite(lotsSeen) && lotsSeen > 0 ? ` (${lotsSeen} lot)` : ''}` } as never,
+    });
+    return NextResponse.json({ ok: true });
+  }
   if (body.dismiss) {
     // ÉCARTER une carte obsolète (spam pause/resume, doublon…) SANS rien appliquer : contrairement à `done`,
     // aucun effet de bord (un connect dismissé ne passe PAS le membre en live). Tracé pour l'audit.
@@ -1192,6 +1229,12 @@ export async function POST(req: NextRequest) {
     // Le support a appliqué l'action dans Social Trade Hub → on la clôt ; un 'connect' fait passer le membre en LIVE.
     const { data: act } = await db.from('member_actions').select('id,tg_id,kind,detail').eq('id', body.done).eq('status', 'pending').limit(1);
     if (!act?.length) return NextResponse.json({ error: 'action not found' }, { status: 404 });
+    // Le ✓ DONE manuel fait passer un membre LIVE exactement comme le branchement STH : il doit donc
+    // passer par le MÊME verrou. Le laisser ouvert reviendrait à poser une porte blindée à côté d'une
+    // fenêtre ouverte — et c'est le bouton le plus rapide de la file, donc celui qu'on utiliserait.
+    if (act[0].kind === 'connect' && !lotsCleared(act[0].detail as Record<string, unknown>)) {
+      return NextResponse.json({ error: `activation lots not validated — check the partner dashboard for ${ACTIVATION_LOTS} lot traded, then hit ✓ LOTS (or force it with a written reason)` }, { status: 409 });
+    }
     await db.from('member_actions').update({ status: 'done', done_at: new Date().toISOString(), done_by: s.username ?? String(s.tgId) }).eq('id', body.done);
     const doneAccountId = (act[0].detail as { account_id?: string } | null)?.account_id;
     if (act[0].kind === 'connect' && doneAccountId) {

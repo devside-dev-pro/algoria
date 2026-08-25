@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin, isVip } from '@/lib/member/server';
 import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, commissionTermsFor, nextMilestone } from '@/lib/member/affiliate';
 import { minDepositFor, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
+import { lotsStateOf } from '@/lib/member/activation';
 import { BROKERS } from '@/lib/member/brokers';
 
 const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
   if (ctx === 'banned') return NextResponse.json({ error: 'access revoked', banned: true }, { status: 403 });
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
-  const [refs, commsQ, payoutsQ, rejQ, accountsQ, kycQ] = await Promise.all([
+  const [refs, commsQ, payoutsQ, rejQ, accountsQ, kycQ, connQ] = await Promise.all([
     db.from('members').select('status').eq('referred_by', ctx.session.tgId),
     db.from('referral_commissions').select('id,kind,amount,status,reason,detail,created_at').eq('referrer_tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
     db.from('referral_payouts').select('id,amount,address,status,tx_hash,reason,created_at').eq('tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
@@ -92,6 +93,8 @@ export async function GET(req: NextRequest) {
     // stratégies MÊME EN REPRISE : le champ local est vide quand le membre revient plus tard, donc sans
     // ça le sélecteur ouvrait les trois profils et le verrou serveur ne se déclenchait qu'à l'envoi.
     db.from('member_actions').select('detail').eq('tg_id', ctx.session.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
+    // CARTE CONNECT EN COURS — porte l'état du lot d'activation, affiché sur l'écran d'attente.
+    db.from('member_actions').select('detail').eq('tg_id', ctx.session.tgId).eq('kind', 'connect').eq('status', 'pending').order('created_at', { ascending: false }).limit(1),
   ]);
   const rejection = (ctx.member as { status?: string }).status === 'onboarding' && rejQ.data?.[0]
     ? { reason: String((rejQ.data[0].detail as { reject_reason?: string })?.reject_reason ?? 'verification failed'), at: rejQ.data[0].done_at }
@@ -129,7 +132,12 @@ export async function GET(req: NextRequest) {
   const status = String((ctx.member as { status?: string }).status ?? '');
   const unlocked = admin || ['live', 'paused'].includes(status) || (await isVip(ctx.session.username));
   const declaredDeposit = Number((kycQ.data?.[0]?.detail as { declared_deposit?: number } | undefined)?.declared_deposit ?? 0) || null;
-  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit });
+  // ÉTAT DU LOT D'ACTIVATION — ce que le membre a le droit de savoir, et RIEN de plus. On expose s'il a
+  // déclaré et si c'est validé ; jamais `lots_override` ni le nom de qui a signé : un motif d'exception
+  // interne (« ami de Mathieu », « on lâche l'affaire ») n'a rien à faire sur l'écran du membre.
+  const lots = lotsStateOf(connQ.data?.[0]?.detail as Record<string, unknown> | undefined);
+  const activation = { claimed: lots.claimedAt != null, claimedAt: lots.claimedAt, validated: lots.ok || lots.override != null };
+  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit, activation });
 }
 
 /** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'risk'|'pause'|'resume', ... } */
@@ -404,6 +412,27 @@ export async function POST(req: NextRequest) {
     });
     const { data: fresh } = (await raw.from('member_accounts').select('account_no,broker,strategy,status,mt5_login,created_at').eq('tg_id', s.tgId).order('account_no', { ascending: true })) as { data: Array<Record<string, unknown>> | null };
     return NextResponse.json({ ok: true, accounts: fresh ?? [] });
+  } else if (body.action === 'activation') {
+    // LE MEMBRE DÉCLARE AVOIR PASSÉ SON LOT D'ACTIVATION (0.5 BUY + 0.5 SELL EURUSD).
+    //
+    // ⚠️ CETTE DÉCLARATION NE PROUVE RIEN, ET LE CODE NE DOIT JAMAIS FAIRE COMME SI. Elle n'écrit QUE
+    // `lots_claimed_at` — jamais `lots_ok`, qui reste la signature d'un humain ayant pointé le dashboard
+    // partenaire. Ce qu'elle apporte est ailleurs : elle transforme une CHASSE (courir après 13 membres
+    // pour savoir qui a tradé) en une VÉRIFICATION (pointer une liste de gens qui disent l'avoir fait),
+    // et elle horodate qui a affirmé quoi — ce qui rend la conversation possible si le volume manque.
+    const { data: card } = await db.from('member_actions')
+      .select('id,detail').eq('tg_id', s.tgId).eq('kind', 'connect').eq('status', 'pending')
+      .order('created_at', { ascending: false }).limit(1);
+    if (!card?.length) return NextResponse.json({ error: 'no connection request is pending on your account' }, { status: 404 });
+    const detail = (card[0].detail as Record<string, unknown>) ?? {};
+    // idempotent : re-cliquer ne réécrit pas la date (sinon un double-clic effacerait l'heure réelle de
+    // la déclaration) et ne peut pas écraser une validation déjà signée par le support.
+    if (!detail.lots_claimed_at) {
+      await db.from('member_actions')
+        .update({ detail: { ...detail, lots_claimed_at: new Date().toISOString() } as never })
+        .eq('id', card[0].id);
+    }
+    return NextResponse.json({ ok: true, claimed: true });
   } else if (body.action === 'trc20') {
     // adresse de retrait USDT TRC20 — une seule par membre, format vérifié, changement horodaté (audit)
     const address = String(body.address ?? '').trim();

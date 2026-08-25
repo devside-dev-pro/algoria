@@ -11,6 +11,7 @@ import { openTelegram } from '@/lib/telegram';
 import { BROKERS } from '@/lib/member/brokers';
 import { LOT_CHOICES, LOT_MAX } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
+import { lotsStateOf, lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -372,6 +373,24 @@ export default function AdminCRM() {
   const payPayout = (id: string) => { const tx = window.prompt('USDT sent? Paste the TRC20 transaction hash:'); if (tx?.trim()) post({ payoutPaid: id, tx: tx.trim() }); };
   const rejectPayout = (id: string) => { const reason = window.prompt('Reject reason (shown to the member):'); if (reason !== null) post({ payoutReject: id, reason }); };
   // refuser une CONNEXION (vérification broker échouée) : le membre repasse en onboarding avec la raison — jamais bloqué
+  // VALIDATION DU VOLUME D'ACTIVATION. Deux issues, jamais une seule : soit le volume est là (on saisit
+  // combien on a vu), soit on force AVEC un motif écrit. Le forçage reste possible — il faut pouvoir
+  // débloquer un membre un dimanche — mais il coûte une phrase, et il s'affiche ensuite « ⚠ LOTS FORCÉS »
+  // sur la carte. Une exception silencieuse redevient la règle en une semaine ; une exception visible non.
+  const validateLots = (a: Action) => {
+    const seen = window.prompt(`Volume tradé constaté sur le dashboard partenaire (attendu : ${ACTIVATION_LOTS} lot).\n\nSaisis le nombre de lots — ou laisse VIDE pour forcer le déblocage avec un motif :`, String(ACTIVATION_LOTS));
+    if (seen === null) return;
+    if (!seen.trim()) {
+      const reason = window.prompt('Forçage — motif obligatoire (il restera affiché sur la carte et au bilan) :');
+      if (reason === null || !reason.trim()) return;
+      post({ lotsOk: a.id, reason });
+      return;
+    }
+    const n = Number(seen.replace(',', '.'));
+    if (!Number.isFinite(n) || n <= 0) { window.alert('Volume invalide.'); return; }
+    if (n < ACTIVATION_LOTS && !window.confirm(`${n} lot < ${ACTIVATION_LOTS} lot attendu.\n\nValider quand même ? La commission risque d'être refusée par le broker.`)) return;
+    post({ lotsOk: a.id, lots: n });
+  };
   const rejectConnect = (id: string) => { const reason = window.prompt('Decline reason (shown to the member, e.g. "no deposit found under this name"):'); if (reason !== null && reason.trim()) post({ rejectConnect: id, reason }); };
   // EN ATTENTE DU BROKER — le cas « compte préexistant non rattaché à notre numéro d'affilié » : il
   // n'apparaît pas dans le dashboard partenaire, et seul le titulaire peut demander le rattachement au
@@ -1503,13 +1522,23 @@ export default function AdminCRM() {
                   {a.kind === 'connect' && !creds[a.id] && (
                     <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password (timestamped)" style={goldBtn}>🔑 REVEAL</button>
                   )}
+                  {/* ✓ LOTS AVANT CONNECT — l'ordre des boutons raconte l'ordre du process. Le CONNECT et le
+                      DONE sont grisés tant que le volume n'est pas validé ; le serveur refuse de toute
+                      façon (409), le grisage n'est là que pour éviter le clic inutile. */}
+                  {a.kind === 'connect' && (() => {
+                    const L = lotsStateOf(a.detail as Record<string, unknown>);
+                    if (L.ok || L.override) {
+                      return <span className="mono" title={L.override ? `forcé : ${L.override}` : `validé par ${L.okBy ?? '?'}`} style={{ fontSize: 10.5, fontWeight: 800, color: L.override ? 'var(--gold)' : 'var(--up)', alignSelf: 'center' }}>{L.override ? '⚠ LOTS FORCÉS' : `✓ LOTS${L.lots ? ` ${L.lots}` : ''}`}</span>;
+                    }
+                    return <button disabled={busy} onClick={() => validateLots(a)} title={`pointe le dashboard partenaire : ${ACTIVATION_LOTS} lot tradé ? Puis valide ici — c'est ce qui déverrouille le CONNECT.`} style={{ ...goldBtn, fontWeight: 800, color: 'var(--gold)' }}>{L.claimedAt ? '🙋 LOTS ? (déclaré)' : '✓ LOTS ?'}</button>;
+                  })()}
                   {a.kind === 'connect' && (
-                    <button disabled={busy} onClick={() => connectViaSth(a)} title="connect this account to the copier via STH now, then go LIVE + log the deposit (one click, no manual STH entry)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔗 CONNECT (STH)</button>
+                    <button disabled={busy || !lotsCleared(a.detail as Record<string, unknown>)} onClick={() => connectViaSth(a)} title={lotsCleared(a.detail as Record<string, unknown>) ? 'connect this account to the copier via STH now, then go LIVE + log the deposit (one click, no manual STH entry)' : 'volume d\u2019activation pas encore validé — pointe le dashboard partenaire et clique ✓ LOTS'} style={{ ...okBtn, color: '#06121f', background: lotsCleared(a.detail as Record<string, unknown>) ? 'linear-gradient(90deg,#2be3f5,#2e8bf0)' : 'rgba(130,152,190,.2)', border: 'none', opacity: lotsCleared(a.detail as Record<string, unknown>) ? 1 : 0.5 }}>🔗 CONNECT (STH)</button>
                   )}
                   {a.kind === 'strategy_change' && (
                     <button disabled={busy} onClick={() => moveViaSth(a.id)} title="move this member's receiver to their new strategy's master via the STH API (API-connected members only — manually-added receivers must be moved in the STH dashboard)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔀 MOVE (STH)</button>
                   )}
-                  <button disabled={busy} onClick={() => post({ done: a.id }, () => { setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }); if (a.kind === 'connect') recordDepositAfterConnect(a); })} title="mark done manually (if you connected the account in STH yourself) — connect cards also offer to log the deposit" style={okBtn}>✓ DONE</button>
+                  <button disabled={busy || (a.kind === 'connect' && !lotsCleared(a.detail as Record<string, unknown>))} onClick={() => post({ done: a.id }, () => { setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }); if (a.kind === 'connect') recordDepositAfterConnect(a); })} title="mark done manually (if you connected the account in STH yourself) — connect cards also offer to log the deposit" style={a.kind === 'connect' && !lotsCleared(a.detail as Record<string, unknown>) ? { ...okBtn, opacity: 0.4 } : okBtn}>✓ DONE</button>
                   {a.kind === 'connect' && (
                     <button disabled={busy} onClick={() => waitBroker(a)} title="account not attached to your affiliate ID — the member must ask the broker's support to attach it. Marks the card as blocked upstream so it stops reading as forgotten. Click again once the broker replied." style={a.detail?.waiting_broker ? { ...goldBtn, color: 'var(--gold)', fontWeight: 800 } : miniBtn}>{a.detail?.waiting_broker ? '⏳ WAITING' : '⏳ BROKER'}</button>
                   )}
