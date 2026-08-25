@@ -211,6 +211,9 @@ export default function AdminCRM() {
   // 🤖 BOT ACTIVITY : fil envoyé (nudge, texte du DM) / reçu (bot_reply) — visibilité totale sur le bot
   const [botActivity, setBotActivity] = useState<Array<{ id: string; tg_id: number; member_no: number | null; kind: string; detail: Record<string, unknown> | null; created_at: string; status?: string | null }>>([]);
   const [tgInboxOn, setTgInboxOn] = useState(false); // état réel du webhook Telegram (getWebhookInfo)
+  // (tg_id|broker) → numéro de compte, tiré de l'historique des connexions validées. Sert l'export des
+  // dépôts : la fiche membre ne garde que le DERNIER compte, l'historique garde celui de chaque broker.
+  const [brokerLogins, setBrokerLogins] = useState<Record<string, string>>({});
   // 🌍 FILTRE MARCHÉ (01/08 — ouverture de l'Italie, deux entités comptables séparées) : 'all' | 'en' | 'it'.
   // Il pilote la liste des membres ET le registre des dépôts : « où en est l'Italie ce mois-ci ? » devient
   // une question à un clic, et l'export CSV suit le filtre (une compta par marché).
@@ -300,6 +303,7 @@ export default function AdminCRM() {
       setDeposits(d.deposits ?? []);
       setPushTgIds(d.pushTgIds ?? []);
       setNudges(d.nudges ?? []);
+      setBrokerLogins((d as unknown as { brokerLogins?: Record<string, string> }).brokerLogins ?? {});
       setSpokeTgIds(d.spokeTgIds ?? []);
       setRejectedTgIds(d.rejectedTgIds ?? []);
       setRunnerLastSeen((d as { runnerLastSeen?: number | null }).runnerLastSeen ?? null);
@@ -914,15 +918,41 @@ export default function AdminCRM() {
   // EXPORT CSV (bilan du mois) — généré côté client, s'ouvre direct dans Google Sheets / Excel (BOM UTF-8)
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    // NUMÉRO DE COMPTE CHEZ LE BROKER — c'est la clé de rapprochement avec le dashboard partenaire, et
+    // c'est ce qui manquait pour pointer les commissions ligne à ligne.
+    //
+    // ⚠️ ON LE CHERCHE PAR BROKER, PAS SUR LA FICHE MEMBRE. Un membre peut porter jusqu'à trois comptes
+    // (un par stratégie, chez des brokers différents — voir member_accounts) : prendre bêtement
+    // `member.mt5_login` sortirait le numéro du compte PRINCIPAL sur la ligne d'un dépôt fait chez un
+    // AUTRE broker. Le rapprochement échouerait sur les cas multi-comptes, précisément ceux qui portent
+    // les plus gros dépôts. On résout donc sur le broker de la ligne : fiche principale si son broker
+    // correspond, sinon le compte supplémentaire ouvert chez ce broker-là.
+    const brokerLoginOf = (tgId: number, broker: string | null | undefined): string => {
+      const b = String(broker ?? '');
+      // 1. l'historique des connexions validées chez CE broker — la source la plus fiable
+      const hist = brokerLogins[`${tgId}|${b}`];
+      if (hist) return hist;
+      // 2. un compte supplémentaire encore ouvert chez ce broker (multi-stratégies)
+      const extra = extraAccounts.find((a) => Number(a.tg_id) === Number(tgId) && String(a.broker ?? '') === b && a.mt5_login);
+      if (extra?.mt5_login) return String(extra.mt5_login);
+      // 3. la fiche membre, SEULEMENT si son broker correspond
+      const m = rows.find((r) => Number(r.tg_id) === Number(tgId));
+      if (m?.mt5_login && String(m.broker ?? '') === b) return String(m.mt5_login);
+      // Rien de fiable : on laisse VIDE. Sortir ici le compte principal reviendrait à imprimer, sur une
+      // ligne RaiseFX, un numéro PU Prime — on partirait le chercher dans le mauvais dashboard.
+      return '';
+    };
     const lines = [
-      ['date', 'market', 'member', 'username', 'country', 'broker', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
+      ['date', 'market', 'member', 'username', 'holder_name', 'country', 'broker', 'broker_account', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
       ...monthDeps.map((d) => [
         depDateOf(d).slice(0, 10),
         localeOf(d.tg_id).toUpperCase(),
         d.member_no != null ? `#${d.member_no}` : '',
         (() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? ''); })(),
+        legalOf(d.tg_id) ?? '',
         rows.find((r) => Number(r.tg_id) === Number(d.tg_id))?.country ?? '',
         d.detail?.broker ?? '',
+        brokerLoginOf(d.tg_id, d.detail?.broker),
         Number(d.detail?.amount_usd ?? 0),
         Number(d.detail?.commission_usd ?? 0),
         d.detail?.commission_status ?? 'pending',
