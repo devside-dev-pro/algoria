@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
   if (!isAdmin(sess.username)) return NextResponse.json({ error: 'forbidden', username: sess.username ?? null }, { status: 403 });
   const s = sess;
   const db = sdb();
-  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ, spokeQ, rejectedQ] = await Promise.all([
+  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ, spokeQ, rejectedQ, connectedQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
     allMembers(db),
@@ -124,6 +124,12 @@ export async function GET(req: NextRequest) {
     db.from('member_actions').select('tg_id').eq('kind', 'bot_reply').limit(5000),
     // CONNEXIONS REFUSÉES : ces gens-là ne sont pas à relancer mais à RATTRAPER — ils ont essayé.
     db.from('member_actions').select('tg_id').eq('kind', 'connect').eq('status', 'rejected').limit(2000),
+    // NUMÉROS DE COMPTE PAR BROKER — l'HISTORIQUE des connexions validées, pas la fiche membre.
+    // La fiche ne garde que le DERNIER compte : un membre qui a déposé chez RaiseFX en août puis rouvert
+    // chez PU Prime n'a plus nulle part son numéro RaiseFX, alors que c'est lui qui porte la commission.
+    // Mesuré : 4 dépôts sur ~59 sont dans ce cas. Sans cette requête, l'export sortait pour eux un numéro
+    // appartenant à un AUTRE broker — pire qu'une case vide, puisqu'on part le chercher pour rien.
+    db.from('member_actions').select('tg_id,detail').eq('kind', 'connect').eq('status', 'done').limit(2000),
   ]);
   // COMPTES SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut)
   const { data: extraAccounts } = await (db as any).from('member_accounts')
@@ -224,7 +230,16 @@ export async function GET(req: NextRequest) {
     const n = String((k.detail as { broker_name?: string })?.broker_name ?? '').trim();
     if (n && !legalNames[t]) legalNames[t] = n;
   }
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
+  // (tg_id, broker) → numéro de compte, construit sur l'historique des connexions VALIDÉES. Les cartes
+  // sont parcourues de la plus ancienne à la plus récente, donc la dernière connexion validée chez un
+  // broker donné gagne — c'est celle qui correspond au compte encore ouvert là-bas.
+  const brokerLogins: Record<string, string> = {};
+  for (const c of (connectedQ.data ?? []) as Array<{ tg_id: number; detail: { broker?: string; login?: string } | null }>) {
+    const b = String(c.detail?.broker ?? '');
+    const login = String(c.detail?.login ?? '');
+    if (b && login) brokerLogins[`${c.tg_id}|${b}`] = login;
+  }
+  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
     // segmentation de la file du jour : qui a déjà écrit (→ vraie relance) et qui s'est fait refuser (→ rattrapage)
     spokeTgIds: [...new Set((spokeQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
     rejectedTgIds: [...new Set((rejectedQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
