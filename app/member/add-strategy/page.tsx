@@ -9,6 +9,7 @@ import { useMe, StrategyPicker, STRATEGY_UI, LoadFailed, Check } from '../ui';
 import { BROKERS, selectableBrokers } from '@/lib/member/brokers';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { bracketForAmount, brokerOrderFor } from '@/lib/member/brokerSteering';
+import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
 
 const STRAT_NAME: Record<number, string> = { 1: 'S1 STEADY', 2: 'S2 BALANCED', 3: 'S3 TURBO' };
 
@@ -81,6 +82,19 @@ export default function AddStrategy() {
             The team is verifying your new account and connecting it to <b style={{ color: 'var(--text)' }}>{STRAT_NAME[strategy ?? 0]}</b>.
             You&rsquo;ll get a notification the moment it goes live — usually within a few hours.
           </p>
+          {/* MÊME RÈGLE QUE POUR UN PREMIER COMPTE, ET IL FAUT LA RÉPÉTER ICI. Un 2e compte chez un
+              nouveau broker = une nouvelle commission chez ce broker = le même volume à tracer. Le verrou
+              serveur s'applique déjà à cette carte connect ; sans ce texte, le membre serait bloqué par une
+              règle que personne ne lui a dite — la façon la plus sûre de transformer un verrou en litige. */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8, textAlign: 'left' }}>
+            <span className="mono" style={{ fontSize: 10, letterSpacing: 1.4, color: 'var(--gold)' }}>ONE LAST STEP ON THE NEW ACCOUNT</span>
+            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)' }}>
+              On the new MT5, place <b style={{ color: 'var(--text)' }}>{ACTIVATION_LEGS.map((l) => `${l.lots} ${l.side}`).join(' + ')}</b> on{' '}
+              <b style={{ color: 'var(--text)' }}>{ACTIVATION_SYMBOL}</b> and close them. One buy, one sell, same size — net exposure zero,
+              so it can&rsquo;t lose you money. It registers the account with the broker and unlocks the copier.
+              Keep your funds in place for {WITHDRAW_LOCK_DAYS} days to keep your access.
+            </p>
+          </div>
           <button onClick={() => router.push('/member')} style={ctaMain}>← BACK TO HOME</button>
         </section>
       </main>

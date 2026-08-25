@@ -5,6 +5,8 @@ import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } 
 import { BROKERS } from '@/lib/member/brokers';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
+import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
+import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, type OffboardReason } from '@/lib/member/winback';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -259,7 +261,7 @@ export async function POST(req: NextRequest) {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
     botBroadcast?: { audience: 'ex_s1' | 'live'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
@@ -655,11 +657,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, banned: true });
   }
   if (body.offboard) {
-    // OFF-BOARD : le client est parti (retrait). Statut → paused (sort du compte "actifs", fiche + creds conservés),
-    // déconnexion copieur (via STH si configuré, sinon empilée dans la file support), et note timeline explicite.
-    const { data: m } = await db.from('members').select('member_no,tg_id').eq('tg_id', body.offboard).limit(1);
+    // OFF-BOARD : le client est parti (retrait). Statut → 'offboarded', déconnexion copieur (via STH si
+    // configuré, sinon empilée dans la file support), note timeline, ET un message au membre avec sa porte
+    // de retour.
+    //
+    // ── 'offboarded' ET NON PLUS 'paused' (25/08/2026) ────────────────────────────────────────────────
+    // 'paused' est le statut d'un membre qui a mis SA copie en pause lui-même, et c'est exactement celui
+    // qui affiche « ▶ RESUME COPYING » dans son app. Un membre off-boardé y voyait donc un bouton capable
+    // de le rebrancher au copieur en un geste, sans redéposer un dollar. Le statut dédié sort de tous les
+    // tests `['live','paused']` de l'app et de l'API : le verrou vient de la structure, pas d'une garde.
+    //
+    // ── ET ON LUI ÉCRIT ──────────────────────────────────────────────────────────────────────────────
+    // Avant, off-boarder c'était perdre quelqu'un en silence : la personne découvrait son accès mort sans
+    // savoir pourquoi et sans chemin de retour. Sur 15 off-boards, un seul membre est revenu — de sa
+    // propre initiative. Le message ne reproche rien (retirer son argent est un droit), il explique la
+    // mécanique et il ouvre la porte.
+    const { data: m } = await db.from('members').select('member_no,tg_id,tg_name,locale').eq('tg_id', body.offboard).limit(1);
     if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
-    await db.from('members').update({ status: 'paused', updated_at: new Date().toISOString() }).eq('tg_id', body.offboard);
+    const reason: OffboardReason = isOffboardReason(body.reason) ? body.reason : 'withdrawal';
+    await db.from('members').update({ status: OFFBOARDED, updated_at: new Date().toISOString() }).eq('tg_id', body.offboard);
     let discLine = 'copier disconnect queued for STH';
     if (sthReady()) {
       const d = await sthDisconnect(String(m[0].tg_id));
@@ -671,8 +687,40 @@ export async function POST(req: NextRequest) {
     } else {
       await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'disconnect', status: 'pending', done_by: who, detail: { reason: 'off-board (client left)' } as never });
     }
-    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `⛔ off-boarded — client left · ${discLine}. Also remove them from the VIP Telegram channel.` } as never });
-    return NextResponse.json({ ok: true });
+    // MESSAGE AU MEMBRE — le cœur du process de récupération. L'échec d'envoi ne fait PAS échouer
+    // l'off-board : le débranchement du copieur est la partie qui ne peut pas attendre, et un membre
+    // injoignable (bot bloqué, compte supprimé) ne doit pas laisser un compte branché derrière lui. On
+    // trace ce qui s'est passé dans les deux cas, pour que « prévenu ou pas » soit une question à laquelle
+    // la fiche répond.
+    let dmLine = 'member not notified (notify off)';
+    if (body.notify !== false) {
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) dmLine = 'member NOT notified — TELEGRAM_BOT_TOKEN missing';
+      else {
+        const loc = asLocale((m[0] as { locale?: string }).locale);
+        const text = winbackMessage(reason, (m[0] as { tg_name?: string }).tg_name ?? null, loc);
+        try {
+          const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            // le bouton app pointe sur l'écran de RÉCUPÉRATION, pas sur l'accueil : un membre off-boardé
+            // qui atterrit sur un dashboard verrouillé n'y trouve aucune action, et repart.
+            body: JSON.stringify({ chat_id: Number(m[0].tg_id), text, disable_web_page_preview: true, reply_markup: ctaKeyboard(loc, '/member/recover') }),
+          });
+          if (r.ok) {
+            dmLine = 'member notified with a recovery link';
+            await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'offboard', reason, text } as never });
+          } else {
+            const err = (await r.json().catch(() => ({}))) as { description?: string };
+            dmLine = `member NOT notified (${err.description ?? `HTTP ${r.status}`})`;
+            await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'nudge', status: 'failed', done_by: who, detail: { via: 'offboard', reason, error: err.description ?? `HTTP ${r.status}`, text } as never });
+          }
+        } catch (e) {
+          dmLine = `member NOT notified (${(e as { message?: string })?.message ?? 'send failed'})`;
+        }
+      }
+    }
+    await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `⛔ off-boarded — ${OFFBOARD_REASONS[reason].admin} · ${discLine} · ${dmLine}. Also remove them from the VIP Telegram channel.` } as never });
+    return NextResponse.json({ ok: true, notified: dmLine });
   }
   if (body.connectSth) {
     // CONNEXION AUTO via STH (option B) : le support clique « connect » sur la demande → on branche le compte
@@ -683,6 +731,13 @@ export async function POST(req: NextRequest) {
     const { data: act } = await db.from('member_actions').select('id,tg_id,detail').eq('id', body.connectSth).eq('kind', 'connect').limit(1);
     if (!act?.length) return NextResponse.json({ error: 'connect request not found (already processed?)' }, { status: 404 });
     const detail = (act[0].detail as Record<string, unknown>) ?? {};
+    // ⚠️ LE VERROU DES LOTS — il est ICI, côté serveur, et pas seulement sur le bouton. Un bouton grisé
+    // n'est qu'une suggestion : il suffit d'un onglet resté ouvert avant la validation pour le contourner.
+    // Sans volume validé, le copieur ne se branche pas. C'est le seul moment du tunnel où le membre a une
+    // raison forte de coopérer — il veut être connecté — donc c'est là que le contrôle doit vivre.
+    if (!lotsCleared(detail)) {
+      return NextResponse.json({ error: `activation lots not validated — check the partner dashboard for ${ACTIVATION_LOTS} lot traded, then hit ✓ LOTS (or force it with a written reason)` }, { status: 409 });
+    }
     const accountId = detail.account_id ? String(detail.account_id) : null;
     let creds: { login: unknown; server: unknown; enc: unknown; sthUser: string; strategy: number; memberNo: number | null };
     if (accountId) {
@@ -845,7 +900,7 @@ export async function POST(req: NextRequest) {
       // Rattrapage MANUEL du statut. Volontairement limité aux 4 états du parcours : un membre coincé en
       // 'pending_copier' alors qu'il copie déjà, ou un 'paused' qui revient, n'avait aucune sortie.
       // Ne touche NI le copieur NI le bannissement (→ OFF-BOARD / BAN / RECONNECT, qui eux agissent chez STH).
-      if (!['onboarding', 'pending_copier', 'live', 'paused'].includes(raw)) return NextResponse.json({ error: 'unknown status' }, { status: 400 });
+      if (!['onboarding', 'pending_copier', 'live', 'paused', OFFBOARDED].includes(raw)) return NextResponse.json({ error: 'unknown status' }, { status: 400 });
       patch.status = raw;
     } else if (field === 'lot' || field === 'strategy') {
       const n = Number(raw);
@@ -1180,6 +1235,35 @@ export async function POST(req: NextRequest) {
     await db.from('member_actions').insert({ tg_id: body.nudged, member_no: m[0].member_no, kind: 'nudge', status: 'done', done_by: who, detail: { via: 'manual', note: `personal DM/voice by ${who}` } as never });
     return NextResponse.json({ ok: true });
   }
+  if (body.lotsOk) {
+    // VALIDATION DU VOLUME D'ACTIVATION — le geste qui déverrouille le copieur. Écrit qui a pointé, quand,
+    // et le volume constaté ; ou un motif de passage en force.
+    //
+    // LE MOTIF EST OBLIGATOIRE POUR FORCER, et ce n'est pas de la paperasse. Un bouton « forcer » sans
+    // justification redevient le comportement par défaut en une semaine — on l'a vu ailleurs : ce qui est
+    // gratuit devient systématique. Écrire une phrase coûte assez pour qu'on ne le fasse que quand il le
+    // faut, et laisse une trace lisible quand on relit le mois.
+    const cardId = String(body.lotsOk);
+    const force = String(body.reason ?? '').trim().slice(0, 200);
+    const lotsSeen = Number(body.lots);
+    const { data: act } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail').eq('id', cardId).eq('kind', 'connect').limit(1);
+    if (!act?.length) return NextResponse.json({ error: 'connect request not found' }, { status: 404 });
+    const detail = (act[0].detail as Record<string, unknown>) ?? {};
+    const patch: Record<string, unknown> = { ...detail, lots_ok_by: who, lots_ok_at: new Date().toISOString() };
+    if (force) {
+      patch.lots_override = force;
+      patch.lots_ok = false; // un forçage n'est PAS une validation : les deux doivent rester distinguables au bilan
+    } else {
+      patch.lots_ok = true;
+      if (Number.isFinite(lotsSeen) && lotsSeen > 0) patch.lots_traded = lotsSeen;
+    }
+    await db.from('member_actions').update({ detail: patch as never }).eq('id', cardId);
+    await db.from('member_actions').insert({
+      tg_id: act[0].tg_id, member_no: act[0].member_no, kind: 'note', status: 'done', done_by: who,
+      detail: { text: force ? `⚠️ activation lots FORCED — ${force}` : `✅ activation lots validated${Number.isFinite(lotsSeen) && lotsSeen > 0 ? ` (${lotsSeen} lot)` : ''}` } as never,
+    });
+    return NextResponse.json({ ok: true });
+  }
   if (body.dismiss) {
     // ÉCARTER une carte obsolète (spam pause/resume, doublon…) SANS rien appliquer : contrairement à `done`,
     // aucun effet de bord (un connect dismissé ne passe PAS le membre en live). Tracé pour l'audit.
@@ -1192,6 +1276,12 @@ export async function POST(req: NextRequest) {
     // Le support a appliqué l'action dans Social Trade Hub → on la clôt ; un 'connect' fait passer le membre en LIVE.
     const { data: act } = await db.from('member_actions').select('id,tg_id,kind,detail').eq('id', body.done).eq('status', 'pending').limit(1);
     if (!act?.length) return NextResponse.json({ error: 'action not found' }, { status: 404 });
+    // Le ✓ DONE manuel fait passer un membre LIVE exactement comme le branchement STH : il doit donc
+    // passer par le MÊME verrou. Le laisser ouvert reviendrait à poser une porte blindée à côté d'une
+    // fenêtre ouverte — et c'est le bouton le plus rapide de la file, donc celui qu'on utiliserait.
+    if (act[0].kind === 'connect' && !lotsCleared(act[0].detail as Record<string, unknown>)) {
+      return NextResponse.json({ error: `activation lots not validated — check the partner dashboard for ${ACTIVATION_LOTS} lot traded, then hit ✓ LOTS (or force it with a written reason)` }, { status: 409 });
+    }
     await db.from('member_actions').update({ status: 'done', done_at: new Date().toISOString(), done_by: s.username ?? String(s.tgId) }).eq('id', body.done);
     const doneAccountId = (act[0].detail as { account_id?: string } | null)?.account_id;
     if (act[0].kind === 'connect' && doneAccountId) {
