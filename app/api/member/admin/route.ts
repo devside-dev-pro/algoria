@@ -988,10 +988,14 @@ export async function POST(req: NextRequest) {
       const st = await sthStatus(String(m.tg_id));
       if (!st.ok) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'error', detail: st.errorMessage }); continue; }
       const masters = st.data.masterAccountsList ?? [];
-      const connected = st.data.tradingAccountConnected === true;
       if (masters.length > 0) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'ok', detail: `${masters.length} master(s)` }); continue; }
-      // masterless : orphelin s'il est bel et bien connecté chez STH, inconnu sinon (rien à réparer d'ici)
-      if (!connected) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'unknown', detail: 'not connected at STH — reconnect from the member card' }); continue; }
+      // MASTERLESS → ORPHELIN, ET ON TENTE LA RÉPARATION (26/08). On triait avant sur
+      // tradingAccountConnected pour séparer « connecté mais sans master » (réparable) de « inconnu de
+      // STH » (rien à faire) — un drapeau faux pour tout le monde, donc TOUS les masterless tombaient dans
+      // « inconnu » et la réparation ne se déclenchait JAMAIS. L'outil d'audit ne réparait rien.
+      // Aucun signal fiable ne permet ce tri, alors on tente : un re-join sur un utilisateur réellement
+      // inconnu échoue avec le message de STH, qui s'affiche. Une tentative qui échoue en le disant est
+      // plus utile qu'un diagnostic qui se trompe en silence.
       const strategy = Number(m.strategy ?? 2) || 2;
       const lots = Number(m.lot ?? 0.01) || 0.01;
       if (!repair) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'orphan', detail: `connected but copying nothing → would rejoin S${strategy} (lots ${lots})` }); continue; }

@@ -75,10 +75,22 @@ export async function sthMoveMaster(userId: string, strategy: number, lots: numb
   // qu'il n'a pas choisie est pire qu'un message d'erreur. S2 garde le repli — MASTER_ID EST son master.
   const masterId = MASTER_BY_STRATEGY[strategy] || (strategy === 2 ? MASTER_ID : '');
   if (!masterId) return { ok: false, error: `no master configured for S${strategy} (set STH_MASTER_ID_S${strategy})` };
-  if (!isApiKnown(await sthStatus(userId)))
-    return { ok: false, error: 'this member is not API-connected (manually-added receiver?) — move them in the STH dashboard instead' };
+  // ON TENTE, ON NE PRÉ-JUGE PLUS (26/08). Le garde isApiKnown vivait ici ; avec un drapeau MT faux pour
+  // tout le monde il se réduit à « possède déjà des masters » — et refusait donc précisément les deux
+  // populations qu'il devait servir : le membre EN PAUSE (sthPauseCopy vide sa liste de masters, c'est
+  // sa définition) et le membre masterless que l'audit veut réparer. Un garde qui bloque exactement les
+  // cas qu'il est censé débloquer doit sauter.
   const j = await sthJoinMaster({ userId, masterId, lots });
-  return j.ok ? { ok: true, error: '' } : { ok: false, error: j.errorMessage };
+  return j.ok ? { ok: true, error: '' } : { ok: false, error: hintUnknownUser(j.errorMessage) };
+}
+
+/** Le conseil que portait l'ancien garde isApiKnown, rendu au moment où il est réellement fondé : quand
+ *  STH dit lui-même ne pas connaître cet utilisateur. Avant, il s'affichait sur une SUPPOSITION tirée d'un
+ *  drapeau, ce qui envoyait le support corriger à la main des membres qui n'avaient rien. */
+function hintUnknownUser(error: string): string {
+  return /user.*(not found|unknown)|invalid user/i.test(error)
+    ? `${error} — STH doesn't know this UserID (manually-added receiver?). Do it in the STH dashboard instead.`
+    : error;
 }
 
 /**
@@ -92,6 +104,17 @@ export async function sthMoveMaster(userId: string, strategy: number, lots: numb
  *  · le flag seul → il reflète l'état INSTANTANÉ du bridge MT et peut être false sur un membre
  *    parfaitement abonné (vécu 23/07 : userIsSubscribed true avec connected false).
  * On exige donc les deux pour déclarer quelqu'un inconnu.
+ *
+ * ⚠️ MISE À JOUR DU 26/08/2026 — LE FLAG EST MORT, ET CETTE FONCTION EN DÉPEND À MOITIÉ.
+ * Constat de Mathieu sur TOUT le parc : tradingAccountConnected est false pour tous les membres, y compris
+ * ceux qui copient parfaitement. Ce n'est donc pas « instantané », c'est inexploitable. Concrètement,
+ * `isApiKnown` se réduit à « possède au moins un master » — ce qui rend faux, à nouveau, le cas de la
+ * PAUSE décrit juste au-dessus (un membre en pause a une liste VIDE).
+ * C'est pourquoi elle n'est plus utilisée comme GARDE D'ENTRÉE nulle part : sthMoveMaster et sthPauseCopy
+ * tentent l'opération et laissent STH répondre. Elle ne sert plus qu'à un seul endroit (confirmation
+ * post-connect), où « possède un master » est une preuve suffisante et où un faux négatif ne fait que
+ * remonter l'erreur réelle du connect.
+ * NE PAS la réintroduire comme pré-condition tant que STH n'a pas réparé ce champ.
  */
 function isApiKnown(st: { ok: boolean; data: { tradingAccountConnected?: boolean; masterAccountsList?: Array<{ id: string }> } }): boolean {
   if (!st.ok) return true; // STH injoignable → on laisse passer, l'appel suivant tranchera avec sa vraie erreur
@@ -102,10 +125,9 @@ function isApiKnown(st: { ok: boolean; data: { tradingAccountConnected?: boolean
  *  tout, mais le compte MT reste connecté au copieur → le resume est un simple re-join (sthMoveMaster).
  *  Même garde que sthMoveMaster : les receivers ajoutés à la main dans le dashboard sont invisibles ici. */
 export async function sthPauseCopy(userId: string): Promise<{ ok: boolean; error: string }> {
-  if (!isApiKnown(await sthStatus(userId)))
-    return { ok: false, error: 'this member is not API-connected (manually-added receiver?) — pause them in the STH dashboard instead' };
+  // même raison qu'au-dessus : on laisse STH répondre plutôt que de deviner à partir d'un drapeau mort
   const r = await sthPost('/Partner/join-master-account', { UserID: userId, MasterAccounts: [] });
-  return r.ok ? { ok: true, error: '' } : { ok: false, error: r.errorMessage };
+  return r.ok ? { ok: true, error: '' } : { ok: false, error: hintUnknownUser(r.errorMessage) };
 }
 
 // ⚠️ NE PAS RECONSTRUIRE UNE VÉRIFICATION D'IDENTIFIANTS BLOQUANTE À L'INSCRIPTION (leçon du 15/08/2026).
@@ -128,12 +150,25 @@ export async function sthPauseCopy(userId: string): Promise<{ ok: boolean; error
 export async function sthConnectAndJoin(o: {
   userId: string; login: string | number; password: string; server: string; isMt4: boolean; lots: number; strategy?: number;
 }): Promise<{ ok: boolean; error: string }> {
-  // 0) PIÈGE DES IDENTIFIANTS PÉRIMÉS : si un connect précédent a enregistré de MAUVAIS identifiants
-  //    (login corrigé après coup, faute de frappe…), STH garde les anciens et répond « already » au re-connect
-  //    → le compte ne se connectera jamais. Si l'utilisateur est connu mais PAS connecté, on disconnect
-  //    d'abord (best-effort) pour repartir proprement avec les identifiants ACTUELS.
-  const pre = await sthStatus(o.userId);
-  if (pre.ok && pre.data.tradingAccountConnected === false) await sthDisconnect(o.userId).catch(() => {});
+  // 0) ⚠️ IL Y AVAIT ICI UN PRÉ-DÉCONNECT, ET IL DÉCONNECTAIT TOUT LE MONDE (retiré le 26/08/2026).
+  //
+  //    Le code lisait `pre.data.tradingAccountConnected === false` pour repérer un utilisateur « connu mais
+  //    pas branché » (cas des identifiants périmés) et appelait sthDisconnect avant de reconnecter.
+  //    Sauf que ce drapeau est faux pour TOUS les membres, y compris ceux qui copient parfaitement —
+  //    constat de Mathieu sur l'ensemble du parc, et déjà écrit noir sur blanc vingt lignes plus haut dans
+  //    isApiKnown : « vécu 23/07 : userIsSubscribed true avec connected false ». La leçon était dans le
+  //    fichier ; le code d'à côté ne s'en servait pas.
+  //
+  //    Conséquence réelle (membre #422, 26/08, 2h du matin) : un clic sur RECONNECT déconnectait le membre,
+  //    puis connect-customer-copier renvoyait HTTP 500 — il restait débranché, et le bouton censé le
+  //    réparer était ce qui l'avait cassé. Un geste de secours ne doit JAMAIS commencer par détruire
+  //    l'état qu'il tente de restaurer.
+  //
+  //    On ne remplace pas par un autre test : aucun signal fiable ne distingue « connu mais pas branché »
+  //    d'un membre sain (la liste de masters vide est aussi l'état d'un membre en PAUSE — voir isApiKnown).
+  //    Le cas des identifiants périmés reste couvert : sthConnectCustomer renvoie les identifiants ACTUELS,
+  //    et si STH s'obstine à garder les anciens, la sortie est un DISCONNECT explicite depuis la fiche
+  //    membre — une action que le support décide, pas un effet de bord silencieux de chaque reconnexion.
   // 1) connecter le compte au copieur (rend l'utilisateur « connu » de STH).
   //    RETRY-SAFE : si le compte est DÉJÀ connecté (re-clic alors que tout marche), on continue vers le join
   //    au lieu de bloquer — l'erreur « already connected » n'est pas un échec pour nous.
@@ -145,8 +180,11 @@ export async function sthConnectAndJoin(o: {
     // invalide chez nous, et le support ne pouvait plus la rebrancher.
     // On redemande donc l'état RÉEL : si le compte est connecté, l'échec du connect n'en est pas un et on
     // continue vers le join. Un fait vérifié vaut mieux qu'une chaîne de caractères devinée.
+    // On redemande l'état RÉEL — via isApiKnown, PAS via le drapeau seul. Le drapeau étant faux pour tout
+    // le monde, ce test transformait la moindre erreur de connect en échec définitif, y compris sur un
+    // compte parfaitement abonné : c'est exactement le faux négatif que isApiKnown documente.
     const after = await sthStatus(o.userId);
-    if (!(after.ok && after.data.tradingAccountConnected === true)) return { ok: false, error: c.errorMessage };
+    if (!isApiKnown(after)) return { ok: false, error: c.errorMessage };
   }
   // 2) master id : celui de la STRATÉGIE du membre d'abord, sinon env global, sinon auto-découverte.
   //    Comme sthMoveMaster : jamais de repli silencieux vers le master historique pour S1/S3 — brancher
@@ -163,25 +201,24 @@ export async function sthConnectAndJoin(o: {
   }
   // 3) abonner au master Algoria.
   //    La connexion MT côté STH est ASYNCHRONE : connect-customer-copier rend la main avant que le bridge
-  //    MetaTrader soit établi → un join immédiat peut échouer « MetaTrader account not connected ». Dans ce
-  //    cas on POLL get-user-status (jusqu'à ~25 s) en attendant tradingAccountConnected, puis on re-join.
-  //    Si le compte ne se connecte jamais, c'est presque toujours login/mot de passe/serveur incorrects.
+  //    MetaTrader soit établi → un join immédiat peut échouer « MetaTrader account not connected ».
+  //
+  //    ON RÉESSAIE LE JOIN LUI-MÊME, on n'attend plus le drapeau (26/08). L'ancienne boucle sondait
+  //    tradingAccountConnected et ne relançait le join qu'une fois le drapeau vrai — un drapeau faux pour
+  //    tout le monde, donc elle brûlait ses 24 secondes puis abandonnait TOUJOURS, y compris quand le join
+  //    serait passé du premier coup au deuxième essai. Interroger l'opération qu'on veut réellement réussir
+  //    vaut mieux que surveiller un indicateur qui prétend la prédire.
   let j = await sthJoinMaster({ userId: o.userId, masterId, lots: o.lots });
-  if (!j.ok && /not connected/i.test(j.errorMessage)) {
-    let connected = false;
-    for (let attempt = 0; attempt < 8 && !connected; attempt++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const st = await sthStatus(o.userId);
-      connected = st.ok && st.data.tradingAccountConnected === true;
-    }
-    if (!connected)
-      return {
-        ok: false,
-        error:
-          "account saved but STH can't reach the MetaTrader account (after ~25s). Either STH is still connecting — retry CONNECT in 1-2 min — or the login/password/server is wrong (check it's the MAIN password, not investor, and the exact server name).",
-      };
+  for (let attempt = 0; attempt < 8 && !j.ok && /not connected/i.test(j.errorMessage); attempt++) {
+    await new Promise((r) => setTimeout(r, 3000));
     j = await sthJoinMaster({ userId: o.userId, masterId, lots: o.lots });
   }
+  if (!j.ok && /not connected/i.test(j.errorMessage))
+    return {
+      ok: false,
+      error:
+        "account saved but STH can't reach the MetaTrader account (after ~25s). Either STH is still connecting — retry CONNECT in 1-2 min — or the login/password/server is wrong (check it's the MAIN password, not investor, and the exact server name).",
+    };
   if (!j.ok) return { ok: false, error: `connected, but join failed: ${j.errorMessage}` };
   return { ok: true, error: '' };
 }
