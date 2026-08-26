@@ -488,7 +488,7 @@ export default function AdminCRM() {
         // « géré par l'API » = liste de masters non vide ; le flag connected (bridge MT instantané) peut traîner
         const known = (d.masters ?? []).length > 0;
         const subs = (d.masters ?? []).filter((m) => m.userIsSubscribed === true).map((m) => String(m.name ?? m.id));
-        window.alert(`STH status (live from their API)\n\nAPI-managed: ${known ? '✅ YES' : '❌ NO (manually-added receiver or never connected)'}\nSubscribed to: ${subs.join(', ') || '(none)'}\nMT bridge right now: ${d.connected ? '✅ up' : '⚠ down/lagging (STH-side flag)'}\n\nMasters:\n${(d.masters ?? []).map((m) => '• ' + JSON.stringify(m)).join('\n') || '(none visible)'}`);
+        window.alert(`STH status (live from their API)\n\nAPI-managed: ${known ? '✅ YES' : '❌ NO (manually-added receiver or never connected)'}\nSubscribed to: ${subs.join(', ') || '(none)'}\nMT bridge flag: ${d.connected ? 'up' : 'down (STH reports this on everyone — NOT a fault signal, ignore it)'}\n\nMasters:\n${(d.masters ?? []).map((m) => '• ' + JSON.stringify(m)).join('\n') || '(none visible)'}`);
       })
       .finally(() => setBusy(false));
   };
