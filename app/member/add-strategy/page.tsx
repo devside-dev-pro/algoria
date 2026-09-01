@@ -90,8 +90,9 @@ export default function AddStrategy() {
             <span className="mono" style={{ fontSize: 10, letterSpacing: 1.4, color: 'var(--gold)' }}>ONE LAST STEP ON THE NEW ACCOUNT</span>
             <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)' }}>
               On the new MT5, place <b style={{ color: 'var(--text)' }}>{ACTIVATION_LEGS.map((l) => `${l.lots} ${l.side}`).join(' + ')}</b> on{' '}
-              <b style={{ color: 'var(--text)' }}>{ACTIVATION_SYMBOL}</b> and close them. One buy, one sell, same size — net exposure zero,
-              so it can&rsquo;t lose you money. It registers the account with the broker and unlocks the copier.
+              <b style={{ color: 'var(--text)' }}>{ACTIVATION_SYMBOL}</b> and close them. One buy and one sell of the same size cancel
+              each other out, so you take no market risk — it costs you the spread, a few dollars. It registers the account
+              with the broker and unlocks the copier.
               Keep your funds in place for {WITHDRAW_LOCK_DAYS} days to keep your access.
             </p>
           </div>

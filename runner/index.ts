@@ -28,7 +28,7 @@ import { pushToAdmins } from '../lib/push/send';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard } from '../lib/member/i18n';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
@@ -1053,8 +1053,14 @@ async function main() {
   // période : 14 demandes VIP, 14 auto-approuvées, ZÉRO jamais restée en attente — Mathieu n'a pas pu en
   // voir une seule passer, alors que c'est LUI qui envoie ce lien, un par un, aux gens qu'il a choisis.
   // Aucun intrus au moment du constat (les 14 étaient des membres avec dépôt), mais un lien VIP transféré
-  // faisait entrer n'importe qui sans le moindre contrôle. Le VIP se valide désormais à la main : ses
-  // demandes restent 'waiting' et réapparaissent dans la liste d'attente Telegram, là où il les attend.
+  // faisait entrer n'importe qui sans le moindre contrôle.
+  //
+  // MISE À JOUR 01/09/2026 — LE VIP EST DE NOUVEAU AUTOMATIQUE, MAIS SOUS CONDITION. Le passage au
+  // manuel avait rouvert le problème d'origine (« je n'ai même pas le temps de les voir ») : la file
+  // dormait. Ce n'est plus le lien qui donne l'accès, c'est le LOT D'ACTIVATION VALIDÉ — une signature
+  // humaine sur le dashboard partenaire, qu'un membre ne peut pas se délivrer lui-même. Celui qui a
+  // rempli sa part entre en 3 minutes ; les autres restent en attente, avec une raison concrète d'agir.
+  // Voir listRipeVipRequests dans lib/supabase/sync.ts.
   const AUTOJOIN_MIN = Number(process.env.ALGORIA_AUTOJOIN_MIN ?? 3);
   const autoApproveJoins = async () => {
     try {
@@ -1062,7 +1068,15 @@ async function main() {
       // VIP_CHAT vide ou non numérique = on ne sait pas identifier le canal VIP, donc rien à exclure :
       // on retombe sur le comportement d'avant plutôt que de bloquer toutes les adhésions par excès de zèle.
       const vipId = Number(VIP_CHAT);
-      const ripe = await listRipeJoinRequests(AUTOJOIN_MIN, 25, Number.isFinite(vipId) ? [vipId] : []);
+      // CANAL PUBLIC : tout le monde, après le délai. VIP : uniquement ceux dont le lot d'activation est
+      // VALIDÉ (01/09) — le volume tradé décide à la place de Mathieu. Les deux files restent séparées
+      // pour la raison expliquée dans listRipeJoinRequests : le VIP, filtré, ne doit jamais affamer le
+      // public en occupant la limite avec des demandes qui ne passeront pas.
+      const [publiques, vip] = await Promise.all([
+        listRipeJoinRequests(AUTOJOIN_MIN, 25, Number.isFinite(vipId) ? [vipId] : []),
+        Number.isFinite(vipId) ? listRipeVipRequests(AUTOJOIN_MIN, vipId, 25) : Promise.resolve([]),
+      ]);
+      const ripe = [...publiques, ...vip];
       if (!ripe.length) return;
       let ok = 0;
       for (const r of ripe) {
@@ -1071,7 +1085,7 @@ async function main() {
         else if (res.error) await markJoinApproved(r.id, res.error.slice(0, 200)); // refus structurel : ne pas boucler
         // res.error null = pépin réseau → on laisse la ligne en file pour le prochain passage
       }
-      if (ok) await logNote(`🚪 ${ok} join request(s) auto-approved after ${AUTOJOIN_MIN} min`, 'info');
+      if (ok) await logNote(`🚪 ${ok} join request(s) auto-approved after ${AUTOJOIN_MIN} min${vip.length ? ` · dont ${vip.length} VIP (lots validés)` : ''}`, 'info');
     } catch (e) {
       console.error('[algoria] auto-approbation des adhésions échouée:', e);
     }

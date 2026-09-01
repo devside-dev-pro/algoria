@@ -240,7 +240,19 @@ export async function POST(req: NextRequest) {
       // donc ce que la personne a RÉELLEMENT déclaré — écrire ack_link:true pour quelqu'un qui n'a jamais
       // affirmé ça rendrait la déclaration inutilisable le jour où une connexion est contestée, et c'est
       // précisément à ce moment-là qu'on la relit.
-      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
+      // ── LOT D'ACTIVATION DÉCLARÉ ICI, ET C'EST TOUT L'INTÉRÊT (01/09/2026) ──────────────────────────
+      // La consigne vivait sur l'écran d'attente, donc APRÈS que le membre a tout rempli et refermé son
+      // terminal. Lui demander d'y retourner deux heures plus tard coûte la moitié des gens. À CETTE
+      // étape il est littéralement DANS MetaTrader — il vient d'y lire son login et son serveur — et son
+      // compte est financé (il coche ack_funded juste au-dessus). Deux clics ne lui coûtent rien ici.
+      //
+      // La clé atterrit dans le détail du kyc, qui est étalé tel quel sur la carte CONNECT à l'étape
+      // suivante (voir action 'strategy'). Rien d'autre à câbler : la carte arrive dans la file du support
+      // déjà marquée « déclaré », et le verrou de lib/member/activation.ts la lit sans changement.
+      //
+      // ⚠️ Ça reste une DÉCLARATION, jamais une preuve : `lots_ok` n'est écrit que par un humain qui a
+      // pointé le dashboard partenaire. Le membre ne peut pas se déverrouiller lui-même.
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}), ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
     });
     // SUCCÈS — indispensable, et pas seulement pour la statistique : l'alarme se déclenche sur « aucune
     // acceptée », donc sans cette ligne le dénominateur ne contient QUE des refus et l'alarme sonne au
