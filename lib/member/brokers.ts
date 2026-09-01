@@ -61,6 +61,17 @@ export const BROKERS: Broker[] = [
   // entrée conservée, serveurs MT5 compris. Voir le champ `retired` pour le détail.
   { key: 'fxcess', name: 'FXCESS', url: '', retired: true, servers: ['FXCESS-Live01', 'FXCESS-Live02', 'FXCess-Live02'] },
   { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', affiliateId: '35182', servers: ['TradingSphere-Real1'] },
+  // XLENCE — nouveau partenaire (01/09/2026). Il PREND LA PLACE DE FXCESS, retiré le 10/08 : on repasse
+  // donc à cinq brokers ouverts. Barème IDENTIQUE à TradingSphere (400/700/900/1800, confirmé sur leur
+  // dashboard partenaire), ce qui en fait un second lien de tête sur les gros dépôts.
+  //
+  // ⚠️ AUCUN SERVEUR MT5 LISTÉ POUR L'INSTANT, ET C'EST VOLONTAIRE. Le champ `servers` exige la chaîne
+  // EXACTE attendue par STH — une approximation ne provoque pas une erreur visible, elle provoque une
+  // copie qui ne démarre jamais. Les noms n'ont pas encore été relevés sur la liste serveur MT5, donc on
+  // ne devine pas : sans liste, l'écran de connexion bascule en SAISIE LIBRE (repli déjà prévu), le
+  // membre tape ce que son terminal affiche, et rien n'est bloqué. À compléter dès que Mathieu a la
+  // capture — c'est la seule chose qui manque sur ce broker.
+  { key: 'xlence', name: 'Xlence', url: 'https://go.xlence.com/visit/?bta=35553&brand=xlence&afp=ALGORIA', affiliateId: '35553' },
   { key: 'other', name: 'Other broker (I already have one)', url: '', nonPartner: true },
 ];
 

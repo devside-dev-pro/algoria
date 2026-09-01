@@ -27,12 +27,18 @@ export const BUDGET_BRACKETS: BudgetBracket[] = [
 // FXCESS RETIRÉ de tous les ordres le 10/08/2026 (le broker arrête, voir brokers.ts). Il fermait
 // chaque tranche, donc son retrait ne redistribue aucune place : les quatre partenaires restants
 // gardent exactement leur rang.
+//
+// XLENCE AJOUTÉ le 01/09/2026 — il remplace FXCESS et porte le MÊME barème que TradingSphere
+// (400/700/900/1800). Il est donc placé JUSTE APRÈS TradingSphere partout : à barème égal, on garde
+// devant le partenaire dont on connaît déjà les serveurs MT5 et le taux de rattachement réel. Ce n'est
+// pas un jugement sur Xlence, c'est le principe « à gain identique, le chemin le mieux connu d'abord ».
+// À revoir dès qu'on aura des dépôts Xlence encaissés — s'il paie aussi bien et plus vite, il passe devant.
 const ORDER: Record<string, string[]> = {
-  b200: ['vtmarkets', 'tradingsphere', 'raisefx', 'puprime'], // VT et TS à 400, VT déclaré avant
-  b500: ['raisefx', 'vtmarkets', 'tradingsphere', 'puprime'], // trio à 700, RaiseFX d'abord
-  b1000: ['vtmarkets', 'raisefx', 'puprime', 'tradingsphere'],
-  b3000: ['puprime', 'vtmarkets', 'raisefx', 'tradingsphere'],
-  b4000: ['tradingsphere', 'puprime', 'vtmarkets', 'raisefx'], // 1800$ — sans rival
+  b200: ['vtmarkets', 'tradingsphere', 'xlence', 'raisefx', 'puprime'], // VT et TS à 400, VT déclaré avant
+  b500: ['raisefx', 'vtmarkets', 'tradingsphere', 'xlence', 'puprime'], // quatuor à 700, RaiseFX d'abord
+  b1000: ['vtmarkets', 'raisefx', 'puprime', 'tradingsphere', 'xlence'],
+  b3000: ['puprime', 'vtmarkets', 'raisefx', 'tradingsphere', 'xlence'],
+  b4000: ['tradingsphere', 'xlence', 'puprime', 'vtmarkets', 'raisefx'], // 1800$ — TS et Xlence, sans rival
 };
 
 // null = pas de tranche choisie → l'appelant garde son ordre par défaut (RaiseFX en vedette)
