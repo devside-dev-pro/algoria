@@ -89,8 +89,9 @@ export default function Pending() {
                 nette nulle. Le membre ne peut pas perdre sur le marché en le faisant. Sans cette phrase,
                 on demande à quelqu'un qui vient de déposer de « risquer » son argent sur commande. */}
             <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--muted)' }}>
-              One buy, one sell, same size — your net exposure is zero, so this can&rsquo;t lose you money on the market.
-              It&rsquo;s what registers your account with the broker and unlocks the copier.
+              One buy and one sell of the same size cancel each other out, so you take no market risk —
+              it costs you the spread, a few dollars. That&rsquo;s what registers your account with the broker
+              and unlocks your copy and the VIP channel.
             </p>
             <button disabled={busy || act?.claimed} onClick={claim} style={{ border: 'none', borderRadius: 10, padding: '11px 14px', fontSize: 13.5, fontWeight: 700, cursor: act?.claimed ? 'default' : 'pointer', color: act?.claimed ? 'var(--muted)' : '#04121e', background: act?.claimed ? 'rgba(130,152,190,.15)' : 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>
               {busy ? 'saving…' : act?.claimed ? '✓ marked as done — being checked' : 'I\u2019ve placed both trades'}

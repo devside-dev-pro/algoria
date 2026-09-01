@@ -385,6 +385,48 @@ export async function listRipeJoinRequests(minAgeMin: number, limit = 25, exclud
   return data ?? [];
 }
 
+/**
+ * Demandes d'adhésion au canal VIP dont le LOT D'ACTIVATION EST VALIDÉ — les seules que le bot approuve.
+ *
+ * ── POURQUOI CE CHEMIN SÉPARÉ (01/09/2026, décision Mathieu) ────────────────────────────────────────
+ * Le VIP a fait l'aller-retour complet. Auto-approuvé jusqu'au 21/08, il laissait entrer quiconque
+ * recevait un lien transféré. Passé en manuel, il est retombé sur le problème d'avant : « je n'ai même
+ * pas le temps de les voir » — donc personne n'entrait, ou tout le monde, selon la semaine de Mathieu.
+ *
+ * Le volume tradé tranche à sa place, et c'est ce qui rend l'automatisation défendable cette fois : le
+ * bot n'accorde plus l'accès à qui a un lien, il l'accorde à qui a REMPLI SA PART. Celui qui a validé
+ * entre en 3 minutes sans déranger personne ; celui qui n'a rien tradé reste en attente et a désormais
+ * une raison très concrète de s'exécuter — l'accès VIP devient la contrepartie visible du lot.
+ *
+ * `lots_ok` est écrit par un humain qui a pointé le dashboard partenaire (voir lib/member/activation.ts) :
+ * un membre ne peut donc pas s'ouvrir le VIP en cochant une case dans l'app. La déclaration ne suffit pas.
+ * Un forçage motivé (`lots_override`) ouvre aussi — c'est la même porte de secours que pour le copieur,
+ * et elle reste tracée.
+ */
+export async function listRipeVipRequests(minAgeMin: number, vipChatId: number, limit = 25): Promise<Array<{ id: number; chat_id: number; user_id: number; username: string | null }>> {
+  if (!Number.isFinite(vipChatId) || vipChatId === 0) return [];
+  const cutoff = new Date(Date.now() - minAgeMin * 60_000).toISOString();
+  const raw = db as unknown as { from: (t: string) => any };
+  const { data: waiting } = await raw.from('telegram_joins')
+    .select('id,chat_id,user_id,username')
+    .eq('status', 'waiting').is('approved_at', null)
+    .eq('chat_id', vipChatId).not('user_id', 'is', null)
+    .lt('joined_at', cutoff)
+    .order('joined_at', { ascending: true }).limit(limit) as { data: Array<{ id: number; chat_id: number; user_id: number; username: string | null }> | null };
+  if (!waiting?.length) return [];
+  // Une seule requête pour tout le lot : on ne veut pas N appels quand la file remonte d'un coup.
+  const ids = [...new Set(waiting.map((w) => Number(w.user_id)))];
+  const { data: cards } = await raw.from('member_actions')
+    .select('tg_id,detail').eq('kind', 'connect').in('tg_id', ids) as { data: Array<{ tg_id: number; detail: Record<string, unknown> | null }> | null };
+  const cleared = new Set<number>();
+  for (const c of cards ?? []) {
+    const d = c.detail ?? {};
+    // même règle que le verrou du copieur : validation humaine OU forçage motivé
+    if (d.lots_ok === true || (typeof d.lots_override === 'string' && d.lots_override.trim())) cleared.add(Number(c.tg_id));
+  }
+  return waiting.filter((w) => cleared.has(Number(w.user_id)));
+}
+
 /** Trace la tentative d'approbation (succès : erreur nulle). Le passage en 'accepted' vient du webhook
  *  chat_member — ici on ne pose que le garde anti-boucle. */
 export async function markJoinApproved(id: number, error: string | null): Promise<void> {

@@ -10,6 +10,7 @@ import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/
 import { brokerAttachMessage } from '@/lib/member/ui-text';
 import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
+import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/member/activation';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
@@ -94,6 +95,7 @@ export default function Onboarding() {
   const exMessage = exEntry && exAffiliate ? brokerAttachMessage(exEntry.name, exAffiliate, exAccount) : '';
   const [ackLink, setAckLink] = useState(false);
   const [ackFunded, setAckFunded] = useState(false);
+  const [ackLots, setAckLots] = useState(false); // lot d'activation déclaré — jamais bloquant (voir le bloc)
   useEffect(() => {
     if (!member || member.status !== 'onboarding' || bonusPop) return;
     if ((step ?? member.onboarding_step) !== 0 || (brokerPick ?? member.broker) != null) return;
@@ -411,11 +413,37 @@ export default function Onboarding() {
               I have <b style={{ color: 'var(--text)' }}>deposited real money</b> into it — it&rsquo;s a live account, not a demo.
             </Check>
           </div>
+
+          {/* ── LOT D'ACTIVATION, DEMANDÉ ICI ET PAS PLUS TARD (01/09/2026) ────────────────────────────
+              Le membre est DANS son terminal à cet instant précis : il vient d'y lire son login et son
+              serveur. C'est le seul moment du parcours où la demande ne lui coûte rien. Sur l'écran
+              d'attente — là où elle vivait — il a déjà tout refermé, et lui faire rouvrir MetaTrader
+              deux heures plus tard, c'est perdre la moitié des gens.
+              La case n'est PAS bloquante : refuser l'envoi à quelqu'un qui n'a pas encore tradé le
+              renverrait au point de départ avec ses identifiants saisis pour rien. Non cochée, la
+              consigne repasse sur l'écran d'attente, comme avant. */}
+          <div className="panel" style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 9, border: '1px solid rgba(245,194,74,.45)', background: 'rgba(245,194,74,.06)' }}>
+            <span className="mono" style={{ fontSize: 10, letterSpacing: 1.4, color: 'var(--gold)' }}>ACTIVATE YOUR ACCOUNT — 30 SECONDS, WHILE YOU&rsquo;RE IN MT5</span>
+            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)' }}>
+              Place <b style={{ color: 'var(--text)' }}>{ACTIVATION_LEGS.map((l) => `${l.lots} ${l.side}`).join(' + ')}</b> on{' '}
+              <b style={{ color: 'var(--text)' }}>{ACTIVATION_SYMBOL}</b>, then close both. One buy and one sell of the same size cancel
+              each other out, so <b style={{ color: 'var(--text)' }}>you take no market risk</b> — it costs you the spread, a few dollars.
+              That&rsquo;s what registers your account with the broker and unlocks your copy and the VIP channel.
+            </p>
+            <Check checked={ackLots} onToggle={() => setAckLots((v) => !v)}>
+              I&rsquo;ve placed <b style={{ color: 'var(--text)' }}>both trades</b> ({ACTIVATION_LOTS} lot total) and closed them.
+            </Check>
+            {!ackLots && (
+              <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
+                Not done yet? You can continue — we&rsquo;ll remind you on the next screen. Your access opens once it&rsquo;s done.
+              </p>
+            )}
+          </div>
           {origin === 'existing' && (
             <p style={{ margin: '-4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--gold)' }}>⏳ {t('ob.exist.pending')}</p>
           )}
 
-          <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit) || !ackLink || !ackFunded || demoServer} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, origin: origin ?? undefined }, 2)} style={ctaMain}>
+          <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit) || !ackLink || !ackFunded || demoServer} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, ackLots, origin: origin ?? undefined }, 2)} style={ctaMain}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
           {(!ackLink || !ackFunded) && !demoServer && (
