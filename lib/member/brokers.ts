@@ -65,13 +65,16 @@ export const BROKERS: Broker[] = [
   // donc à cinq brokers ouverts. Barème IDENTIQUE à TradingSphere (400/700/900/1800, confirmé sur leur
   // dashboard partenaire), ce qui en fait un second lien de tête sur les gros dépôts.
   //
-  // ⚠️ AUCUN SERVEUR MT5 LISTÉ POUR L'INSTANT, ET C'EST VOLONTAIRE. Le champ `servers` exige la chaîne
-  // EXACTE attendue par STH — une approximation ne provoque pas une erreur visible, elle provoque une
-  // copie qui ne démarre jamais. Les noms n'ont pas encore été relevés sur la liste serveur MT5, donc on
-  // ne devine pas : sans liste, l'écran de connexion bascule en SAISIE LIBRE (repli déjà prévu), le
-  // membre tape ce que son terminal affiche, et rien n'est bloqué. À compléter dès que Mathieu a la
-  // capture — c'est la seule chose qui manque sur ce broker.
-  { key: 'xlence', name: 'Xlence', url: 'https://go.xlence.com/visit/?bta=35553&brand=xlence&afp=ALGORIA', affiliateId: '35553' },
+  // ⚠️ SERVEURS RELEVÉS LE 01/09 SUR LES DEUX TERMINAUX (captures Mathieu), et il y a un PIÈGE PROPRE À
+  // XLENCE : les serveurs MT5 et MT4 ne se recouvrent PAS DU TOUT.
+  //   • MT5 réel : Xlence-Real1 — et c'est le SEUL. Il n'apparaît pas dans la liste MT4.
+  //   • MT4 réel : Xlence-Real5, 6, 10, 11, 13 — aucun d'eux n'existe côté MT5.
+  // Conséquence : un membre en MT5 qui choisit « Xlence-Real13 » ne se connectera jamais, et l'inverse
+  // est vrai aussi. Le menu ne filtre pas par plateforme (aucun broker ne le fait aujourd'hui), donc
+  // Real1 est placé EN TÊTE — c'est le seul choix possible pour la plateforme qu'on recommande.
+  // Demo exclu : un membre doit être en réel (règle générale du champ, voir plus haut).
+  // Éditeur : Tradeco Ltd. — c'est ce nom qui s'affiche sous le serveur dans MetaTrader.
+  { key: 'xlence', name: 'Xlence', url: 'https://go.xlence.com/visit/?bta=35553&brand=xlence&afp=ALGORIA', affiliateId: '35553', servers: ['Xlence-Real1', 'Xlence-Real5', 'Xlence-Real6', 'Xlence-Real10', 'Xlence-Real11', 'Xlence-Real13'] },
   { key: 'other', name: 'Other broker (I already have one)', url: '', nonPartner: true },
 ];
 
