@@ -356,10 +356,18 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
     },
   });
   const CANDS: Array<{ name: string; tpAtr: number; exits: Exits }> = [
-    { name: 'PROD (TP16 · ladder 2R→.5 · trail 2.5)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] } },
-    { name: 'TP8 · trail 2@2', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2 } },
-    { name: 'PROD + WE perdants + sans entrée ven 12h', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 12 } },
-    { name: 'TP8 trail2@2 + WE perdants + ven 12h', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2, weekendFlatLosers: true, noEntryFriFrom: 12 } },
+    // ⚠️ LE CANDIDAT « PROD » N'ÉTAIT PAS LA PROD (corrigé le 02/09/2026).
+    // L'assurance week-end tourne EN LIVE depuis le 29/07 sur TOUS les marchés — runner/index.ts:521 refuse
+    // les nouvelles entrées swing le vendredi ≥ 12h UTC, et runner/index.ts:552 ferme les swings perdants le
+    // vendredi ≥ 20h. Or le candidat baptisé « PROD » ne les avait PAS : le tableau comparait donc la vraie
+    // production à une ligne portant son nom mais pas sa configuration, et on lisait « PROD gagne » là où il
+    // fallait lire « retirer l'assurance week-end gagnerait ». Conclusion inversée, sur le seul mot du libellé.
+    // Les noms disent maintenant ce que les configs FONT. Un libellé faux dans un tribunal ne coûte pas moins
+    // cher qu'un calcul faux.
+    { name: 'PROD RÉEL (live : assurance WE incluse)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 12 } },
+    { name: 'PROD SANS assurance week-end', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] } },
+    { name: 'PROD RÉEL mais TP8 · trail 2@2', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2, weekendFlatLosers: true, noEntryFriFrom: 12 } },
+    { name: 'TP8 · trail 2@2, sans assurance WE', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2 } },
     // LES DEUX RÈGLES, SÉPARÉMENT (02/09/2026). Elles n'existaient qu'EN BLOC, donc le premier walk-forward
     // BTC ne pouvait pas dire laquelle porte le gain — seulement que le couple vaut +2 982 $ hors échantillon
     // sur PROD et +2 965 $ sur TP8. Or elles n'agissent pas du tout au même endroit : `noEntryFriFrom`
@@ -368,8 +376,8 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
     // Attribuer tout le gain à l'une ou à l'autre serait une supposition ; la mesurer coûte deux lignes.
     // C'est la doctrine déjà écrite plus haut dans ce fichier : une config qu'on ne comprend pas est une
     // config qu'on ne saura pas défendre le jour où elle cassera.
-    { name: 'PROD + WE perdants (seul)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true } },
-    { name: 'PROD + sans entrée ven 12h (seul)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], noEntryFriFrom: 12 } },
+    { name: 'PROD, WE perdants SEUL (sans ven 12h)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true } },
+    { name: 'PROD, ven 12h SEUL (sans WE perdants)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], noEntryFriFrom: 12 } },
   ];
   const N = bars.length, TUNE = Math.floor(N * 0.43), TEST = Math.floor(N * 0.14);
   // DURÉES CALCULÉES, PAS RECOPIÉES (02/09/2026). L'en-tête annonçait « tune ~9 mois → test ~3 mois » :
