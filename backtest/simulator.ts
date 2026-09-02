@@ -63,6 +63,7 @@ export interface SimTrade {
   pnl: number;
   r: number;
   confidence: number;
+  riskDist?: number; // distance prix entrée → stop INITIAL (sert aux études d'edge : backtest/edge-sessions.ts)
 }
 export interface EquityPoint {
   time: number;
@@ -129,6 +130,7 @@ export function backtest(bars: Bar[], features: Feature[], cfg: EngineConfig, p:
       pnl,
       r: pos.risk ? pnl / pos.risk : 0,
       confidence: pos.signal.confidence,
+      riskDist: pos.riskDist,
     });
   };
 

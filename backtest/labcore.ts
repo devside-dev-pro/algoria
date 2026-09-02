@@ -169,7 +169,7 @@ export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec, fin
     if (!open) return;
     const pnl = (px - open.entryPrice) * open.dir * open.lot * spec.contractSize - spec.commissionPerLot * open.lot;
     balance += pnl;
-    trades.push({ dir: open.direction, entryTime: open.entryTime, entryPrice: open.entryPrice, exitTime: time, exitPrice: px, reason, lot: open.lot, pnl, r: open.risk ? pnl / open.risk : 0, confidence: 0 });
+    trades.push({ dir: open.direction, entryTime: open.entryTime, entryPrice: open.entryPrice, exitTime: time, exitPrice: px, reason, lot: open.lot, pnl, r: open.risk ? pnl / open.risk : 0, confidence: 0, riskDist: open.riskDist });
     open = null;
   };
 
