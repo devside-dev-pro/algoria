@@ -138,9 +138,29 @@ export const RISK_PCT = 0.01, MAX_DAILY_LOSS = 0.04, START = 10_000;
 const dayOf = (t: number) => Math.floor(t / 86_400_000);
 const isFriCutoff = (t: number) => { const d = new Date(t); return d.getUTCDay() === 5 && d.getUTCHours() >= 20; }; // or clôture ~21h UTC ven.
 
-export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec): BacktestRun {
+/**
+ * GESTION DES STOPS EN BOUGIES FINES (02/09/2026) — le correctif du biais trouvé par le test de parité.
+ *
+ * Le runner déplace les stops À CHAQUE TICK (manage.ts). Le simulateur les déplaçait UNE FOIS PAR BOUGIE H1,
+ * avec le stop figé de la bougie précédente. Un trade qui touche 0,5 R puis revient à l'entrée DANS LA MÊME
+ * HEURE est stoppé au breakeven en live — le sim ne pouvait pas le voir : à la clôture H1 il constatait un
+ * plus-haut à 0,5 R, posait le BE, et ne le testait qu'à la bougie suivante. Mesuré sur 25 jours propres :
+ * 29 % de sorties au breakeven en live, 9 % en sim. Le sim était donc OPTIMISTE sur les gagnants qui courent.
+ *
+ * `fine` = bougies M1 (ou M5) couvrant la période. Pour chaque bougie H1 où une position est ouverte, on
+ * déroule les bougies fines de cette heure : à chacune, sortie testée avec le stop courant, PUIS mise à jour
+ * du stop (BE, paliers, trailing) sur le plus-haut fin. Les heures sans couverture fine retombent sur la
+ * gestion H1 — le résultat dit combien d'heures ont été gérées finement, pour qu'on sache ce qu'on lit.
+ * Entrées, coupure week-end, journée, kill switch : inchangés, toujours en H1. Seule la GRANULARITÉ de la
+ * gestion change, pour isoler exactement l'effet qu'on veut mesurer.
+ */
+export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec, fine?: Bar[]): BacktestRun {
   const bars = ind.bars;
   const slippage = spec.spread * 0.25;
+  const H1 = 3_600_000;
+  const fineByHour = new Map<number, Bar[]>();
+  if (fine) for (const f of fine) { const k = Math.floor(f.time / H1); const a = fineByHour.get(k); if (a) a.push(f); else fineByHour.set(k, [f]); }
+  let hoursFine = 0, hoursCoarse = 0;
   let balance = START, dayStart = balance, dayKilled = false, lastDay = dayOf(bars[strat.minBars].time);
   let open: { dir: 1 | -1; direction: 'long' | 'short'; entryPrice: number; entryTime: number; lot: number; risk: number; riskDist: number; stop: number; tp: number; peak: number } | null = null;
   const trades: SimTrade[] = [];
@@ -158,14 +178,18 @@ export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec): Ba
     // 1) sorties sur la bougie i (stop AVANT tp — pessimiste ; le stop testé a été figé en i-1 → causal)
     if (open) {
       const o = open;
-      const hitStop = o.dir === 1 ? bar.low <= o.stop : bar.high >= o.stop;
-      const hitTp = o.dir === 1 ? bar.high >= o.tp : bar.low <= o.tp;
-      if (hitStop) {
-        const above = o.dir * (o.stop - o.entryPrice);
-        close(o.stop, bar.time, above > 0.1 * o.riskDist ? 'trail' : above >= -1e-9 ? 'be' : 'sl');
-      } else if (hitTp) close(o.tp, bar.time, 'tp');
-      else {
-        o.peak = o.dir === 1 ? Math.max(o.peak, bar.high) : Math.min(o.peak, bar.low);
+      // Une « étape » = tester la sortie avec le stop courant, puis remonter le stop sur le plus-haut vu.
+      // Identique en H1 et en fin ; seule la bougie passée change. Retourne true si la position est close.
+      const step = (b: Bar): boolean => {
+        const hitStop = o.dir === 1 ? b.low <= o.stop : b.high >= o.stop;
+        const hitTp = o.dir === 1 ? b.high >= o.tp : b.low <= o.tp;
+        if (hitStop) {
+          const above = o.dir * (o.stop - o.entryPrice);
+          close(o.stop, b.time, above > 0.1 * o.riskDist ? 'trail' : above >= -1e-9 ? 'be' : 'sl');
+          return true;
+        }
+        if (hitTp) { close(o.tp, b.time, 'tp'); return true; }
+        o.peak = o.dir === 1 ? Math.max(o.peak, b.high) : Math.min(o.peak, b.low);
         const fav = o.dir * (o.peak - o.entryPrice);
         const ex = strat.exits;
         if (ex.be && fav >= ex.be * o.riskDist) {
@@ -182,7 +206,11 @@ export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec): Ba
           const trail = o.peak - o.dir * ex.trailDist * o.riskDist;
           o.stop = o.dir === 1 ? Math.max(o.stop, trail) : Math.min(o.stop, trail);
         }
-      }
+        return false;
+      };
+      const fines = fineByHour.get(Math.floor(bar.time / H1));
+      if (fines && fines.length) { hoursFine++; for (const f of fines) if (step(f)) break; }
+      else { hoursCoarse++; step(bar); }
       // FLAT WEEK-END : vendredi ≥ 20h UTC → fermeture au close (stop/TP de la bougie déjà honorés ci-dessus).
       // Variante 'losers' : seules les positions en perte latente sont coupées — les runners gagnants restent.
       if (open && isFriCutoff(bar.time)) {
@@ -215,6 +243,6 @@ export function labBacktest(ind: Indicators, strat: StrategyDef, spec: Spec): Ba
   }
   const last = bars[bars.length - 1];
   close(last.close, last.time, 'eod');
-  return { trades, equity, finalBalance: balance };
+  return { trades, equity, finalBalance: balance, hoursFine, hoursCoarse };
 }
 

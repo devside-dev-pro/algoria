@@ -159,7 +159,14 @@ if (FIX.exits?.length) {
       const warm = 750; // 700 exigées par la stratégie + marge
       if (firstIn < warm) { console.log(`SIM  : seulement ${firstIn} bougies AVANT la fenêtre live — il en faut ${warm} pour la chauffe`); continue; }
       const win = h1.slice(firstIn - warm, lastIn + 1);
-      const run = labBacktest(computeIndicators(win), swingTrendDef(SWING_PROD_EXITS, SWING_PROD_TP_ATR), SPECS.XAUUSD);
+      // GESTION DES STOPS EN M1 (02/09/2026) : le runner gère à chaque tick, le sim gérait une fois par H1 —
+      // d'où 9 % de BE en sim contre 29 % en live. Avec le cache M1 (node scripts/pull-cache.mjs XAUUSD M1),
+      // les stops sont déplacés et testés minute par minute sur la fenêtre live. Sans lui, on prévient.
+      const M1 = 'backtest/.cache/XAUUSD-M1-15.json';
+      const fine: Bar[] | undefined = existsSync(M1) ? JSON.parse(readFileSync(M1, 'utf8')) : undefined;
+      if (!fine) console.log('SIM  : ⚠️ cache M1 absent → stops gérés en H1 seulement (biais optimiste connu). node scripts/pull-cache.mjs XAUUSD M1');
+      const run = labBacktest(computeIndicators(win), swingTrendDef(SWING_PROD_EXITS, SWING_PROD_TP_ATR), SPECS.XAUUSD, fine);
+      if (fine) console.log(`SIM  : stops gérés en M1 sur ${run.hoursFine} h de position, en H1 sur ${run.hoursCoarse} h (M1 : ${dayStr(fine[0].time)} → ${dayStr(fine[fine.length - 1].time)})`);
       const inWin = run.trades.filter((t) => { const d = dayStr(t.exitTime); return d >= from && d <= to; });
       const byReason = new Map<string, { reason: string; n: number; pnl: number }>();
       for (const t of inWin) {

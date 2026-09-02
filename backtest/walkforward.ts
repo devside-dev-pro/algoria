@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 // WALK-FORWARD — le vaccin contre l'overfitting (étude 28/07). Le péché originel des configs actuelles :
 // chaque paramètre a été choisi PARCE QU'il embellissait la fenêtre juin-juillet (le « net » des commentaires
 // grimpe +9k → +23k sur la MÊME fenêtre). Ici : on règle sur la fenêtre A (tune), on évalue UNIQUEMENT sur
@@ -356,6 +356,12 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
   const raw = usableBars(load(`${sym}-H1-15.json`), 3_600_000, sym, 'H1');
   const ind = computeIndicators(raw);
   const bars = ind.bars;
+  // STOPS GÉRÉS EN M1 QUAND LE CACHE EXISTE (02/09/2026) — voir labBacktest. Le M1 ne couvre que quelques
+  // mois (juin 2026 →) : les folds anciens restent en H1, avec le biais optimiste connu, et la sortie le
+  // dit fold par fold. Un fold « M1 100 % » et un fold « H1 100 % » ne se lisent pas avec la même confiance.
+  const M1PATH = `backtest/.cache/${sym}-M1-15.json`;
+  const fine: Bar[] | undefined = existsSync(M1PATH) ? load(`${sym}-M1-15.json`) : undefined;
+  console.log(fine ? `[swing] stops gérés en M1 là où le cache couvre (${dayStr(fine[0].time)} → ${dayStr(fine[fine.length - 1].time)})` : `[swing] ⚠️ pas de cache M1 → stops gérés en H1 (biais optimiste). node scripts/pull-cache.mjs ${sym} M1`);
   const trendDef = swingTrendDef; // définition PARTAGÉE avec le test de parité — voir labcore.ts
   // TOUS LES CANDIDATS DÉRIVENT DE LA CONFIG LIVE (02/09/2026, 3e passe). Jusqu'ici ils étaient écrits
   // en dur, et le candidat « PROD RÉEL » portait encore be:1 et un seul palier alors que GOLD_SWING vit
@@ -387,7 +393,7 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
   // marché chaque fenêtre a traversé. On les dérive donc des horodatages réels.
   const months = (n: number) => ((bars[Math.min(n, N - 1)].time - bars[0].time) / 86_400_000 / 30.44).toFixed(1);
   console.log(`\n========== WALK-FORWARD SWING ${sym} (H1, ${N} bougies) — tune ~${months(TUNE)} mois → test ~${months(TUNE + TEST)} - ${months(TUNE)} mois ==========`);
-  console.log('fold  test window                 choisi sur tune                          TEST $   TEST PF  trades');
+  console.log('fold  test window                 choisi sur tune                          TEST $   TEST PF  trades  stops');
   let oos = 0, folds = 0;
   const oosByCand = new Map<string, number>();
   const tradesByCand = new Map<string, number>();
@@ -402,21 +408,24 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
     const testBars = bars.slice(Math.max(0, start + TUNE - 700), start + TUNE + TEST); // 700 barres de warmup réutilisées
     let best: { c: (typeof CANDS)[number]; net: number } | null = null;
     for (const c of CANDS) {
-      const m = metrics(labBacktest(computeIndicators(tuneBars), trendDef(c.exits, c.tpAtr), SPECS[sym]), START);
+      const m = metrics(labBacktest(computeIndicators(tuneBars), trendDef(c.exits, c.tpAtr), SPECS[sym], fine), START);
       if (!best || m.netPnl > best.net) best = { c, net: m.netPnl };
     }
     if (!best) continue;
-    const t = metrics(labBacktest(computeIndicators(testBars), trendDef(best.c.exits, best.c.tpAtr), SPECS[sym]), START);
+    const tRun = labBacktest(computeIndicators(testBars), trendDef(best.c.exits, best.c.tpAtr), SPECS[sym], fine);
+    const t = metrics(tRun, START);
+    const cov = (tRun.hoursFine ?? 0) + (tRun.hoursCoarse ?? 0);
+    const covTag = fine ? `M1 ${cov ? Math.round((100 * (tRun.hoursFine ?? 0)) / cov) : 0}%` : 'H1';
     oos += t.netPnl; folds++;
     for (const c of CANDS) {
-      const tc = metrics(labBacktest(computeIndicators(testBars), trendDef(c.exits, c.tpAtr), SPECS[sym]), START);
+      const tc = metrics(labBacktest(computeIndicators(testBars), trendDef(c.exits, c.tpAtr), SPECS[sym], fine), START);
       oosByCand.set(c.name, (oosByCand.get(c.name) ?? 0) + tc.netPnl);
       tradesByCand.set(c.name, (tradesByCand.get(c.name) ?? 0) + tc.trades);
       foldsByCand.set(c.name, [...(foldsByCand.get(c.name) ?? []), tc.netPnl]);
     }
     // NOMBRE DE TRADES AFFICHÉ (02/09/2026) — il manquait, et sans lui un P&L ne se lit pas : « +3 988 $ »
     // sur 8 trades et sur 200 trades ne racontent pas la même histoire, ni en confiance ni en risque.
-    console.log(`#${folds}`.padEnd(5), `${dayStr(testBars[700]?.time ?? testBars[0].time)}→${dayStr(testBars[testBars.length - 1].time)}`.padEnd(26), best.c.name.padEnd(40), ('$' + t.netPnl.toFixed(0)).padStart(8), (t.profitFactor === Infinity ? '∞' : t.profitFactor.toFixed(2)).padStart(8), String(t.trades).padStart(7));
+    console.log(`#${folds}`.padEnd(5), `${dayStr(testBars[700]?.time ?? testBars[0].time)}→${dayStr(testBars[testBars.length - 1].time)}`.padEnd(26), best.c.name.padEnd(40), ('$' + t.netPnl.toFixed(0)).padStart(8), (t.profitFactor === Infinity ? '∞' : t.profitFactor.toFixed(2)).padStart(8), String(t.trades).padStart(7), `  ${covTag}`);
   }
   console.log(`\n→ OOS de la sélection par tune : $${oos.toFixed(0)} sur ${folds} folds`);
   console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) :');
