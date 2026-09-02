@@ -15,7 +15,7 @@ import { backtest, type SimParams } from './simulator';
 import { metrics } from './metrics';
 import { FEATURES } from '../lib/engine/features';
 import { STRATEGIES } from '../lib/engine/strategies';
-import { computeIndicators, labBacktest, SPECS, START, type Exits, type StrategyDef } from './labcore';
+import { computeIndicators, labBacktest, swingTrendDef, SPECS, START, type Exits, type StrategyDef } from './labcore';
 import { cfgFor, ctxFor, simFor, SIM_BASE } from './wiring';
 import { simBreakout, BK_COSTS, BK_START, type BkOpts } from './breakout-core';
 import { GOLD_BREAKOUT, type BreakoutConfig } from '../lib/engine/breakout';
@@ -344,17 +344,7 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
   const raw = usableBars(load(`${sym}-H1-15.json`), 3_600_000, sym, 'H1');
   const ind = computeIndicators(raw);
   const bars = ind.bars;
-  const trendDef = (exits: Exits, tpAtr: number): StrategyDef => ({
-    family: 'sw', params: 't', minBars: 700, exits,
-    onClose(i, d) {
-      const { bars: b, atr, emaF, emaS, ema21 } = d; if (i < 601) return null; const bar = b[i], a = atr[i];
-      const bull = emaF[i] > emaS[i] * 1.001, bear = emaF[i] < emaS[i] * 0.999;
-      const dip = b[i - 1].low < ema21[i - 1] || b[i - 2].low < ema21[i - 2], pop = b[i - 1].high > ema21[i - 1] || b[i - 2].high > ema21[i - 2];
-      if (bull && dip && bar.close > bar.open && bar.close > ema21[i]) return { direction: 'long', stopLoss: bar.close - a, takeProfit: bar.close + tpAtr * a };
-      if (bear && pop && bar.close < bar.open && bar.close < ema21[i]) return { direction: 'short', stopLoss: bar.close + a, takeProfit: bar.close - tpAtr * a };
-      return null;
-    },
-  });
+  const trendDef = swingTrendDef; // définition PARTAGÉE avec le test de parité — voir labcore.ts
   const CANDS: Array<{ name: string; tpAtr: number; exits: Exits }> = [
     // ⚠️ LE CANDIDAT « PROD » N'ÉTAIT PAS LA PROD (corrigé le 02/09/2026).
     // L'assurance week-end tourne EN LIVE depuis le 29/07 sur TOUS les marchés — runner/index.ts:521 refuse
