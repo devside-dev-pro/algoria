@@ -11,10 +11,13 @@
 // position par marché, coûts à l'entrée et à la sortie (or 0,32 $/once ; BTC 0,05 % du prix). Chaque marché
 // est simulé jour par jour sur un calendrier fusionné ; l'équité est marquée au marché chaque jour.
 //
-// SWAP (03/09, soir) : frais de tenue quotidiens, hypothèses de broker CFD — BTC 0,05 % du notionnel par jour, or
-// 0,01 % par jour, dans les deux sens. À 1 % de risque et 2 ATR de stop, la position BTC vaut ~14 % de l'équité, l'or
-// ~25 % : sur 50 jours, ≈ 0,35 R sur BTC (espérance +3 R) et ≈ 0,1 R sur l'or (+0,85 R). Un dixième de l'edge.
-// À vérifier dans la spécification MT5 du broker : un swap crypto à 0,2 %/jour ferait ×4.
+// SWAP (03/09, spécifications MT5 du broker, lues par Mathieu) — en points, 1 point = 0,01 $, mercredi ×3 :
+//   Gold    long −64 pts = −64 $/lot/jour (lot 100 oz ≈ 330 k$) → 0,019 %/jour · short −6 pts → 0,002 %/jour
+//   Bitcoin long et short −3 600 pts = −36 $/BTC/jour (≈ 110 k$) → 0,033 %/jour
+// Avec le mercredi triple : or ×7/5 (5 jours de cotation), BTC ×9/7 (7 jours). En % du notionnel, pour rester
+// valable sur toute l'histoire (le broker recale ses points avec le prix). À 1 % de risque et 2 ATR de stop, la
+// position or vaut ~25 % de l'équité : 47 jours de tenue en long ≈ 0,35 R par trade sur +0,85 R d'espérance —
+// quarante pour cent de l'edge de l'or part en swap dans le sens long. BTC : ~14 % de l'équité, ≈ 0,3 R sur +3 R.
 // PROTECTION DES GAINS (pré-enregistrée) : le défaut connu de cette famille est de rendre beaucoup de profit latent
 // (avril 2013 : −62 % depuis un sommet gonflé par une position ouverte sur un ×10). Variante : dès que le profit
 // latent dépasse 4 R, on sort si on en rend la moitié. Un seul réglage, posé avant de regarder.
@@ -23,8 +26,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { Bar } from '../lib/engine/types';
 
-interface Market { sym: string; bars: Bar[]; contract: number; cost: (p: number) => number; swapPerDay: number; atr: number[]; byTime: Map<number, number> }
-const load = (sym: string, contract: number, cost: (p: number) => number, swapPerDay: number): Market | null => {
+interface Market { sym: string; bars: Bar[]; contract: number; cost: (p: number) => number; swap: { long: number; short: number }; atr: number[]; byTime: Map<number, number> }
+const load = (sym: string, contract: number, cost: (p: number) => number, swap: { long: number; short: number }): Market | null => {
   const p = `backtest/.cache/${sym}-D1-15.json`;
   if (!existsSync(p)) { console.error(`${p} absent`); return null; }
   const bars = JSON.parse(readFileSync(p, 'utf8')) as Bar[];
@@ -33,10 +36,10 @@ const load = (sym: string, contract: number, cost: (p: number) => number, swapPe
   const tr = bars.map((b, i) => (i ? Math.max(b.high - b.low, Math.abs(b.high - bars[i - 1].close), Math.abs(b.low - bars[i - 1].close)) : b.high - b.low));
   let s = 0; for (let i = 0; i < n; i++) { s += tr[i]; if (i >= 20) s -= tr[i - 20]; atr[i] = s / Math.min(20, i + 1); }
   const byTime = new Map<number, number>(); bars.forEach((b, i) => byTime.set(Math.floor(b.time / 86_400_000), i));
-  return { sym, bars, contract, cost, swapPerDay, atr, byTime };
+  return { sym, bars, contract, cost, swap, atr, byTime };
 };
-const gold = load('XAUUSD', 100, () => 0.32, 0.0001);
-const btc = load('BTCUSD', 1, (p) => p * 0.0005, 0.0005);
+const gold = load('XAUUSD', 100, () => 0.32, { long: 0.00019 * 7 / 5, short: 0.00002 * 7 / 5 });
+const btc = load('BTCUSD', 1, (p) => p * 0.0005, { long: 0.00033 * 9 / 7, short: 0.00033 * 9 / 7 });
 if (!gold || !btc) process.exit(1);
 
 const START = 10_000, RISK = 0.01;
@@ -74,7 +77,7 @@ function run(name: string, N: number, longOnly: boolean, markets: Market[], prot
       if (leg.pos) {
         const pos = leg.pos;
         // swap : prélevé chaque jour de tenue sur le notionnel
-        eq -= m.swapPerDay * pos.units * m.contract * b.close;
+        eq -= (pos.dir === 1 ? m.swap.long : m.swap.short) * pos.units * m.contract * b.close;
         const hit = pos.dir === 1 ? b.low <= pos.stop : b.high >= pos.stop;
         const chan = i >= EXIT && (pos.dir === 1 ? b.close < ll(m, i, EXIT) : b.close > hh(m, i, EXIT));
         const openR = ((b.close - pos.entry) * pos.dir * pos.units * m.contract) / pos.risk;
@@ -116,7 +119,7 @@ function run(name: string, N: number, longOnly: boolean, markets: Market[], prot
 
 console.log(`\n================  PORTEFEUILLE DE TENDANCE — or + BTC · risque ${RISK * 100} %/trade/marché · départ ${START} $  ================`);
 console.log(`or : ${dayStr(gold.bars[0].time)} → ${dayStr(gold.bars[gold.bars.length - 1].time)} · BTC : ${dayStr(btc.bars[0].time)} → ${dayStr(btc.bars[btc.bars.length - 1].time)} · période commune à partir du moment où les deux ont un an d'historique`);
-console.log(`swap : or ${gold.swapPerDay * 100} %/jour · BTC ${btc.swapPerDay * 100} %/jour du notionnel (hypothèses broker CFD — à confirmer dans MT5)`);
+console.log(`swap (spécifications MT5, mercredi ×3 lissé) : or long ${(gold.swap.long * 100).toFixed(3)} % · short ${(gold.swap.short * 100).toFixed(3)} % · BTC ${(btc.swap.long * 100).toFixed(3)} %/jour du notionnel`);
 run('Donchian 50 j · long et short · or + BTC', 50, false, [gold, btc]);
 run('Donchian 50 j · long et short · or + BTC · PROTECTION DES GAINS (> 4 R atteints, sortie si moitié rendue)', 50, false, [gold, btc], true);
 run('Donchian 50 j · LONG SEULEMENT · or + BTC', 50, true, [gold, btc]);
