@@ -384,6 +384,12 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
   let oos = 0, folds = 0;
   const oosByCand = new Map<string, number>();
   const tradesByCand = new Map<string, number>();
+  // DÉTAIL PAR FOLD, PAR CANDIDAT (02/09/2026). Le total OOS ne dit pas si un écart est ROBUSTE ou s'il
+  // tient à une seule fenêtre. C'est pourtant toute la différence entre un edge et un coup de chance :
+  // « +2 982 $ » réparti sur 4 folds n'a rien à voir avec « +2 982 $ » dont 2 900 viennent du fold 3.
+  // Sans cette ligne on ne peut pas trancher, et on décide alors sur une moyenne — exactement ce que le
+  // walk-forward est censé nous éviter.
+  const foldsByCand = new Map<string, number[]>();
   for (let start = 0; start + TUNE + TEST <= N; start += TEST) {
     const tuneBars = bars.slice(start, start + TUNE);
     const testBars = bars.slice(Math.max(0, start + TUNE - 700), start + TUNE + TEST); // 700 barres de warmup réutilisées
@@ -399,6 +405,7 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
       const tc = metrics(labBacktest(computeIndicators(testBars), trendDef(c.exits, c.tpAtr), SPECS[sym]), START);
       oosByCand.set(c.name, (oosByCand.get(c.name) ?? 0) + tc.netPnl);
       tradesByCand.set(c.name, (tradesByCand.get(c.name) ?? 0) + tc.trades);
+      foldsByCand.set(c.name, [...(foldsByCand.get(c.name) ?? []), tc.netPnl]);
     }
     // NOMBRE DE TRADES AFFICHÉ (02/09/2026) — il manquait, et sans lui un P&L ne se lit pas : « +3 988 $ »
     // sur 8 trades et sur 200 trades ne racontent pas la même histoire, ni en confiance ni en risque.
@@ -408,7 +415,9 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
   console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) :');
   for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1] - a[1])) {
     const n = tradesByCand.get(name) ?? 0;
-    console.log('   ', name.padEnd(42), ('$' + v.toFixed(0)).padStart(8), `${String(n).padStart(5)} trades`, n ? `${(v / n).toFixed(0)} $/trade` : '');
+    const per = foldsByCand.get(name) ?? [];
+    const pos = per.filter((x) => x > 0).length;
+    console.log('   ', name.padEnd(42), ('$' + v.toFixed(0)).padStart(8), `${String(n).padStart(5)} trades`, (n ? `${(v / n).toFixed(0)} $/tr` : '').padStart(9), `| ${pos}/${per.length} folds +  `, per.map((x) => ('$' + x.toFixed(0)).padStart(7)).join(' '));
   }
 }
 
