@@ -72,6 +72,8 @@ export interface BacktestRun {
   trades: SimTrade[];
   equity: EquityPoint[];
   finalBalance: number;
+  /** heures de position gérées en bougies fines / en H1 (labBacktest avec `fine`) */
+  hoursFine?: number; hoursCoarse?: number;
 }
 
 interface OpenPos {
