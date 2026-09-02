@@ -361,11 +361,19 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
     { name: 'PROD + WE perdants + sans entrée ven 12h', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 12 } },
     { name: 'TP8 trail2@2 + WE perdants + ven 12h', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2, weekendFlatLosers: true, noEntryFriFrom: 12 } },
   ];
-  const N = bars.length, TUNE = Math.floor(N * 0.43), TEST = Math.floor(N * 0.14); // ~9 mois / ~3 mois
-  console.log(`\n========== WALK-FORWARD SWING ${sym} (H1, ${N} bougies) — tune ~9 mois → test ~3 mois ==========`);
-  console.log('fold  test window                 choisi sur tune                          TEST $   TEST PF');
+  const N = bars.length, TUNE = Math.floor(N * 0.43), TEST = Math.floor(N * 0.14);
+  // DURÉES CALCULÉES, PAS RECOPIÉES (02/09/2026). L'en-tête annonçait « tune ~9 mois → test ~3 mois » :
+  // vrai pour l'or, FAUX pour le BTC. Les fenêtres sont des fractions du NOMBRE DE BOUGIES, or le BTC cote
+  // 24/7 quand l'or cote ~120 h par semaine — à nombre de bougies égal, le BTC couvre 40 % de calendrier en
+  // plus. Sur 24 596 bougies BTC, « ~3 mois » valait en réalité 4,8 mois. Un libellé faux sur la longueur
+  // des fenêtres fausse la lecture du walk-forward lui-même, puisque c'est ce qui dit combien de régimes de
+  // marché chaque fenêtre a traversé. On les dérive donc des horodatages réels.
+  const months = (n: number) => ((bars[Math.min(n, N - 1)].time - bars[0].time) / 86_400_000 / 30.44).toFixed(1);
+  console.log(`\n========== WALK-FORWARD SWING ${sym} (H1, ${N} bougies) — tune ~${months(TUNE)} mois → test ~${months(TUNE + TEST)} - ${months(TUNE)} mois ==========`);
+  console.log('fold  test window                 choisi sur tune                          TEST $   TEST PF  trades');
   let oos = 0, folds = 0;
   const oosByCand = new Map<string, number>();
+  const tradesByCand = new Map<string, number>();
   for (let start = 0; start + TUNE + TEST <= N; start += TEST) {
     const tuneBars = bars.slice(start, start + TUNE);
     const testBars = bars.slice(Math.max(0, start + TUNE - 700), start + TUNE + TEST); // 700 barres de warmup réutilisées
@@ -380,12 +388,18 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
     for (const c of CANDS) {
       const tc = metrics(labBacktest(computeIndicators(testBars), trendDef(c.exits, c.tpAtr), SPECS[sym]), START);
       oosByCand.set(c.name, (oosByCand.get(c.name) ?? 0) + tc.netPnl);
+      tradesByCand.set(c.name, (tradesByCand.get(c.name) ?? 0) + tc.trades);
     }
-    console.log(`#${folds}`.padEnd(5), `${dayStr(testBars[700]?.time ?? testBars[0].time)}→${dayStr(testBars[testBars.length - 1].time)}`.padEnd(26), best.c.name.padEnd(40), ('$' + t.netPnl.toFixed(0)).padStart(8), (t.profitFactor === Infinity ? '∞' : t.profitFactor.toFixed(2)).padStart(8));
+    // NOMBRE DE TRADES AFFICHÉ (02/09/2026) — il manquait, et sans lui un P&L ne se lit pas : « +3 988 $ »
+    // sur 8 trades et sur 200 trades ne racontent pas la même histoire, ni en confiance ni en risque.
+    console.log(`#${folds}`.padEnd(5), `${dayStr(testBars[700]?.time ?? testBars[0].time)}→${dayStr(testBars[testBars.length - 1].time)}`.padEnd(26), best.c.name.padEnd(40), ('$' + t.netPnl.toFixed(0)).padStart(8), (t.profitFactor === Infinity ? '∞' : t.profitFactor.toFixed(2)).padStart(8), String(t.trades).padStart(7));
   }
   console.log(`\n→ OOS de la sélection par tune : $${oos.toFixed(0)} sur ${folds} folds`);
   console.log('→ OOS par candidat (somme des fenêtres test, sans sélection) :');
-  for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1] - a[1])) console.log('   ', name.padEnd(42), '$' + v.toFixed(0));
+  for (const [name, v] of [...oosByCand.entries()].sort((a, b) => b[1] - a[1])) {
+    const n = tradesByCand.get(name) ?? 0;
+    console.log('   ', name.padEnd(42), ('$' + v.toFixed(0)).padStart(8), `${String(n).padStart(5)} trades`, n ? `${(v / n).toFixed(0)} $/trade` : '');
+  }
 }
 
 const which = process.argv[2] ?? 'scalp';
