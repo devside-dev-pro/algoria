@@ -169,8 +169,13 @@ async function main() {
         cursor = oldest;
       }
     } catch (e) {
-      failed.push(`${label} (${(e as { message?: string })?.message ?? e})`);
-      console.error(`[gaps] ${String(n + 1).padStart(3)}/${gaps.length}  ${label}  ÉCHEC — on continue`);
+      const why = (e as { message?: string })?.message ?? String(e);
+      failed.push(`${label} (${why})`);
+      // La RAISON s'affiche tout de suite, pas seulement dans le bilan final (02/09, soir) : quinze trous qui
+      // échouent d'affilée avec un message caché jusqu'à la fin, c'est un quart d'heure perdu à regarder
+      // « ÉCHEC — on continue » sans savoir si c'est le symbole broker, le token ou l'historique.
+      console.error(`[gaps] ${String(n + 1).padStart(3)}/${gaps.length}  ${label}  ÉCHEC — ${why.slice(0, 160)}`);
+      if (n === 0 && /symbol|not found|invalid/i.test(why)) console.error(`[gaps] ⚠️ le broker ne connaît probablement pas « ${brokerSymbol} » — relancer avec --broker <nom exact chez le broker> (valeur d'ALGORIA_SYMBOL / BTCUSD_SYMBOL sur Railway)`);
       continue;
     }
     console.log(`[gaps] ${String(n + 1).padStart(3)}/${gaps.length}  ${label}  +${got}`);
