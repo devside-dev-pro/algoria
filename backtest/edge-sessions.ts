@@ -82,6 +82,33 @@ function report(layer: string, trades: SimTrade[], fine: Bar[], maxBars: number,
   console.log(`${'toutes sessions'.padEnd(18)} ${''.padStart(periods.length * 13)} ${`${String(all.n).padStart(4)} · ${String(pct(all.p1, all.n)).padStart(3)}%`.padStart(12)}`);
 }
 
+// ===== DIRECTION + LIGNE DE BASE (02/09, nuit). Verdict de la première passe sur deux ans : 49 % partout, à
+// toutes les heures, pour 3 076 scalps et 777 swings. Avant de conclure « pièce de monnaie », deux contrôles :
+//   · le « hasard = 50 % » suppose un marché sans dérive. L'or a monté fort en 2025 : des entrées AU HASARD
+//     pourraient déjà donner 53 % en long et 47 % en short. On mesure donc une ligne de base — une entrée
+//     toutes les 4 h, long et short, stop = risque médian de la couche — semestre par semestre ;
+//   · un moteur peut être nul en moyenne et avoir un côté qui vaut quelque chose. On sépare longs et shorts.
+function byDirection(layer: string, trades: SimTrade[], fine: Bar[], maxBars: number) {
+  const rows = trades.map((t) => ({ t, m: mfe(fine, t, maxBars) })).filter((x): x is { t: SimTrade; m: number } => x.m != null);
+  const periods = [...new Set(rows.map((x) => half(x.t.entryTime)))].sort();
+  console.log(`\n${layer} — par DIRECTION (+1R avant −1R) :`);
+  console.log(`${'côté'.padEnd(18)} ${periods.map((p) => p.padStart(12)).join(' ')} ${'TOTAL'.padStart(12)}`);
+  for (const dir of ['long', 'short'] as const) {
+    const sub = rows.filter((x) => x.t.dir === dir);
+    const cells = periods.map((p) => { const s = sub.filter((x) => half(x.t.entryTime) === p); return { n: s.length, p1: s.filter((x) => x.m >= 1).length }; });
+    const tot = { n: sub.length, p1: sub.filter((x) => x.m >= 1).length };
+    console.log(`${dir.padEnd(18)} ${cells.map((c) => (c.n ? `${String(c.n).padStart(4)} · ${String(pct(c.p1, c.n)).padStart(3)}%` : '—'.padStart(11)).padStart(12)).join(' ')} ${`${String(tot.n).padStart(4)} · ${String(pct(tot.p1, tot.n)).padStart(3)}%`.padStart(12)}`);
+  }
+}
+function baseline(label: string, fine: Bar[], everyBars: number, riskDist: number, maxBars: number) {
+  const trades: SimTrade[] = [];
+  for (let i = 300; i < fine.length - maxBars; i += everyBars)
+    for (const dir of ['long', 'short'] as const)
+      trades.push({ dir, entryTime: fine[i].time, entryPrice: fine[i].open, exitTime: 0, exitPrice: 0, reason: 'sl', lot: 1, pnl: 0, r: 0, confidence: 0, riskDist });
+  byDirection(`LIGNE DE BASE ${label} — entrées au hasard toutes les ${(everyBars * 5) / 60} h, stop ${riskDist.toFixed(2)} $ (= risque médian de la couche)`, trades, fine, maxBars);
+}
+const medianRisk = (trades: SimTrade[]) => { const d = trades.map((t) => t.riskDist ?? 0).filter((x) => x > 0).sort((a, b) => a - b); return d[Math.floor(d.length / 2)] ?? 0; };
+
 console.log(`\n================  EDGE PAR SESSION, HORS ÉCHANTILLON — XAUUSD  ================`);
 console.log(`M5 : ${m5.length} bougies, ${dayStr(m5[0].time)} → ${dayStr(m5[m5.length - 1].time)} · H1 : ${h1.length} bougies, ${dayStr(h1[0].time)} → ${dayStr(h1[h1.length - 1].time)}`);
 
@@ -90,6 +117,8 @@ for (const key of ['2', '1']) {
   const profile = STRATEGIES[key];
   const run = backtest(m5, FEATURES, cfgFor(profile), { ...simFor(profile), blockEntryHours: undefined });
   report(`SCALP · profil S${key} (${profile.tradeAsia ? 'Asie ouverte' : 'Asie coupée par le profil'}) · trajet M5 · horizon 8 h`, run.trades, m5, 96);
+  byDirection(`SCALP · profil S${key}`, run.trades, m5, 96);
+  if (key === '2') baseline('scalp', m5, 48, medianRisk(run.trades), 96);
 }
 
 // ===== SWING : la stratégie trend de labcore (= GOLD_SWING), entrées H1, trajet M5 là où il existe =====
@@ -99,6 +128,8 @@ for (const key of ['2', '1']) {
   const m5From = m5[0].time;
   const onM5 = run.trades.filter((t) => t.entryTime >= m5From);
   report(`SWING · trend GOLD_SWING · trajet M5 · horizon 5 j`, onM5, m5, 5 * 24 * 12, 30);
+  byDirection('SWING · trend GOLD_SWING · trajet M5', onM5, m5, 5 * 24 * 12);
+  baseline('swing', m5, 48, medianRisk(onM5), 5 * 24 * 12);
   report(`SWING · trend GOLD_SWING · trajet H1 (tout l'historique, moins précis) · horizon 5 j`, run.trades, h1, 5 * 24, 30);
 }
 console.log('');
