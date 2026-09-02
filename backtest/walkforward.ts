@@ -15,7 +15,7 @@ import { backtest, type SimParams } from './simulator';
 import { metrics } from './metrics';
 import { FEATURES } from '../lib/engine/features';
 import { STRATEGIES } from '../lib/engine/strategies';
-import { computeIndicators, labBacktest, swingTrendDef, SPECS, START, type Exits, type StrategyDef } from './labcore';
+import { computeIndicators, labBacktest, swingTrendDef, SPECS, START, SWING_PROD_EXITS, SWING_PROD_TP_ATR, type Exits, type StrategyDef } from './labcore';
 import { cfgFor, ctxFor, simFor, SIM_BASE } from './wiring';
 import { simBreakout, BK_COSTS, BK_START, type BkOpts } from './breakout-core';
 import { GOLD_BREAKOUT, type BreakoutConfig } from '../lib/engine/breakout';
@@ -357,41 +357,26 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
   const ind = computeIndicators(raw);
   const bars = ind.bars;
   const trendDef = swingTrendDef; // définition PARTAGÉE avec le test de parité — voir labcore.ts
+  // TOUS LES CANDIDATS DÉRIVENT DE LA CONFIG LIVE (02/09/2026, 3e passe). Jusqu'ici ils étaient écrits
+  // en dur, et le candidat « PROD RÉEL » portait encore be:1 et un seul palier alors que GOLD_SWING vit
+  // à be:0,5 avec quatre paliers — #345 avait relié labcore au live, mais pas cette liste. Désormais chaque
+  // candidat est `{ ...SWING_PROD_EXITS, <un seul champ> }` : il diffère de la prod par exactement une
+  // chose, et si GOLD_SWING change, le tableau entier suit.
+  //
+  // L'EXPÉRIENCE DU JOUR : LE SEUIL DE BREAKEVEN. Le live fournit une expérience naturelle de 115 trades :
+  // avant le 04/08, un bug faisait retomber le swing sur le défaut scalp (BE à 0,15 R) — l'or rendait
+  // +2 198 $ avec 70 % de BE et 7 % de stops. Après le correctif (BE à 0,5 R, la vraie config), −20 788 $
+  // avec 35 % de stops pleins à −1 537 $. Le BTC a fait la bascule inverse (+566 → +4 617 $). Hypothèse :
+  // sur l'or, protéger TÔT vaut mieux que protéger tard. On la met au tribunal sur deux ans, fold par fold.
+  // Trois valeurs — 0,15 (celle de juillet), 0,25 (le milieu), 0,5 (la prod) — pas une grille.
   const CANDS: Array<{ name: string; tpAtr: number; exits: Exits }> = [
-    // ⚠️ LE CANDIDAT « PROD » N'ÉTAIT PAS LA PROD (corrigé le 02/09/2026).
-    // L'assurance week-end tourne EN LIVE depuis le 29/07 sur TOUS les marchés — runner/index.ts:521 refuse
-    // les nouvelles entrées swing le vendredi ≥ 12h UTC, et runner/index.ts:552 ferme les swings perdants le
-    // vendredi ≥ 20h. Or le candidat baptisé « PROD » ne les avait PAS : le tableau comparait donc la vraie
-    // production à une ligne portant son nom mais pas sa configuration, et on lisait « PROD gagne » là où il
-    // fallait lire « retirer l'assurance week-end gagnerait ». Conclusion inversée, sur le seul mot du libellé.
-    // Les noms disent maintenant ce que les configs FONT. Un libellé faux dans un tribunal ne coûte pas moins
-    // cher qu'un calcul faux.
-    { name: 'PROD RÉEL (live : assurance WE incluse)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 12 } },
-    { name: 'PROD SANS assurance week-end', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]] } },
-    { name: 'PROD RÉEL mais TP8 · trail 2@2', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2, weekendFlatLosers: true, noEntryFriFrom: 12 } },
-    { name: 'TP8 · trail 2@2, sans assurance WE', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2 } },
-    // LES DEUX RÈGLES, SÉPARÉMENT (02/09/2026). Elles n'existaient qu'EN BLOC, donc le premier walk-forward
-    // BTC ne pouvait pas dire laquelle porte le gain — seulement que le couple vaut +2 982 $ hors échantillon
-    // sur PROD et +2 965 $ sur TP8. Or elles n'agissent pas du tout au même endroit : `noEntryFriFrom`
-    // SUPPRIME des entrées (756 trades contre 779, soit 23 de moins), tandis que `weekendFlatLosers` n'en
-    // supprime aucune et ne change que la SORTIE des positions perdantes au cutoff du vendredi soir.
-    // Attribuer tout le gain à l'une ou à l'autre serait une supposition ; la mesurer coûte deux lignes.
-    // C'est la doctrine déjà écrite plus haut dans ce fichier : une config qu'on ne comprend pas est une
-    // config qu'on ne saura pas défendre le jour où elle cassera.
-    { name: 'PROD, WE perdants SEUL (sans ven 12h)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true } },
-    { name: 'PROD, ven 12h SEUL (sans WE perdants)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], noEntryFriFrom: 12 } },
-    // OÙ COUPER LE VENDREDI ? (02/09/2026) — la règle live coupe à 12h UTC, mais l'incident qui l'a motivée
-    // date du 26/07 et portait sur deux shorts ouverts à 19h. La règle est donc SEPT HEURES plus large que
-    // l'événement qu'elle est censée prévenir, et sur l'or ces sept heures sont la session US du vendredi —
-    // le marché ferme à 21h UTC, donc couper à 12h supprime 9 h de cotation, pas un bord de week-end.
-    // Mesuré : sur l'or ces entrées valaient +2 705 $ sur 4 folds (27 trades, ~100 $ pièce contre 39 $ de
-    // moyenne) ; sur le BTC elles coûtaient 2 981 $ (23 trades, ~130 $ de perte pièce contre +10 $ de moyenne).
-    // On teste donc l'heure de coupure elle-même. Trois valeurs seulement, et choisies sur l'HISTOIRE
-    // (l'incident de 19h, la clôture de 21h), pas en balayant la grille : un seuil optimisé sur la donnée
-    // serait exactement le péché que ce fichier existe pour empêcher.
-    { name: 'PROD, ven 18h (au lieu de 12h)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 18 } },
-    { name: 'PROD, ven 19h (heure de l\'incident)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 19 } },
-    { name: 'PROD, ven 20h (juste avant la cloche)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 20 } },
+    { name: 'PROD RÉEL (live : BE 0,5 R · 4 paliers · ven 18h)', tpAtr: SWING_PROD_TP_ATR, exits: { ...SWING_PROD_EXITS } },
+    { name: 'BE 0,15 R (ce que juillet subissait par accident)', tpAtr: SWING_PROD_TP_ATR, exits: { ...SWING_PROD_EXITS, be: 0.15 } },
+    { name: 'BE 0,25 R', tpAtr: SWING_PROD_TP_ATR, exits: { ...SWING_PROD_EXITS, be: 0.25 } },
+    { name: 'BE 1 R (l\'ancien « PROD » du backtest, jamais en live)', tpAtr: SWING_PROD_TP_ATR, exits: { ...SWING_PROD_EXITS, be: 1 } },
+    // témoins des questions précédentes, réexprimés à partir de la prod
+    { name: 'PROD sans assurance week-end', tpAtr: SWING_PROD_TP_ATR, exits: { ...SWING_PROD_EXITS, weekendFlatLosers: false, noEntryFriFrom: undefined } },
+    { name: 'PROD, ven 12h (l\'ancienne coupure)', tpAtr: SWING_PROD_TP_ATR, exits: { ...SWING_PROD_EXITS, noEntryFriFrom: 12 } },
   ];
   const N = bars.length, TUNE = Math.floor(N * 0.43), TEST = Math.floor(N * 0.14);
   // DURÉES CALCULÉES, PAS RECOPIÉES (02/09/2026). L'en-tête annonçait « tune ~9 mois → test ~3 mois » :
