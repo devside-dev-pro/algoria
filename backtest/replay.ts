@@ -25,8 +25,18 @@
 // −18 591 $. Le contrôle de sincérité (PROD rejouée ≈ LIVE) existait pour ça. Le R live est recalculé depuis
 // le P&L et le risque initial ; la colonne `r` a le même défaut que `sl`.
 //
-// DIFFÉRENCES ASSUMÉES : la bougie M1 de l'entrée est comptée en entier (son plus-bas peut précéder l'entrée —
-// légèrement pessimiste) ; pas de cap journalier ni de kill switch (ils coupent des ENTRÉES, pas des sorties) ;
+// L'HEURE QUI COMPTE : `trades.opened_at` est l'heure de la BOUGIE DU SIGNAL (runner/index.ts : openedAt =
+// signal.time), pas celle du remplissage. Sur un signal M5 l'écart est de 0 à 5 min ; sur un signal H1 (swing)
+// jusqu'à une heure. Mesuré en base le 02/09 : le prix de sortie tombe dans la bougie M1 de closed_at pour 99 %
+// des trades, le prix d'entrée dans celle de opened_at pour 36 % seulement (133 swings sur 192 à plus de 15 min).
+// Le rejeu cherche donc, à partir de opened_at, la première bougie M1 dont l'amplitude contient le prix
+// d'entrée réel (fenêtre 70 min) — l'entrée est alignée sur le remplissage, pas sur le signal.
+//
+// STOPS ABERRANTS : quelques signaux ont un stop_loss nul ou absurde (risque de 4 103 $ sur un scalp or). Ils
+// sont exclus par une borne de plausibilité par symbole et comptés, pas cachés.
+//
+// DIFFÉRENCES ASSUMÉES : la bougie M1 du remplissage est comptée en entier (son plus-bas peut précéder
+// l'entrée — légèrement pessimiste) ; pas de cap journalier ni de kill switch (ils coupent des ENTRÉES, pas des sorties) ;
 // coûts = commission + glissement sur les sorties au stop (le spread est déjà dans le prix d'entrée live).
 //
 //   node scripts/pull-cache.mjs XAUUSD M1 && npx tsx scripts/pull-live-trades.ts
@@ -53,9 +63,10 @@ const bars = JSON.parse(readFileSync(M1, 'utf8')) as Bar[];
 
 // Coûts par symbole : commission par lot et glissement sur une sortie au stop (frais RaiseFX mesurés — voir
 // breakout-core.ts BK_COSTS pour l'or ; BTC : pas de commission mesurée, glissement ≈ 1 tick de spread).
-const SPEC: Record<string, { contractSize: number; commissionPerLot: number; slippage: number }> = {
-  XAUUSD: { contractSize: 100, commissionPerLot: 7, slippage: 0.05 },
-  BTCUSD: { contractSize: 1, commissionPerLot: 0, slippage: 5 },
+const SPEC: Record<string, { contractSize: number; commissionPerLot: number; slippage: number; fillTol: number; riskMin: number; riskMax: number }> = {
+  // fillTol : tolérance pour retrouver la bougie du remplissage (≈ spread) · riskMin/Max : bornes de plausibilité du stop initial
+  XAUUSD: { contractSize: 100, commissionPerLot: 7, slippage: 0.05, fillTol: 0.3, riskMin: 0.5, riskMax: 60 },
+  BTCUSD: { contractSize: 1, commissionPerLot: 0, slippage: 5, fillTol: 15, riskMin: 20, riskMax: 5000 },
 };
 const spec = SPEC[sym] ?? SPEC.XAUUSD;
 
@@ -68,7 +79,9 @@ const layerOf = (ref: string | null): 'swing' | 'breakout' | 'scalp' => {
 };
 
 // Règle de sortie rejouée : identique à labcore.ts (BE sur le pic, paliers, trailing, stop testé AVANT le TP).
-interface Exit { be?: number; beOffset?: number; ladder?: Array<[number, number]>; trailActivate?: number; trailDist?: number; tpR?: number; maxBars: number }
+// beBefore : BE différent pour les trades ouverts avant une date — sert à rejouer la prod TELLE QUE VÉCUE
+// (jusqu'au 04/08, un bug de purge dans manage.ts ramenait le swing au BE scalp de 0,15 R ; voir manage.ts).
+interface Exit { be?: number; beOffset?: number; ladder?: Array<[number, number]>; trailActivate?: number; trailDist?: number; tpR?: number; maxBars: number; beBefore?: { until: string; be: number } }
 type Reason = 'sl' | 'be' | 'trail' | 'tp' | 'time';
 interface Outcome { r: number; reason: Reason; bars: number }
 
@@ -89,9 +102,11 @@ const SCALP_BARS = 8 * 60;
 const SWING_BARS = 5 * 24 * 60;
 
 const SW = sym === 'BTCUSD' ? BTC_SWING : GOLD_SWING;
+const BUG_FIX_DAY = '2026-08-04'; // avant : BE swing 0,15 R par accident (purge peaks/custom, manage.ts) ; après : la config
 const VARIANTS: Record<string, Array<{ name: string; exit: Exit }>> = {
   swing: [
-    { name: `PROD (BE ${SW.beTrigger} R · paliers · trail ${SW.trailDist} R)`, exit: swingExit(SW, SWING_BARS) },
+    { name: `PROD VÉCUE (BE 0,15 avant le 04/08 par bug, ${SW.beTrigger} après)`, exit: swingExit(SW, SWING_BARS, { beBefore: { until: BUG_FIX_DAY, be: 0.15 } }) },
+    { name: `PROD CONFIG (BE ${SW.beTrigger} R · paliers · trail ${SW.trailDist} R)`, exit: swingExit(SW, SWING_BARS) },
     { name: 'BE 0,15 R (reste identique)', exit: swingExit(SW, SWING_BARS, { be: 0.15 }) },
     { name: 'BE 1 R (reste identique)', exit: swingExit(SW, SWING_BARS, { be: 1 }) },
     { name: 'sans BE ni paliers, trail seul', exit: swingExit(SW, SWING_BARS, { be: undefined, ladder: undefined }) },
@@ -119,13 +134,34 @@ const startIndex = (t: number): number => {
 };
 
 const riskOf = (t: LiveTrade): number => (t.sl0 == null ? 0 : Math.abs(t.entry - t.sl0));
+const riskOk = (t: LiveTrade): boolean => {
+  const d = riskOf(t);
+  if (!(d >= spec.riskMin && d <= spec.riskMax)) return false;
+  const dir = t.dir === 'long' ? 1 : -1;
+  return dir * (t.entry - t.sl0!) > 0; // stop du bon côté de l'entrée
+};
+/** Bougie du REMPLISSAGE : première bougie M1 à partir de opened_at (bougie du signal) dont l'amplitude contient
+ *  le prix d'entrée réel. −1 si introuvable dans les 70 minutes (trade non rejouable, compté à part). */
+const FILL_WINDOW = 70;
+const fillCache = new Map<LiveTrade, number>();
+const fillIndex = (t: LiveTrade): number => {
+  const c = fillCache.get(t);
+  if (c !== undefined) return c;
+  const i0 = startIndex(new Date(t.openedAt).getTime());
+  let found = -1;
+  for (let i = i0; i < bars.length && i < i0 + FILL_WINDOW; i++)
+    if (t.entry >= bars[i].low - spec.fillTol && t.entry <= bars[i].high + spec.fillTol) { found = i; break; }
+  fillCache.set(t, found);
+  return found;
+};
 
 function replay(t: LiveTrade, ex: Exit): Outcome | null {
   const dir = t.dir === 'long' ? 1 : -1;
   const riskDist = riskOf(t);
   if (!(riskDist > 0)) return null;
-  const i0 = startIndex(new Date(t.openedAt).getTime());
-  if (i0 >= bars.length) return null;
+  const i0 = fillIndex(t);
+  if (i0 < 0) return null;
+  const be = ex.beBefore && t.openedAt < ex.beBefore.until ? ex.beBefore.be : ex.be;
   const costR = (spec.commissionPerLot / spec.contractSize) / riskDist; // commission par lot, ramenée en R
   const slipR = spec.slippage / riskDist;
   let stop = t.sl0!, peak = t.entry;
@@ -143,7 +179,7 @@ function replay(t: LiveTrade, ex: Exit): Outcome | null {
     peak = dir === 1 ? Math.max(peak, b.high) : Math.min(peak, b.low);
     const fav = dir * (peak - t.entry);
     const lift = (lvl: number) => { stop = dir === 1 ? Math.max(stop, lvl) : Math.min(stop, lvl); };
-    if (ex.be && fav >= ex.be * riskDist) lift(t.entry + dir * (ex.beOffset ?? 0.05) * riskDist);
+    if (be && fav >= be * riskDist) lift(t.entry + dir * (ex.beOffset ?? 0.05) * riskDist);
     if (ex.ladder) for (const [trig, lock] of ex.ladder) if (fav >= trig * riskDist) lift(t.entry + dir * lock * riskDist);
     if (ex.trailActivate && ex.trailDist && fav >= ex.trailActivate * riskDist) lift(peak - dir * ex.trailDist * riskDist);
   }
@@ -156,7 +192,8 @@ function excursion(t: LiveTrade, maxBars: number): { mfe: number; mae: number } 
   const dir = t.dir === 'long' ? 1 : -1;
   const riskDist = riskOf(t);
   if (!(riskDist > 0)) return null;
-  const i0 = startIndex(new Date(t.openedAt).getTime());
+  const i0 = fillIndex(t);
+  if (i0 < 0) return null;
   let mfe = 0, mae = 0;
   for (let i = i0; i < bars.length && i - i0 < maxBars; i++) {
     const b = bars[i];
@@ -182,7 +219,10 @@ const layers = [...new Set(rows.map((t) => layerOf(t.ref)))].sort();
 for (const layer of layers) {
   const all = rows.filter((t) => layerOf(t.ref) === layer);
   const maxBars = layer === 'swing' ? SWING_BARS : SCALP_BARS;
-  const ok = all.filter((t) => riskOf(t) > 0 && startIndex(new Date(t.openedAt).getTime()) < bars.length);
+  const noStop = all.filter((t) => !(riskOf(t) > 0)).length;
+  const badStop = all.filter((t) => riskOf(t) > 0 && !riskOk(t)).length;
+  const noFill = all.filter((t) => riskOk(t) && fillIndex(t) < 0).length;
+  const ok = all.filter((t) => riskOk(t) && fillIndex(t) >= 0);
   const months = [...new Set(ok.map((t) => monthOf(t.closedAt)))].sort();
   const livePnl = all.reduce((s, t) => s + t.pnl, 0);
   // R live = P&L réel / risque initial au lot réel — pas la colonne `r` (calculée sur le stop courant).
@@ -191,7 +231,7 @@ for (const layer of layers) {
   for (const t of all) { const s = byStrat.get(t.strategy) ?? { n: 0, pnl: 0 }; s.n++; s.pnl += t.pnl; byStrat.set(t.strategy, s); }
 
   console.log(`\n────────  ${sym} · ${layer.toUpperCase()}  ·  ${all.length} trades live · ${money(livePnl)}  ·  ${[...byStrat.entries()].sort().map(([s, v]) => `S${s} ${v.n} tr ${money(v.pnl)}`).join(' · ')}  ────────`);
-  console.log(`rejouables : ${ok.length}/${all.length} (les autres : sans stop initial dans signals, ou hors couverture M1) · risque initial médian ${(() => { const d = ok.map(riskOf).sort((a, b) => a - b); return (d[Math.floor(d.length / 2)] ?? 0).toFixed(2); })()} $`);
+  console.log(`rejouables : ${ok.length}/${all.length} (exclus : ${noStop} sans stop initial · ${badStop} stop aberrant · ${noFill} prix d'entrée introuvable dans le M1 sous 70 min) · risque initial médian ${(() => { const d = ok.map(riskOf).sort((a, b) => a - b); return (d[Math.floor(d.length / 2)] ?? 0).toFixed(2); })()} $`);
   if (!ok.length) continue;
 
   // 1) EDGE DES ENTRÉES — indépendant de toute gestion.
@@ -212,7 +252,8 @@ for (const layer of layers) {
     const tot = liveRs.reduce((s, r) => s + r, 0);
     const byM = months.map((m) => ok.filter((t) => monthOf(t.closedAt) === m).reduce((s, t) => s + liveR(t), 0));
     const cnt = (k: string) => ok.filter((t) => t.reason === k).length;
-    return `${'LIVE (tel qu\'enregistré)'.padEnd(52)} ${String(ok.length).padStart(4)} ${f1(tot).padStart(7)} ${f2(tot / ok.length).padStart(6)} ${pct(liveRs.filter((r) => r > 0).length, ok.length).padStart(4)}  ${pct(cnt('sl'), ok.length).padStart(4)} ${pct(cnt('be'), ok.length).padStart(4)} ${pct(cnt('trail'), ok.length).padStart(4)} ${pct(cnt('tp'), ok.length).padStart(4)} ${'—'.padStart(4)}  ${byM.map((x) => f1(x).padStart(6)).join(' ')}  ${money(ok.reduce((s, t) => s + t.pnl, 0)).padStart(12)}`;
+    const other = ok.length - cnt('sl') - cnt('be') - cnt('trail') - cnt('tp');
+    return `${`LIVE (enregistré · ${pct(other, ok.length)} autres sorties)`.padEnd(52)} ${String(ok.length).padStart(4)} ${f1(tot).padStart(7)} ${f2(tot / ok.length).padStart(6)} ${pct(liveRs.filter((r) => r > 0).length, ok.length).padStart(4)}  ${pct(cnt('sl'), ok.length).padStart(4)} ${pct(cnt('be'), ok.length).padStart(4)} ${pct(cnt('trail'), ok.length).padStart(4)} ${pct(cnt('tp'), ok.length).padStart(4)} ${'—'.padStart(4)}  ${byM.map((x) => f1(x).padStart(6)).join(' ')}  ${money(ok.reduce((s, t) => s + t.pnl, 0)).padStart(12)}`;
   })();
   console.log(liveLine);
   for (const v of VARIANTS[layer]) {
