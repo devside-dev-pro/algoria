@@ -18,7 +18,7 @@
 // FAMILLES TESTÉES (chacune a une raison d'exister, aucune n'est l'une des trois de prod) :
 //   A. Cassure du range d'ouverture (Londres 07h, New York 13h30 UTC) — l'ouverture d'une place fixe une
 //      fourchette, la sortie de cette fourchette engage les flux de la session.
-//   B. Compression puis expansion — quand les 12 dernières bougies tiennent dans une boîte étroite (< 1,5 ATR,
+//   B. Compression puis expansion — quand les 12 dernières bougies tiennent dans une boîte étroite (< 2 ATR,
 //      soit moins de la moitié de l'amplitude normale d'une heure),
 //      la sortie de la boîte va souvent plus loin que le bruit.
 //   C. Momentum de fond — le rendement des 5 derniers jours donne la direction ; on entre chaque jour à 07h UTC
@@ -100,15 +100,15 @@ for (const [label, h, m] of [['Londres 07h', 7, 0], ['New York 13h30', 13, 30]] 
   } });
 }
 
-// B. Compression puis expansion : les 12 dernières bougies (1 h) tiennent dans < 1,5 ATR (amplitude normale d'une heure ≈ 3,5 ATR) ; on entre à la première
+// B. Compression puis expansion : les 12 dernières bougies (1 h) tiennent dans < 2 ATR (amplitude normale d'une heure ≈ 3,5 ATR) ; on entre à la première
 //    clôture hors de la boîte, stop = autre côté de la boîte (borné comme ci-dessus), au plus une entrée par boîte.
-CANDS.push({ key: 'B', name: 'B · compression (1 h dans < 1,5 ATR) puis cassure de la boîte', horizon: 4 * 12, gen: () => {
+CANDS.push({ key: 'B', name: 'B · compression (1 h dans < 2 ATR) puis cassure de la boîte', horizon: 4 * 12, gen: () => {
   const out: Entry[] = []; let cool = 0;
   for (let i = 30; i < n; i++) {
     if (cool > 0) { cool--; continue; }
     let hi = -Infinity, lo = Infinity;
     for (let k = i - 12; k < i; k++) { hi = Math.max(hi, bars[k].high); lo = Math.min(lo, bars[k].low); }
-    if (!(hi - lo < 1.5 * atr[i]) || !(hi > lo)) continue;
+    if (!(hi - lo < 2 * atr[i]) || !(hi > lo)) continue;
     const b = bars[i];
     const clamp = (x: number) => Math.min(2 * atr[i], Math.max(0.5 * atr[i], x));
     if (b.close > hi) { out.push({ i, dir: 1, risk: clamp(b.close - lo) }); cool = 12; }
