@@ -50,12 +50,12 @@ const hh = (m: Market, i: number, N: number) => { let h = -Infinity; for (let k 
 const ll = (m: Market, i: number, N: number) => { let l = Infinity; for (let k = i - N; k < i; k++) l = Math.min(l, m.bars[k].low); return l; };
 
 interface Pos { dir: 1 | -1; entry: number; units: number; stop: number; risk: number; day: number; peakR: number }
-interface Leg { market: Market; pos: Pos | null; trades: number; wins: number; pnl: number }
+interface Leg { market: Market; pos: Pos | null; trades: number; wins: number; pnl: number; lastClose: number }
 
 function run(name: string, N: number, longOnly: boolean, markets: Market[], protect = false) {
   const EXIT = Math.max(10, Math.floor(N / 2));
   let eq = START;
-  const legs: Leg[] = markets.map((market) => ({ market, pos: null, trades: 0, wins: 0, pnl: 0 }));
+  const legs: Leg[] = markets.map((market) => ({ market, pos: null, trades: 0, wins: 0, pnl: 0, lastClose: 0 }));
   // calendrier fusionné : tous les jours où au moins un marché a une bougie, à partir du moment où les deux ont 260 jours d'historique
   const days = [...new Set(markets.flatMap((m) => m.bars.map((b) => Math.floor(b.time / 86_400_000))))].sort((a, b) => a - b);
   const startDay = Math.max(...markets.map((m) => Math.floor(m.bars[Math.max(N, 260)].time / 86_400_000)));
@@ -66,8 +66,13 @@ function run(name: string, N: number, longOnly: boolean, markets: Market[], prot
     if (d < startDay) continue;
     let floating = 0;
     for (const leg of legs) {
-      const m = leg.market; const i = m.byTime.get(d); if (i === undefined) { if (leg.pos) floating += 0; continue; }
-      const b = m.bars[i];
+      const m = leg.market; const i = m.byTime.get(d);
+      // JOUR SANS BOUGIE POUR CE MARCHÉ (week-end de l'or, fin de l'historique BTC le 20/08/2026) : la position
+      // ouverte reste marquée à son DERNIER close. La première version l'oubliait (floating = 0) — une position
+      // BTC en perte latente disparaissait de l'équité à la fin de ses données, et le portefeuille affichait
+      // +35 % en 2026 quand ses deux jambes faisaient +6 % et +1 %. Trouvé le 03/09 en comparant aux témoins.
+      if (i === undefined) { if (leg.pos) floating += (leg.lastClose - leg.pos.entry) * leg.pos.dir * leg.pos.units * m.contract; continue; }
+      const b = m.bars[i]; leg.lastClose = b.close;
       // entrées décidées la veille : exécutées à l'ouverture du jour
       for (const p of pending.filter((x) => x.leg === leg)) {
         const risk = eq * RISK; const units = risk / (p.dist * m.contract);
@@ -103,7 +108,7 @@ function run(name: string, N: number, longOnly: boolean, markets: Market[], prot
     equity.push({ t: d * 86_400_000, eq: eq + floating });
   }
   // rapport
-  const ddOf = (pts: Array<{ t: number; eq: number }>) => { let peak = -Infinity, maxDd = 0, ddStart = 0, longest = 0, from = 0; for (const e of pts) { if (e.eq > peak) { peak = e.eq; from = e.t; } const dd = (peak - e.eq) / peak; if (dd > maxDd) { maxDd = dd; ddStart = from; } longest = Math.max(longest, (e.t - from) / 86_400_000); } return { maxDd, ddStart, longest }; };
+  const ddOf = (pts: Array<{ t: number; eq: number }>) => { let peak = -Infinity, maxDd = 0, ddStart = 0, longest = 0, from = 0, peakEq = 0, troughEq = 0, troughT = 0; for (const e of pts) { if (e.eq > peak) { peak = e.eq; from = e.t; } const dd = (peak - e.eq) / peak; if (dd > maxDd) { maxDd = dd; ddStart = from; peakEq = peak; troughEq = e.eq; troughT = e.t; } longest = Math.max(longest, (e.t - from) / 86_400_000); } return { maxDd, ddStart, longest, peakEq, troughEq, troughT }; };
   const { maxDd, ddStart, longest } = ddOf(equity);
   const since2014 = ddOf(equity.filter((e) => year(e.t) >= 2014));
   const yrs = (equity[equity.length - 1].t - equity[0].t) / (365.25 * 86_400_000);
@@ -111,7 +116,7 @@ function run(name: string, N: number, longOnly: boolean, markets: Market[], prot
   const years = [...new Set(equity.map((e) => year(e.t)))];
   const rets = years.map((y) => { const pts = equity.filter((e) => year(e.t) === y); const prev = equity[equity.indexOf(pts[0]) - 1]?.eq ?? pts[0].eq; return pts[pts.length - 1].eq / prev - 1; });
   console.log(`\n────────  ${name}  ·  ${dayStr(equity[0].t)} → ${dayStr(equity[equity.length - 1].t)}  ────────`);
-  console.log(`rendement annualisé ${f1(cagr * 100)} % · pire perte depuis un sommet −${(maxDd * 100).toFixed(1)} % (depuis ${dayStr(ddStart)}) · depuis 2014 : −${(since2014.maxDd * 100).toFixed(1)} % (depuis ${dayStr(since2014.ddStart)}), désert ${Math.round(since2014.longest)} j · années négatives ${rets.filter((r) => r < 0).length}/${years.length} · pire année ${f1(Math.min(...rets) * 100)} %`);
+  console.log(`rendement annualisé ${f1(cagr * 100)} % · pire perte depuis un sommet −${(maxDd * 100).toFixed(1)} % (depuis ${dayStr(ddStart)}) · depuis 2014 : −${(since2014.maxDd * 100).toFixed(1)} % (sommet ${dayStr(since2014.ddStart)} à ${Math.round(since2014.peakEq)} $ → creux ${dayStr(since2014.troughT)} à ${Math.round(since2014.troughEq)} $), désert ${Math.round(since2014.longest)} j · années négatives ${rets.filter((r) => r < 0).length}/${years.length} · pire année ${f1(Math.min(...rets) * 100)} %`);
   console.log('par année : ' + years.map((y, k) => `${y} ${f1(rets[k] * 100)} %`).join(' · '));
   console.log(`levier max (notionnel / équité) : ${maxLever.toFixed(2)}× — au-delà de ~3×, le swap et la marge deviennent le sujet`);
   console.log('par marché : ' + legs.map((l) => `${l.market.sym} ${l.trades} trades · ${l.trades ? Math.round((100 * l.wins) / l.trades) : 0} % gagnants · ${f1(l.pnl / START * 100)} % de l'équité de départ`).join('  |  '));
