@@ -554,7 +554,12 @@ async function main() {
       };
       const h1seed = await loadHistory(account, BROKER, '1h', 700).catch(() => [] as Bar[]);
       swingAgg = makeAggregator('1h', h1seed, (b) => void onH1Closed(b));
-      console.log(`[algoria] couche SWING active sur ${DISPLAY} (${SW.kind}, lot ${SW.lot}) · seed H1: ${h1seed.length} bougies`);
+      // L'HEURE DE COUPURE EST AFFICHÉE AU DÉMARRAGE (02/09/2026). Elle a été codée en dur à 12h pour tous
+      // les marchés pendant cinq semaines, à tort sur l'or (~2 759 $ hors échantillon, 4 folds sur 4), et
+      // rien dans les logs ne permettait de s'en apercevoir : le paramètre ne se manifestait QUE le vendredi,
+      // dans un motif de rejet. Un réglage qu'on ne peut pas lire est un réglage qu'on ne peut pas vérifier —
+      // et c'est aussi le seul moyen de confirmer, un mercredi, qu'un déploiement a bien pris.
+      console.log(`[algoria] couche SWING active sur ${DISPLAY} (${SW.kind}, lot ${SW.lot}) · pas d'entrée ven ≥ ${SW.noEntryFriFromUtc ?? 12}h UTC · seed H1: ${h1seed.length} bougies`);
 
       // ASSURANCE WEEK-END 2/2 (étude 28-29/07, validé « go tout ») : le vendredi ≥ 20h UTC (l'or clôture
       // ~21h), on ferme les swings PERDANTS — les gagnants, déjà protégés par leur BE/trailing, portent le
