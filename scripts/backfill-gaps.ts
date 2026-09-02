@@ -124,9 +124,27 @@ async function upsert(rows: Bar[]) {
   }
 }
 
+/**
+ * FUSION DES TROUS VOISINS (03/09/2026). Le journalier BTC de 2013–2018 présentait 261 trous de quelques
+ * jours, traités un par un : un appel MetaApi chacun, une heure de course, alors qu'UNE page de l'API (1 000
+ * bougies) couvre trois ans de journalier. Deux trous séparés de moins d'une page sont fusionnés en une seule
+ * plage ; les bougies déjà en base qui tombent dedans sont simplement ré-écrites à l'identique (upsert).
+ */
+function coalesce(gaps: Gap[]): Gap[] {
+  const out: Gap[] = [];
+  for (const g of gaps) {
+    const last = out[out.length - 1];
+    if (last && g.from - last.to < 1000 * step) last.to = g.to;
+    else out.push({ ...g });
+  }
+  return out;
+}
+
 async function main() {
   const before = await existingTimes();
-  const gaps = findGaps(before);
+  const raw = findGaps(before);
+  const gaps = coalesce(raw);
+  if (gaps.length < raw.length) console.log(`[gaps] ${raw.length} trous fusionnés en ${gaps.length} plage(s) (moins d'une page d'API entre eux)`);
   const missing = gaps.reduce((s, g) => s + (g.to - g.from) / step + 1, 0);
   console.log(`[gaps] ${symbol} ${tf} : ${before.length} bougies en base, ${gaps.length} trous, ~${Math.round(missing)} bougies manquantes`);
   if (!gaps.length) { console.log('[gaps] rien à faire.'); process.exit(0); }
