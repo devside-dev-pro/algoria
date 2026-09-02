@@ -29,8 +29,12 @@
 // signal.time), pas celle du remplissage. Sur un signal M5 l'écart est de 0 à 5 min ; sur un signal H1 (swing)
 // jusqu'à une heure. Mesuré en base le 02/09 : le prix de sortie tombe dans la bougie M1 de closed_at pour 99 %
 // des trades, le prix d'entrée dans celle de opened_at pour 36 % seulement (133 swings sur 192 à plus de 15 min).
-// Le rejeu cherche donc, à partir de opened_at, la première bougie M1 dont l'amplitude contient le prix
-// d'entrée réel (fenêtre 70 min) — l'entrée est alignée sur le remplissage, pas sur le signal.
+// signal.time est l'heure d'OUVERTURE de la bougie du signal (lib/engine : `time: b.time`), et l'ordre part à
+// sa clôture : le remplissage est donc à opened_at + 5 min (signal M5) ou + 60 min (signal H1), jamais avant.
+// Le rejeu cherche, à partir de LÀ, la première bougie M1 dont l'amplitude contient le prix d'entrée réel
+// (fenêtre 70 min). Chercher dès opened_at (version précédente) tombait dans la bougie du signal elle-même —
+// dont la clôture EST le prix d'entrée — et comptait ses mèches comme si la position existait déjà : le BE
+// s'armait avant le remplissage, d'où 5 % de stops pleins rejoués contre 19 % en live sur le scalp.
 //
 // STOPS ABERRANTS : quelques signaux ont un stop_loss nul ou absurde (risque de 4 103 $ sur un scalp or). Ils
 // sont exclus par une borne de plausibilité par symbole et comptés, pas cachés.
@@ -149,10 +153,11 @@ const riskOk = (t: LiveTrade): boolean => {
  *  le prix d'entrée réel. −1 si introuvable dans les 70 minutes (trade non rejouable, compté à part). */
 const FILL_WINDOW = 70;
 const fillCache = new Map<LiveTrade, number>();
+const SIGNAL_TF_MS = (t: LiveTrade) => (layerOf(t.ref) === 'swing' ? 60 : 5) * 60_000; // bougie du signal : H1 (swing) ou M5
 const fillIndex = (t: LiveTrade): number => {
   const c = fillCache.get(t);
   if (c !== undefined) return c;
-  const i0 = startIndex(new Date(t.openedAt).getTime());
+  const i0 = startIndex(new Date(t.openedAt).getTime() + SIGNAL_TF_MS(t));
   let found = -1;
   for (let i = i0; i < bars.length && i < i0 + FILL_WINDOW; i++)
     if (t.entry >= bars[i].low - spec.fillTol && t.entry <= bars[i].high + spec.fillTol) { found = i; break; }
