@@ -58,6 +58,7 @@ function run(name: string, N: number, longOnly: boolean, markets: Market[], prot
   const startDay = Math.max(...markets.map((m) => Math.floor(m.bars[Math.max(N, 260)].time / 86_400_000)));
   const equity: Array<{ t: number; eq: number }> = [];
   const pending: Array<{ leg: Leg; dir: 1 | -1; dist: number }> = [];
+  let maxLever = 0; // notionnel total / équité — la taille « 1 % de risque » peut cacher un levier énorme quand l'ATR est faible
   for (const d of days) {
     if (d < startDay) continue;
     let floating = 0;
@@ -94,6 +95,8 @@ function run(name: string, N: number, longOnly: boolean, markets: Market[], prot
       }
       if (leg.pos) floating += (b.close - leg.pos.entry) * leg.pos.dir * leg.pos.units * m.contract;
     }
+    const notional = legs.reduce((s, l) => { const i = l.market.byTime.get(d); return s + (l.pos && i !== undefined ? l.pos.units * l.market.contract * l.market.bars[i].close : 0); }, 0);
+    maxLever = Math.max(maxLever, notional / Math.max(1, eq + floating));
     equity.push({ t: d * 86_400_000, eq: eq + floating });
   }
   // rapport
@@ -107,6 +110,7 @@ function run(name: string, N: number, longOnly: boolean, markets: Market[], prot
   console.log(`\n────────  ${name}  ·  ${dayStr(equity[0].t)} → ${dayStr(equity[equity.length - 1].t)}  ────────`);
   console.log(`rendement annualisé ${f1(cagr * 100)} % · pire perte depuis un sommet −${(maxDd * 100).toFixed(1)} % (depuis ${dayStr(ddStart)}) · depuis 2014 : −${(since2014.maxDd * 100).toFixed(1)} % (depuis ${dayStr(since2014.ddStart)}), désert ${Math.round(since2014.longest)} j · années négatives ${rets.filter((r) => r < 0).length}/${years.length} · pire année ${f1(Math.min(...rets) * 100)} %`);
   console.log('par année : ' + years.map((y, k) => `${y} ${f1(rets[k] * 100)} %`).join(' · '));
+  console.log(`levier max (notionnel / équité) : ${maxLever.toFixed(2)}× — au-delà de ~3×, le swap et la marge deviennent le sujet`);
   console.log('par marché : ' + legs.map((l) => `${l.market.sym} ${l.trades} trades · ${l.trades ? Math.round((100 * l.wins) / l.trades) : 0} % gagnants · ${f1(l.pnl / START * 100)} % de l'équité de départ`).join('  |  '));
 }
 
