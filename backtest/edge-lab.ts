@@ -25,6 +25,11 @@
 //      dans ce sens, stop 1,5 ATR(H1), horizon 3 jours. C'est la seule structure que la ligne de base a montrée.
 //   D. Retour à la moyenne en Asie — écart > 2 σ à la moyenne 20 bougies entre 22h et 06h UTC : on prend le
 //      contre-pied, stop 1 ATR, horizon 2 h. Le scalp de prod « vivait » aux heures calmes ; on teste l'idée nue.
+//   E. VWAP (demande Mathieu, 03/09) — E1 : rebond sur le VWAP de session dans le sens de la tendance (prix au-dessus
+//      du VWAP depuis 1 h, la bougie le touche et clôture au-dessus → long ; symétrique en short) ; E2 : retour au
+//      VWAP (clôture à plus de 1,5 ATR du VWAP → contre-pied vers le VWAP).
+//   F. Divergence RSI 14 — nouveau plus-bas sur 24 bougies alors que le RSI fait un plus-bas plus haut (≥ 5 pts) que
+//      sur le creux précédent, bougie de confirmation haussière → long ; symétrique en short.
 //   Z. Ligne de base — une entrée toutes les 4 h, long et short, stop 1 ATR. Le vrai hasard de chaque semestre.
 //
 //   npx tsx backtest/edge-lab.ts                (XAUUSD)
@@ -56,6 +61,11 @@ const atr = new Array<number>(n).fill(0); // ATR14 simple sur M5
 const atrH1 = atr.map((a) => a * Math.sqrt(12)); // approximation : ATR M5 × √12 ≈ ATR horaire
 const sma20 = new Array<number>(n).fill(0), sd20 = new Array<number>(n).fill(0);
 { let s = 0, s2 = 0; for (let i = 0; i < n; i++) { const c = bars[i].close; s += c; s2 += c * c; if (i >= 20) { const o = bars[i - 20].close; s -= o; s2 -= o * o; } const k = Math.min(20, i + 1); const m = s / k; sma20[i] = m; sd20[i] = Math.sqrt(Math.max(0, s2 / k - m * m)); } }
+// VWAP de session (ancré au jour UTC) et RSI 14 — pour les familles E et F
+const vwap = new Array<number>(n).fill(0);
+{ let day = -1, pv = 0, vv = 0; for (let i = 0; i < n; i++) { const d = dayKey(bars[i].time); if (d !== day) { day = d; pv = 0; vv = 0; } const tp = (bars[i].high + bars[i].low + bars[i].close) / 3; const v = Math.max(1, bars[i].volume); pv += tp * v; vv += v; vwap[i] = pv / vv; } }
+const rsi = new Array<number>(n).fill(50);
+{ let ag = 0, al = 0; for (let i = 1; i < n; i++) { const ch = bars[i].close - bars[i - 1].close; const g = Math.max(0, ch), l = Math.max(0, -ch); if (i <= 14) { ag += g / 14; al += l / 14; } else { ag = (ag * 13 + g) / 14; al = (al * 13 + l) / 14; } rsi[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al); } }
 // clôture d'il y a ~5 jours de bourse (1 440 bougies M5 = 5 × 288), pour le momentum de fond
 const closeAgo = (i: number, k: number) => (i - k >= 0 ? bars[i - k].close : NaN);
 
@@ -161,6 +171,55 @@ CANDS.push({ key: 'D', name: 'D · retour à la moyenne en Asie (écart > 2 σ, 
     const z = sd20[i] > 0 ? (bars[i].close - sma20[i]) / sd20[i] : 0;
     if (z > 2) { out.push({ i, dir: -1, risk: atr[i] }); cool = 12; }
     else if (z < -2) { out.push({ i, dir: 1, risk: atr[i] }); cool = 12; }
+  }
+  return out;
+} });
+
+// E1. Rebond sur le VWAP dans le sens de la tendance : 12 bougies au-dessus du VWAP, la bougie i le touche (low ≤ vwap)
+//     et clôture au-dessus → long ; stop sous le plus-bas de la bougie − 0,2 ATR (borné 0,5–2 ATR) ; horizon 4 h ; 6 bougies de repos.
+CANDS.push({ key: 'E1', name: 'E1 · rebond sur le VWAP de session dans le sens de la tendance (stop sous la bougie)', horizon: 4 * 12, gen: () => {
+  const out: Entry[] = []; let cool = 0;
+  const clampAt = (i: number, x: number) => Math.min(2 * atr[i], Math.max(0.5 * atr[i], x));
+  for (let i = 30; i < n; i++) {
+    if (cool > 0) { cool--; continue; }
+    if (dayKey(bars[i].time) !== dayKey(bars[i - 12].time)) continue; // même session
+    let above = true, below = true;
+    for (let k = i - 12; k < i; k++) { if (bars[k].close <= vwap[k]) above = false; if (bars[k].close >= vwap[k]) below = false; }
+    const b = bars[i];
+    if (above && b.low <= vwap[i] && b.close > vwap[i]) { out.push({ i, dir: 1, risk: clampAt(i, b.close - b.low + 0.2 * atr[i]) }); cool = 6; }
+    else if (below && b.high >= vwap[i] && b.close < vwap[i]) { out.push({ i, dir: -1, risk: clampAt(i, b.high - b.close + 0.2 * atr[i]) }); cool = 6; }
+  }
+  return out;
+} });
+
+// E2. Retour au VWAP : clôture à plus de 1,5 ATR du VWAP → contre-pied ; stop 1 ATR ; horizon 4 h ; 12 bougies de repos.
+CANDS.push({ key: 'E2', name: 'E2 · retour au VWAP (écart > 1,5 ATR, contre-pied, stop 1 ATR)', horizon: 4 * 12, gen: () => {
+  const out: Entry[] = []; let cool = 0;
+  for (let i = 30; i < n; i++) {
+    if (cool > 0) { cool--; continue; }
+    const d = bars[i].close - vwap[i];
+    if (d > 1.5 * atr[i]) { out.push({ i, dir: -1, risk: atr[i] }); cool = 12; }
+    else if (d < -1.5 * atr[i]) { out.push({ i, dir: 1, risk: atr[i] }); cool = 12; }
+  }
+  return out;
+} });
+
+// F. Divergence RSI 14 : plus-bas des 24 dernières bougies sous le creux précédent (12 à 60 bougies avant) avec un RSI
+//    plus haut d'au moins 5 points, et bougie de confirmation (clôture > ouverture) → long ; symétrique ; stop sous le
+//    plus-bas − 0,5 ATR (borné) ; horizon 4 h ; 12 bougies de repos.
+CANDS.push({ key: 'F', name: 'F · divergence RSI 14 (creux plus bas, RSI plus haut, bougie de confirmation)', horizon: 4 * 12, gen: () => {
+  const out: Entry[] = []; let cool = 0;
+  const clampAt = (i: number, x: number) => Math.min(2 * atr[i], Math.max(0.5 * atr[i], x));
+  for (let i = 80; i < n; i++) {
+    if (cool > 0) { cool--; continue; }
+    const b = bars[i];
+    // creux précédent : plus-bas entre i−60 et i−12
+    let j = i - 60, jh = i - 60;
+    for (let k = i - 60; k <= i - 12; k++) { if (bars[k].low < bars[j].low) j = k; if (bars[k].high > bars[jh].high) jh = k; }
+    let recentLow = Infinity, recentHigh = -Infinity;
+    for (let k = i - 11; k < i; k++) { recentLow = Math.min(recentLow, bars[k].low); recentHigh = Math.max(recentHigh, bars[k].high); }
+    if (b.low < bars[j].low && b.low <= recentLow && rsi[i] > rsi[j] + 5 && b.close > b.open) { out.push({ i, dir: 1, risk: clampAt(i, b.close - b.low + 0.5 * atr[i]) }); cool = 12; }
+    else if (b.high > bars[jh].high && b.high >= recentHigh && rsi[i] < rsi[jh] - 5 && b.close < b.open) { out.push({ i, dir: -1, risk: clampAt(i, b.high - b.close + 0.5 * atr[i]) }); cool = 12; }
   }
   return out;
 } });
