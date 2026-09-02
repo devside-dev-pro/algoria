@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 //   npx tsx backtest/walkforward.ts breakout   → breakout M5 (variantes + filtres de régime)
 //   npx tsx backtest/walkforward.ts swing         → swing H1 sur l'or (variantes d'exit)
 //   npx tsx backtest/walkforward.ts swing BTCUSD  → le MÊME jeu de candidats sur le BTC
+//   … --contiguous  → si des trous subsistent, mesure le plus long bloc continu (annoncé, jamais implicite)
 //   npx tsx backtest/walkforward.ts all        → les trois
 import { backtest, type SimParams } from './simulator';
 import { metrics } from './metrics';
@@ -38,6 +39,9 @@ const volTag = (n: number, days: number) => {
 };
 
 const load = (f: string): Bar[] => JSON.parse(readFileSync(`backtest/.cache/${f}`, 'utf8'));
+// Repli EXPLICITE sur le plus long bloc continu quand le broker ne détient plus l'historique manquant.
+// Jamais implicite : voir usableBars().
+const CONTIGUOUS_ONLY = process.argv.includes('--contiguous');
 const dayStr = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 // ===== SCALP M5 : grille de configs candidates (S2 comme base) =====
@@ -250,23 +254,85 @@ function breakoutWF() {
  * celui du BTC n'ait jamais existé. Personne n'avait regardé la donnée avant de faire confiance au résultat.)
  *
  * On préfère donc ne RIEN rendre plutôt qu'un chiffre faux, et dire quoi lancer pour y remédier.
- * Les vides de forme week-end ne comptent pas : le marché était fermé, il n'y a rien à combler.
+ * Les fermetures de marché (week-ends, vendredis saints) ne comptent pas : voir CLOSURE_MAX_H.
  */
-function assertContiguous(bars: Bar[], tfMs: number, sym: string, tf: string) {
-  const closeMs = 6 * 3_600_000; // au-delà : ce n'est plus une fermeture de marché, c'est un trou
+/**
+ * OÙ PLACER LA FRONTIÈRE ENTRE « MARCHÉ FERMÉ » ET « DONNÉE MANQUANTE » (02/09/2026).
+ *
+ * Premier jet : 6 heures. Beaucoup trop bas — il comptait comme trou CHAQUE week-end, ce qui aurait fait
+ * refuser l'or (96 week-ends) alors que sa donnée est saine. Le garde-fou aurait bloqué le seul
+ * walk-forward qui tourne.
+ *
+ * La distribution réelle des vides > 48 h en base tranche la question sans qu'on ait à choisir un chiffre
+ * au doigt mouillé :
+ *     or  49-56 h : 96 vides   → week-ends ordinaires
+ *     or       74 h : 2 vides  → vendredis saints 2025 et 2026, fermeture réelle du marché
+ *     or  83 / 92 / 164 h      → 3 vrais trous, tous en octobre 2024 (une semaine entière absente)
+ *     BTC      46 h : 1 vide   → l'unique fermeture week-end du flux BTC, sinon 24/7
+ * Il y a une BANDE VIDE entre 74 h et 83 h. La frontière se place dedans : 78 heures.
+ *
+ * Ce n'est pas un seuil universel, c'est celui que NOTRE donnée dessine, et il est faux le jour où un
+ * marché fermera quatre jours d'affilée. On l'assume : mieux vaut une frontière lisible, justifiée par une
+ * distribution qu'on peut réafficher, qu'un calendrier de jours fériés qu'on maintiendrait mal.
+ */
+const CLOSURE_MAX_H = 78;
+
+function contiguousBlocks(bars: Bar[], tfMs: number) {
+  const closeMs = CLOSURE_MAX_H * 3_600_000;
+  const blocks: Bar[][] = [];
+  let cur: Bar[] = [];
   let holes = 0, missing = 0, worst = 0;
-  for (let i = 1; i < bars.length; i++) {
-    const gap = bars[i].time - bars[i - 1].time;
-    if (gap > closeMs) { holes++; missing += gap / tfMs - 1; worst = Math.max(worst, gap / tfMs - 1); }
+  for (const b of bars) {
+    if (cur.length) {
+      const gap = b.time - cur[cur.length - 1].time;
+      if (gap > closeMs) {
+        holes++; missing += gap / tfMs - 1; worst = Math.max(worst, gap / tfMs - 1);
+        blocks.push(cur); cur = [];
+      }
+    }
+    cur.push(b);
   }
-  if (!holes) return;
+  if (cur.length) blocks.push(cur);
+  return { blocks, holes, missing, worst };
+}
+
+/**
+ * Retourne les bougies sur lesquelles on a le DROIT de mesurer, ou rien du tout.
+ *
+ * Trois issues, et deux d'entre elles sont des refus assumés :
+ *  - série continue      → on mesure tout, cas normal ;
+ *  - trouée, sans --contiguous → on n'affiche AUCUN chiffre, on dit quoi lancer pour combler ;
+ *  - trouée, avec --contiguous → on mesure UNIQUEMENT le plus long bloc continu, en annonçant très fort
+ *    ce qui a été jeté. C'est un repli légitime — restreindre la fenêtre est honnête, recoller des
+ *    fragments ne l'est pas — mais il doit être DEMANDÉ, jamais appliqué en douce : un backtest qui
+ *    rétrécit son échantillon tout seul est un backtest qui choisit sa fenêtre, donc un backtest suspect.
+ */
+function usableBars(bars: Bar[], tfMs: number, sym: string, tf: string): Bar[] {
+  const { blocks, holes, missing, worst } = contiguousBlocks(bars, tfMs);
+  if (!holes) return bars;
+
   const span = (bars[bars.length - 1].time - bars[0].time) / tfMs;
-  console.error(`\n⛔ ${sym} ${tf} : série trouée — ${holes} trous, ~${Math.round(missing)} bougies absentes sur ${Math.round(span)} (${Math.round((missing / span) * 100)} %), plus gros trou ${Math.round(worst)}.`);
-  console.error("   Un walk-forward là-dessus mesurerait les trous, pas la stratégie. Rien n'est calculé.");
-  console.error(`   Pour combler :  tsx scripts/backfill-gaps.ts ${sym} ${tf}`);
-  console.error('   (à lancer là où api.metaapi.cloud est joignable — machine locale ou Railway), puis');
-  console.error(`   rafraîchir le cache :  node scripts/pull-cache.mjs ${sym} ${tf}`);
-  process.exit(1);
+  const best = blocks.reduce((a, b) => (b.length > a.length ? b : a), blocks[0]);
+  const pct = Math.round((missing / span) * 100);
+  const bestSpan = `${dayStr(best[0].time)}→${dayStr(best[best.length - 1].time)}`;
+
+  if (!CONTIGUOUS_ONLY) {
+    console.error(`\n⛔ ${sym} ${tf} : série trouée — ${holes} trous, ~${Math.round(missing)} bougies absentes sur ${Math.round(span)} (${pct} %), plus gros trou ${Math.round(worst)}.`);
+    console.error("   Un walk-forward là-dessus mesurerait les trous, pas la stratégie. Rien n'est calculé.");
+    console.error(`   Pour combler :  tsx scripts/backfill-gaps.ts ${sym} ${tf}`);
+    console.error('   (à lancer là où api.metaapi.cloud est joignable — machine locale ou Railway), puis');
+    console.error(`   rafraîchir le cache :  node scripts/pull-cache.mjs ${sym} ${tf}`);
+    console.error(`\n   Si le broker ne détient plus cet historique, le seul repli défendable est de mesurer`);
+    console.error(`   sur le plus long bloc continu — ici ${best.length} bougies, ${bestSpan} — en ajoutant :`);
+    console.error(`      npx tsx backtest/walkforward.ts swing ${sym} --contiguous`);
+    process.exit(1);
+  }
+
+  console.warn(`\n⚠️  ${sym} ${tf} — MESURE RESTREINTE (--contiguous).`);
+  console.warn(`   Série trouée : ${holes} trous, ~${Math.round(missing)} bougies absentes (${pct} %). On ne recolle rien.`);
+  console.warn(`   Fenêtre RÉELLEMENT mesurée : ${best.length} bougies, ${bestSpan} — soit ${Math.round((best.length / bars.length) * 100)} % du cache.`);
+  console.warn('   Tout chiffre ci-dessous ne vaut QUE pour cette fenêtre, et le nombre de folds sera réduit d\'autant.');
+  return best;
 }
 
 // SYMBOLE PARAMÉTRABLE (02/09/2026) — la fonction était câblée sur l'or de bout en bout (cache, SPECS,
@@ -275,8 +341,7 @@ function assertContiguous(bars: Bar[], tfMs: number, sym: string, tf: string) {
 // tient ailleurs, pas fabriquer un jeu de réglages par marché — ce serait exactement le sur-ajustement que
 // ce fichier existe pour empêcher.
 function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
-  const raw = load(`${sym}-H1-15.json`);
-  assertContiguous(raw, 3_600_000, sym, 'H1');
+  const raw = usableBars(load(`${sym}-H1-15.json`), 3_600_000, sym, 'H1');
   const ind = computeIndicators(raw);
   const bars = ind.bars;
   const trendDef = (exits: Exits, tpAtr: number): StrategyDef => ({
