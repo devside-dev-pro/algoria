@@ -117,6 +117,25 @@ CANDS.push({ key: 'B', name: 'B · compression (1 h dans < 2 ATR) puis cassure d
   return out;
 } });
 
+// B⁻. CONTRE-PIED de la cassure de boîte (pré-enregistré le 03/09 après la première passe : B est SOUS le hasard
+//     sur les quatre semestres de l'or, 44-47 %, −5 pts partout ; un anti-edge régulier vaut un test de son contraire,
+//     une fois, sans réglage). Même boîte, même stop en distance, direction inversée. Attention : le contraire de
+//     45 % n'est pas 55 % — les trades qui n'atteignent ni +1R ni −1R dans l'horizon ne se retournent pas.
+CANDS.push({ key: 'B-inv', name: 'B⁻ · contre-pied de la cassure de boîte (même boîte, même stop, direction inversée)', horizon: 4 * 12, gen: () => {
+  const out: Entry[] = []; let cool = 0;
+  for (let i = 30; i < n; i++) {
+    if (cool > 0) { cool--; continue; }
+    let hi = -Infinity, lo = Infinity;
+    for (let k = i - 12; k < i; k++) { hi = Math.max(hi, bars[k].high); lo = Math.min(lo, bars[k].low); }
+    if (!(hi - lo < 2 * atr[i]) || !(hi > lo)) continue;
+    const b = bars[i];
+    const clamp = (x: number) => Math.min(2 * atr[i], Math.max(0.5 * atr[i], x));
+    if (b.close > hi) { out.push({ i, dir: -1, risk: clamp(b.close - lo) }); cool = 12; }
+    else if (b.close < lo) { out.push({ i, dir: 1, risk: clamp(hi - b.close) }); cool = 12; }
+  }
+  return out;
+} });
+
 // C. Momentum de fond : à 07h00 UTC, direction = signe du rendement sur 5 jours de bourse ; stop 1,5 ATR(H1) ; horizon 3 jours.
 for (const [label, k] of [['5 jours', 5 * 288], ['10 jours', 10 * 288]] as Array<[string, number]>) {
   CANDS.push({ key: `C-${label}`, name: `C · momentum de fond ${label}, entrée 07h UTC, stop 1,5 ATR(H1)`, horizon: 3 * 288, gen: () => {
