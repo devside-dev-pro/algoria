@@ -56,6 +56,17 @@ export const BROKER_COMMISSIONS: Record<string, CommissionTier[]> = {
     { min: 1000, usd: 900 },
     { min: 4000, usd: 1800 },
   ],
+  // XLENCE (01/09/2026) — « même deal que TradingSphere, mêmes conditions » (Mathieu), relevé sur leur
+  // dashboard partenaire : FTD Tiers 400 / 700 / 900 / 1800. Barème volontairement RECOPIÉ plutôt que
+  // référencé sur tradingsphere : deux partenaires distincts peuvent renégocier séparément, et un alias
+  // ferait bouger l'un quand on corrige l'autre — l'erreur serait silencieuse et se paierait en
+  // commissions mal pré-remplies.
+  xlence: [
+    { min: 200, usd: 400 },
+    { min: 500, usd: 700 },
+    { min: 1000, usd: 900 },
+    { min: 4000, usd: 1800 },
+  ],
 };
 
 // Commission estimée pour un dépôt chez un broker — null si barème inconnu (broker legacy,

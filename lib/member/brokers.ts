@@ -61,6 +61,20 @@ export const BROKERS: Broker[] = [
   // entrée conservée, serveurs MT5 compris. Voir le champ `retired` pour le détail.
   { key: 'fxcess', name: 'FXCESS', url: '', retired: true, servers: ['FXCESS-Live01', 'FXCESS-Live02', 'FXCess-Live02'] },
   { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', affiliateId: '35182', servers: ['TradingSphere-Real1'] },
+  // XLENCE — nouveau partenaire (01/09/2026). Il PREND LA PLACE DE FXCESS, retiré le 10/08 : on repasse
+  // donc à cinq brokers ouverts. Barème IDENTIQUE à TradingSphere (400/700/900/1800, confirmé sur leur
+  // dashboard partenaire), ce qui en fait un second lien de tête sur les gros dépôts.
+  //
+  // ⚠️ SERVEURS RELEVÉS LE 01/09 SUR LES DEUX TERMINAUX (captures Mathieu), et il y a un PIÈGE PROPRE À
+  // XLENCE : les serveurs MT5 et MT4 ne se recouvrent PAS DU TOUT.
+  //   • MT5 réel : Xlence-Real1 — et c'est le SEUL. Il n'apparaît pas dans la liste MT4.
+  //   • MT4 réel : Xlence-Real5, 6, 10, 11, 13 — aucun d'eux n'existe côté MT5.
+  // Conséquence : un membre en MT5 qui choisit « Xlence-Real13 » ne se connectera jamais, et l'inverse
+  // est vrai aussi. Le menu ne filtre pas par plateforme (aucun broker ne le fait aujourd'hui), donc
+  // Real1 est placé EN TÊTE — c'est le seul choix possible pour la plateforme qu'on recommande.
+  // Demo exclu : un membre doit être en réel (règle générale du champ, voir plus haut).
+  // Éditeur : Tradeco Ltd. — c'est ce nom qui s'affiche sous le serveur dans MetaTrader.
+  { key: 'xlence', name: 'Xlence', url: 'https://go.xlence.com/visit/?bta=35553&brand=xlence&afp=ALGORIA', affiliateId: '35553', servers: ['Xlence-Real1', 'Xlence-Real5', 'Xlence-Real6', 'Xlence-Real10', 'Xlence-Real11', 'Xlence-Real13'] },
   { key: 'other', name: 'Other broker (I already have one)', url: '', nonPartner: true },
 ];
 

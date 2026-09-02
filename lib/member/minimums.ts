@@ -19,9 +19,28 @@ import { inMaintenance } from './maintenance';
 // mécaniquement le même dollar de risque qu'un gros. Arbitrage assumé : rouvrir 47 % du tunnel vaut
 // ce risque le temps que S1 revienne.
 //
-// À REMETTRE À $500 dès que S1 est réparée et sort de maintenance — elle reprend alors le palier $200,
-// pour lequel ses caps serrés sont faits. Ne pas laisser cette ligne se figer par oubli.
-export const STRATEGY_MIN_DEPOSIT: Record<number, number> = { 1: 200, 2: 200, 3: 1000 };
+// ── S2 REMISE À $500 LE 01/09/2026 (décision Mathieu) ────────────────────────────────────────────────
+// ⚠️ PAS pour la raison écrite ci-dessus. S1 est TOUJOURS en maintenance et n'a pas repris le palier $200 :
+// la condition qu'on s'était fixée n'est pas remplie. C'est une décision de RISQUE, prise après le mois
+// d'août, et il faut savoir laquelle.
+//
+// LE CHIFFRE QUI DÉCIDE : un compte à $200 copiant à 0.01 lot porte ~3,5 fois le risque RELATIF du maître.
+// Ce n'est pas une estimation, c'est mesuré et déjà écrit plus haut : sur la pire journée du maître
+// (−4 683 $, soit −6,7 % de son solde), un compte à $200 encaissait −23,4 % — contre −9,4 % à $500.
+// La cause est mécanique et sans remède : le lot minimum broker est 0.01 sur l'or, donc un petit compte ne
+// peut pas réduire sa taille pour compenser. Il prend le même dollar de risque qu'un gros, sur dix fois
+// moins de capital. Août l'a payé cash : 39 membres live devenus 27 en une semaine.
+//
+// CE QUE ÇA COÛTE, ET C'EST ÉNORME — À REGARDER EN FACE : la tranche $200-499 pèse 41 dépôts sur 72 (57 %),
+// 38 membres, et $8 550 de commission RÉELLEMENT ENCAISSÉE, soit 37 % de tout ce qu'Algoria a encaissé.
+// On ferme volontairement la porte d'entrée la plus fréquentée. L'arbitrage assumé : un membre qui perd
+// 23 % en une séance ne reste pas, ne parraine personne, et coûte plus cher en réputation qu'il ne rapporte.
+//
+// ⚠️ À FAIRE EN MÊME TEMPS, SINON ON REFAIT LA PANNE DU 20/08 : MIN_ENTRY_DEPOSIT passe mécaniquement à
+// $500 (S1 masquée, S3 à $1000). Les publicités qui promettent « from $200 » envoient donc désormais les
+// gens sur un mur — exactement le défaut qu'on a corrigé le 21/08, à l'envers. Les créas et les pages
+// d'entrée doivent annoncer $500 le jour où cette ligne part en production.
+export const STRATEGY_MIN_DEPOSIT: Record<number, number> = { 1: 200, 2: 500, 3: 1000 };
 
 /** Le plus petit dépôt qui débloque QUELQUE CHOSE aujourd'hui — le « from $X » du marketing.
  *
