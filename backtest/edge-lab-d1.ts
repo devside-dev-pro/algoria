@@ -32,8 +32,12 @@ const path = `backtest/.cache/${sym}-D1-15.json`;
 if (!existsSync(path)) { console.error(`${path} absent → npx tsx scripts/backfill-gaps.ts ${sym} D1 --from 2014-01-01 --broker <nom broker> && node scripts/pull-cache.mjs ${sym} D1`); process.exit(1); }
 const bars = JSON.parse(readFileSync(path, 'utf8')) as Bar[];
 const n = bars.length;
-const COST: Record<string, number> = { XAUUSD: 0.2 + 0.05 + 0.07, BTCUSD: 10 + 5 + 0 };
-const cost = COST[sym] ?? COST.XAUUSD;
+// COÛT PROPORTIONNEL AU PRIX POUR BTC (03/09, trouvé sur la première sortie) : 15 $ par bitcoin est le spread de
+// 2026 (BTC ≈ 100 000 $, soit 0,015 %). Appliqué à 2013, quand BTC valait 100 $, c'était 15 % par trade — d'où des
+// espérances à −16 R en 2012 et une « pire perte » fantaisiste. Le coût BTC est donc 0,05 % du prix (spread +
+// glissement d'un CFD crypto), quelle que soit l'époque. L'or, lui, reste à 0,32 $ : entre 1 200 et 3 500 $ l'once
+// l'écart est de 0,01 à 0,03 %, sans conséquence.
+const costAt = (price: number) => (sym === 'BTCUSD' ? price * 0.0005 : 0.2 + 0.05 + 0.07);
 const dayStr = (t: number) => new Date(t).toISOString().slice(0, 10);
 const pct = (a: number, d: number) => (d ? Math.round((100 * a) / d) : 0);
 const year = (t: number) => String(new Date(t).getUTCFullYear());
@@ -122,7 +126,7 @@ const empty = (): Cell => ({ n: 0, p1: 0, p2: 0, costR: 0, r1: 0, r2: 0 });
 // Résultat RÉEL d'un trade à TP fixe k : +k si le TP est touché, −1 si le stop l'est, sinon le résultat à
 // l'horizon (le trade est coupé au close). Une entrée qui n'atteint ni l'un ni l'autre n'est pas une perte pleine.
 const outcome = (o: Out, k: number) => (o.mfe >= k ? k : o.stopped ? -1 : o.endR);
-const add = (c: Cell, o: Out) => { c.n++; if (o.mfe >= 1) c.p1++; if (o.mfe >= 2) c.p2++; c.costR += cost / o.risk; c.r1 += outcome(o, 1); c.r2 += outcome(o, 2); };
+const add = (c: Cell, o: Out) => { c.n++; if (o.mfe >= 1) c.p1++; if (o.mfe >= 2) c.p2++; c.costR += costAt(bars[o.i].open) / o.risk; c.r1 += outcome(o, 1); c.r2 += outcome(o, 2); };
 const exp1 = (c: Cell) => (c.n ? (c.r1 - c.costR) / c.n : 0); // espérance en R à TP 1R, après coûts
 const exp2 = (c: Cell) => (c.n ? (c.r2 - c.costR) / c.n : 0); // idem à TP 2R
 const f2 = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2);

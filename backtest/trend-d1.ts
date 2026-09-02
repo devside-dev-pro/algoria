@@ -26,7 +26,9 @@ const path = `backtest/.cache/${sym}-D1-15.json`;
 if (!existsSync(path)) { console.error(`${path} absent → node scripts/pull-cache.mjs ${sym} D1`); process.exit(1); }
 const bars = JSON.parse(readFileSync(path, 'utf8')) as Bar[];
 const n = bars.length;
-const SPEC: Record<string, { contract: number; cost: number }> = { XAUUSD: { contract: 100, cost: 0.32 }, BTCUSD: { contract: 1, cost: 15 } };
+// Coût par unité : fixe pour l'or (0,32 $ l'once, 0,01–0,03 % selon l'époque), PROPORTIONNEL pour BTC (0,05 % du
+// prix — 15 $ fixes, c'est le spread de 2026 ; en 2013 ça faisait 15 % par trade et une équité fantaisiste).
+const SPEC: Record<string, { contract: number; cost: (price: number) => number }> = { XAUUSD: { contract: 100, cost: () => 0.32 }, BTCUSD: { contract: 1, cost: (p) => p * 0.0005 } };
 const spec = SPEC[sym] ?? SPEC.XAUUSD;
 const START = 10_000, RISK = 0.01;
 const year = (t: number) => new Date(t).getUTCFullYear();
@@ -55,7 +57,7 @@ function run(name: string, N: number, longOnly = false): Result {
       const chan = pos.dir === 1 ? b.close < ll(i, EXIT) : b.close > hh(i, EXIT);
       if (hit || chan) {
         const px = hit ? pos.stop : b.close;
-        const pnl = (px - pos.entry) * pos.dir * pos.units * spec.contract - spec.cost * pos.units * spec.contract;
+        const pnl = (px - pos.entry) * pos.dir * pos.units * spec.contract - ((spec.cost(pos.entry) + spec.cost(px)) / 2) * pos.units * spec.contract; // aller-retour : moyenne du coût à l'entrée et à la sortie
         eq += pnl;
         trades.push({ dir: pos.dir, entryTime: bars[pos.i0].time, exitTime: b.time, entry: pos.entry, exit: px, units: pos.units, pnl, r: pnl / pos.risk, days: i - pos.i0 });
         pos = null;
