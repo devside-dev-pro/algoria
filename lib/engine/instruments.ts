@@ -71,7 +71,9 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     // S2 : couche additive N96 (défaut). breakoutN pilote la fenêtre Donchian par stratégie.
     breakout: STRAT.breakout ? { ...GOLD_BREAKOUT, N: STRAT.breakoutN ?? GOLD_BREAKOUT.N } : undefined,
     // 3ᵉ couche : SWING de fond H1 (labo 1.75 an : PF 2.21, +88%, tenue moy 3.5 j, en position 67% du temps).
-    swing: STRAT.swing ? GOLD_SWING : undefined,
+    // Levier d'urgence sans déploiement (02/09/2026) : SWING_XAUUSD=0 sur Railway coupe les NOUVELLES entrées
+    // swing or ; les positions déjà ouvertes restent gérées par manage.ts. Voir docs/PLAN-DIAGNOSTIC.md §5.
+    swing: STRAT.swing && process.env.SWING_XAUUSD !== '0' ? GOLD_SWING : undefined,
   },
   // NAS100 RETIRÉ (produit) : Social Trade Hub ne copie pas l'indice et son sizing en lots est piégeux —
   // les pertes NAS n'apparaissaient QUE sur le compte maître, jamais chez les clients. Focus GOLD + BITCOIN.
@@ -88,7 +90,7 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     watchOnly: true, // pas de scalp intraday (aucun edge validé) — mais la couche SWING ci-dessous tourne
     // SWING de fond 24/7 (labo 2.7 ans : PF 2.02, +39% à 1% de risque, week-end PF 2.7) — le compte vit le week-end.
     // Coupé sur S1 (aucune position multi-jours sur le profil « journée bouclée »).
-    swing: STRAT.swing ? BTC_SWING : undefined,
+    swing: STRAT.swing && process.env.SWING_BTCUSD !== '0' ? BTC_SWING : undefined, // SWING_BTCUSD=0 : même levier que l'or
   },
 ];
 
