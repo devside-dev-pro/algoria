@@ -86,7 +86,22 @@ async function page(account: any, before: Date, count = 1000): Promise<Bar[]> {
   }));
 }
 
-async function upsert(bars: Bar[]) {
+/**
+ * DÉDOUBLONNAGE OBLIGATOIRE AVANT ÉCRITURE (02/09/2026, constaté en production sur le 4e trou).
+ * MetaApi renvoie parfois DEUX FOIS la même bougie dans une seule page. Postgres refuse alors le lot
+ * entier : « ON CONFLICT DO UPDATE command cannot affect row a second time » — un même INSERT ne peut pas
+ * mettre à jour la même ligne deux fois. Un seul doublon faisait donc échouer 1 000 bougies valides, et
+ * l'erreur ne dit rien de sa cause réelle.
+ * On garde la DERNIÈRE occurrence : à égalité d'horodatage, la plus récemment renvoyée par l'API.
+ */
+function dedupe(bars: Bar[]): Bar[] {
+  const byTime = new Map<number, Bar>();
+  for (const b of bars) byTime.set(b.time, b);
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
+async function upsert(rows: Bar[]) {
+  const bars = dedupe(rows);
   const CHUNK = 2000;
   for (let i = 0; i < bars.length; i += CHUNK) {
     const { error } = await db.from('candles').upsert(
@@ -115,21 +130,32 @@ async function main() {
   const { account } = await connectAccount();
 
   let written = 0;
+  const failed: string[] = [];
   for (const [n, gap] of gaps.entries()) {
     const label = `${new Date(gap.from).toISOString().slice(0, 10)}→${new Date(gap.to).toISOString().slice(0, 10)}`;
     let cursor = gap.to + step; // on demande les bougies AVANT la fin du trou
     let got = 0;
-    // Garde-fou : un broker qui ne détient plus cet historique renvoie du vide ou du hors-plage.
-    // On s'arrête alors au lieu de boucler — c'est une limite du broker, pas un bug à contourner.
-    for (let guard = 0; guard < 50; guard++) {
-      const bars = await page(account, new Date(cursor));
-      const useful = bars.filter((b) => b.time >= gap.from && b.time <= gap.to);
-      if (useful.length) { await upsert(useful); got += useful.length; written += useful.length; }
-      if (!bars.length) break;
-      const oldest = Math.min(...bars.map((b) => b.time));
-      if (oldest <= gap.from) break;
-      if (oldest >= cursor) break; // l'API ne recule plus : historique épuisé
-      cursor = oldest;
+    // UN TROU QUI ÉCHOUE NE DOIT PAS JETER LE TRAVAIL DES AUTRES (02/09/2026). La première version
+    // remontait l'erreur jusqu'en haut : un incident sur le 4e trou arrêtait la course et les 50 suivants
+    // n'étaient jamais tentés. Le script est idempotent et recalcule les trous à chaque lancement, donc
+    // continuer ne coûte rien et ne masque rien — les échecs sont comptés et listés à la fin.
+    try {
+      // Garde-fou : un broker qui ne détient plus cet historique renvoie du vide ou du hors-plage.
+      // On s'arrête alors au lieu de boucler — c'est une limite du broker, pas un bug à contourner.
+      for (let guard = 0; guard < 50; guard++) {
+        const bars = await page(account, new Date(cursor));
+        const useful = bars.filter((b) => b.time >= gap.from && b.time <= gap.to);
+        if (useful.length) { await upsert(useful); got += useful.length; written += useful.length; }
+        if (!bars.length) break;
+        const oldest = Math.min(...bars.map((b) => b.time));
+        if (oldest <= gap.from) break;
+        if (oldest >= cursor) break; // l'API ne recule plus : historique épuisé
+        cursor = oldest;
+      }
+    } catch (e) {
+      failed.push(`${label} (${(e as { message?: string })?.message ?? e})`);
+      console.error(`[gaps] ${String(n + 1).padStart(3)}/${gaps.length}  ${label}  ÉCHEC — on continue`);
+      continue;
     }
     console.log(`[gaps] ${String(n + 1).padStart(3)}/${gaps.length}  ${label}  +${got}`);
   }
@@ -137,6 +163,10 @@ async function main() {
   const after = await existingTimes();
   const left = findGaps(after);
   console.log(`\n[gaps] ${written} bougies écrites. Trous restants : ${left.length} (avant : ${gaps.length}).`);
+  if (failed.length) {
+    console.error(`[gaps] ${failed.length} trou(x) en échec — relancer le script les retentera :`);
+    for (const f of failed) console.error(`   ${f}`);
+  }
   if (left.length) console.log('[gaps] les trous restants sont de l\'historique que le broker ne détient plus — rien de plus à récupérer par cette voie.');
   process.exit(0);
 }
