@@ -515,10 +515,21 @@ async function main() {
           const sig = swingSignal(DISPLAY, h1bars, SW, mode, inst.config.priceStep ?? 0.01);
           if (!sig) return;
           // ASSURANCE WEEK-END 1/2 (étude 28-29/07, validé « go tout ») : pas de NOUVELLE position de fond
-          // le vendredi ≥ 12h UTC — un swing ouvert vendredi après-midi n'a pas le temps de se protéger (BE à
+          // le vendredi en fin de séance — un swing ouvert trop tard n'a pas le temps de se protéger (BE à
           // 1R) avant le gap du dimanche (vécu le 26/07 : 2 shorts de ven. 19h → −1 850$ chacun au ré-open).
-          // Backtest 21 mois : coût quasi nul ($26 663 vs $28 862) pour supprimer ce risque. Overnights intacts.
-          { const now = new Date(); if (now.getUTCDay() === 5 && now.getUTCHours() >= 12) { await logSignal(sig, { code: 'week-end insurance: no new swing entries Friday ≥ 12h UTC', status: 'rejected' }); return; } }
+          //
+          // L'HEURE EST DÉSORMAIS PAR INSTRUMENT (02/09/2026). Elle était codée en dur à 12h pour TOUS les
+          // marchés, sur la foi d'un backtest in-sample fait sur l'or seul (« coût quasi nul, $26 663 vs
+          // $28 862 »). Le walk-forward du 02/09 dit que les deux marchés veulent l'inverse l'un de l'autre :
+          //          coupure ven.    12h        18h        19h      aucune
+          //   OR       11 313 $   14 072 $   14 403 $   14 018 $   → plus TARD vaut mieux
+          //   BTC       7 313 $    5 200 $    4 783 $    4 331 $   → plus TÔT vaut mieux
+          // Un seul chiffre pour les deux ne pouvait donc que se tromper sur l'un : il était juste pour le
+          // BTC et coûtait ~2 759 $ sur l'or, dans les 4 folds sur 4. Voir SwingConfig.noEntryFriFromUtc
+          // pour le détail et pour la raison de retenir 18h sur l'or plutôt que 19h.
+          //
+          // Sans valeur configurée, on garde 12h : le comportement d'un marché non mesuré ne change pas.
+          { const cut = SW.noEntryFriFromUtc ?? 12; const now = new Date(); if (now.getUTCDay() === 5 && now.getUTCHours() >= cut) { await logSignal(sig, { code: `week-end insurance: no new swing entries Friday ≥ ${cut}h UTC`, status: 'rejected' }); return; } }
           // garde-fous : spread + lockout news (fenêtres du calendrier éco) + veto portefeuille global
           st2: {
             const freshState = readState(terminal, BROKER, state);
