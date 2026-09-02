@@ -21,6 +21,27 @@ export interface SwingConfig {
   // et le trailing, jamais dans le mauvais sens. Backtesté (backtest/swing-ladder.ts) : sur GOLD, verrouiller
   // +0.5R à 2R garde le PF (1.72) et monte le rendement (+189%→+251%) — évite le « beau trade qui rentre à BE ».
   ladder?: [number, number][];
+  /**
+   * Heure UTC à partir de laquelle on refuse une NOUVELLE entrée swing le vendredi.
+   *
+   * Était codée en dur à 12h dans le runner, pour TOUS les marchés (assurance week-end du 29/07). Le
+   * walk-forward du 02/09 montre que les deux marchés veulent l'inverse l'un de l'autre, et de loin :
+   *
+   *          coupure ven.    12h        18h        19h      aucune
+   *   OR       11 313 $   14 072 $   14 403 $   14 018 $     → plus TARD vaut mieux
+   *   BTC       7 313 $    5 200 $    4 783 $    4 331 $     → plus TÔT vaut mieux (gradient monotone)
+   *
+   * Le paramètre unique était donc juste pour le BTC et coûtait ~2 759 $ sur l'or, dans les 4 folds sur 4.
+   *
+   * POURQUOI L'OR EST À 18h ET NON 19h, qui sort pourtant premier : prendre le maximum de trois valeurs
+   * testées est exactement le sur-ajustement que backtest/walkforward.ts existe pour empêcher. 18h se
+   * justifie SANS la donnée — l'incident du 26/07 (deux shorts ouverts à 19h, −1 850 $ chacun au ré-open
+   * du dimanche) est couvert avec une heure de marge. Et 18h et 19h sont sur le même plateau : 331 $ les
+   * séparent, contre 2 759 $ qui les séparent de 12h. On choisit l'heure défendable, pas la plus haute.
+   *
+   * L'or ferme à 21h UTC : couper à 20h ne bloque plus rien (357 trades, comme sans règle du tout).
+   */
+  noEntryFriFromUtc?: number;
 }
 
 /** BTC — cassure du range 24h (labo : PF 2.02 sur 2.7 ans, robuste tiers + week-end).
@@ -29,7 +50,7 @@ export interface SwingConfig {
  *  un SL plein pèse pareil (~500-760$). */
 // TRAIL ÉLARGI (activate 2.0, dist 3.0 au lieu de 2.5/2.5) : le breakout BTC a besoin d'encore plus d'air —
 // backtest 2.7 ans → PF 2.02→2.25, +39%→+48% (petit échantillon 72 trades, amélioration probable). Config-only.
-export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.0, trailDist: 3.0 };
+export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 1, beTrigger: 1, trailActivate: 2.0, trailDist: 3.0, noEntryFriFromUtc: 12 };
 /** OR — suivi de tendance EMA longues + reprise après repli.
  *  STOP RESSERRÉ slAtr 1 (au lieu de 2) : le copieur des clients est en LOT FIXE, donc le risque client =
  *  largeur du stop × SON lot, indépendant du lot master. Un stop 2×ATR (~37 pts) = −187$ sur un compte 500$
@@ -109,9 +130,11 @@ export const BTC_SWING: SwingConfig = { kind: 'breakout', N: 24, confirmAtr: 0.1
 // (2.5 de distance ⇒ il ne dépasse 1.5R qu'à partir de peak 4R). En dessous, ce sont les paliers qui
 // pilotent. Aucune variante « paliers + trailing resserré » n'a été retenue : la seule testée (trail 2.0,
 // dist 1.0) ressort à t = 0.06, donc sans effet — on n'ajoute pas un changement non prouvé à un autre.
-export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 1, beTrigger: 0.5, trailActivate: 2.5, trailDist: 2.5, ladder: [[0.75, 0.3], [1, 0.5], [1.5, 1.0], [2, 1.5]] };
+export const GOLD_SWING: SwingConfig = { kind: 'trend', confirmAtr: 0, slAtr: 1, tpAtr: 16, lot: 1, beTrigger: 0.5, trailActivate: 2.5, trailDist: 2.5, ladder: [[0.75, 0.3], [1, 0.5], [1.5, 1.0], [2, 1.5]], noEntryFriFromUtc: 18 };
 /** NAS100 — cassure du range 72h (labo 2.2 ans : PF 1.94, +$3086, DD 6.9%, tiers ✅ · tenue moy 8.5 j). */
-export const NAS_SWING: SwingConfig = { kind: 'breakout', N: 72, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 3, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5 };
+// NAS100 : PAS rejoué le 02/09 (aucun cache à jour), donc on lui laisse le 12h historique EXPLICITEMENT
+// plutôt que de le faire hériter d'un défaut. Un marché non mesuré ne change pas de comportement.
+export const NAS_SWING: SwingConfig = { kind: 'breakout', N: 72, confirmAtr: 0.15, slAtr: 2, tpAtr: 16, lot: 3, beTrigger: 1, trailActivate: 2.5, trailDist: 2.5, noEntryFriFromUtc: 12 };
 
 const ema = (src: number[], n: number): number[] => {
   const k = 2 / (n + 1);
