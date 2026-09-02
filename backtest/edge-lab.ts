@@ -61,19 +61,20 @@ const closeAgo = (i: number, k: number) => (i - k >= 0 ? bars[i - k].close : NaN
 
 // ===== La mesure : +1R / +2R touchés avant −1R, sur le trajet M5 à partir de la bougie SUIVANTE (entrée à son open) =====
 interface Entry { i: number; dir: 1 | -1; risk: number }
-interface Out { i: number; dir: 1 | -1; risk: number; mfe: number }
+interface Out { i: number; dir: 1 | -1; risk: number; mfe: number; stopped: boolean; endR: number }
 function measure(e: Entry, maxBars: number): Out | null {
   const i0 = e.i + 1;
   if (i0 >= n || !(e.risk > 0)) return null;
   const entry = bars[i0].open;
-  let best = 0;
+  let best = 0, stopped = false, endR = 0;
   for (let i = i0; i < n && i - i0 < maxBars; i++) {
     const b = bars[i];
     const adverse = (e.dir * (entry - (e.dir === 1 ? b.low : b.high))) / e.risk;
-    if (adverse >= 1) break;
+    if (adverse >= 1) { stopped = true; break; }
+    endR = (e.dir * (b.close - entry)) / e.risk; // où en est le trade si l'horizon s'arrête ici
     best = Math.max(best, (e.dir * ((e.dir === 1 ? b.high : b.low) - entry)) / e.risk);
   }
-  return { i: i0, dir: e.dir, risk: e.risk, mfe: best };
+  return { i: i0, dir: e.dir, risk: e.risk, mfe: best, stopped, endR };
 }
 
 // ===== Candidats — paramètres conventionnels, posés avant de regarder =====
@@ -173,12 +174,15 @@ CANDS.push({ key: 'Z', name: 'Z · LIGNE DE BASE — entrées au hasard toutes l
 
 // ===== Rapport =====
 const periods = [...new Set(bars.map((b) => half(b.time)))].sort();
-type Cell = { n: number; p1: number; p2: number; costR: number };
-const empty = (): Cell => ({ n: 0, p1: 0, p2: 0, costR: 0 });
-const add = (c: Cell, o: Out) => { c.n++; if (o.mfe >= 1) c.p1++; if (o.mfe >= 2) c.p2++; c.costR += cost / o.risk; };
+type Cell = { n: number; p1: number; p2: number; costR: number; r1: number; r2: number };
+const empty = (): Cell => ({ n: 0, p1: 0, p2: 0, costR: 0, r1: 0, r2: 0 });
+// Résultat RÉEL d'un trade à TP fixe k : +k si le TP est touché, −1 si le stop l'est, sinon le résultat à
+// l'horizon (le trade est coupé au close). Une entrée qui n'atteint ni l'un ni l'autre n'est pas une perte pleine.
+const outcome = (o: Out, k: number) => (o.mfe >= k ? k : o.stopped ? -1 : o.endR);
+const add = (c: Cell, o: Out) => { c.n++; if (o.mfe >= 1) c.p1++; if (o.mfe >= 2) c.p2++; c.costR += cost / o.risk; c.r1 += outcome(o, 1); c.r2 += outcome(o, 2); };
 // espérance en R à TP fixe k, stop −1R, après coûts : p·k − (1−p)·1 − coût moyen
-const exp1 = (c: Cell) => (c.n ? (c.p1 / c.n) * 1 - (1 - c.p1 / c.n) - c.costR / c.n : 0);
-const exp2 = (c: Cell) => (c.n ? (c.p2 / c.n) * 2 - (1 - c.p2 / c.n) - c.costR / c.n : 0);
+const exp1 = (c: Cell) => (c.n ? (c.r1 - c.costR) / c.n : 0); // espérance en R à TP 1R, après coûts
+const exp2 = (c: Cell) => (c.n ? (c.r2 - c.costR) / c.n : 0); // idem à TP 2R
 const f2 = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2);
 
 console.log(`\n================  LABO D'EDGE — ${sym} M5 · ${bars.length} bougies · ${dayStr(bars[0].time)} → ${dayStr(bars[n - 1].time)}  ================`);
