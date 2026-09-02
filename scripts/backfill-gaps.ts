@@ -23,6 +23,13 @@ import 'dotenv/config'; // charge le .env AVANT que le client MetaApi lise proce
 // joignable — ta machine ou Railway. PAS depuis un bac à sable dont la sortie réseau est filtrée.
 //   tsx scripts/backfill-gaps.ts BTCUSD H1
 //   tsx scripts/backfill-gaps.ts BTCUSD H1 --broker BTCUSD.a   (si le nom broker diffère du label stocké)
+//   tsx scripts/backfill-gaps.ts XAUUSD M5 --from 2024-10-01    (ÉTEND l'historique en arrière jusqu'à cette date)
+//
+// --from (02/09/2026, soir) : par construction ce script ne comble que les trous ENTRE deux bougies existantes ;
+// ce qui précède la première bougie n'est pas un trou, c'est le bord. Or l'étude d'edge par session
+// (backtest/edge-sessions.ts) a besoin du trajet M5 sur deux ans, et le M5 en base commence le 10/04/2026 :
+// tout ce qu'on croit savoir du scalp par session vient des trois mêmes mois que le live. Avec --from, la
+// plage [from, première bougie) est traitée comme un trou de plus, pagé en arrière comme les autres.
 //
 // PRUDENCE VOLONTAIRE : on ne comble PAS les trous de forme « week-end » (le marché était fermé, il n'y a
 // rien à récupérer et on ferait tourner l'API pour rien). Seuil par défaut : 6 h en M1/M5/M15/H1, 4 jours
@@ -37,6 +44,9 @@ const symbol = process.argv[2] ?? '';
 const tf = (process.argv[3] ?? 'H1').toUpperCase();
 const brokerIdx = process.argv.indexOf('--broker');
 const brokerSymbol = brokerIdx > 0 ? process.argv[brokerIdx + 1] : symbol;
+const fromIdx = process.argv.indexOf('--from');
+const fromMs = fromIdx > 0 ? Date.parse(process.argv[fromIdx + 1]) : NaN;
+if (fromIdx > 0 && !Number.isFinite(fromMs)) { console.error('--from attend une date ISO, ex. 2024-10-01'); process.exit(1); }
 
 if (!symbol || !TF_API[tf]) {
   console.error('usage: tsx scripts/backfill-gaps.ts <SYMBOLE_STOCKÉ> <M1|M5|M15|H1|D1> [--broker <SYMBOLE_BROKER>]');
@@ -70,6 +80,8 @@ async function existingTimes(): Promise<number[]> {
 
 function findGaps(times: number[]): Gap[] {
   const gaps: Gap[] = [];
+  // Extension en arrière : la plage avant la première bougie devient un trou comme les autres.
+  if (Number.isFinite(fromMs) && times.length && times[0] - fromMs > step) gaps.push({ from: fromMs, to: times[0] - step });
   for (let i = 1; i < times.length; i++) {
     const delta = times[i] - times[i - 1];
     if (delta > MARKET_CLOSE_MS) gaps.push({ from: times[i - 1] + step, to: times[i] - step });
@@ -142,7 +154,11 @@ async function main() {
     try {
       // Garde-fou : un broker qui ne détient plus cet historique renvoie du vide ou du hors-plage.
       // On s'arrête alors au lieu de boucler — c'est une limite du broker, pas un bug à contourner.
-      for (let guard = 0; guard < 50; guard++) {
+      // Le garde-fou est dimensionné sur le trou : 50 pages suffisaient aux trous ordinaires, pas à une
+      // extension --from de deux ans en M5 (~150 000 bougies = 150 pages). Le script reste idempotent :
+      // interrompu, il reprend là où il s'est arrêté au prochain lancement.
+      const maxPages = Math.max(50, Math.ceil((gap.to - gap.from) / step / 1000) + 5);
+      for (let guard = 0; guard < maxPages; guard++) {
         const bars = await page(account, new Date(cursor));
         const useful = bars.filter((b) => b.time >= gap.from && b.time <= gap.to);
         if (useful.length) { await upsert(useful); got += useful.length; written += useful.length; }
