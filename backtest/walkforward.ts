@@ -341,6 +341,18 @@ function usableBars(bars: Bar[], tfMs: number, sym: string, tf: string): Bar[] {
 // tient ailleurs, pas fabriquer un jeu de réglages par marché — ce serait exactement le sur-ajustement que
 // ce fichier existe pour empêcher.
 function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
+  // ⚠️ LE BTC NE FAIT PAS TOURNER CETTE STRATÉGIE (02/09/2026, trouvé par le test de parité).
+  // lib/engine/swing.ts : GOLD_SWING est `kind: 'trend'` — c'est bien ce que swingTrendDef reproduit.
+  // Mais BTC_SWING est `kind: 'breakout'` (Donchian 24 h, slAtr 2, trail 2.0/3.0) : une autre famille,
+  // d'autres entrées, d'autres sorties. Le walk-forward BTC du 02/09 a donc mesuré une stratégie que le
+  // BTC ne joue pas, et sa conclusion (« la prod BTC est déjà la meilleure des six ») ne portait sur rien.
+  // On ne masque pas le résultat — l'outil reste utile pour explorer — mais on refuse qu'il soit lu comme
+  // un jugement sur la production tant qu'un simulateur breakout n'existe pas.
+  if (sym === 'BTCUSD') {
+    console.log('\n⚠️  ATTENTION — ce que vous allez lire ne décrit PAS le BTC en production.');
+    console.log('   Live : BTC_SWING = breakout (Donchian 24h).  Simulé ici : trend (EMA + repli).');
+    console.log('   Deux familles différentes. Aucune décision de production ne doit sortir de ce tableau.');
+  }
   const raw = usableBars(load(`${sym}-H1-15.json`), 3_600_000, sym, 'H1');
   const ind = computeIndicators(raw);
   const bars = ind.bars;

@@ -3,6 +3,7 @@
 // des edges live sur données fraîches). Une seule implémentation = un seul tribunal.
 import type { BacktestRun, SimTrade, EquityPoint } from './simulator';
 import type { Bar } from '../lib/engine/types';
+import { GOLD_SWING } from '../lib/engine/swing';
 
 // ===== Specs marché (miroir de validate.ts — coûts RÉELS par symbole) =====
 export interface Spec { spread: number; contractSize: number; commissionPerLot: number }
@@ -100,9 +101,38 @@ export const swingTrendDef = (exits: Exits, tpAtr: number): StrategyDef => ({
   },
 });
 
-/** Ce qui tourne RÉELLEMENT en live sur le swing, assurance week-end incluse (cf. runner/index.ts). */
-export const SWING_PROD_EXITS: Exits = { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 12 };
-export const SWING_PROD_TP_ATR = 16;
+/**
+ * LA CONFIG PROD EST DÉRIVÉE DU LIVE, PLUS RECOPIÉE (02/09/2026, trouvé par le test de parité).
+ *
+ * Cette constante était écrite à la main et NE CORRESPONDAIT PAS à GOLD_SWING. Trois écarts, dont deux
+ * gouvernent directement le taux de breakeven — c'est-à-dire exactement la mesure qui a échoué :
+ *
+ *                       live (GOLD_SWING)                          sim (l'ancienne constante)
+ *   breakeven           0,5 R                                      1 R
+ *   paliers             [0.75→0.3, 1→0.5, 1.5→1.0, 2→1.5]          [2→0.5]
+ *   coupure vendredi    18h (depuis #342)                          12h
+ *
+ * Un BE à 0,5 R se déclenche BEAUCOUP plus souvent qu'à 1 R, et quatre paliers verrouillent bien plus tôt
+ * qu'un seul. Le simulateur ne « mentait » donc pas : il jouait une autre stratégie. Le live sort 54 % de
+ * ses swings au breakeven, le sim 22 % — et personne ne pouvait le voir, puisque les deux configurations
+ * vivaient dans deux fichiers sans lien.
+ *
+ * On les relie. Si GOLD_SWING change, le backtest suit — il ne peut plus juger une stratégie qu'on ne
+ * fait pas tourner.
+ *
+ * `weekendFlatLosers` reste en dur : ce n'est pas un champ de SwingConfig mais une boucle du runner
+ * (runner/index.ts:552), active sur tous les instruments. Le jour où elle devient configurable, elle se
+ * dérivera aussi.
+ */
+export const SWING_PROD_EXITS: Exits = {
+  be: GOLD_SWING.beTrigger,
+  trailActivate: GOLD_SWING.trailActivate,
+  trailDist: GOLD_SWING.trailDist,
+  ladder: GOLD_SWING.ladder,
+  noEntryFriFrom: GOLD_SWING.noEntryFriFromUtc,
+  weekendFlatLosers: true,
+};
+export const SWING_PROD_TP_ATR = GOLD_SWING.tpAtr;
 
 export const RISK_PCT = 0.01, MAX_DAILY_LOSS = 0.04, START = 10_000;
 const dayOf = (t: number) => Math.floor(t / 86_400_000);
