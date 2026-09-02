@@ -378,6 +378,18 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
     // config qu'on ne saura pas défendre le jour où elle cassera.
     { name: 'PROD, WE perdants SEUL (sans ven 12h)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true } },
     { name: 'PROD, ven 12h SEUL (sans WE perdants)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], noEntryFriFrom: 12 } },
+    // OÙ COUPER LE VENDREDI ? (02/09/2026) — la règle live coupe à 12h UTC, mais l'incident qui l'a motivée
+    // date du 26/07 et portait sur deux shorts ouverts à 19h. La règle est donc SEPT HEURES plus large que
+    // l'événement qu'elle est censée prévenir, et sur l'or ces sept heures sont la session US du vendredi —
+    // le marché ferme à 21h UTC, donc couper à 12h supprime 9 h de cotation, pas un bord de week-end.
+    // Mesuré : sur l'or ces entrées valaient +2 705 $ sur 4 folds (27 trades, ~100 $ pièce contre 39 $ de
+    // moyenne) ; sur le BTC elles coûtaient 2 981 $ (23 trades, ~130 $ de perte pièce contre +10 $ de moyenne).
+    // On teste donc l'heure de coupure elle-même. Trois valeurs seulement, et choisies sur l'HISTOIRE
+    // (l'incident de 19h, la clôture de 21h), pas en balayant la grille : un seuil optimisé sur la donnée
+    // serait exactement le péché que ce fichier existe pour empêcher.
+    { name: 'PROD, ven 18h (au lieu de 12h)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 18 } },
+    { name: 'PROD, ven 19h (heure de l\'incident)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 19 } },
+    { name: 'PROD, ven 20h (juste avant la cloche)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 20 } },
   ];
   const N = bars.length, TUNE = Math.floor(N * 0.43), TEST = Math.floor(N * 0.14);
   // DURÉES CALCULÉES, PAS RECOPIÉES (02/09/2026). L'en-tête annonçait « tune ~9 mois → test ~3 mois » :
