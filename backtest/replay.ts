@@ -19,6 +19,12 @@
 //   · VARIANTES DE SORTIE sur les mêmes entrées : la prod, le brut (SL/TP sans gestion), les seuils de BE, etc.,
 //     avec le détail par MOIS — une variante qui gagne un mois et perd les deux autres n'a rien prouvé.
 //
+// LE STOP QUI COMPTE : `sl0`, le stop INITIAL du signal (signals.stop_loss), jamais `trades.sl` qui est le stop
+// courant réécrit à chaque BE/palier/trailing. La première version utilisait `sl` : sur les sorties au BE le
+// risque devenait ~0, chaque trade sortait « trail +1R » à la première bougie, et LIVE affichait +150 R pour
+// −18 591 $. Le contrôle de sincérité (PROD rejouée ≈ LIVE) existait pour ça. Le R live est recalculé depuis
+// le P&L et le risque initial ; la colonne `r` a le même défaut que `sl`.
+//
 // DIFFÉRENCES ASSUMÉES : la bougie M1 de l'entrée est comptée en entier (son plus-bas peut précéder l'entrée —
 // légèrement pessimiste) ; pas de cap journalier ni de kill switch (ils coupent des ENTRÉES, pas des sorties) ;
 // coûts = commission + glissement sur les sorties au stop (le spread est déjà dans le prix d'entrée live).
@@ -112,16 +118,17 @@ const startIndex = (t: number): number => {
   return lo;
 };
 
+const riskOf = (t: LiveTrade): number => (t.sl0 == null ? 0 : Math.abs(t.entry - t.sl0));
+
 function replay(t: LiveTrade, ex: Exit): Outcome | null {
-  if (t.sl == null) return null;
   const dir = t.dir === 'long' ? 1 : -1;
-  const riskDist = Math.abs(t.entry - t.sl);
+  const riskDist = riskOf(t);
   if (!(riskDist > 0)) return null;
   const i0 = startIndex(new Date(t.openedAt).getTime());
   if (i0 >= bars.length) return null;
   const costR = (spec.commissionPerLot / spec.contractSize) / riskDist; // commission par lot, ramenée en R
   const slipR = spec.slippage / riskDist;
-  let stop = t.sl, peak = t.entry;
+  let stop = t.sl0!, peak = t.entry;
   const tp = ex.tpR ? t.entry + dir * ex.tpR * riskDist : undefined;
   for (let i = i0; i < bars.length && i - i0 < ex.maxBars; i++) {
     const b = bars[i];
@@ -146,9 +153,8 @@ function replay(t: LiveTrade, ex: Exit): Outcome | null {
 
 /** Excursion favorable max (en R) avant que le stop initial −1R soit touché, sur l'horizon. */
 function excursion(t: LiveTrade, maxBars: number): { mfe: number; mae: number } | null {
-  if (t.sl == null) return null;
   const dir = t.dir === 'long' ? 1 : -1;
-  const riskDist = Math.abs(t.entry - t.sl);
+  const riskDist = riskOf(t);
   if (!(riskDist > 0)) return null;
   const i0 = startIndex(new Date(t.openedAt).getTime());
   let mfe = 0, mae = 0;
@@ -176,15 +182,16 @@ const layers = [...new Set(rows.map((t) => layerOf(t.ref)))].sort();
 for (const layer of layers) {
   const all = rows.filter((t) => layerOf(t.ref) === layer);
   const maxBars = layer === 'swing' ? SWING_BARS : SCALP_BARS;
-  const ok = all.filter((t) => t.sl != null && Math.abs(t.entry - t.sl!) > 0 && startIndex(new Date(t.openedAt).getTime()) < bars.length);
+  const ok = all.filter((t) => riskOf(t) > 0 && startIndex(new Date(t.openedAt).getTime()) < bars.length);
   const months = [...new Set(ok.map((t) => monthOf(t.closedAt)))].sort();
   const livePnl = all.reduce((s, t) => s + t.pnl, 0);
-  const liveR = (t: LiveTrade) => (t.r != null ? t.r : t.exit != null && t.sl != null ? ((t.dir === 'long' ? 1 : -1) * (t.exit - t.entry)) / Math.abs(t.entry - t.sl) : 0);
+  // R live = P&L réel / risque initial au lot réel — pas la colonne `r` (calculée sur le stop courant).
+  const liveR = (t: LiveTrade) => t.pnl / (riskOf(t) * t.lot * spec.contractSize);
   const byStrat = new Map<number, { n: number; pnl: number }>();
   for (const t of all) { const s = byStrat.get(t.strategy) ?? { n: 0, pnl: 0 }; s.n++; s.pnl += t.pnl; byStrat.set(t.strategy, s); }
 
   console.log(`\n────────  ${sym} · ${layer.toUpperCase()}  ·  ${all.length} trades live · ${money(livePnl)}  ·  ${[...byStrat.entries()].sort().map(([s, v]) => `S${s} ${v.n} tr ${money(v.pnl)}`).join(' · ')}  ────────`);
-  console.log(`rejouables : ${ok.length}/${all.length} (les autres : sans stop enregistré ou hors couverture M1)`);
+  console.log(`rejouables : ${ok.length}/${all.length} (les autres : sans stop initial dans signals, ou hors couverture M1) · risque initial médian ${(() => { const d = ok.map(riskOf).sort((a, b) => a - b); return (d[Math.floor(d.length / 2)] ?? 0).toFixed(2); })()} $`);
   if (!ok.length) continue;
 
   // 1) EDGE DES ENTRÉES — indépendant de toute gestion.
@@ -214,7 +221,7 @@ for (const layer of layers) {
     const wins = outs.filter((x) => x.o.r > 0).length;
     const cnt = (k: Reason) => outs.filter((x) => x.o.reason === k).length;
     const byM = months.map((m) => outs.filter((x) => monthOf(x.t.closedAt) === m).reduce((s, x) => s + x.o.r, 0));
-    const usd = outs.reduce((s, x) => s + x.o.r * Math.abs(x.t.entry - x.t.sl!) * x.t.lot * spec.contractSize, 0);
+    const usd = outs.reduce((s, x) => s + x.o.r * riskOf(x.t) * x.t.lot * spec.contractSize, 0);
     console.log(`${v.name.padEnd(52)} ${String(outs.length).padStart(4)} ${f1(tot).padStart(7)} ${f2(tot / outs.length).padStart(6)} ${pct(wins, outs.length).padStart(4)}  ${pct(cnt('sl'), outs.length).padStart(4)} ${pct(cnt('be'), outs.length).padStart(4)} ${pct(cnt('trail'), outs.length).padStart(4)} ${pct(cnt('tp'), outs.length).padStart(4)} ${pct(cnt('time'), outs.length).padStart(4)}  ${byM.map((x) => f1(x).padStart(6)).join(' ')}  ${money(usd).padStart(12)}`);
   }
   console.log(`Lecture : la ligne LIVE est la réalité ; la ligne PROD rejouée doit lui ressembler (sinon le rejeu ment). Une variante ne compte que si elle gagne sur CHAQUE mois.`);
