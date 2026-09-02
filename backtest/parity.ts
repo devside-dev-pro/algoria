@@ -20,13 +20,20 @@ import { readFileSync, existsSync } from 'node:fs';
 // S3 : le scalp confluence est ÉTEINT en live (intraday='breakout') → sa parité « scalp » est indicative,
 // son vrai moteur attend un sim breakout.
 import { backtest } from './simulator';
+import { computeIndicators, labBacktest, swingTrendDef, SPECS, START, SWING_PROD_EXITS, SWING_PROD_TP_ATR } from './labcore';
 import { FEATURES } from '../lib/engine/features';
 import { STRATEGIES } from '../lib/engine/strategies';
 import { cfgFor, simFor } from './wiring';
 import type { Bar } from '../lib/engine/types';
 
-interface LiveDay { day: string; strategy: number; layer: string; n: number; pnl: number }
-const LIVE: LiveDay[] = JSON.parse(readFileSync('backtest/fixtures/live-daily.json', 'utf8')).days;
+interface LiveDay { day: string; strategy: number; layer: string; symbol?: string; n: number; pnl: number }
+interface LiveExit { symbol: string; layer: string; strategy: number; reason: string; n: number; pnl: number }
+const FIX = JSON.parse(readFileSync('backtest/fixtures/live-daily.json', 'utf8')) as { days: LiveDay[]; exits?: LiveExit[]; from?: string; to?: string; generatedAt?: string };
+// La fixture v1 était implicitement XAUUSD sans le dire ; la v2 porte le symbole. On filtre explicitement,
+// sinon les trades BTC (qui GAGNENT) viendraient diluer une comparaison censée juger l'or.
+const LIVE: LiveDay[] = FIX.days.filter((d) => (d.symbol ?? 'XAUUSD') === 'XAUUSD');
+if (FIX.from) console.log(`[parity] fixture live : ${FIX.from} → ${FIX.to}${FIX.generatedAt ? ` (extraite le ${FIX.generatedAt.slice(0, 10)})` : ''}`);
+else console.log("[parity] ⚠️ fixture SANS date de génération — probablement la v1 figée. Régénérer : tsx scripts/pull-live-fixture.ts");
 const CACHE = 'backtest/.cache/XAUUSD-M5-15.json';
 const dayStr = (t: number) => new Date(t).toISOString().slice(0, 10);
 
@@ -100,4 +107,55 @@ for (const sid of ['1', '2', '3'] as const) {
   }
   console.log();
 }
-console.log('[parity] terminé.');
+// ═══ RÉPARTITION DES SORTIES — l'angle qui manquait (02/09/2026) ═══════════════════════════════════
+// Le P&L journalier ne suffit pas : deux distributions de sorties très différentes peuvent donner la même
+// somme. Or c'est précisément là que le live surprend — en réalité 44 % des scalps or et 54 % des swings or
+// finissent au BREAKEVEN, pour +27 $ et +51 $. Si le simulateur n'en produit pas autant, son modèle de
+// sortie est faux, et alors AUCUN de ses chiffres ne vaut : ni le P&L, ni le classement des candidats du
+// walk-forward, ni les décisions prises dessus.
+const pct = (n: number, tot: number) => (tot ? `${Math.round((100 * n) / tot)}%` : '—');
+const dist = (rows: Array<{ reason: string; n: number; pnl: number }>) => {
+  const tot = rows.reduce((s, r) => s + r.n, 0);
+  return [...rows].sort((a, b) => b.n - a.n)
+    .map((r) => `${r.reason} ${r.n} (${pct(r.n, tot)}, ${(r.pnl / Math.max(1, r.n)).toFixed(0)}$/tr)`).join(' · ');
+};
+
+if (FIX.exits?.length) {
+  console.log('\n================  RÉPARTITION DES SORTIES — LIVE vs SIM  ================');
+  for (const layer of ['scalp', 'swing'] as const) {
+    const live = FIX.exits.filter((e) => e.symbol === 'XAUUSD' && e.layer === layer);
+    if (!live.length) continue;
+    const totL = live.reduce((s, e) => s + e.n, 0);
+    const beL = live.filter((e) => e.reason === 'be').reduce((s, e) => s + e.n, 0);
+    console.log(`\n--- ${layer.toUpperCase()} or · ${totL} trades live`);
+    console.log(`LIVE : ${dist(live)}`);
+
+    if (layer === 'swing') {
+      // Le swing n'avait AUCUN sim dans ce fichier — c'est pourtant lui qui a produit le +14 018 $ du
+      // walk-forward du 02/09, opposé aux −18 591 $ du live. On le rejoue ici, avec la définition PARTAGÉE.
+      const H1 = 'backtest/.cache/XAUUSD-H1-15.json';
+      if (!existsSync(H1)) { console.log('SIM  : cache H1 absent → node scripts/pull-cache.mjs XAUUSD H1'); continue; }
+      const h1: Bar[] = JSON.parse(readFileSync(H1, 'utf8'));
+      const win = h1.filter((b) => { const d = dayStr(b.time); return d >= (FIX.from ?? '2000-01-01') && d <= (FIX.to ?? '2100-01-01'); });
+      if (win.length < 800) { console.log(`SIM  : seulement ${win.length} bougies H1 sur la fenêtre live (700 de chauffe nécessaires)`); continue; }
+      const run = labBacktest(computeIndicators(win), swingTrendDef(SWING_PROD_EXITS, SWING_PROD_TP_ATR), SPECS.XAUUSD);
+      const byReason = new Map<string, { reason: string; n: number; pnl: number }>();
+      for (const t of run.trades) {
+        const cur = byReason.get(t.reason) ?? { reason: t.reason, n: 0, pnl: 0 };
+        cur.n++; cur.pnl += t.pnl; byReason.set(t.reason, cur);
+      }
+      const sim = [...byReason.values()];
+      const totS = sim.reduce((s, e) => s + e.n, 0);
+      const beS = sim.filter((e) => e.reason === 'be').reduce((s, e) => s + e.n, 0);
+      console.log(`SIM  : ${dist(sim)}`);
+      console.log(`P&L  : live $${live.reduce((s, e) => s + e.pnl, 0)}  ·  sim $${(run.finalBalance - START).toFixed(0)}`);
+      console.log(`BE   : live ${pct(beL, totL)}  ·  sim ${pct(beS, totS)}  → ${Math.abs(beL / Math.max(1, totL) - beS / Math.max(1, totS)) > 0.15
+        ? '❌ ÉCART MAJEUR sur le breakeven : le modèle de sortie du sim ne reproduit pas le live, ses chiffres ne sont pas utilisables tels quels'
+        : '✅ taux de breakeven comparable'}`);
+      console.log('⚠️ Rappel : le sim dimensionne à 1 % de risque sur $10 000, le live est en LOT FIXE. Les');
+      console.log('   niveaux de $ ne sont donc pas directement comparables — la RÉPARTITION, elle, l\'est.');
+    }
+  }
+}
+
+console.log('\n[parity] terminé.');

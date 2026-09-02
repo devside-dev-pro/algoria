@@ -80,6 +80,30 @@ export function computeIndicators(bars: Bar[]): Indicators {
 }
 
 // ===== Simulateur du labo — MÊMES règles d'exécution que backtest/simulator.ts (pessimiste, causal) =====
+/**
+ * STRATÉGIE SWING « TREND » — LA DÉFINITION PARTAGÉE (02/09/2026).
+ *
+ * Elle vivait à l'intérieur de walkforward.ts, donc tout autre test voulant la rejouer devait la RECOPIER.
+ * Un test de parité qui recopie la stratégie ne prouve rien : il compare le live à une copie, et le jour où
+ * les deux divergent d'une ligne, il valide un simulateur qui n'est plus celui sur lequel on décide.
+ * Elle est donc ici, importée par les deux.
+ */
+export const swingTrendDef = (exits: Exits, tpAtr: number): StrategyDef => ({
+  family: 'sw', params: 't', minBars: 700, exits,
+  onClose(i, d) {
+    const { bars: b, atr, emaF, emaS, ema21 } = d; if (i < 601) return null; const bar = b[i], a = atr[i];
+    const bull = emaF[i] > emaS[i] * 1.001, bear = emaF[i] < emaS[i] * 0.999;
+    const dip = b[i - 1].low < ema21[i - 1] || b[i - 2].low < ema21[i - 2], pop = b[i - 1].high > ema21[i - 1] || b[i - 2].high > ema21[i - 2];
+    if (bull && dip && bar.close > bar.open && bar.close > ema21[i]) return { direction: 'long', stopLoss: bar.close - a, takeProfit: bar.close + tpAtr * a };
+    if (bear && pop && bar.close < bar.open && bar.close < ema21[i]) return { direction: 'short', stopLoss: bar.close + a, takeProfit: bar.close - tpAtr * a };
+    return null;
+  },
+});
+
+/** Ce qui tourne RÉELLEMENT en live sur le swing, assurance week-end incluse (cf. runner/index.ts). */
+export const SWING_PROD_EXITS: Exits = { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 12 };
+export const SWING_PROD_TP_ATR = 16;
+
 export const RISK_PCT = 0.01, MAX_DAILY_LOSS = 0.04, START = 10_000;
 const dayOf = (t: number) => Math.floor(t / 86_400_000);
 const isFriCutoff = (t: number) => { const d = new Date(t); return d.getUTCDay() === 5 && d.getUTCHours() >= 20; }; // or clôture ~21h UTC ven.
