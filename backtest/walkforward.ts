@@ -254,10 +254,31 @@ function breakoutWF() {
  * celui du BTC n'ait jamais existé. Personne n'avait regardé la donnée avant de faire confiance au résultat.)
  *
  * On préfère donc ne RIEN rendre plutôt qu'un chiffre faux, et dire quoi lancer pour y remédier.
- * Les vides de forme week-end ne comptent pas : le marché était fermé, il n'y a rien à combler.
+ * Les fermetures de marché (week-ends, vendredis saints) ne comptent pas : voir CLOSURE_MAX_H.
  */
+/**
+ * OÙ PLACER LA FRONTIÈRE ENTRE « MARCHÉ FERMÉ » ET « DONNÉE MANQUANTE » (02/09/2026).
+ *
+ * Premier jet : 6 heures. Beaucoup trop bas — il comptait comme trou CHAQUE week-end, ce qui aurait fait
+ * refuser l'or (96 week-ends) alors que sa donnée est saine. Le garde-fou aurait bloqué le seul
+ * walk-forward qui tourne.
+ *
+ * La distribution réelle des vides > 48 h en base tranche la question sans qu'on ait à choisir un chiffre
+ * au doigt mouillé :
+ *     or  49-56 h : 96 vides   → week-ends ordinaires
+ *     or       74 h : 2 vides  → vendredis saints 2025 et 2026, fermeture réelle du marché
+ *     or  83 / 92 / 164 h      → 3 vrais trous, tous en octobre 2024 (une semaine entière absente)
+ *     BTC      46 h : 1 vide   → l'unique fermeture week-end du flux BTC, sinon 24/7
+ * Il y a une BANDE VIDE entre 74 h et 83 h. La frontière se place dedans : 78 heures.
+ *
+ * Ce n'est pas un seuil universel, c'est celui que NOTRE donnée dessine, et il est faux le jour où un
+ * marché fermera quatre jours d'affilée. On l'assume : mieux vaut une frontière lisible, justifiée par une
+ * distribution qu'on peut réafficher, qu'un calendrier de jours fériés qu'on maintiendrait mal.
+ */
+const CLOSURE_MAX_H = 78;
+
 function contiguousBlocks(bars: Bar[], tfMs: number) {
-  const closeMs = 6 * 3_600_000; // au-delà : ce n'est plus une fermeture de marché, c'est un trou
+  const closeMs = CLOSURE_MAX_H * 3_600_000;
   const blocks: Bar[][] = [];
   let cur: Bar[] = [];
   let holes = 0, missing = 0, worst = 0;
