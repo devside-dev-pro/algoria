@@ -7,7 +7,8 @@ import { readFileSync } from 'node:fs';
 // prod sur les fenêtres test.
 //   npx tsx backtest/walkforward.ts            → scalp M5 (S2 par défaut, grille de configs)
 //   npx tsx backtest/walkforward.ts breakout   → breakout M5 (variantes + filtres de régime)
-//   npx tsx backtest/walkforward.ts swing      → swing H1 (variantes d'exit)
+//   npx tsx backtest/walkforward.ts swing         → swing H1 sur l'or (variantes d'exit)
+//   npx tsx backtest/walkforward.ts swing BTCUSD  → le MÊME jeu de candidats sur le BTC
 //   npx tsx backtest/walkforward.ts all        → les trois
 import { backtest, type SimParams } from './simulator';
 import { metrics } from './metrics';
@@ -236,8 +237,47 @@ function breakoutWF() {
 }
 
 // ===== SWING H1 : variantes d'exit en walk-forward (tune 9 mois → test 3 mois) =====
-function swingWF() {
-  const ind = computeIndicators(load('XAUUSD-H1-15.json'));
+/**
+ * REFUS DE MESURER SUR UNE SÉRIE TROUÉE (02/09/2026).
+ *
+ * Le cache est un simple tableau : deux bougies séparées de trois semaines y deviennent VOISINES. EMA(600),
+ * EMA(50) et ATR14 traversent alors la discontinuité sans la voir, et une stratégie qui exige 700 bougies de
+ * chauffe se met à « chauffer » sur un collage de fragments. Le backtest ne mesure plus une stratégie, il
+ * mesure des trous — et il rend un chiffre parfaitement présentable, ce qui est le pire des cas.
+ *
+ * Constaté sur BTCUSD H1 : 46 vrais trous, 13 367 heures absentes sur 24 648, soit 54 % du calendrier.
+ * (L'or est sain : 5 trous, 482 heures — d'où le fait que le walk-forward or tourne depuis juillet et que
+ * celui du BTC n'ait jamais existé. Personne n'avait regardé la donnée avant de faire confiance au résultat.)
+ *
+ * On préfère donc ne RIEN rendre plutôt qu'un chiffre faux, et dire quoi lancer pour y remédier.
+ * Les vides de forme week-end ne comptent pas : le marché était fermé, il n'y a rien à combler.
+ */
+function assertContiguous(bars: Bar[], tfMs: number, sym: string, tf: string) {
+  const closeMs = 6 * 3_600_000; // au-delà : ce n'est plus une fermeture de marché, c'est un trou
+  let holes = 0, missing = 0, worst = 0;
+  for (let i = 1; i < bars.length; i++) {
+    const gap = bars[i].time - bars[i - 1].time;
+    if (gap > closeMs) { holes++; missing += gap / tfMs - 1; worst = Math.max(worst, gap / tfMs - 1); }
+  }
+  if (!holes) return;
+  const span = (bars[bars.length - 1].time - bars[0].time) / tfMs;
+  console.error(`\n⛔ ${sym} ${tf} : série trouée — ${holes} trous, ~${Math.round(missing)} bougies absentes sur ${Math.round(span)} (${Math.round((missing / span) * 100)} %), plus gros trou ${Math.round(worst)}.`);
+  console.error("   Un walk-forward là-dessus mesurerait les trous, pas la stratégie. Rien n'est calculé.");
+  console.error(`   Pour combler :  tsx scripts/backfill-gaps.ts ${sym} ${tf}`);
+  console.error('   (à lancer là où api.metaapi.cloud est joignable — machine locale ou Railway), puis');
+  console.error(`   rafraîchir le cache :  node scripts/pull-cache.mjs ${sym} ${tf}`);
+  process.exit(1);
+}
+
+// SYMBOLE PARAMÉTRABLE (02/09/2026) — la fonction était câblée sur l'or de bout en bout (cache, SPECS,
+// libellé). Le BTC est la moitié du produit et n'avait jamais eu de walk-forward ; il en a un dès que sa
+// donnée est comblée. Les candidats restent IDENTIQUES d'un symbole à l'autre : on veut savoir si l'edge
+// tient ailleurs, pas fabriquer un jeu de réglages par marché — ce serait exactement le sur-ajustement que
+// ce fichier existe pour empêcher.
+function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
+  const raw = load(`${sym}-H1-15.json`);
+  assertContiguous(raw, 3_600_000, sym, 'H1');
+  const ind = computeIndicators(raw);
   const bars = ind.bars;
   const trendDef = (exits: Exits, tpAtr: number): StrategyDef => ({
     family: 'sw', params: 't', minBars: 700, exits,
@@ -257,7 +297,7 @@ function swingWF() {
     { name: 'TP8 trail2@2 + WE perdants + ven 12h', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2, weekendFlatLosers: true, noEntryFriFrom: 12 } },
   ];
   const N = bars.length, TUNE = Math.floor(N * 0.43), TEST = Math.floor(N * 0.14); // ~9 mois / ~3 mois
-  console.log(`\n========== WALK-FORWARD SWING (H1, ${N} bougies) — tune ~9 mois → test ~3 mois ==========`);
+  console.log(`\n========== WALK-FORWARD SWING ${sym} (H1, ${N} bougies) — tune ~9 mois → test ~3 mois ==========`);
   console.log('fold  test window                 choisi sur tune                          TEST $   TEST PF');
   let oos = 0, folds = 0;
   const oosByCand = new Map<string, number>();
@@ -266,14 +306,14 @@ function swingWF() {
     const testBars = bars.slice(Math.max(0, start + TUNE - 700), start + TUNE + TEST); // 700 barres de warmup réutilisées
     let best: { c: (typeof CANDS)[number]; net: number } | null = null;
     for (const c of CANDS) {
-      const m = metrics(labBacktest(computeIndicators(tuneBars), trendDef(c.exits, c.tpAtr), SPECS.XAUUSD), START);
+      const m = metrics(labBacktest(computeIndicators(tuneBars), trendDef(c.exits, c.tpAtr), SPECS[sym]), START);
       if (!best || m.netPnl > best.net) best = { c, net: m.netPnl };
     }
     if (!best) continue;
-    const t = metrics(labBacktest(computeIndicators(testBars), trendDef(best.c.exits, best.c.tpAtr), SPECS.XAUUSD), START);
+    const t = metrics(labBacktest(computeIndicators(testBars), trendDef(best.c.exits, best.c.tpAtr), SPECS[sym]), START);
     oos += t.netPnl; folds++;
     for (const c of CANDS) {
-      const tc = metrics(labBacktest(computeIndicators(testBars), trendDef(c.exits, c.tpAtr), SPECS.XAUUSD), START);
+      const tc = metrics(labBacktest(computeIndicators(testBars), trendDef(c.exits, c.tpAtr), SPECS[sym]), START);
       oosByCand.set(c.name, (oosByCand.get(c.name) ?? 0) + tc.netPnl);
     }
     console.log(`#${folds}`.padEnd(5), `${dayStr(testBars[700]?.time ?? testBars[0].time)}→${dayStr(testBars[testBars.length - 1].time)}`.padEnd(26), best.c.name.padEnd(40), ('$' + t.netPnl.toFixed(0)).padStart(8), (t.profitFactor === Infinity ? '∞' : t.profitFactor.toFixed(2)).padStart(8));
@@ -284,7 +324,9 @@ function swingWF() {
 }
 
 const which = process.argv[2] ?? 'scalp';
-if (which === 'swing') swingWF();
+// `swing` reste l'or par défaut : aucune commande déjà utilisée ne change de sens. `swing BTCUSD` ajoute le BTC.
+const swingSym = (process.argv[3] ?? '').toUpperCase() === 'BTCUSD' ? 'BTCUSD' : 'XAUUSD';
+if (which === 'swing') swingWF(swingSym);
 else if (which === 'breakout') breakoutWF();
 else if (which === 'all') { scalpWF(); breakoutWF(); swingWF(); }
 else scalpWF();

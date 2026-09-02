@@ -28,7 +28,7 @@ import 'dotenv/config'; // charge le .env AVANT que le client MetaApi lise proce
 // rien à récupérer et on ferait tourner l'API pour rien). Seuil par défaut : 6 h en M1/M5/M15/H1, 4 jours
 // en D1 — au-delà, c'est un vrai trou.
 import { createClient } from '@supabase/supabase-js';
-import { connectMaster } from '../runner/metaapi/client';
+import { connectAccount } from '../runner/metaapi/client';
 
 const TF_API: Record<string, string> = { M1: '1m', M5: '5m', M15: '15m', H1: '1h', D1: '1d' };
 const TF_MS: Record<string, number> = { M1: 60_000, M5: 300_000, M15: 900_000, H1: 3_600_000, D1: 86_400_000 };
@@ -104,9 +104,15 @@ async function main() {
   console.log(`[gaps] ${symbol} ${tf} : ${before.length} bougies en base, ${gaps.length} trous, ~${Math.round(missing)} bougies manquantes`);
   if (!gaps.length) { console.log('[gaps] rien à faire.'); process.exit(0); }
 
-  console.log('[gaps] connexion MetaApi…');
-  const { account, stream } = await connectMaster();
-  await stream.subscribeToMarketData(brokerSymbol);
+  // CONNEXION RPC SEULE, PAS DE FLUX (connectAccount et non connectMaster). Deux raisons :
+  //  1. on ne lit que de l'historique — `getHistoricalCandles` est un appel RPC, le streaming n'apporte rien ;
+  //  2. ce script tourne depuis une machine locale PENDANT que le runner Railway tient déjà sa propre
+  //     connexion streaming sur le MÊME compte master. Ouvrir un second flux synchronisé sur un compte qui
+  //     trade en direct est un risque gratuit, et `waitSynchronized` peut faire attendre longtemps.
+  // C'est exactement l'usage que le commentaire de connectAccount décrit : « historique de bougies, idéal
+  // pour le backtest, même marché fermé ».
+  console.log('[gaps] connexion MetaApi (RPC, sans flux)…');
+  const { account } = await connectAccount();
 
   let written = 0;
   for (const [n, gap] of gaps.entries()) {
