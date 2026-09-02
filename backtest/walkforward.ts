@@ -360,6 +360,16 @@ function swingWF(sym: 'XAUUSD' | 'BTCUSD' = 'XAUUSD') {
     { name: 'TP8 · trail 2@2', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2 } },
     { name: 'PROD + WE perdants + sans entrée ven 12h', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true, noEntryFriFrom: 12 } },
     { name: 'TP8 trail2@2 + WE perdants + ven 12h', tpAtr: 8, exits: { be: 1, trailActivate: 2, trailDist: 2, weekendFlatLosers: true, noEntryFriFrom: 12 } },
+    // LES DEUX RÈGLES, SÉPARÉMENT (02/09/2026). Elles n'existaient qu'EN BLOC, donc le premier walk-forward
+    // BTC ne pouvait pas dire laquelle porte le gain — seulement que le couple vaut +2 982 $ hors échantillon
+    // sur PROD et +2 965 $ sur TP8. Or elles n'agissent pas du tout au même endroit : `noEntryFriFrom`
+    // SUPPRIME des entrées (756 trades contre 779, soit 23 de moins), tandis que `weekendFlatLosers` n'en
+    // supprime aucune et ne change que la SORTIE des positions perdantes au cutoff du vendredi soir.
+    // Attribuer tout le gain à l'une ou à l'autre serait une supposition ; la mesurer coûte deux lignes.
+    // C'est la doctrine déjà écrite plus haut dans ce fichier : une config qu'on ne comprend pas est une
+    // config qu'on ne saura pas défendre le jour où elle cassera.
+    { name: 'PROD + WE perdants (seul)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], weekendFlatLosers: true } },
+    { name: 'PROD + sans entrée ven 12h (seul)', tpAtr: 16, exits: { be: 1, trailActivate: 2.5, trailDist: 2.5, ladder: [[2, 0.5]], noEntryFriFrom: 12 } },
   ];
   const N = bars.length, TUNE = Math.floor(N * 0.43), TEST = Math.floor(N * 0.14);
   // DURÉES CALCULÉES, PAS RECOPIÉES (02/09/2026). L'en-tête annonçait « tune ~9 mois → test ~3 mois » :
