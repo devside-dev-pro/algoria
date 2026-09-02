@@ -114,10 +114,20 @@ for (const sid of ['1', '2', '3'] as const) {
 // sortie est faux, et alors AUCUN de ses chiffres ne vaut : ni le P&L, ni le classement des candidats du
 // walk-forward, ni les décisions prises dessus.
 const pct = (n: number, tot: number) => (tot ? `${Math.round((100 * n) / tot)}%` : '—');
+// AGRÉGER PAR MOTIF (02/09/2026, 2e passe) — la fixture porte une ligne par STRATÉGIE, donc « be »
+// sortait trois fois de suite dans la liste et le lecteur devait additionner de tête. On regroupe.
+const agg = (rows: Array<{ reason: string; n: number; pnl: number }>) => {
+  const m = new Map<string, { reason: string; n: number; pnl: number }>();
+  for (const r of rows) {
+    const cur = m.get(r.reason) ?? { reason: r.reason, n: 0, pnl: 0 };
+    cur.n += r.n; cur.pnl += r.pnl; m.set(r.reason, cur);
+  }
+  return [...m.values()].sort((a, b) => b.n - a.n);
+};
 const dist = (rows: Array<{ reason: string; n: number; pnl: number }>) => {
-  const tot = rows.reduce((s, r) => s + r.n, 0);
-  return [...rows].sort((a, b) => b.n - a.n)
-    .map((r) => `${r.reason} ${r.n} (${pct(r.n, tot)}, ${(r.pnl / Math.max(1, r.n)).toFixed(0)}$/tr)`).join(' · ');
+  const g = agg(rows);
+  const tot = g.reduce((s, r) => s + r.n, 0);
+  return g.map((r) => `${r.reason} ${r.n} (${pct(r.n, tot)}, ${(r.pnl / Math.max(1, r.n)).toFixed(0)}$/tr)`).join(' · ');
 };
 
 if (FIX.exits?.length) {
@@ -136,11 +146,23 @@ if (FIX.exits?.length) {
       const H1 = 'backtest/.cache/XAUUSD-H1-15.json';
       if (!existsSync(H1)) { console.log('SIM  : cache H1 absent → node scripts/pull-cache.mjs XAUUSD H1'); continue; }
       const h1: Bar[] = JSON.parse(readFileSync(H1, 'utf8'));
-      const win = h1.filter((b) => { const d = dayStr(b.time); return d >= (FIX.from ?? '2000-01-01') && d <= (FIX.to ?? '2100-01-01'); });
-      if (win.length < 800) { console.log(`SIM  : seulement ${win.length} bougies H1 sur la fenêtre live (700 de chauffe nécessaires)`); continue; }
+      // ⚠️ BUG DE LA 1re VERSION, CORRIGÉ ICI. Je découpais le cache SUR la fenêtre live puis je lançais le
+      // simulateur dessus. Or cette stratégie exige 700 bougies de chauffe : sur ~1 080 bougies H1 de juillet
+      // à septembre, il n'en restait que ~380 pour trader. Le sim a sorti 16 trades face aux 192 du live, et
+      // j'ai failli lire ça comme « le sim ne trade pas assez » — c'était MON test qui l'empêchait de trader.
+      // Le live, lui, tourne en continu : il arrive dans la fenêtre déjà chauffé.
+      // On lui donne donc la chauffe AVANT la fenêtre, et on ne compte que les trades qui SORTENT dedans.
+      const from = FIX.from ?? '2000-01-01', to = FIX.to ?? '2100-01-01';
+      const firstIn = h1.findIndex((b) => dayStr(b.time) >= from);
+      let lastIn = -1; for (let i = h1.length - 1; i >= 0; i--) { if (dayStr(h1[i].time) <= to) { lastIn = i; break; } }
+      if (firstIn < 0 || lastIn < 0) { console.log('SIM  : la fenêtre live ne recouvre pas le cache H1'); continue; }
+      const warm = 750; // 700 exigées par la stratégie + marge
+      if (firstIn < warm) { console.log(`SIM  : seulement ${firstIn} bougies AVANT la fenêtre live — il en faut ${warm} pour la chauffe`); continue; }
+      const win = h1.slice(firstIn - warm, lastIn + 1);
       const run = labBacktest(computeIndicators(win), swingTrendDef(SWING_PROD_EXITS, SWING_PROD_TP_ATR), SPECS.XAUUSD);
+      const inWin = run.trades.filter((t) => { const d = dayStr(t.exitTime); return d >= from && d <= to; });
       const byReason = new Map<string, { reason: string; n: number; pnl: number }>();
-      for (const t of run.trades) {
+      for (const t of inWin) {
         const cur = byReason.get(t.reason) ?? { reason: t.reason, n: 0, pnl: 0 };
         cur.n++; cur.pnl += t.pnl; byReason.set(t.reason, cur);
       }
@@ -148,7 +170,8 @@ if (FIX.exits?.length) {
       const totS = sim.reduce((s, e) => s + e.n, 0);
       const beS = sim.filter((e) => e.reason === 'be').reduce((s, e) => s + e.n, 0);
       console.log(`SIM  : ${dist(sim)}`);
-      console.log(`P&L  : live $${live.reduce((s, e) => s + e.pnl, 0)}  ·  sim $${(run.finalBalance - START).toFixed(0)}`);
+      console.log(`NB   : live ${totL} trades  ·  sim ${totS} trades sur la MÊME fenêtre (chauffe prise avant)`);
+      console.log(`P&L  : live $${live.reduce((s, e) => s + e.pnl, 0)}  ·  sim $${inWin.reduce((s, t) => s + t.pnl, 0).toFixed(0)}`);
       console.log(`BE   : live ${pct(beL, totL)}  ·  sim ${pct(beS, totS)}  → ${Math.abs(beL / Math.max(1, totL) - beS / Math.max(1, totS)) > 0.15
         ? '❌ ÉCART MAJEUR sur le breakeven : le modèle de sortie du sim ne reproduit pas le live, ses chiffres ne sont pas utilisables tels quels'
         : '✅ taux de breakeven comparable'}`);
