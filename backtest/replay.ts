@@ -81,15 +81,20 @@ const layerOf = (ref: string | null): 'swing' | 'breakout' | 'scalp' => {
 // Règle de sortie rejouée : identique à labcore.ts (BE sur le pic, paliers, trailing, stop testé AVANT le TP).
 // beBefore : BE différent pour les trades ouverts avant une date — sert à rejouer la prod TELLE QUE VÉCUE
 // (jusqu'au 04/08, un bug de purge dans manage.ts ramenait le swing au BE scalp de 0,15 R ; voir manage.ts).
-interface Exit { be?: number; beOffset?: number; ladder?: Array<[number, number]>; trailActivate?: number; trailDist?: number; tpR?: number; maxBars: number; beBefore?: { until: string; be: number } }
-type Reason = 'sl' | 'be' | 'trail' | 'tp' | 'time';
+// weekendFlatLosers : la règle de prod du runner (weekendFlatLosers, toutes les 5 min) — vendredi ≥ 20h UTC,
+// tout swing en PERTE latente est fermé au marché ; les gagnants restent. Appliquée à toutes les variantes swing :
+// c'est un garde-fou de prod, pas une stratégie de sortie, et le live la subit quelle que soit la gestion.
+interface Exit { be?: number; beOffset?: number; ladder?: Array<[number, number]>; trailActivate?: number; trailDist?: number; tpR?: number; maxBars: number; beBefore?: { until: string; be: number }; weekendFlatLosers?: boolean }
+type Reason = 'sl' | 'be' | 'trail' | 'tp' | 'time' | 'wkd';
+const isFri20 = (t: number) => { const d = new Date(t); return d.getUTCDay() === 5 && d.getUTCHours() >= 20; };
 interface Outcome { r: number; reason: Reason; bars: number }
 
 const swingExit = (cfg: SwingConfig, maxBars: number, over: Partial<Exit> = {}): Exit => ({
   be: cfg.beTrigger, ladder: cfg.ladder, trailActivate: cfg.trailActivate, trailDist: cfg.trailDist,
   tpR: cfg.tpAtr / cfg.slAtr, // TP à tpAtr×ATR avec un SL à slAtr×ATR → tpAtr/slAtr en R (16 R : jamais touché en pratique)
-  maxBars, ...over,
+  maxBars, weekendFlatLosers: true, ...over,
 });
+const swingRaw = (tpR: number): Exit => ({ tpR, maxBars: SWING_BARS, weekendFlatLosers: true });
 const scalpExit = (s: string, maxBars: number, over: Partial<Exit> = {}): Exit => {
   const p = STRATEGIES[s];
   return { be: p.beTrigger, ladder: p.ladder, trailActivate: p.trailActivate, trailDist: p.trailDist, tpR: p.targetRR, maxBars, ...over };
@@ -110,9 +115,9 @@ const VARIANTS: Record<string, Array<{ name: string; exit: Exit }>> = {
     { name: 'BE 0,15 R (reste identique)', exit: swingExit(SW, SWING_BARS, { be: 0.15 }) },
     { name: 'BE 1 R (reste identique)', exit: swingExit(SW, SWING_BARS, { be: 1 }) },
     { name: 'sans BE ni paliers, trail seul', exit: swingExit(SW, SWING_BARS, { be: undefined, ladder: undefined }) },
-    { name: 'brut : SL −1R / TP +1R, aucune gestion', exit: { tpR: 1, maxBars: SWING_BARS } },
-    { name: 'brut : SL −1R / TP +2R', exit: { tpR: 2, maxBars: SWING_BARS } },
-    { name: 'brut : SL −1R / TP +3R', exit: { tpR: 3, maxBars: SWING_BARS } },
+    { name: 'brut : SL −1R / TP +1R, aucune gestion', exit: swingRaw(1) },
+    { name: 'brut : SL −1R / TP +2R', exit: swingRaw(2) },
+    { name: 'brut : SL −1R / TP +3R', exit: swingRaw(3) },
   ],
   scalp: [
     { name: 'PROD S2 (BE 0,10 · 3 paliers · trail 0,30/0,18 · TP 1R)', exit: scalpExit('2', SCALP_BARS) },
@@ -182,6 +187,8 @@ function replay(t: LiveTrade, ex: Exit): Outcome | null {
     if (be && fav >= be * riskDist) lift(t.entry + dir * (ex.beOffset ?? 0.05) * riskDist);
     if (ex.ladder) for (const [trig, lock] of ex.ladder) if (fav >= trig * riskDist) lift(t.entry + dir * lock * riskDist);
     if (ex.trailActivate && ex.trailDist && fav >= ex.trailActivate * riskDist) lift(peak - dir * ex.trailDist * riskDist);
+    if (ex.weekendFlatLosers && isFri20(b.time) && dir * (b.close - t.entry) < 0)
+      return { r: (dir * (b.close - t.entry)) / riskDist - costR, reason: 'wkd', bars: i - i0 + 1 };
   }
   const last = bars[Math.min(bars.length - 1, i0 + ex.maxBars - 1)];
   return { r: (dir * (last.close - t.entry)) / riskDist - costR, reason: 'time', bars: ex.maxBars };
@@ -245,7 +252,7 @@ for (const layer of layers) {
   console.log(`  → ${verdict}`);
 
   // 2) VARIANTES DE SORTIE sur les mêmes entrées, détail par mois.
-  const head = `${'sortie'.padEnd(52)} ${'n'.padStart(4)} ${'R tot'.padStart(7)} ${'R/tr'.padStart(6)} ${'win'.padStart(4)}  ${'sl'.padStart(4)} ${'be'.padStart(4)} ${'trl'.padStart(4)} ${'tp'.padStart(4)} ${'tim'.padStart(4)}  ${months.map((m) => m.slice(5).padStart(6)).join(' ')}  ${'$ lots live'.padStart(12)}`;
+  const head = `${'sortie'.padEnd(52)} ${'n'.padStart(4)} ${'R tot'.padStart(7)} ${'R/tr'.padStart(6)} ${'win'.padStart(4)}  ${'sl'.padStart(4)} ${'be'.padStart(4)} ${'trl'.padStart(4)} ${'tp'.padStart(4)} ${'tim'.padStart(4)} ${'wkd'.padStart(4)}  ${months.map((m) => m.slice(5).padStart(6)).join(' ')}  ${'$ lots live'.padStart(12)}`;
   console.log('\n' + head);
   const liveRs = ok.map(liveR);
   const liveLine = (() => {
@@ -253,18 +260,45 @@ for (const layer of layers) {
     const byM = months.map((m) => ok.filter((t) => monthOf(t.closedAt) === m).reduce((s, t) => s + liveR(t), 0));
     const cnt = (k: string) => ok.filter((t) => t.reason === k).length;
     const other = ok.length - cnt('sl') - cnt('be') - cnt('trail') - cnt('tp');
-    return `${`LIVE (enregistré · ${pct(other, ok.length)} autres sorties)`.padEnd(52)} ${String(ok.length).padStart(4)} ${f1(tot).padStart(7)} ${f2(tot / ok.length).padStart(6)} ${pct(liveRs.filter((r) => r > 0).length, ok.length).padStart(4)}  ${pct(cnt('sl'), ok.length).padStart(4)} ${pct(cnt('be'), ok.length).padStart(4)} ${pct(cnt('trail'), ok.length).padStart(4)} ${pct(cnt('tp'), ok.length).padStart(4)} ${'—'.padStart(4)}  ${byM.map((x) => f1(x).padStart(6)).join(' ')}  ${money(ok.reduce((s, t) => s + t.pnl, 0)).padStart(12)}`;
+    return `${`LIVE (enregistré · ${pct(other, ok.length)} autres sorties)`.padEnd(52)} ${String(ok.length).padStart(4)} ${f1(tot).padStart(7)} ${f2(tot / ok.length).padStart(6)} ${pct(liveRs.filter((r) => r > 0).length, ok.length).padStart(4)}  ${pct(cnt('sl'), ok.length).padStart(4)} ${pct(cnt('be'), ok.length).padStart(4)} ${pct(cnt('trail'), ok.length).padStart(4)} ${pct(cnt('tp'), ok.length).padStart(4)} ${'—'.padStart(4)} ${pct(cnt('wkd'), ok.length).padStart(4)}  ${byM.map((x) => f1(x).padStart(6)).join(' ')}  ${money(ok.reduce((s, t) => s + t.pnl, 0)).padStart(12)}`;
   })();
   console.log(liveLine);
+  const liveTot = liveRs.reduce((s, r) => s + r, 0);
+  const liveSl = ok.filter((t) => t.reason === 'sl').length / ok.length;
+  let ref: { name: string; rPer: number; sl: number } | null = null;
   for (const v of VARIANTS[layer]) {
     const outs = ok.map((t) => ({ t, o: replay(t, v.exit)! }));
     const tot = outs.reduce((s, x) => s + x.o.r, 0);
     const wins = outs.filter((x) => x.o.r > 0).length;
     const cnt = (k: Reason) => outs.filter((x) => x.o.reason === k).length;
+    if (!ref) ref = { name: v.name, rPer: tot / outs.length, sl: cnt('sl') / outs.length }; // 1ʳᵉ variante = la prod telle que vécue
     const byM = months.map((m) => outs.filter((x) => monthOf(x.t.closedAt) === m).reduce((s, x) => s + x.o.r, 0));
     const usd = outs.reduce((s, x) => s + x.o.r * riskOf(x.t) * x.t.lot * spec.contractSize, 0);
-    console.log(`${v.name.padEnd(52)} ${String(outs.length).padStart(4)} ${f1(tot).padStart(7)} ${f2(tot / outs.length).padStart(6)} ${pct(wins, outs.length).padStart(4)}  ${pct(cnt('sl'), outs.length).padStart(4)} ${pct(cnt('be'), outs.length).padStart(4)} ${pct(cnt('trail'), outs.length).padStart(4)} ${pct(cnt('tp'), outs.length).padStart(4)} ${pct(cnt('time'), outs.length).padStart(4)}  ${byM.map((x) => f1(x).padStart(6)).join(' ')}  ${money(usd).padStart(12)}`);
+    console.log(`${v.name.padEnd(52)} ${String(outs.length).padStart(4)} ${f1(tot).padStart(7)} ${f2(tot / outs.length).padStart(6)} ${pct(wins, outs.length).padStart(4)}  ${pct(cnt('sl'), outs.length).padStart(4)} ${pct(cnt('be'), outs.length).padStart(4)} ${pct(cnt('trail'), outs.length).padStart(4)} ${pct(cnt('tp'), outs.length).padStart(4)} ${pct(cnt('time'), outs.length).padStart(4)} ${pct(cnt('wkd'), outs.length).padStart(4)}  ${byM.map((x) => f1(x).padStart(6)).join(' ')}  ${money(usd).padStart(12)}`);
   }
-  console.log(`Lecture : la ligne LIVE est la réalité ; la ligne PROD rejouée doit lui ressembler (sinon le rejeu ment). Une variante ne compte que si elle gagne sur CHAQUE mois.`);
+  // TEST DE SINCÉRITÉ : la prod rejouée (1ʳᵉ variante) doit ressembler au live — R par trade et part de stops pleins.
+  if (ref) {
+    const dR = ref.rPer - liveTot / ok.length, dSl = ref.sl - liveSl;
+    const verdict = Math.abs(dR) <= 0.05 && Math.abs(dSl) <= 0.10 ? '✅ le rejeu est crédible' : Math.abs(dR) <= 0.10 && Math.abs(dSl) <= 0.20 ? '⚠️ écart notable — lire les variantes avec cette marge' : '❌ le rejeu ne reproduit pas le live — aucune conclusion';
+    console.log(`SINCÉRITÉ (prod rejouée vs live) : R/trade ${f2(ref.rPer)} vs ${f2(liveTot / ok.length)} (Δ ${f2(dR)}) · stops pleins ${pct(ref.sl * 100, 100)} vs ${pct(liveSl * 100, 100)} → ${verdict}`);
+  }
+  console.log(`Lecture : une variante ne compte que si elle gagne sur CHAQUE mois, et d'au moins la marge du test de sincérité.`);
+
+  // 3) L'EDGE PAR SESSION — si les entrées valent quelque chose à certaines heures et rien à d'autres,
+  //    le problème est QUAND on entre, pas COMMENT on sort. Heure = celle du remplissage, en UTC.
+  const SESS: Array<[string, number, number]> = [['Asie 22–07h', 22, 7], ['Londres 07–12h', 7, 12], ['New York 12–17h', 12, 17], ['soir 17–22h', 17, 22]];
+  const hourOf = (t: LiveTrade) => new Date(bars[fillIndex(t)].time).getUTCHours();
+  const inSess = (h: number, a: number, b: number) => (a < b ? h >= a && h < b : h >= a || h < b);
+  const raw1: Exit = { tpR: 1, maxBars, weekendFlatLosers: layer === 'swing' };
+  console.log(`\nEDGE PAR SESSION (heure du remplissage, UTC) :`);
+  console.log(`${'session'.padEnd(18)} ${'n'.padStart(4)} ${'+1R'.padStart(5)} ${'+2R'.padStart(5)} ${'live R/tr'.padStart(10)} ${'brut ±1R R/tr'.padStart(14)} ${'live $'.padStart(10)}`);
+  for (const [name, a, b] of SESS) {
+    const sub = ok.filter((t) => inSess(hourOf(t), a, b));
+    if (!sub.length) continue;
+    const e = sub.map((t) => excursion(t, maxBars)!);
+    const lr = sub.reduce((s, t) => s + liveR(t), 0) / sub.length;
+    const br = sub.reduce((s, t) => s + replay(t, raw1)!.r, 0) / sub.length;
+    console.log(`${name.padEnd(18)} ${String(sub.length).padStart(4)} ${pct(e.filter((x) => x.mfe >= 1).length, e.length).padStart(5)} ${pct(e.filter((x) => x.mfe >= 2).length, e.length).padStart(5)} ${f2(lr).padStart(10)} ${f2(br).padStart(14)} ${money(sub.reduce((s, t) => s + t.pnl, 0)).padStart(10)}`);
+  }
 }
 console.log('');
