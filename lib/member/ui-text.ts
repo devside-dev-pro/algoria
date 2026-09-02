@@ -140,6 +140,21 @@ export const UI: Dict = {
   'ob.verifHint': { en: 'Accurate name & deposit = faster approval — the team checks them with the broker before switching the copy on.', it: 'Nome e deposito esatti = approvazione più rapida — il team li verifica con il broker prima di attivare la copia.' },
   'ob.encrypting': { en: 'ENCRYPTING…', it: 'CRITTOGRAFIA…' },
   'ob.connectCta': { en: 'CONNECT MY ACCOUNT →', it: 'COLLEGA IL MIO CONTO →' },
+  // BOUTON MUET (02/09/2026) — un membre est resté bloqué sur « je clique, rien ne se passe ». Deux causes
+  // cumulées : le bouton désactivé était visuellement identique à un bouton actif, et l'erreur d'envoi
+  // s'affichait tout en bas de page, hors écran. On nomme donc CE QUI MANQUE, et on montre l'échec.
+  'ob.blocked': { en: 'Before you can connect, we still need:', it: 'Prima di collegare, manca ancora:' },
+  'ob.miss.broker': { en: 'your broker', it: 'il tuo broker' },
+  'ob.miss.brokerName': { en: "your broker's name", it: 'il nome del tuo broker' },
+  'ob.miss.login': { en: 'your account number', it: 'il numero del conto' },
+  'ob.miss.server': { en: 'your server', it: 'il tuo server' },
+  'ob.miss.password': { en: 'your trading password', it: 'la password di trading' },
+  'ob.miss.name': { en: 'the full name on your broker account', it: 'il nome completo sul conto broker' },
+  'ob.miss.deposit': { en: 'the amount you deposited', it: "l'importo depositato" },
+  'ob.miss.acks': { en: 'both confirmation boxes ticked', it: 'entrambe le caselle spuntate' },
+  'ob.miss.demo': { en: 'a live server — the one selected is a demo', it: 'un server reale — quello scelto è demo' },
+  'ob.sendFailed': { en: "Couldn't send your details", it: 'Impossibile inviare i tuoi dati' },
+  'ob.sendRetry': { en: 'Nothing was saved, so nothing is lost. Check your connection and tap the button again. If it keeps failing, sign in again — or message us and we will connect you by hand.', it: 'Non è stato salvato nulla, quindi non hai perso niente. Controlla la connessione e tocca di nuovo il pulsante. Se continua a fallire, accedi di nuovo — oppure scrivici e ti colleghiamo a mano.' },
   'ob.noBroker': { en: 'Don\'t have a broker account yet? Open one →', it: 'Non hai ancora un conto broker? Aprine uno →' },
   // Même lien, autre situation : celui qui a DÉJÀ un broker enregistré ne « n'en a pas encore ». Il
   // revient (déconnexion, refus) et veut en changer — lui proposer « aprine uno » le laisse croire

@@ -2,7 +2,7 @@
 // Wizard d'adhésion en 3 étapes : broker (budget demandé D'ABORD → le partenaire recommandé pour la
 // tranche prend la vedette, Raise par défaut ; minimum PAR STRATÉGIE $200/$500/$1000) → connexion MT5 (chiffrée) → profil de risque.
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, StrategyPicker, bestStrategyFor, LoadFailed, useUILocale, SUPPORT_TG, Check } from '../ui';
 import { tgHref } from '@/lib/telegram';
@@ -49,6 +49,39 @@ async function post(body: Record<string, unknown>) {
   const r = await fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? 'request failed');
   return r.json();
+}
+
+/**
+ * ÉCHEC D'ENVOI — AFFICHÉ SOUS LE BOUTON, JAMAIS EN BAS DE PAGE (02/09/2026).
+ *
+ * Le message d'erreur était rendu tout en bas du wizard, HORS du bloc de l'étape en cours. Quand le POST
+ * échouait, il s'affichait donc sous l'écran, et `busy` retombant dans le `finally`, le bouton reprenait
+ * aussitôt son libellé normal. Vu du membre : « je clique, rien ne se passe. » Un client s'est arrêté là,
+ * formulaire parfaitement rempli — la réponse était à l'écran, quelques centaines de pixels plus bas.
+ *
+ * Ce cas ne laisse AUCUNE trace côté serveur : les échecs en amont du formulaire (401 session expirée,
+ * 404, page d'erreur HTML de la passerelle) reviennent avant le journal `funnel_attempts`. L'écran du
+ * membre est donc la SEULE source de diagnostic — raison de plus pour qu'il puisse la lire.
+ *
+ * On ramène le message dans le champ de vision (scrollIntoView) et on dit ce qu'il faut faire. « Rien n'a
+ * été enregistré » est le point important : sans ça, on renvoie quelqu'un qui craint d'avoir à moitié
+ * soumis ses identifiants.
+ */
+function SubmitError({ msg, t }: { msg: string | null; t: (k: string) => string }) {
+  // `t` vient du parent (useMe) et non de useUILocale : la locale du membre est ENREGISTRÉE, celle de
+  // useUILocale est devinée. Un message d'échec dans une autre langue que le formulaire ferait douter.
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (msg) ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [msg]);
+  if (!msg) return null;
+  return (
+    <div ref={ref} role="alert" style={{ border: '1px solid rgba(255,107,138,.45)', background: 'rgba(255,107,138,.08)', borderRadius: 11, padding: '11px 13px', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text)' }}>
+      <b>⚠ {t('ob.sendFailed')}</b> — {msg}
+      <br /><span style={{ color: 'var(--muted)' }}>{t('ob.sendRetry')}</span>
+      <br /><a href={SUPPORT_TG} target="_blank" rel="noreferrer" style={{ color: 'var(--cyan)', textDecoration: 'none' }}>{t('fail.support')}</a>
+    </div>
+  );
 }
 
 export default function Onboarding() {
@@ -139,6 +172,23 @@ export default function Onboarding() {
   const affordable = budgetUsd == null || budgetUsd >= (STRATEGY_MIN_DEPOSIT[strategy] ?? 500);
   const stratChoice = affordable ? strategy : bestStrategyFor(budgetUsd) ?? 0; // 0 = rien de débloqué (dépôt < $200)
 
+  // CE QUI MANQUE ENCORE, NOMMÉ (02/09/2026). Le bouton CONNECT portait une condition `disabled` de dix
+  // termes et ne disait rien : champ oublié = bouton inerte, sans un mot. Le même tableau sert maintenant
+  // aux trois usages — désactiver, griser, et ÉNUMÉRER au membre ce qu'il lui reste à faire. Une seule
+  // source : la liste et le bouton ne peuvent plus diverger.
+  // L'ordre suit celui du formulaire, pour que le premier élément cité soit le premier champ à remonter.
+  const mt5Missing: string[] = [];
+  if (!picked) mt5Missing.push(t('ob.miss.broker'));
+  else if (picked === 'other' && brokerOther.trim().length < 2) mt5Missing.push(t('ob.miss.brokerName'));
+  if (!login) mt5Missing.push(t('ob.miss.login'));
+  if (!server) mt5Missing.push(t('ob.miss.server'));
+  else if (demoServer) mt5Missing.push(t('ob.miss.demo')); // le bloc rouge dédié le détaille déjà au-dessus
+  if (!password) mt5Missing.push(t('ob.miss.password'));
+  if (fullName.trim().length < 3) mt5Missing.push(t('ob.miss.name'));
+  if (!Number(deposit)) mt5Missing.push(t('ob.miss.deposit'));
+  if (!ackLink || !ackFunded) mt5Missing.push(t('ob.miss.acks'));
+  const mt5Blocked = busy || mt5Missing.length > 0;
+
   const run = (body: Record<string, unknown>, next: number | 'done') => {
     setBusy(true);
     setErr(null);
@@ -222,7 +272,8 @@ export default function Onboarding() {
               ))}
             </div>
           )}
-          <button disabled={busy} onClick={() => run({ action: 'broker', broker: picked ?? lead.key }, 1)} style={ctaMain}>{t('ob.ready')}</button>
+          <button disabled={busy} onClick={() => run({ action: 'broker', broker: picked ?? lead.key }, 1)} style={cta(busy)}>{t('ob.ready')}</button>
+          <SubmitError msg={err} t={t} />
         </section>
       )}
 
@@ -443,12 +494,15 @@ export default function Onboarding() {
             <p style={{ margin: '-4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--gold)' }}>⏳ {t('ob.exist.pending')}</p>
           )}
 
-          <button disabled={busy || !picked || (picked === 'other' && brokerOther.trim().length < 2) || !login || !server || !password || fullName.trim().length < 3 || !Number(deposit) || !ackLink || !ackFunded || demoServer} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, ackLots, origin: origin ?? undefined }, 2)} style={ctaMain}>
+          <button disabled={mt5Blocked} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, ackLots, origin: origin ?? undefined }, 2)} style={cta(mt5Blocked)}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
-          {(!ackLink || !ackFunded) && !demoServer && (
-            <p style={{ margin: '-6px 0 0', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>Tick both boxes above to continue — we check them against the broker.</p>
+          {/* remplace l'ancien « Tick both boxes above » : il ne couvrait QUE les cases, alors que huit
+              autres conditions pouvaient figer le bouton en silence. */}
+          {!busy && mt5Missing.length > 0 && (
+            <p style={{ margin: '-6px 0 0', fontSize: 11.5, color: 'var(--gold)', textAlign: 'center', lineHeight: 1.5 }}>{t('ob.blocked')} {mt5Missing.join(' · ')}</p>
           )}
+          <SubmitError msg={err} t={t} />
           <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
           </>)}
 
@@ -478,12 +532,11 @@ export default function Onboarding() {
               Fund your account, then go back and update the amount — or message us and we&rsquo;ll sort it out.
             </p>
           )}
-          <button disabled={busy || stratChoice === 0} onClick={() => run({ action: 'strategy', choice: stratChoice }, 'done')} style={ctaMain}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
+          <button disabled={busy || stratChoice === 0} onClick={() => run({ action: 'strategy', choice: stratChoice }, 'done')} style={cta(busy || stratChoice === 0)}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
+          <SubmitError msg={err} t={t} />
           <button onClick={() => setStep(1)} style={linkBtn}>{t('ob.backMt5')}</button>
         </section>
       )}
-
-      {err && <p style={{ fontSize: 12.5, color: 'rgba(210,150,165,.9)', margin: 0 }}>⚠ {err}</p>}
 
       {/* popup ALGORIA100 — cadrage honnête OBLIGATOIRE : « trading power » / crédit broker,
           jamais « double ton argent » (le bonus n'est pas du cash retirable) */}
@@ -523,6 +576,10 @@ const pMuted = { color: 'var(--muted)', fontSize: 13.5, lineHeight: 1.6, margin:
 const lbl = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, letterSpacing: 1, color: 'var(--dim)', textTransform: 'uppercase' } as const;
 const inp = { padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', fontSize: 15, outline: 'none' } as const;
 const ctaMain = { padding: '13px 16px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' } as const;
+// UN BOUTON DÉSACTIVÉ DOIT SE VOIR (02/09/2026). `ctaMain` gardait `cursor: pointer` et son dégradé plein
+// même sous `disabled` : le bouton inerte était PIXEL POUR PIXEL le bouton actif. Le membre cliquait sur ce
+// qui, pour lui, était le bouton d'envoi — et rien ne se produisait, sans la moindre indication.
+const cta = (off: boolean) => (off ? { ...ctaMain, opacity: 0.42, cursor: 'not-allowed', filter: 'grayscale(0.55)' } : ctaMain);
 const ctaGold = { padding: '13px 16px', borderRadius: 12, textAlign: 'center', textDecoration: 'none', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)', boxShadow: '0 0 20px rgba(245,194,74,.25)' } as const;
 const linkBtn = { padding: 6, border: 'none', background: 'transparent', color: 'var(--dim)', fontSize: 12.5, cursor: 'pointer', textDecoration: 'underline' } as const;
 // blocs visuels du wizard de connexion (regroupent les champs → moins « mur de formulaire »)
