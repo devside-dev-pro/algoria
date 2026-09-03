@@ -1,4 +1,5 @@
 'use client';
+import { useState } from 'react';
 // TOOLS — la boîte à outils de l’opérateur : push composer, relance des leads, legacy
 // Découpé depuis app/admin/page.tsx (03/09/2026) : un fichier par onglet, l’état et les handlers restent
 // dans useAdminState (app/admin/_state.tsx) et arrivent ici par contexte.
@@ -8,6 +9,7 @@ import { CTA_TEMPLATES, dangerBtn, dimP, goldBtn, inp, miniBtn, secH } from '../
 
 export function ToolsTab() {
   const { STEP_LABEL, bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, daysStuck, downloadCard, downloadRecap, feedWins, input, leads, live, nudge, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
+  const [leadsShown, setLeadsShown] = useState(30); // 961 cartes d'un coup rendaient l'onglet interminable (03/09)
   return (
           <>
             {/* 📣 ANNONCE GROUPÉE — née du basculement S1 → S2 : prévenir 17 membres un par un depuis le
@@ -216,7 +218,8 @@ export function ToolsTab() {
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 680 }}>
               <h2 style={secH}>🎯 FOLLOW-UP — STUCK IN THE FUNNEL {leads.length > 0 && `· ${leads.length}`}</h2>
               {leads.length === 0 && <p style={dimP}>Nobody stuck — every signup either finished the wizard or is waiting in the QUEUE.</p>}
-              {leads.map((r) => (
+              {leads.length > 0 && <p style={dimP}>Oldest first. The 10:00 UTC auto-nudges already reach everyone here — this list is for the personal touch.</p>}
+              {leads.slice(0, leadsShown).map((r) => (
                 <div key={r.member_no} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
                   <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 34 }}>#{r.member_no}</span>
                   <span style={{ fontSize: 12, color: 'var(--text)', minWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
@@ -226,6 +229,9 @@ export function ToolsTab() {
                   <button disabled={busy} onClick={() => nudge(r)} title="push: 'Need a hand finishing your setup?' → opens the wizard" style={goldBtn}>🔔 NUDGE</button>
                 </div>
               ))}
+              {leads.length > leadsShown && (
+                <button onClick={() => setLeadsShown((n) => n + 30)} style={{ ...miniBtn, alignSelf: 'flex-start', padding: '8px 14px' }}>SHOW 30 MORE · {leads.length - leadsShown} left</button>
+              )}
               {pushResult && leads.length > 0 && <p style={{ ...dimP, color: 'var(--up)' }}>✓ {pushResult}</p>}
             </section>
 

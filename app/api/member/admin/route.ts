@@ -29,6 +29,19 @@ function guard(req: NextRequest) {
 // repousser la date, et PostgREST plafonne de toute façon ses réponses — donc on pagine jusqu'à épuisement.
 let lastChatLookup = 0;
 let tgInboxCache: { at: number; on: boolean } | null = null; // état du webhook Telegram, rafraîchi au plus toutes les 10 min
+
+/** Les updates que le webhook unique doit recevoir. callback_query (03/09) : boutons « Envoyer la réponse ». */
+const TG_ALLOWED_UPDATES = ['chat_join_request', 'chat_member', 'message', 'channel_post', 'my_chat_member', 'callback_query'];
+/** (Ré)applique la config COMPLÈTE du webhook — même fonction pour le bouton ENABLE INBOX et pour la
+ *  remise à niveau automatique du GET (une liste d'updates qui change dans le code ne doit dépendre d'aucun clic). */
+async function applyTelegramWebhook(token: string): Promise<{ ok: boolean; description?: string }> {
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
+  const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5000),
+    body: JSON.stringify({ url: 'https://www.algoria.tech/api/telegram', ...(secret ? { secret_token: secret } : {}), allowed_updates: TG_ALLOWED_UPDATES }),
+  });
+  return (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string } as { ok: boolean; description?: string };
+}
 const MEMBER_COLS = 'member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at,locale,strategy,lot';
 type MemberRow = { tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>;
 async function allMembers(db: ReturnType<typeof sdb>): Promise<{ data: MemberRow[] }> {
@@ -219,8 +232,16 @@ export async function GET(req: NextRequest) {
       const token = process.env.TELEGRAM_BOT_TOKEN;
       if (token) {
         const wh = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`, { signal: AbortSignal.timeout(3000) });
-        const wd = (await wh.json().catch(() => ({}))) as { result?: { url?: string } };
+        const wd = (await wh.json().catch(() => ({}))) as { result?: { url?: string; allowed_updates?: string[] } };
         tgInboxOn = String(wd.result?.url ?? '').includes('/api/telegram');
+        // REMISE À NIVEAU AUTOMATIQUE (03/09) : le webhook pointe au bon endroit mais sa liste d'updates est
+        // en retard sur le code (ex. callback_query ajouté pour les boutons des DM). Un bouton « à cliquer une
+        // fois » ne se trouve pas à 4 h du matin dans 961 cartes — le GET s'en charge.
+        const have = new Set(wd.result?.allowed_updates ?? []);
+        if (tgInboxOn && TG_ALLOWED_UPDATES.some((u) => !have.has(u))) {
+          const fix = await applyTelegramWebhook(token).catch(() => ({ ok: false }));
+          console.log(`[admin] webhook Telegram remis à niveau (${TG_ALLOWED_UPDATES.filter((u) => !have.has(u)).join(', ')}) : ${fix.ok ? 'ok' : 'échec'}`);
+        }
         tgInboxCache = { at: Date.now(), on: tgInboxOn };
       }
     } catch { /* Telegram injoignable → on laisse le bouton visible */ }
@@ -1080,18 +1101,9 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     // webhook par bot : ce bouton ré-applique toujours la config COMPLÈTE (vécu 26/07 : une URL inbox
     // séparée avait écrasé le webhook et cassé la connexion des membres).
     const token = process.env.TELEGRAM_BOT_TOKEN;
-    const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
     if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured (Vercel)' }, { status: 400 });
-    const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        url: 'https://www.algoria.tech/api/telegram',
-        ...(secret ? { secret_token: secret } : {}),
-        allowed_updates: ['chat_join_request', 'chat_member', 'message', 'channel_post', 'my_chat_member', 'callback_query'], // callback_query (03/09) : boutons « Envoyer la réponse » des DM d'alerte
-      }),
-    });
-    const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    const d = await applyTelegramWebhook(token);
+    tgInboxCache = null; // le prochain GET relit l'état réel
     if (!d.ok) return NextResponse.json({ error: `Telegram: ${d.description ?? 'setWebhook failed'}` }, { status: 400 });
     return NextResponse.json({ ok: true, description: d.description ?? 'webhook set' });
   }
