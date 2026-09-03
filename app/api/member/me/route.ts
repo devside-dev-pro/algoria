@@ -111,7 +111,7 @@ export async function GET(req: NextRequest) {
     // ça le sélecteur ouvrait les trois profils et le verrou serveur ne se déclenchait qu'à l'envoi.
     db.from('member_actions').select('detail').eq('tg_id', ctx.session.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
     // CARTE CONNECT EN COURS — porte l'état du lot d'activation, affiché sur l'écran d'attente.
-    db.from('member_actions').select('detail').eq('tg_id', ctx.session.tgId).eq('kind', 'connect').eq('status', 'pending').order('created_at', { ascending: false }).limit(1),
+    db.from('member_actions').select('detail,created_at').eq('tg_id', ctx.session.tgId).eq('kind', 'connect').eq('status', 'pending').order('created_at', { ascending: false }).limit(1),
   ]);
   const rejection = (ctx.member as { status?: string }).status === 'onboarding' && rejQ.data?.[0]
     ? { reason: String((rejQ.data[0].detail as { reject_reason?: string })?.reject_reason ?? 'verification failed'), at: rejQ.data[0].done_at }
@@ -158,7 +158,10 @@ export async function GET(req: NextRequest) {
   // déclaré et si c'est validé ; jamais `lots_override` ni le nom de qui a signé : un motif d'exception
   // interne (« ami de Mathieu », « on lâche l'affaire ») n'a rien à faire sur l'écran du membre.
   const lots = lotsStateOf(connQ.data?.[0]?.detail as Record<string, unknown> | undefined);
-  const activation = { claimed: lots.claimedAt != null, claimedAt: lots.claimedAt, validated: lots.ok || lots.override != null };
+  // submittedAt / waitingBroker : l'écran d'attente dit depuis quand le dossier attend et pourquoi (audit
+  // 03/09 : un texte fixe « quelques heures » restait affiché au bout de huit jours).
+  const pendingCard = connQ.data?.[0] as { detail?: Record<string, unknown> | null; created_at?: string } | undefined;
+  const activation = { claimed: lots.claimedAt != null, claimedAt: lots.claimedAt, validated: lots.ok || lots.override != null, submittedAt: pendingCard?.created_at ?? null, waitingBroker: !!pendingCard?.detail?.waiting_broker };
   return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit, activation });
 }
 

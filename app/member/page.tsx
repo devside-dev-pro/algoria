@@ -5,7 +5,7 @@
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount, type Referral } from './ui';
+import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, STRATEGY_AVAILABLE, type Member, type MemberAccount, type Referral } from './ui';
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 
@@ -89,8 +89,9 @@ export default function MemberHome() {
                 <h2 style={{ margin: 0, fontSize: 16 }}>Setup received — access under review</h2>
               </div>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
-                The team is verifying your broker account and switching the copy on. Everything unlocks automatically — usually within a few hours.
+                The team is verifying your broker account and switching the copy on. Everything unlocks automatically.
               </p>
+              <a href="/member/pending" style={{ ...ctaGhost, borderColor: 'rgba(245,194,74,.5)', color: 'var(--gold)' }}>⧗ SEE WHAT&rsquo;S LEFT TO DO</a>
               <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={ctaGhost}>💬 MESSAGE SUPPORT — @mathieu_algoria</a>
             </>
           ) : (
@@ -188,7 +189,7 @@ const STRAT_LABEL: Record<number, { icon: string; name: string }> = { 1: { icon:
 function AddStrategyCard({ member, accounts }: { member: Member; accounts: MemberAccount[] }) {
   const active = accounts.filter((a) => a.status !== 'rejected');
   const used = new Set<number>([Number(member.strategy ?? 2), ...active.map((a) => a.strategy)]);
-  const missing = [1, 2, 3].filter((id) => !used.has(id));
+  const missing = STRATEGY_AVAILABLE.filter((id) => !used.has(id)); // jamais une stratégie en maintenance : la page cible la refuserait (audit 03/09)
   const pending = active.filter((a) => a.status === 'pending');
   if (missing.length === 0 && pending.length === 0) return null; // flotte complète → rien à vendre
   return (
