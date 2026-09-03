@@ -5,15 +5,17 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
+import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
+import { STRATEGY_AVAILABLE } from '../ui';
 
 const CHECKS = [
   'Broker account opened through the Algoria link',
-  'Minimum deposit confirmed ($200–$1,000 depending on your strategy)',
+  `Minimum deposit confirmed ($${MIN_ENTRY_DEPOSIT}–$${Math.max(...STRATEGY_AVAILABLE.map((id) => STRATEGY_MIN_DEPOSIT[id])).toLocaleString('en-US')} depending on your strategy)`,
   `Activation volume traded (${ACTIVATION_LOTS} lot on ${ACTIVATION_SYMBOL})`,
   'Account linked to the Algoria copier',
 ];
 
-type Activation = { claimed: boolean; claimedAt: string | null; validated: boolean };
+type Activation = { claimed: boolean; claimedAt: string | null; validated: boolean; submittedAt?: string | null; waitingBroker?: boolean };
 
 export default function Pending() {
   const router = useRouter();
@@ -121,7 +123,16 @@ export default function Pending() {
           </div>
         ))}
       </div>
-      <p className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 1, margin: 0 }}>USUALLY DONE WITHIN A FEW HOURS</p>
+      {/* L'ÂGE RÉEL DU DOSSIER, pas un « quelques heures » figé (audit 03/09 : le même texte s'affichait au
+          bout de huit jours). Passé 24 h, on le dit, et on dit que l'équipe est prévenue — c'est vrai depuis
+          le rappel quotidien au propriétaire (lib/member/notifyOwner.ts). */}
+      {(() => {
+        const h = act?.submittedAt ? Math.floor((Date.now() - Date.parse(act.submittedAt)) / 3_600_000) : null;
+        const age = h == null ? null : h < 1 ? 'just now' : h < 48 ? `${h} h ago` : `${Math.floor(h / 24)} days ago`;
+        if (act?.waitingBroker) return <p className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 1, margin: 0, maxWidth: 400, lineHeight: 1.6 }}>WAITING FOR YOUR BROKER TO ATTACH THE ACCOUNT — USUALLY A FEW DAYS{age ? ` · SUBMITTED ${age.toUpperCase()}` : ''}</p>;
+        if (h != null && h >= 24) return <p className="mono" style={{ fontSize: 10.5, color: 'var(--gold)', letterSpacing: 1, margin: 0, maxWidth: 400, lineHeight: 1.6 }}>SUBMITTED {age?.toUpperCase()} — LONGER THAN USUAL, THE TEAM HAS BEEN NOTIFIED</p>;
+        return <p className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 1, margin: 0 }}>{age ? `SUBMITTED ${age.toUpperCase()} · ` : ''}USUALLY DONE WITHIN A FEW HOURS</p>;
+      })()}
       <form action="/api/member/logout" method="post"><button style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', borderRadius: 8, padding: '6px 12px', fontSize: 11.5, cursor: 'pointer' }}>sign out</button></form>
     </main>
   );

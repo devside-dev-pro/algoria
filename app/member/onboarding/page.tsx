@@ -4,11 +4,11 @@
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StrategyPicker, bestStrategyFor, LoadFailed, useUILocale, SUPPORT_TG, Check } from '../ui';
+import { useMe, StrategyPicker, bestStrategyFor, LoadFailed, useUILocale, SUPPORT_TG, Check, STRATEGY_UI, STRATEGY_AVAILABLE } from '../ui';
 import { tgHref } from '@/lib/telegram';
 import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/member/brokers';
 import { brokerAttachMessage } from '@/lib/member/ui-text';
-import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
+import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, minDepositFor } from '@/lib/member/minimums';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/member/activation';
 
@@ -169,8 +169,8 @@ export default function Onboarding() {
   // personne a saisi l'identifiant de son espace client broker — 1er motif de refus. On avertit seulement.
   const loginLooksWrong = login.trim().length > 0 && !/^\d{4,12}$/.test(login.trim());
   const budgetUsd = Number(deposit) > 0 ? Number(deposit) : declaredDeposit ?? undefined;
-  const affordable = budgetUsd == null || budgetUsd >= (STRATEGY_MIN_DEPOSIT[strategy] ?? 500);
-  const stratChoice = affordable ? strategy : bestStrategyFor(budgetUsd) ?? 0; // 0 = rien de débloqué (dépôt < $200)
+  const affordable = budgetUsd == null || budgetUsd >= minDepositFor(strategy);
+  const stratChoice = affordable ? strategy : bestStrategyFor(budgetUsd) ?? 0; // 0 = rien de débloqué (dépôt sous le minimum d'entrée)
 
   // CE QUI MANQUE ENCORE, NOMMÉ (02/09/2026). Le bouton CONNECT portait une condition `disabled` de dix
   // termes et ne disait rien : champ oublié = bouton inerte, sans un mot. Le même tableau sert maintenant
@@ -193,7 +193,7 @@ export default function Onboarding() {
     setBusy(true);
     setErr(null);
     post(body)
-      .then(() => (next === 'done' ? router.replace('/member') : setStep(next)))
+      .then(() => (next === 'done' ? router.replace('/member/pending') : setStep(next))) // l'écran d'attente : ce qui manque, la règle des 30 jours, le lot (audit 03/09 : personne n'y arrivait plus)
       .catch((e) => setErr((e as Error).message))
       .finally(() => setBusy(false));
   };
@@ -253,8 +253,14 @@ export default function Onboarding() {
             <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
               <strong style={{ color: 'var(--gold)' }}>{t('ob.min.title')}</strong> {t('ob.min.body')}
             </p>
+            {/* LUS DEPUIS LA SOURCE DE VÉRITÉ (audit 03/09). Cette ligne était écrite en dur — « BALANCED $500 »
+                — alors que minimums.ts disait $200 et que le sélecteur, deux écrans plus loin, affichait
+                « min $200 » : le même tunnel donnait deux minimums. Et S1, en maintenance, y figurait encore.
+                Une stratégie qu'on ne peut pas choisir n'a pas de minimum à annoncer. */}
             <p className="mono" style={{ margin: 0, fontSize: 11, color: 'var(--muted)', letterSpacing: 0.3 }}>
-              🛡️ STEADY <b style={{ color: 'var(--text)' }}>$200</b> · ⚖️ BALANCED <b style={{ color: 'var(--text)' }}>$500</b> · 🔥 TURBO <b style={{ color: 'var(--text)' }}>$1,000</b>
+              {STRATEGY_UI.filter((s) => STRATEGY_AVAILABLE.includes(s.id)).map((s, i) => (
+                <span key={s.id}>{i > 0 && ' · '}{s.icon} {s.name} <b style={{ color: 'var(--text)' }}>${STRATEGY_MIN_DEPOSIT[s.id].toLocaleString('en-US')}</b></span>
+              ))}
             </p>
             <p style={{ ...pMuted, margin: 0, fontSize: 11.5, color: 'var(--dim)' }}>{t('ob.min.warn')}</p>
           </div>
@@ -486,7 +492,7 @@ export default function Onboarding() {
             </Check>
             {!ackLots && (
               <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
-                Not done yet? You can continue — we&rsquo;ll remind you on the next screen. Your access opens once it&rsquo;s done.
+                Not done yet? You can continue — the next screen will show it as the one thing left. Your access opens once it&rsquo;s done.
               </p>
             )}
           </div>

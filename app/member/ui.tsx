@@ -230,9 +230,10 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
           <>
             <h2 style={{ margin: 0, fontSize: 19, textAlign: 'center' }}>⧗ Almost there</h2>
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6, textAlign: 'center' }}>
-              Your setup is in — the team is verifying your broker account and switching the copy on. Everything unlocks automatically, usually <b style={{ color: 'var(--text)' }}>within a few hours</b>.
+              Your setup is in — the team is verifying your broker account and switching the copy on. Everything unlocks automatically.
             </p>
-            <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={sheetGoldCta}>💬 MESSAGE SUPPORT — @mathieu_algoria</a>
+            <a href="/member/pending" style={sheetGoldCta}>⧗ SEE WHAT&rsquo;S LEFT TO DO</a>
+            <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ ...sheetGoldCta, background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)' }}>💬 MESSAGE SUPPORT — @mathieu_algoria</a>
           </>
         ) : (
           <>

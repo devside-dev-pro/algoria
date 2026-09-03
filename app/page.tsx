@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { usePrice, useFeedHealth } from '@/lib/cockpit/useRealtime';
 import { tgHref } from '@/lib/telegram';
+import { WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
 
 // Funnel PUBLIC (domaine racine) : ce que voit un viewer qui tape algoria.tech (lien en bio TikTok).
 // VERSION CLOSING — une seule page qui déroule l'argumentaire complet : bannière live, hero, PREUVE
@@ -139,7 +140,7 @@ export default function Funnel() {
           <h2 style={{ fontSize: 12, letterSpacing: 1.6, color: 'var(--muted)', margin: '0 0 2px', textAlign: 'center' }}>QUESTIONS EVERYONE ASKS</h2>
           {[
             ['Is it really free? What’s the catch?', 'Yes — the channel, the app and the live are 100% free. Algoria is paid by its partner brokers when members open accounts. You never pay us anything; that’s the whole model, in the open.'],
-            ['Where does my money sit?', 'In YOUR broker account, under YOUR name. We never hold or touch your funds — the copier only mirrors trades onto your account. You can pause the copy or withdraw from your broker anytime.'],
+            ['Where does my money sit?', 'In YOUR broker account, under YOUR name. We never hold or touch your funds — the copier only mirrors trades onto your account. You can pause the copy anytime. One rule: keep your deposit in place for the first ' + WITHDRAW_LOCK_DAYS + ' days — that is what keeps your broker registration, and your access, valid. After that, withdraw whenever you like.'],
             ['How do I actually start?', 'Join the Telegram channel (free), talk to us, then open an account with a partner broker — from $200 depending on the strategy you pick. Once verified, every AI trade copies to your account automatically.'],
             ['What are the risks?', 'Trading is risky — period. Every trade has a stop-loss and the AI enforces a daily loss kill-switch, but losing days exist. Never fund with money you can’t afford to lose.'],
             ['Can I see the results before joining?', 'Yes. Everything runs in public: the TikTok lives, the channel, and the app in free mode show the wins as they happen, on a real account.'],
