@@ -30,6 +30,7 @@
 //      VWAP (clôture à plus de 1,5 ATR du VWAP → contre-pied vers le VWAP).
 //   F. Divergence RSI 14 — nouveau plus-bas sur 24 bougies alors que le RSI fait un plus-bas plus haut (≥ 5 pts) que
 //      sur le creux précédent, bougie de confirmation haussière → long ; symétrique en short.
+//   P. Pullback RSI 14 horaire (< 30 / > 70) dans la tendance de 50 jours — stop 1,5 ATR(H1) horizon 1 j, ou stop 1 ATR horizon 4 h.
 //   Z. Ligne de base — une entrée toutes les 4 h, long et short, stop 1 ATR. Le vrai hasard de chaque semestre.
 //
 //   npx tsx backtest/edge-lab.ts                (XAUUSD)
@@ -68,6 +69,13 @@ const rsi = new Array<number>(n).fill(50);
 { let ag = 0, al = 0; for (let i = 1; i < n; i++) { const ch = bars[i].close - bars[i - 1].close; const g = Math.max(0, ch), l = Math.max(0, -ch); if (i <= 14) { ag += g / 14; al += l / 14; } else { ag = (ag * 13 + g) / 14; al = (al * 13 + l) / 14; } rsi[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al); } }
 // clôture d'il y a ~5 jours de bourse (1 440 bougies M5 = 5 × 288), pour le momentum de fond
 const closeAgo = (i: number, k: number) => (i - k >= 0 ? bars[i - k].close : NaN);
+
+// RSI 14 HORAIRE (clôtures de la dernière M5 de chaque heure, valeur reportée sur les M5 suivantes) et moyenne
+// des clôtures sur ~50 jours de bourse (50 × 288 M5) — pour la famille P (pullback dans la tendance de fond).
+const rsiH1 = new Array<number>(n).fill(50);
+{ let ag = 0, al = 0, k = 0, prev = NaN, cur = 50; for (let i = 0; i < n; i++) { if (minUtc(bars[i].time) === 55) { const c = bars[i].close; if (!Number.isNaN(prev)) { const ch = c - prev; const g = Math.max(0, ch), l = Math.max(0, -ch); k++; if (k <= 14) { ag += g / 14; al += l / 14; } else { ag = (ag * 13 + g) / 14; al = (al * 13 + l) / 14; } cur = al === 0 ? 100 : 100 - 100 / (1 + ag / al); } prev = c; } rsiH1[i] = cur; } }
+const sma50d = new Array<number>(n).fill(0);
+{ const W = 50 * 288; let s = 0; for (let i = 0; i < n; i++) { s += bars[i].close; if (i >= W) s -= bars[i - W].close; sma50d[i] = s / Math.min(W, i + 1); } }
 
 // ===== La mesure : +1R / +2R touchés avant −1R, sur le trajet M5 à partir de la bougie SUIVANTE (entrée à son open) =====
 interface Entry { i: number; dir: 1 | -1; risk: number }
@@ -225,6 +233,24 @@ CANDS.push({ key: 'F', name: 'F · divergence RSI 14 (creux plus bas, RSI plus h
 } });
 
 // Z. Ligne de base : une entrée toutes les 4 h, long ET short, stop 1 ATR — le hasard de chaque semestre.
+// P. PULLBACK DANS LA TENDANCE DE FOND (03/09, la « stratégie n°2 » du texte de Mathieu : « si la macro-tendance est
+//    haussière, attendre que le RSI passe en survente sur 15 min ou 1 h pour acheter à prix réduit ») : tendance de
+//    fond = clôture au-dessus (long) / en dessous (short) de la moyenne des clôtures sur 50 jours ; déclencheur =
+//    RSI 14 HORAIRE < 30 (long) ou > 70 (short) ; stop 1,5 ATR(H1) ; horizon 1 jour (288 M5) ; 12 bougies de repos.
+//    P-tight : la même avec un stop de 1 ATR(H1) et un horizon de 4 h — la version « scalp » de l'idée.
+for (const [label, slK, hz] of [['stop 1,5 ATR(H1) · horizon 1 j', 1.5, 288], ['stop 1 ATR(H1) · horizon 4 h', 1, 4 * 12]] as Array<[string, number, number]>) {
+  CANDS.push({ key: `P-${hz}`, name: `P · pullback RSI 14 horaire (< 30 / > 70) dans la tendance de 50 jours · ${label}`, horizon: hz, gen: () => {
+    const out: Entry[] = []; let cool = 0;
+    for (let i = 50 * 288; i < n; i++) {
+      if (cool > 0) { cool--; continue; }
+      const up = bars[i].close > sma50d[i], dn = bars[i].close < sma50d[i];
+      if (up && rsiH1[i] < 30) { out.push({ i, dir: 1, risk: slK * atrH1[i] }); cool = 12; }
+      else if (dn && rsiH1[i] > 70) { out.push({ i, dir: -1, risk: slK * atrH1[i] }); cool = 12; }
+    }
+    return out;
+  } });
+}
+
 CANDS.push({ key: 'Z', name: 'Z · LIGNE DE BASE — entrées au hasard toutes les 4 h, stop 1 ATR', horizon: 8 * 12, gen: () => {
   const out: Entry[] = [];
   for (let i = 300; i < n; i += 48) { out.push({ i, dir: 1, risk: atr[i] }); out.push({ i, dir: -1, risk: atr[i] }); }
