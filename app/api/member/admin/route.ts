@@ -26,6 +26,8 @@ function guard(req: NextRequest) {
 // de l'entonnoir et de tous les compteurs. Le pire était le silence : le dashboard affichait « 200 » comme si
 // c'était le total, et le mur reculait d'un membre à chaque inscription. Une limite plus haute ne ferait que
 // repousser la date, et PostgREST plafonne de toute façon ses réponses — donc on pagine jusqu'à épuisement.
+let lastChatLookup = 0;
+let tgInboxCache: { at: number; on: boolean } | null = null; // état du webhook Telegram, rafraîchi au plus toutes les 10 min
 const MEMBER_COLS = 'member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at,locale,strategy,lot';
 type MemberRow = { tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>;
 async function allMembers(db: ReturnType<typeof sdb>): Promise<{ data: MemberRow[] }> {
@@ -184,7 +186,8 @@ export async function GET(req: NextRequest) {
   const known = new Map((chatRows ?? []).map((c) => [Number(c.chat_id), c]));
   const missing = [...new Set((joinChats ?? []).map((r) => Number(r.chat_id)).filter(Boolean))]
     .filter((id) => !known.get(id)?.title).slice(0, 8);
-  if (missing.length && process.env.TELEGRAM_BOT_TOKEN) {
+  if (missing.length && process.env.TELEGRAM_BOT_TOKEN && Date.now() - lastChatLookup >= 10 * 60_000) {
+    lastChatLookup = Date.now(); // un canal sans titre chez Telegram restait interrogé à CHAQUE GET (8 appels × 3,5 s)
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const found = await Promise.all(missing.map(async (id) => {
       try {
@@ -205,15 +208,20 @@ export async function GET(req: NextRequest) {
 
   // état RÉEL du webhook (getWebhookInfo) — SAIN uniquement s'il pointe sur /api/telegram (le webhook
   // unique : login + waitlist + inbox). Toute autre URL = cassé → le bouton de réparation s'affiche.
-  let tgInboxOn = false;
-  try {
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (token) {
-      const wh = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`, { signal: AbortSignal.timeout(3000) });
-      const wd = (await wh.json().catch(() => ({}))) as { result?: { url?: string } };
-      tgInboxOn = String(wd.result?.url ?? '').includes('/api/telegram');
-    }
-  } catch { /* Telegram injoignable → on laisse le bouton visible */ }
+  // MÉMORISÉ 10 MIN (audit 03/09 §3) : ce GET tourne toutes les 30 s et appelait Telegram à chaque fois, avec
+  // jusqu'à 3 s d'attente bloquante — le webhook ne change pas toutes les 30 secondes.
+  let tgInboxOn = tgInboxCache && Date.now() - tgInboxCache.at < 10 * 60_000 ? tgInboxCache.on : false;
+  if (!tgInboxCache || Date.now() - tgInboxCache.at >= 10 * 60_000) {
+    try {
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (token) {
+        const wh = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`, { signal: AbortSignal.timeout(3000) });
+        const wd = (await wh.json().catch(() => ({}))) as { result?: { url?: string } };
+        tgInboxOn = String(wd.result?.url ?? '').includes('/api/telegram');
+        tgInboxCache = { at: Date.now(), on: tgInboxOn };
+      }
+    } catch { /* Telegram injoignable → on laisse le bouton visible */ }
+  }
   const pushTgIds = [...new Set((pushQ.data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
   // AFFILIATION — la dette réelle par parrain : Σ confirmées − Σ retraits (demandés + payés).
   // Une balance NÉGATIVE (commission annulée APRÈS retrait) est le signal d'abus n°1 → flag rouge.
@@ -350,6 +358,12 @@ export async function POST(req: NextRequest) {
       const { data: seg } = await db.from('members').select('tg_id').in('status', statuses);
       sent = await push.pushToUsers((seg ?? []).map((m) => Number(m.tg_id)), payload);
     } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });
+    // Une push individuelle est une RELANCE : elle s'écrit comme telle (audit 03/09 §3.2 : le 🔔 NUDGE de
+    // TOOLS n'écrivait rien, donc invisible du cooldown de 3 j et de BOT ACTIVITY — deux files, deux mémoires).
+    if (p.audience === 'user' && sent) {
+      const { data: mn } = await db.from('members').select('member_no').eq('tg_id', Number(p.tg_id)).limit(1);
+      await db.from('member_actions').insert({ tg_id: Number(p.tg_id), member_no: mn?.[0]?.member_no ?? null, kind: 'nudge', status: 'done', done_by: `${who} (push)`, detail: { via: 'admin', note: `push from TOOLS: ${title}`, push: sent } as never });
+    }
     return NextResponse.json({ sent });
   }
 
@@ -649,24 +663,6 @@ export async function POST(req: NextRequest) {
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `🔑 credentials revealed by ${who}` } as never });
     return NextResponse.json({ login: m[0].mt5_login, server: m[0].mt5_server, password });
   }
-  if (body.revealAccount) {
-    // RÉVÉLATION des identifiants d'un COMPTE SUPPLÉMENTAIRE (multi-stratégies) — même contrat que revealMember.
-    const { data: acc } = await (db as any).from('member_accounts').select('tg_id,member_no,account_no,mt5_login,mt5_server,mt5_password_enc').eq('id', String(body.revealAccount)).limit(1) as { data: Array<Record<string, unknown>> | null };
-    if (!acc?.length) return NextResponse.json({ error: 'account not found' }, { status: 404 });
-    if (!acc[0].mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
-    let password: string;
-    try {
-      password = decryptSecret(acc[0].mt5_password_enc as string);
-    } catch {
-      return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
-    }
-    await db.from('member_actions').insert({ tg_id: Number(acc[0].tg_id), member_no: acc[0].member_no != null ? Number(acc[0].member_no) : null, kind: 'note', status: 'done', done_by: who, detail: { text: `🔑 credentials revealed by ${who} (account #${acc[0].account_no})` } as never });
-    return NextResponse.json({ login: acc[0].mt5_login, server: acc[0].mt5_server, password });
-  }
-  // ===== 🚫 BAN / UNBAN (31/07 — un concurrent s'était créé un compte pour capturer l'app et la copier).
-  // Coupe TOUT : la session en cours (banned_at relu à chaque requête), la reconnexion (aucune session
-  // n'est posée), et la copie côté STH. Retire aussi de la whitelist VIP — sinon un banni garderait
-  // l'app déverrouillée. Réversible : `unban` remet tout à zéro sauf la copie (à rebrancher à la main).
   if (body.ban) {
     const { tg_id, reason, undo } = body.ban;
     const { data: m } = await db.from('members').select('member_no,tg_id,tg_username').eq('tg_id', tg_id).limit(1);

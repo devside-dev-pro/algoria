@@ -142,7 +142,7 @@ export default function Report() {
           </div>
           <div className="sub">
             <div className="t">GOLD · BITCOIN</div>
-            <div className="d">Generated July 2026</div>
+            <div className="d">Data through {RECORD.window.to}</div>
           </div>
         </div>
 
@@ -154,7 +154,7 @@ export default function Report() {
           </div>
         </div>
 
-        <p className="lede">Algoria runs several strategies at once — fast intraday scalps plus slower swing positions held for days. This is <b>16 months of all of them together, on one account</b> — every trade a member&rsquo;s account would have taken, not a hand-picked strategy. Real gold &amp; Bitcoin prices, with spreads, commissions and slippage modelled in. Live trading began July 2026; this is the history behind it.</p>
+        <p className="lede">Algoria runs several strategies at once — fast intraday scalps plus slower swing positions held for days. This is <b>{RECORD.window.months} months of all of them together, on one account</b> — every trade a member&rsquo;s account would have taken, not a hand-picked strategy. Real gold &amp; Bitcoin prices, with spreads, commissions and slippage modelled in. Live trading began July 2026; this is the history behind it.</p>
 
         <section>
           <div className="sechead">
@@ -162,7 +162,7 @@ export default function Report() {
             <span className="tag">all trades</span>
             <span className="per">Mar 2025 → Jun 2026 · 16 months</span>
           </div>
-          <p className="subhead">Scalping and swing running side by side, exactly as a member receives them — 6,773 trades over 16 full months on a single simulated account, replayed with the exact live filters (never two stacked trades, no counter-trend entries).</p>
+          <p className="subhead">Scalping and swing running side by side, exactly as a member receives them — {RECORD.trades.toLocaleString('en-US')} trades over {RECORD.window.months} full months on a single simulated account, replayed with the exact live filters (never two stacked trades, no counter-trend entries).</p>
 
           <div className="chartcard">
             <div className="cap">
@@ -173,10 +173,10 @@ export default function Report() {
           </div>
 
           <div className="tiles">
-            <div className="tile" style={tile('var(--blue)')}><div className="k">Total trades</div><div className="v">6,773</div><div className="s">gold scalp + swing</div></div>
-            <div className="tile" style={tile('var(--up)')}><div className="k">Win rate</div><div className="v" style={{ color: 'var(--up)' }}>83%</div><div className="s">across all strategies</div></div>
-            <div className="tile" style={tile('var(--cyan)')}><div className="k">Profit factor</div><div className="v">1.12</div><div className="s">gross win ÷ gross loss</div></div>
-            <div className="tile" style={tile('var(--down)')}><div className="k">Max drawdown</div><div className="v" style={{ color: 'var(--down)' }}>30.7%</div><div className="s">worst peak-to-trough</div></div>
+            <div className="tile" style={tile('var(--blue)')}><div className="k">Total trades</div><div className="v">{RECORD.trades.toLocaleString('en-US')}</div><div className="s">gold scalp + swing</div></div>
+            <div className="tile" style={tile('var(--up)')}><div className="k">Win rate</div><div className="v" style={{ color: 'var(--up)' }}>{RECORD.winRate}%</div><div className="s">across all strategies</div></div>
+            <div className="tile" style={tile('var(--cyan)')}><div className="k">Profit factor</div><div className="v">{RECORD.profitFactor}</div><div className="s">gross win ÷ gross loss</div></div>
+            <div className="tile" style={tile('var(--down)')}><div className="k">Max drawdown</div><div className="v" style={{ color: 'var(--down)' }}>{RECORD.maxDrawdownPct}%</div><div className="s">worst peak-to-trough</div></div>
             <div className="tile" style={tile('var(--gold)')}><div className="k">Months green</div><div className="v">{greenMonths}<span style={{ fontSize: 15, color: 'var(--dim)' }}> / {MONTHS.length}</span></div><div className="s">{MONTHS.length - greenMonths} months closed red</div></div>
           </div>
 
