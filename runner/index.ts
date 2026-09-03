@@ -13,6 +13,7 @@ import { runTick } from '../lib/engine/pipeline';
 import { checkRisk } from '../lib/engine/risk';
 import { breakoutSignal } from '../lib/engine/breakout';
 import { swingSignal, swingMinBars } from '../lib/engine/swing';
+import { trendSignal, trendExit, trendLot, closedDailyBars } from '../lib/engine/trend';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
 import { ACTIVE_STRATEGY } from '../lib/engine/strategies';
@@ -28,7 +29,7 @@ import { pushToAdmins } from '../lib/push/send';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTradesWithInitialStop, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, updateTradeStop, listOpenTradesWithInitialStop, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard } from '../lib/member/i18n';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
@@ -338,8 +339,16 @@ async function main() {
           hardClosedDay = state.dayStamp ?? '';
           const openHere = ((terminal.positions ?? []) as any[]).filter((p) => p.symbol === BROKER);
           if (openHere.length) {
-            try { await closeAll(stream, BROKER); await logNote(`🛑 daily loss cap hit — closed ${openHere.length} open position(s) to bound the day`, 'veto'); }
-            catch (e) { console.error('[algoria] hard-cap close échec:', e); }
+            try {
+              // Les positions de TENDANCE (D1) ne sont PAS fermées par le cap journalier : leur risque est
+              // borné à 1 % de l'équité par le stop du broker, et une règle qui se juge sur des semaines ne
+              // peut pas être coupée par un compteur de la journée. Sans couche de tendance, comportement inchangé.
+              const keep = inst.trend ? new Set((await listOpenTrendTrades(DISPLAY)).map((t) => t.ticket)) : new Set<string>();
+              const toClose = openHere.filter((p) => !keep.has(String(p.id)));
+              if (!keep.size) await closeAll(stream, BROKER);
+              else for (const p of toClose) await closePosition(stream, String(p.id));
+              await logNote(`🛑 daily loss cap hit — closed ${toClose.length} open position(s) to bound the day${keep.size ? ` (${keep.size} trend position kept, its stop is held by the broker)` : ''}`, 'veto');
+            } catch (e) { console.error('[algoria] hard-cap close échec:', e); }
           }
         }
         state.newsWindows = newsWindows(); // annonces éco USD fort impact → checkRisk refuse les entrées autour
@@ -588,6 +597,99 @@ async function main() {
       setInterval(() => void weekendFlatLosers(), 5 * 60_000);
     }
 
+    // ===== COUCHE DE TENDANCE (D1) — cassure de canal journalier (03/09/2026), voir lib/engine/trend.ts =====
+    // UNE décision par bougie journalière CLÔTURÉE, prise sur les bougies D1 du broker (les mêmes que le
+    // backtest — pas une agrégation maison qui aurait ses propres bornes de journée). Le passage tourne toutes
+    // les 5 min : il ne fait rien tant que la dernière bougie close est celle déjà traitée, et il attend une
+    // cotation FRAÎCHE — sur l'or, la bougie du vendredi se décide donc à la ré-ouverture du dimanche soir,
+    // ce qui est exactement « l'entrée à l'ouverture du lendemain » du backtest.
+    //   1) positions ouvertes : clôture au-delà du canal de sortie → fermeture au marché ; sinon le stop est
+    //      remonté sur le canal (jamais à reculons), et c'est le BROKER qui le tient (pas manage.ts) ;
+    //   2) sans position : cassure du canal d'entrée → ordre au marché, stop à slAtr × ATR du prix courant,
+    //      lot = riskPct de l'ÉQUITÉ (refusé, et dit, si le compte est trop petit pour le lot minimal).
+    // L'état « position de tendance ouverte ? » est relu en base à chaque passage (signal_ref *-trend-*).
+    if (inst.trend) {
+      const TR = inst.trend;
+      let trendDecided = 0; // temps d'ouverture de la dernière bougie D1 close dont l'ENTRÉE a été décidée
+      let trendManaged = 0; // idem pour la gestion des positions ouvertes (sortie / remontée du stop)
+      const priceStep = inst.config.priceStep ?? 0.01;
+      const dec = Math.max(0, Math.round(-Math.log10(priceStep)));
+      const roundP = (x: number) => +(Math.round(x / priceStep) * priceStep).toFixed(dec);
+      const trendPass = async () => {
+        try {
+          if (!terminal.accountInformation) return; // pas synchronisé
+          const px = terminal.price(BROKER);
+          if (!px?.bid || !px?.ask) return;
+          const quoteMs = new Date(px.time).getTime();
+          if (Number.isFinite(quoteMs) && Date.now() - quoteMs > 90_000) return; // marché fermé → à l'ouverture suivante
+          const hist = await loadHistory(account, BROKER, '1d', TR.minBars + 60);
+          const closed = closedDailyBars(hist, Date.now());
+          if (closed.length < TR.minBars) return;
+          const last = closed[closed.length - 1];
+          const mid = (Number(px.bid) + Number(px.ask)) / 2;
+
+          // ── 1) positions ouvertes : sortie de canal ou remontée du stop (une fois par bougie close)
+          const open = await listOpenTrendTrades(DISPLAY);
+          let stillOpen = open.length;
+          if (open.length && last.time > trendManaged) {
+            trendManaged = last.time;
+            for (const t of open) {
+              const dir: 1 | -1 = t.direction === 'long' ? 1 : -1;
+              const pos = ((terminal.positions ?? []) as any[]).find((p) => String(p.id) === t.ticket);
+              if (!pos) continue; // fermée côté broker (stop touché) — la réconciliation la clôt en base
+              const { exit, trail } = trendExit(closed, TR, dir);
+              if (exit) {
+                await closePosition(stream, t.ticket);
+                stillOpen--;
+                await logNote(`📐 TREND exit ${DISPLAY} ${t.direction} ${t.ticket} — daily close ${last.close} beyond the ${TR.exitN}-day channel (${trail.toFixed(dec)}) · closed at the open`, 'order');
+                continue;
+              }
+              const want = roundP(trail);
+              const cur = typeof pos.stopLoss === 'number' ? pos.stopLoss : null;
+              const better = cur == null ? true : dir === 1 ? want > cur + priceStep : want < cur - priceStep;
+              // le stop ne doit pas être posé du mauvais côté du prix (canal traversé intrajournalier sans clôture au-delà)
+              const sideOk = dir === 1 ? want < mid : want > mid;
+              if (better && sideOk) {
+                await stream.modifyPosition(t.ticket, want, pos.takeProfit);
+                void updateTradeStop(t.ticket, want);
+                console.log(`[algoria] trend stop → ${DISPLAY} ${t.ticket} SL=${want} (${TR.exitN}-day channel, was ${cur})`);
+              }
+            }
+          }
+
+          // ── 2) entrée : cassure du canal sur la dernière bougie close, une seule décision par bougie
+          if (last.time <= trendDecided) return;
+          if (stillOpen > 0) { trendDecided = last.time; return; } // une position de tendance à la fois par marché
+          if (killed) return;
+          const sig = trendSignal(DISPLAY, closed, TR, mode, mid, priceStep);
+          if (!sig) { trendDecided = last.time; return; }
+          const freshState = readState(terminal, BROKER, state);
+          if (freshState.spread > inst.config.risk.maxSpread) { console.log(`[algoria] trend ${DISPLAY} : spread ${freshState.spread.toFixed(2)} trop large à l'ouverture, nouvel essai dans 5 min`); return; } // pas décidé : on réessaie
+          trendDecided = last.time;
+          const spec = stream?.terminalState?.specification?.(BROKER);
+          const contract = typeof spec?.contractSize === 'number' && spec.contractSize > 0 ? spec.contractSize : inst.config.contractSize;
+          const equity = Number(terminal.accountInformation?.equity) || 0;
+          const riskDist = Math.abs(sig.entry - sig.stopLoss);
+          const lot = trendLot(equity, TR.riskPct, riskDist, contract, { minVolume: spec?.minVolume, volumeStep: spec?.volumeStep, maxVolume: spec?.maxVolume });
+          if (!lot) { await logSignal(sig, { code: `trend: equity ${equity.toFixed(0)} too small — ${TR.riskPct * 100}% risk over ${riskDist.toFixed(dec)} needs less than the broker's minimum lot`, status: 'rejected' }); return; }
+          sig.lot = lot;
+          const veto = portfolioVeto({ positions: (terminal.positions ?? []) as any[], symbol: BROKER });
+          if (veto) { await logSignal(sig, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' }); return; }
+          const ticket = await executeSignal(sig);
+          if (ticket) {
+            rememberManagement(ticket, { beTrigger: 0, riskDist, newsGuard: false }); // aucune gestion tick par tick
+            await logNote(`📐 TREND ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} (${TR.slAtr}×ATR, ${(TR.riskPct * 100).toFixed(0)}% of equity = ${lot} lot) · exit on the ${TR.exitN}-day channel — held for weeks`, 'order');
+            if (vipReady() && !SECONDARY) void postVip(`📐 <b>TREND position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction.toUpperCase()}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n${VIP_RULE}\n<i>Daily breakout. Risk 1R = ${(TR.riskPct * 100).toFixed(0)}% of equity. Can ride for weeks — the stop follows the ${TR.exitN}-day channel.</i>`);
+          }
+        } catch (e) {
+          console.error(`[algoria] trend ${DISPLAY} échoué:`, e);
+        }
+      };
+      console.log(`[algoria] couche TENDANCE active sur ${DISPLAY} (Donchian ${TR.N} j · sortie ${TR.exitN} j · stop ${TR.slAtr}×ATR${TR.atrLen} · risque ${TR.riskPct * 100} % de l'équité)`);
+      setTimeout(() => void trendPass(), 90_000); // après la synchro du compte
+      setInterval(() => void trendPass(), 5 * 60_000);
+    }
+
     // Agrégateur M1 LÉGER : log chaque bougie M1 clôturée (chart + data fraîche backtest), sans retenir l'historique.
     let m1cur: Bar | null = null;
     const feedM1 = (mid: number, t: number) => {
@@ -634,14 +736,18 @@ async function main() {
           const riskDist = Math.abs(r.entry - r.stopLoss);
           if (!riskDist) continue;
           const SWc = inst.swing;
-          if (r.ref.includes('-swing-') && SWc) rememberManagement(r.ticket, { beTrigger: SWc.beTrigger, trailActivate: SWc.trailActivate, trailDist: SWc.trailDist, ladder: SWc.ladder, riskDist });
+          // TENDANCE (D1) : aucune gestion tick par tick, ni protection avant annonce — le stop est remonté une
+          // fois par jour sur le canal de sortie (trendPass). Restaurée même si TREND_<SYM> a été coupé entre
+          // temps : une position ouverte garde sa règle jusqu'à sa sortie.
+          if (r.ref.includes('-trend-')) rememberManagement(r.ticket, { beTrigger: 0, riskDist, newsGuard: false });
+          else if (r.ref.includes('-swing-') && SWc) rememberManagement(r.ticket, { beTrigger: SWc.beTrigger, trailActivate: SWc.trailActivate, trailDist: SWc.trailDist, ladder: SWc.ladder, riskDist });
           else if (r.ref.includes('-bk-') && inst.breakout) rememberManagement(r.ticket, { beTrigger: inst.breakout.beTrigger, trailActivate: inst.breakout.trailActivate, trailDist: inst.breakout.trailDist, riskDist });
           // même correctif qu'à l'exécution (voir le bloc hasCustomMgmt) : tester TOUTE gestion custom, pas le
           // seul trailing — sinon un scalp S1 réadopté après redéploiement repartait sur le BE par défaut (0.15).
           else if (inst.config.beTrigger != null || inst.config.ladder != null || (inst.config.trailActivate != null && inst.config.trailDist != null))
             rememberManagement(r.ticket, { beTrigger: inst.config.beTrigger ?? 0, ladder: inst.config.ladder, trailActivate: inst.config.trailActivate, trailDist: inst.config.trailDist, riskDist });
           else continue; // aucune gestion custom définie → le défaut EST la gestion
-          await logNote(`🔧 management restored on ${DISPLAY} position ${r.ticket} (${r.ref.includes('-swing-') ? 'swing' : r.ref.includes('-bk-') ? 'breakout' : 'scalp'} · risk ${riskDist.toFixed(2)}) — stop ladder + trailing are live again`, 'order');
+          await logNote(`🔧 management restored on ${DISPLAY} position ${r.ticket} (${r.ref.includes('-trend-') ? 'trend' : r.ref.includes('-swing-') ? 'swing' : r.ref.includes('-bk-') ? 'breakout' : 'scalp'} · risk ${riskDist.toFixed(2)}) — ${r.ref.includes('-trend-') ? 'daily channel stop only, tick management off' : 'stop ladder + trailing are live again'}`, 'order');
         }
       } catch (e) {
         console.error('[algoria] restauration gestion échec:', (e as { message?: string })?.message ?? e);

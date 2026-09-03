@@ -26,6 +26,7 @@ type Row = { signal_ref: string | null; symbol: string; closed_at: string; pnl: 
 /** Couche déduite du signal_ref, comme le runner la nomme : *-swing-*, *-bk-*, sinon scalp. */
 const layerOf = (ref: string | null): string => {
   const r = (ref ?? '').toLowerCase();
+  if (r.includes('-trend-')) return 'trend';
   if (r.includes('swing')) return 'swing';
   if (r.includes('-bk-') || r.includes('break')) return 'breakout';
   return 'scalp';

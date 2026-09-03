@@ -441,6 +441,13 @@ export async function listOpenSwingTrades(symbol: string): Promise<Array<{ ticke
   return (data ?? []).map((r: Record<string, unknown>) => ({ ticket: String(r.ticket), direction: r.direction === 'short' ? 'short' : 'long', entry: Number(r.entry) }));
 }
 
+/** Positions de TENDANCE (D1) ouvertes sur ce symbole — slot séparé du swing (signal_ref *-trend-*), relu en
+ *  base à chaque décision journalière : l'état survit aux redémarrages, jamais en mémoire seule. */
+export async function listOpenTrendTrades(symbol: string): Promise<Array<{ ticket: string; direction: 'long' | 'short'; entry: number }>> {
+  const { data } = await db.from('trades').select('ticket,direction,entry').eq('symbol', symbol).eq('strategy' as never, STRAT_ID as never).is('closed_at', null).ilike('signal_ref', '%-trend-%');
+  return (data ?? []).map((r: Record<string, unknown>) => ({ ticket: String(r.ticket), direction: r.direction === 'short' ? 'short' : 'long', entry: Number(r.entry) }));
+}
+
 /**
  * Positions ENCORE OUVERTES en base, avec le stop D'ORIGINE du signal qui les a créées.
  *
