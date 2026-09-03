@@ -8,7 +8,6 @@ import { BROKERS } from '@/lib/member/brokers';
 import { notifyOwner } from '@/lib/member/notifyOwner';
 import { rejectMessage } from '@/lib/member/rejectReasons';
 
-const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
 
 // Familles d'actions dont seul le DERNIER état compte : une nouvelle demande REMPLACE les précédentes en attente.
 // pause/resume/disconnect = même interrupteur (l'état de la copie) ; risk_change = le dernier tier demandé.
@@ -179,7 +178,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit, activation, prefill });
 }
 
-/** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'risk'|'pause'|'resume', ... } */
+/** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'strategy'|'pause'|'resume', ... } */
 export async function POST(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
   if (!s) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -367,41 +366,6 @@ export async function POST(req: NextRequest) {
       await db.from('member_actions').insert({ tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member (auto STH)', detail: { text: `📏 copy size changed to ${newLot} lot — applied automatically via STH` } as never });
     } else {
       await queueAction(s.tgId, 'risk_change', { lot: String(newLot), to: `lot ${newLot}` }); // → le support règle le lot dans STH
-    }
-  } else if (body.action === 'risk') {
-    const tier = String(body.tier ?? '');
-    if (!['low', 'balanced', 'high'].includes(tier)) return NextResponse.json({ error: 'invalid tier' }, { status: 400 });
-    patch.risk_tier = tier;
-    if (cur.status === 'onboarding') {
-      // fin du wizard : la copie doit être branchée côté copieur → pending_copier (un membre déjà live ne régresse pas).
-      // UNE action 'connect' complète (compte + lot initial) part dans la file — PAS de mot de passe dedans.
-      patch.onboarding_step = 3;
-      patch.status = 'pending_copier';
-      // la carte CONNECT porte TOUT ce qu'il faut pour VÉRIFIER avant d'approuver : broker choisi,
-      // nom du titulaire, dépôt déclaré, @telegram — plus jamais une demande aveugle dans la file.
-      const [{ data: mrow }, { data: kyc }] = await Promise.all([
-        db.from('members').select('mt5_login,mt5_server,broker,tg_username').eq('tg_id', s.tgId).limit(1),
-        db.from('member_actions').select('detail').eq('tg_id', s.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
-      ]);
-      await queueAction(s.tgId, 'connect', {
-        login: mrow?.[0]?.mt5_login ?? null,
-        server: mrow?.[0]?.mt5_server ?? null,
-        tier,
-        lot: TIER_LOT[tier],
-        broker: mrow?.[0]?.broker ?? null,
-        username: mrow?.[0]?.tg_username ?? null,
-        ...(kyc?.[0]?.detail as Record<string, unknown> | undefined),
-      });
-    } else {
-      // AUTO via STH (29/07) : même master, nouveau lot — join déclaratif. Échec → file (backup).
-      const { data: mrow } = await db.from('members').select('member_no,strategy').eq('tg_id', s.tgId).limit(1);
-      const strat = Number((mrow?.[0] as { strategy?: number } | undefined)?.strategy ?? 2) || 2;
-      let applied = false;
-      const { sthReady, sthMoveMaster } = await import('@/lib/member/sth');
-      if (sthReady()) applied = (await sthMoveMaster(String(s.tgId), strat, Number(TIER_LOT[tier]))).ok;
-      if (applied)
-        await db.from('member_actions').insert({ tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member (auto STH)', detail: { text: `⚖ risk tier ${tier} (lot ${TIER_LOT[tier]}) — applied automatically via STH` } as never });
-      else await queueAction(s.tgId, 'risk_change', { to: tier, lot: TIER_LOT[tier] }); // backup : le support règle le lot à la main
     }
   } else if (body.action === 'add_account') {
     // ➕ AJOUTER UNE STRATÉGIE (multi-comptes) — la CONTINUITÉ d'un VIP : un membre déjà live ajoute un

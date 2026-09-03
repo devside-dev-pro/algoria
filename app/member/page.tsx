@@ -43,9 +43,9 @@ export default function MemberHome() {
   // c'est exactement là qu'on le perd. Le lien du message Telegram mène au même endroit.
   if (member.status === 'offboarded') { router.replace('/member/recover'); return null; }
 
-  const act = (action: 'pause' | 'resume' | 'risk', tier?: string) => {
+  const act = (action: 'pause' | 'resume') => {
     setBusy(true);
-    void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...(tier ? { tier } : {}) }) })
+    void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
       .then(async (r) => { const d = (await r.json()) as { member?: Member }; if (d.member) setMember(d.member); })
       .finally(() => setBusy(false));
   };
