@@ -73,7 +73,7 @@ export default function Profile() {
       .then(async (r) => { const d = (await r.json()) as { member?: Member }; if (d.member) setMember(d.member); })
       .finally(() => setBusy(false));
   };
-  // LANGUE (03/08) — l'app est traduite a 100 %, mais la langue etait DEDUITE du canal d'arrivee :
+  // LANGUE (03/08) — le tunnel d'inscription est traduit (EN/IT) ; le reste de l'app est en anglais. La langue etait DEDUITE du canal d'arrivee :
   // un Italien venu d'Instagram ou d'un DM restait bloque en anglais sans aucun moyen d'en sortir.
   // C'est un prospect italien qui nous l'a signale, au moment ou il allait deposer. Rechargement
   // complet apres le changement : le dictionnaire est lu au rendu, une simple mise a jour d'etat

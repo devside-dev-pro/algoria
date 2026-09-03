@@ -13,7 +13,6 @@ type Dict = Record<string, { en: string; it: string }>;
 
 export const UI: Dict = {
   // ===== connexion / accès =====
-  'login.title': { en: 'ALGORIA', it: 'ALGORIA' },
   'login.sub': {
     en: 'Your member dashboard — copying status, risk control and the live AI feed. Sign in with the Telegram account that joined the channel.',
     it: 'La tua dashboard membro — stato della copia, controllo del rischio e il feed live dell\'IA. Accedi con l\'account Telegram con cui sei entrato nel canale.',
@@ -69,25 +68,8 @@ export const UI: Dict = {
   'ob.proof.riskEnd': { en: 'every single day', it: 'ogni singolo giorno' },
   'ob.proof.video': { en: '▶ New here? Watch the 2-min founder intro', it: '▶ Nuovo qui? Guarda la presentazione di 2 minuti' },
 
-  'ob.budget.q': { en: 'How much are you planning to start with?', it: 'Con quanto pensi di iniziare?' },
-  'ob.budget.help': { en: 'We\'ll point you to the broker that fits your budget best.', it: 'Ti indichiamo il broker più adatto al tuo budget.' },
-  'ob.broker.title': { en: 'Open your broker account', it: 'Apri il tuo conto broker' },
-  'ob.broker.recommended': { en: 'RECOMMENDED', it: 'CONSIGLIATO' },
-  'ob.broker.others': { en: 'Other partner brokers', it: 'Altri broker partner' },
-  'ob.broker.done': { en: 'I\'ve opened my account', it: 'Ho aperto il mio conto' },
 
-  'ob.mt5.title': { en: 'Connect your trading account', it: 'Collega il tuo conto di trading' },
-  'ob.mt5.login': { en: 'Account number (login)', it: 'Numero di conto (login)' },
-  'ob.mt5.server': { en: 'Server', it: 'Server' },
-  'ob.mt5.password': { en: 'Password', it: 'Password' },
-  'ob.mt5.name': { en: 'Full name on the broker account', it: 'Nome completo sul conto broker' },
-  'ob.mt5.deposit': { en: 'Deposit amount ($)', it: 'Importo del deposito ($)' },
-  'ob.mt5.secure': { en: 'Encrypted and never shared. Used only to connect you to the copier.', it: 'Crittografati e mai condivisi. Servono solo a collegarti al copiatore.' },
-  'ob.mt5.submit': { en: 'Connect my account', it: 'Collega il mio conto' },
 
-  'ob.strategy.title': { en: 'Pick your strategy', it: 'Scegli la tua strategia' },
-  'ob.strategy.submit': { en: 'Finish', it: 'Concludi' },
-  'ob.back': { en: 'Back', it: 'Indietro' },
   'ob.rejected': { en: 'Your last request was declined', it: 'La tua ultima richiesta è stata rifiutata' },
 
 
@@ -133,7 +115,6 @@ export const UI: Dict = {
   'ob.loginHint': { en: 'The account NUMBER shown in MetaTrader — usually 6 to 10 digits. Not your email.', it: 'Il NUMERO di conto mostrato in MetaTrader — di solito 6-10 cifre. Non la tua email.' },
   'ob.loginWarn': { en: 'That looks like your broker website login. Algoria needs the MetaTrader account number — the digits shown at the top of MetaTrader, also in the broker\'s email.', it: 'Sembra il login del sito del broker. Algoria ha bisogno del numero di conto MetaTrader — le cifre mostrate in alto in MetaTrader, presenti anche nell\'email del broker.' },
   // le bouton d'envoi attend une vraie connexion MetaTrader (~30 s) — « encrypting » mentait sur la durée
-  'ob.checking': { en: 'CHECKING YOUR ACCOUNT…', it: 'VERIFICA DEL TUO CONTO…' },
   'ob.verif': { en: 'FOR VERIFICATION', it: 'PER LA VERIFICA' },
   'ob.fullName': { en: 'Full name on your broker account', it: 'Nome completo sul tuo conto broker' },
   'ob.amount': { en: 'Amount deposited ($ — min 200)', it: 'Importo depositato ($ — min 200)' },
@@ -170,13 +151,6 @@ export const UI: Dict = {
   'ob.backMt5': { en: '← Back to MT5 details', it: '← Torna ai dati MT5' },
 
   // ===== paywall / statut (vus par tous les prospects) =====
-  'lock.cta': { en: 'UNLOCK MY ACCESS', it: 'SBLOCCA IL MIO ACCESSO' },
-  'lock.membersOnly': { en: 'MEMBERS ONLY', it: 'SOLO MEMBRI' },
-  'status.onboarding': { en: 'SETTING UP', it: 'IN CONFIGURAZIONE' },
-  'status.pending_copier': { en: 'CONNECTING', it: 'COLLEGAMENTO' },
-  'status.live': { en: 'LIVE', it: 'ATTIVO' },
-  'status.paused': { en: 'PAUSED', it: 'IN PAUSA' },
-  'support.ask': { en: 'A question? Message us', it: 'Una domanda? Scrivici' },
   // ===== COMPTE PRÉEXISTANT — LA DÉMARCHE QUE SEUL LE TITULAIRE PEUT FAIRE (17/08/2026) ==============
   // Avant, cet écran disait « écris à Mathieu d'abord ». C'était le mauvais destinataire : Mathieu ne
   // peut que CONSTATER que le compte n'apparaît pas chez le partenaire, il ne peut pas le rattacher.
