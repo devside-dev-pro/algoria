@@ -187,7 +187,9 @@ export async function GET(req: NextRequest) {
   // dans les variables Vercel. On calcule ici le RÔLE de chacun : source du fan-out, miroir UK, canal IT.
   // Un canal listé « — » n'est branché sur rien : c'est le signe qu'une variable manque.
   const roles: Record<string, string> = {};
-  for (const [env, role] of [['TELEGRAM_CHANNEL_EN', 'source'], ['TELEGRAM_CHANNEL_MIRROR', 'mirror UK'], ['TELEGRAM_CHANNEL_IT', 'canale IT']] as const) {
+  // TELEGRAM_VIP_CHAT vit sur Railway (runner) ; s'il est aussi posé sur Vercel, le carnet l'étiquette au lieu
+  // d'afficher « not wired » sur le canal VIP (vu le 03/09 sur la capture de Mathieu).
+  for (const [env, role] of [['TELEGRAM_CHANNEL_EN', 'source'], ['TELEGRAM_CHANNEL_MIRROR', 'mirror UK'], ['TELEGRAM_CHANNEL_IT', 'canale IT'], ['TELEGRAM_VIP_CHAT', 'VIP (runner)']] as const) {
     const v = (process.env[env] ?? '').trim();
     if (v) roles[v] = role;
   }
