@@ -1135,9 +1135,22 @@ async function main() {
     try {
       const { sendDm } = await import('./telegram');
       const { pushToUser } = await import('../lib/push/send');
-      const candidates = (await fetchNudgeCandidates()).slice(0, 20);
+      // PLAFOND (03/09/2026). Il était de 20 par jour, posé quand 30 personnes s'inscrivaient par semaine ;
+      // en août il en arrive 200 par semaine, et 20 places ne couvraient plus que les plus anciens (voir le
+      // tri dans fetchNudgeCandidates). Avec la cadence dégressive (3 j / 7 j / 14 j), le régime de croisière
+      // est d'environ 200 envois par jour, chacun ne recevant au plus un message tous les trois jours.
+      // ALGORIA_NUDGE_MAX_PER_DAY surcharge sans redéploiement ; 150 ms entre deux envois pour rester sous
+      // les limites du bot (Telegram tolère ~30 messages par seconde, on en fait ~6).
+      const NUDGE_MAX = Number(process.env.ALGORIA_NUDGE_MAX_PER_DAY ?? 250) || 250;
+      const all = await fetchNudgeCandidates();
+      const candidates = all.slice(0, NUDGE_MAX);
+      const bucket = (d: number) => (d <= 7 ? 'J+1-7' : d <= 14 ? 'J+8-14' : d <= 30 ? 'J+15-30' : 'J+31-60');
+      const counts = new Map<string, number>();
+      for (const c of candidates) counts.set(bucket(c.days), (counts.get(bucket(c.days)) ?? 0) + 1);
+      console.log(`[algoria] activation : ${candidates.length} relance(s) à envoyer sur ${all.length} éligible(s) · ${[...counts.entries()].map(([k, v]) => `${k}: ${v}`).join(' · ')}${all.length > NUDGE_MAX ? ` · ${all.length - NUDGE_MAX} reportée(s) à demain (les plus anciens)` : ''}`);
       let sent = 0;
       for (const c of candidates) {
+        await new Promise((r) => setTimeout(r, 150));
         const m = nudgeMessage(c.step, c.days);
         // TROIS PORTES sur CHAQUE relance auto. Le bouton « parler à Mathieu » existait depuis le 14/08
         // (deux variantes sur six ne donnaient aucun point de contact, et répondre à ce DM revient à écrire
