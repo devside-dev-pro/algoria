@@ -226,7 +226,14 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
       if (blocked && (lastNudge.get(m.tg_id) ?? 0) < blocked) return false;
       const last = lastNudge.get(m.tg_id);
       return !last || now - last > cooldownDays(m.days) * 86_400_000;
-    });
+    })
+    // LES PLUS RÉCENTS D'ABORD (03/09/2026, décision Mathieu : « priorité aux nouveaux »). Sans tri, la liste
+    // arrivait dans l'ordre de la base (les plus anciens en tête) et le plafond quotidien du runner servait
+    // toujours les mêmes : mesuré le 03/09, sur 920 prospects dans la fenêtre, les 217 inscrits de la
+    // semaine n'avaient JAMAIS reçu un message, et les 149 de plus d'un mois l'avaient tous reçu. Le J+1 est
+    // le message qui compte — la décision est chaude — et c'était le seul qui ne partait jamais. À
+    // ancienneté égale, celui qui a déjà franchi une étape (step 1 : broker choisi, MT5 en cours) passe avant.
+    .sort((a, b) => a.days - b.days || b.step - a.step);
 }
 
 /** Trace une relance (auto ou manuelle) → kind='nudge', status='done' (jamais dans la file support). */
