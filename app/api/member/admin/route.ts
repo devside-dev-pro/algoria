@@ -104,7 +104,7 @@ export async function GET(req: NextRequest) {
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
     allMembers(db),
-    db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
+    db.from('member_actions').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(500), // 100 → 500 (audit 03/09 : la file se tronquait sans le dire) ; pendingTotal dit le vrai nombre
     db.from('referral_commissions').select('*').order('created_at', { ascending: false }).limit(300),
     db.from('referral_payouts').select('*').order('created_at', { ascending: false }).limit(200),
     // REGISTRE DES DÉPÔTS (bilan broker) : lignes saisies par l'admin, kind='deposit' status='done'
@@ -271,7 +271,8 @@ export async function GET(req: NextRequest) {
   const botBlocked = [...lastPermanentFail.entries()]
     .filter(([tg, at]) => (lastReachable.get(tg) ?? 0) < at)
     .map(([tg]) => tg);
-  return NextResponse.json({ whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, botBlocked, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
+  const { count: pendingTotal } = await db.from('member_actions').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+  return NextResponse.json({ pendingTotal: pendingTotal ?? (actions.data ?? []).length, whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, botBlocked, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
     // segmentation de la file du jour : qui a déjà écrit (→ vraie relance) et qui s'est fait refuser (→ rattrapage)
     spokeTgIds: [...new Set((spokeQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
     rejectedTgIds: [...new Set((rejectedQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
@@ -773,13 +774,15 @@ export async function POST(req: NextRequest) {
     }
     const accountId = detail.account_id ? String(detail.account_id) : null;
     let creds: { login: unknown; server: unknown; enc: unknown; sthUser: string; strategy: number; memberNo: number | null };
+    let memberLot: number | null = null; // le lot CHOISI par le membre (fiche) — la carte porte un 0.01 écrit en dur à la soumission (audit 03/09 §2.9)
     if (accountId) {
       const { data: acc } = await (db as any).from('member_accounts').select('account_no,member_no,mt5_login,mt5_server,mt5_password_enc,strategy').eq('id', accountId).limit(1) as { data: Array<Record<string, unknown>> | null };
       if (!acc?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file for this extra account' }, { status: 404 });
       creds = { login: acc[0].mt5_login, server: acc[0].mt5_server, enc: acc[0].mt5_password_enc, sthUser: `${act[0].tg_id}-${acc[0].account_no}`, strategy: Number(acc[0].strategy) || 2, memberNo: acc[0].member_no != null ? Number(acc[0].member_no) : null };
     } else {
-      const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier,strategy').eq('tg_id', act[0].tg_id).limit(1);
+      const { data: m } = await db.from('members').select('member_no,tg_id,mt5_login,mt5_server,mt5_password_enc,risk_tier,strategy,lot').eq('tg_id', act[0].tg_id).limit(1);
       if (!m?.[0]?.mt5_password_enc) return NextResponse.json({ error: 'no credentials on file' }, { status: 404 });
+      memberLot = Number((m[0] as { lot?: number | string | null }).lot) || null;
       creds = { login: m[0].mt5_login, server: m[0].mt5_server, enc: m[0].mt5_password_enc, sthUser: String(m[0].tg_id), strategy: Number(detail.strategy ?? (m[0] as { strategy?: number }).strategy ?? 2) || 2, memberNo: m[0].member_no != null ? Number(m[0].member_no) : null };
     }
     if (!creds.login || !creds.server) return NextResponse.json({ error: 'missing MT5 login/server' }, { status: 400 });
@@ -789,7 +792,7 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
     }
-    const lots = Number(detail.lot ?? 0.01) || 0.01;
+    const lots = memberLot ?? (Number(detail.lot ?? 0.01) || 0.01); // fiche d'abord, carte ensuite — cohérent avec reconnectSth et moveSth
     const r = await sthConnectAndJoin({ userId: creds.sthUser, login: creds.login as number, password, server: String(creds.server), isMt4: Boolean(detail.is_mt4), lots, strategy: creds.strategy });
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: act[0].tg_id, member_no: creds.memberNo, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots} · S${creds.strategy}${accountId ? ` · account #${detail.account_no}` : ''})` } as never });
