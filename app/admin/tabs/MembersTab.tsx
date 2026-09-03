@@ -5,14 +5,20 @@
 import { BROKERS } from '@/lib/member/brokers';
 import { ask } from '@/components/admin/Dialog';
 import { useAdmin } from '../_state';
-import { StatusChip, dangerBtn, dimP, goldBtn, inp, miniBtn, secH, td } from '../_shared';
+import { useEffect } from 'react';
+import { StatusChip, dangerBtn, dimP, goldBtn, inp, miniBtn, secH, td, useNarrow } from '../_shared';
 
 export function MembersTab() {
   const { KIND_LABEL, actSummary, actions, addNote, alertsOn, banMember, busy, countrySelect, delNote, deposits, editLegalName, editPassword, editPick, editText, extraAccounts, filtered, input, legalOf, live, lotPick, market, nameOf, noteText, nudges, offboard, openMember, reconnectSth, rows, search, sel, selActs, selCreds, serverPick, setNoteText, setSearch, setSel, setSelActs, setSelCreds, showCreds, sthCheck } = useAdmin();
+  const narrow = useNarrow();
+  useEffect(() => {
+    if (!sel || !narrow) return;
+    document.getElementById('member-file')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [sel?.tg_id, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       {sel && (
-          <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'rgba(43,227,245,.35)' }}>
+          <section id="member-file" className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'rgba(43,227,245,.35)', scrollMarginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span className="mono goldText" style={{ fontWeight: 800, fontSize: 15 }}>#{sel.member_no}</span>
               {/* marché du membre : pilote la langue de l'app, des DM et des relances. Corrigeable : un Italien
@@ -146,13 +152,36 @@ export function MembersTab() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <h2 style={secH}>MEMBERS · {filtered.length}</h2>
               <span style={{ flex: 1 }} />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search @, name, broker, MT5, status…" style={{ ...inp, width: 280 }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search @, name, broker, MT5, status…" style={{ ...inp, width: narrow ? '100%' : 280, minWidth: 0 }} />
             </div>
+            {narrow ? (
+              /* TÉLÉPHONE (03/09) : le tableau de 9 colonnes (860 px) obligeait à scroller de côté pour lire
+                 un nom. Une carte par membre : #, pseudo, statut, broker, MT, lot, date. Tap = fiche. */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                {filtered.slice(0, 150).map((r) => (
+                  <button key={r.member_no} onClick={() => openMember(r)} style={{ textAlign: 'left', padding: '10px 12px', borderRadius: 10, border: `1px solid ${sel?.member_no === r.member_no ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: sel?.member_no === r.member_no ? 'rgba(43,227,245,.06)' : 'rgba(10,17,31,.5)', color: 'var(--text)', cursor: 'pointer', font: 'inherit' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+                      <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12 }}>#{r.member_no}</span>
+                      <span style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
+                      <StatusChip status={r.status} />
+                    </div>
+                    <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 5, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                      <span>{r.broker ?? 'no broker'}</span>
+                      {r.mt5_login && <span>MT {r.mt5_login}</span>}
+                      {r.lot != null && <span>{Number(r.lot).toFixed(2)} lot</span>}
+                      {legalOf(r.tg_id) && <span style={{ color: 'var(--gold)' }}>🏦 {legalOf(r.tg_id)}</span>}
+                      <span style={{ marginLeft: 'auto', color: 'var(--dim)' }}>{new Date(r.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</span>
+                    </div>
+                  </button>
+                ))}
+                {filtered.length > 150 && <p style={{ ...dimP, padding: '6px 4px' }}>{filtered.length - 150} more — type in the search to narrow the list.</p>}
+              </div>
+            ) : (
             <div style={{ overflowX: 'auto' }}>
               <table className="mono" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5, minWidth: 860 }}>
                 <thead>
                   <tr>
-                    {['#', 'MEMBER', 'STATUS', 'BROKER', 'RISK', 'MT5', 'USDT', 'REFERRED BY', 'SINCE'].map((h) => (
+                    {['#', 'MEMBER', 'STATUS', 'BROKER', 'LOT', 'MT5', 'USDT', 'REFERRED BY', 'SINCE'].map((h) => (
                       <th key={h} style={{ textAlign: 'left', padding: '7px 10px', fontSize: 9.5, letterSpacing: 1.2, color: 'var(--dim)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -169,7 +198,7 @@ export function MembersTab() {
                       </td>
                       <td style={td}><StatusChip status={r.status} /></td>
                       <td style={{ ...td, color: 'var(--muted)' }}>{r.broker ?? '—'}</td>
-                      <td style={{ ...td, color: 'var(--muted)' }}>{r.risk_tier}</td>
+                      <td style={{ ...td, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{r.lot != null ? Number(r.lot).toFixed(2) : '—'}</td>
                       <td style={{ ...td, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{r.mt5_login ? `${r.mt5_login} @ ${r.mt5_server ?? '?'}` : '—'}</td>
                       <td style={{ ...td, color: r.usdt_trc20 ? 'var(--cyan)' : 'var(--dim)' }} title={r.usdt_trc20 ?? undefined}>{r.usdt_trc20 ? r.usdt_trc20.slice(0, 6) + '…' : '—'}</td>
                       <td style={{ ...td, color: 'var(--muted)' }}>{r.referred_by ? nameOf(r.referred_by) : '—'}</td>
@@ -178,8 +207,9 @@ export function MembersTab() {
                   ))}
                 </tbody>
               </table>
-              {filtered.length === 0 && <p style={{ ...dimP, padding: 10 }}>No member matches “{search}”.</p>}
             </div>
+            )}
+            {filtered.length === 0 && <p style={{ ...dimP, padding: 10 }}>No member matches “{search}”.</p>}
           </section>
       )}
     </>
