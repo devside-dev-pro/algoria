@@ -299,7 +299,7 @@ export function Cockpit() {
                   borderColor: killed ? 'rgba(255,107,138,.5)' : 'rgba(31,216,176,.45)',
                   background: killed ? 'rgba(255,107,138,.14)' : 'rgba(31,216,176,.08)',
                 }}
-                title={killed ? 'auto-trading is OFF — click to resume' : 'auto-trading is ON (validated scalp + breakout, 24/24) — click to stop new entries'}
+                title={killed ? 'auto-trading is OFF — click to resume' : 'auto-trading is ON (scalp + swing, 24/24) — click to stop new entries'}
               >
                 {killed ? '⏸ AUTO OFF' : '⚡ AUTO ON'}
               </button>
@@ -1019,18 +1019,6 @@ function LogoutIcon() {
     </svg>
   );
 }
-
-const onAirBtn: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  letterSpacing: 0.5,
-  padding: '4px 11px',
-  borderRadius: 6,
-  cursor: 'pointer',
-  color: '#ff8aa2',
-  background: 'rgba(255,107,138,.14)',
-  border: '1px solid rgba(255,107,138,.5)',
-};
 
 function pill(active: boolean): CSSProperties {
   return {

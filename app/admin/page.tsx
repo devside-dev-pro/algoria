@@ -13,6 +13,7 @@ import { REJECT_REASONS } from '@/lib/member/rejectReasons';
 import { LOT_CHOICES, LOT_MAX } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 import { lotsStateOf, lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
+import { ask, DialogHost } from '@/components/admin/Dialog';
 
 interface WL { username: string; added_by: string | null; created_at: string }
 interface Row {
@@ -55,34 +56,8 @@ const personalise = (text: string, name?: string | null): string => {
 // Le corps se lit en trois secondes : une accroche, une raison d'y aller, rien de plus. Un post de
 // canal qui demande un effort de lecture ne convertit pas.
 // (non exportée : un fichier de page Next ne peut exporter que ses symboles réservés)
-// ===== ANNONCE S1 → S2 (20/08/2026) ====================================================================
-// Demande de Mathieu : prévenir les membres basculés, « sans phrase trop inquiétante » — on annonce la
-// maintenance et la migration, pas un post-mortem.
-//
-// TON : court et calme. La première version détaillait le défaut de construction (caps journaliers
-// asymétriques) ; Mathieu l'a jugée trop lourde, et il a raison — le membre n'a rien à faire, il n'a pas
-// besoin d'un rapport d'incident. On dit ce qui change et ce qui ne change pas, point.
-//
-// LA PHRASE SUR S2 EST UN FAIT PASSÉ, VÉRIFIABLE, JAMAIS UNE PROJECTION. « solidly positive these last
-// few weeks » = +8 519$ master sur 4 semaines, dont +8 254$ sur la dernière. On évite délibérément « la
-// meilleure des trois » : sur 7 jours c'est S3 qui mène (+881$ contre +825$ à 0,1 lot), et le membre a ce
-// comparatif SOUS LES YEUX dans l'app — une phrase que son propre écran contredit coûte plus cher que le
-// silence. Et jamais de promesse sur la suite : un « maintenant ça va gagner » se ressort trois semaines
-// plus tard.
-const S1_TO_S2_ANNOUNCE = `Hey{name} 👋
-
-Quick update on your account — nothing for you to do.
-
-We are putting <b>S1 STEADY</b> into maintenance after its recent results, and moving you over to <b>S2 BALANCED</b>, our reference profile, <b>at no extra cost</b>.
-
-S2 has been solidly positive these last few weeks, and it is the engine behind the track record we publish.
-
-Nothing changes on your side: same account, same broker, same lot size. The copying carries on automatically on S2 — you will see it in the app.
-
-Any question, just reply here.
-
-— Mathieu`;
-
+// L'annonce S1 → S2 du 20/08 vivait ici en texte pré-rempli, envoyable en deux clics à 17 membres, trois
+// semaines après coup (audit 03/09). Une campagne d'un jour ne reste pas dans le code : le champ part vide.
 const CTA_TEMPLATES: Array<{ id: string; label: string; target: 'app' | 'mathieu'; text: string; btn: string; url: string }> = [
   {
     id: 'results', label: '📈 Résultats du jour → app', target: 'app',
@@ -191,20 +166,20 @@ export default function AdminCRM() {
   // 📣 ANNONCE GROUPÉE VIA LE BOT — prévenir un segment entier d'un changement, en une fois.
   // Le texte par défaut est celui du basculement S1 → S2 du 20/08. L'étiquette (tag) sert d'anti-doublon
   // côté serveur : quiconque l'a déjà reçue est sauté, donc un second clic ne renvoie rien à personne.
-  const [bcText, setBcText] = useState(S1_TO_S2_ANNOUNCE);
-  const [bcTag, setBcTag] = useState('s1-to-s2-2026-08-20');
-  const [bcAudience, setBcAudience] = useState<'ex_s1' | 'live'>('ex_s1');
+  const [bcText, setBcText] = useState('');
+  const [bcTag, setBcTag] = useState('');
+  const [bcAudience, setBcAudience] = useState<'pending' | 'live'>('live');
   const [bcReport, setBcReport] = useState<{ sent: number; skipped: number; failed: number; report: Array<{ member_no: number | null; ok: boolean; error?: string; skipped?: boolean }> } | null>(null);
-  const sendBroadcast = () => {
+  const sendBroadcast = async () => {
     if (!bcText.trim() || !bcTag.trim()) return;
-    const who = bcAudience === 'ex_s1' ? 'the members still awaiting their S1 → S2 move' : 'ALL live + paused members';
-    if (!window.confirm(`Send this message through the bot to ${who}?\n\nAnyone who already received the tag "${bcTag}" is skipped automatically.`)) return;
+    const who = bcAudience === 'pending' ? 'the members whose account is in the QUEUE (pending)' : 'ALL live + paused members';
+    if (!await ask.confirm(`Send this message through the bot to ${who}?\n\nAnyone who already received the tag "${bcTag}" is skipped automatically.`)) return;
     setBusy(true);
     setBcReport(null);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botBroadcast: { audience: bcAudience, text: bcText, tag: bcTag, cta: true } }) })
       .then(async (r) => {
         const d = (await r.json()) as { error?: string; sent?: number; skipped?: number; failed?: number; report?: Array<{ member_no: number | null; ok: boolean; error?: string; skipped?: boolean }> };
-        if (d.error) return window.alert(`⚠ ${d.error}`);
+        if (d.error) return void ask.alert(`⚠ ${d.error}`);
         setBcReport({ sent: d.sent ?? 0, skipped: d.skipped ?? 0, failed: d.failed ?? 0, report: d.report ?? [] });
         load();
       })
@@ -367,7 +342,7 @@ export default function AdminCRM() {
   const post = (body: Record<string, unknown>, cb?: () => void) => {
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(async (r) => { const d = (await r.json()) as { error?: string }; if (d.error) window.alert(d.error); cb?.(); load(); })
+      .then(async (r) => { const d = (await r.json()) as { error?: string }; if (d.error) void ask.alert(d.error); cb?.(); load(); })
       .finally(() => setBusy(false));
   };
   const reveal = (id: string) => {
@@ -376,38 +351,35 @@ export default function AdminCRM() {
       .then(async (r) => { const d = (await r.json()) as { login?: string; server?: string; password?: string }; if (d.password) setCreds((c) => ({ ...c, [id]: { login: d.login ?? '', server: d.server ?? '', password: d.password! } })); })
       .finally(() => setBusy(false));
   };
-  const cancelCommission = (id: string) => { const reason = window.prompt('Cancel reason (e.g. "client withdrew deposit"):'); if (reason !== null) post({ cancelCommission: id, reason }); };
-  const payPayout = (id: string) => { const tx = window.prompt('USDT sent? Paste the TRC20 transaction hash:'); if (tx?.trim()) post({ payoutPaid: id, tx: tx.trim() }); };
-  const rejectPayout = (id: string) => { const reason = window.prompt('Reject reason (shown to the member):'); if (reason !== null) post({ payoutReject: id, reason }); };
+  const cancelCommission = async (id: string) => { const reason = await ask.prompt('Cancel reason (e.g. "client withdrew deposit"):', '', { multiline: true, danger: true, ok: 'CANCEL COMMISSION' }); if (reason !== null) post({ cancelCommission: id, reason }); };
+  const payPayout = async (id: string) => { const tx = await ask.prompt('USDT sent? Paste the TRC20 transaction hash:', '', { placeholder: 'transaction hash', ok: 'MARK PAID' }); if (tx?.trim()) post({ payoutPaid: id, tx: tx.trim() }); };
+  const rejectPayout = async (id: string) => { const reason = await ask.prompt('Reject reason (shown to the member):', '', { multiline: true, danger: true, ok: 'REJECT' }); if (reason !== null) post({ payoutReject: id, reason }); };
   // refuser une CONNEXION (vérification broker échouée) : le membre repasse en onboarding avec la raison — jamais bloqué
   // VALIDATION DU VOLUME D'ACTIVATION. Deux issues, jamais une seule : soit le volume est là (on saisit
   // combien on a vu), soit on force AVEC un motif écrit. Le forçage reste possible — il faut pouvoir
   // débloquer un membre un dimanche — mais il coûte une phrase, et il s'affiche ensuite « ⚠ LOTS FORCÉS »
   // sur la carte. Une exception silencieuse redevient la règle en une semaine ; une exception visible non.
-  const validateLots = (a: Action) => {
-    const seen = window.prompt(`Volume tradé constaté sur le dashboard partenaire (attendu : ${ACTIVATION_LOTS} lot).\n\nSaisis le nombre de lots — ou laisse VIDE pour forcer le déblocage avec un motif :`, String(ACTIVATION_LOTS));
+  const validateLots = async (a: Action) => {
+    const seen = await ask.prompt(`Volume tradé constaté sur le dashboard partenaire (attendu : ${ACTIVATION_LOTS} lot).\n\nSaisis le nombre de lots — ou laisse VIDE pour forcer le déblocage avec un motif :`, String(ACTIVATION_LOTS), { type: 'number', ok: 'VALIDATE' });
     if (seen === null) return;
     if (!seen.trim()) {
-      const reason = window.prompt('Forçage — motif obligatoire (il restera affiché sur la carte et au bilan) :');
+      const reason = await ask.prompt('Forçage — motif obligatoire (il restera affiché sur la carte et au bilan) :', '', { multiline: true, danger: true, ok: 'FORCE' });
       if (reason === null || !reason.trim()) return;
       post({ lotsOk: a.id, reason });
       return;
     }
     const n = Number(seen.replace(',', '.'));
-    if (!Number.isFinite(n) || n <= 0) { window.alert('Volume invalide.'); return; }
-    if (n < ACTIVATION_LOTS && !window.confirm(`${n} lot < ${ACTIVATION_LOTS} lot attendu.\n\nValider quand même ? La commission risque d'être refusée par le broker.`)) return;
+    if (!Number.isFinite(n) || n <= 0) { void ask.alert('Volume invalide.'); return; }
+    if (n < ACTIVATION_LOTS && !await ask.confirm(`${n} lot < ${ACTIVATION_LOTS} lot attendu.\n\nValider quand même ? La commission risque d'être refusée par le broker.`)) return;
     post({ lotsOk: a.id, lots: n });
   };
   // MOTIFS FERMÉS (03/09) : un numéro suffit, le membre reçoit le texte propre dans sa langue avec la
   // correction attendue (lib/member/rejectReasons.ts). Un texte libre reste possible (« other »).
-  const rejectConnect = (id: string) => {
-    const menu = REJECT_REASONS.map((r, i) => `${i + 1}. ${r.admin}`).join('\n');
-    const raw = window.prompt(`Motif du refus — tape un NUMÉRO, ou un texte libre :\n\n${menu}`);
-    if (raw === null || !raw.trim()) return;
-    const n = Number(raw.trim());
-    const picked = Number.isInteger(n) && n >= 1 && n <= REJECT_REASONS.length ? REJECT_REASONS[n - 1] : null;
-    if (picked && picked.code !== 'other') { post({ rejectConnect: id, code: picked.code }); return; }
-    const free = picked ? window.prompt('Texte libre (montré au membre) :') : raw;
+  const rejectConnect = async (id: string) => {
+    const code = await ask.prompt('Motif du refus (le membre reçoit le message correspondant) :', '', { options: REJECT_REASONS.map((r) => ({ value: r.code, label: r.admin })), danger: true });
+    if (!code) return;
+    if (code !== 'other') { post({ rejectConnect: id, code }); return; }
+    const free = await ask.prompt('Texte libre (montré au membre) :', '', { multiline: true, ok: 'REJECT', danger: true });
     if (free !== null && free.trim()) post({ rejectConnect: id, code: 'other', reason: free.trim() });
   };
   // EN ATTENTE DU BROKER — le cas « compte préexistant non rattaché à notre numéro d'affilié » : il
@@ -415,39 +387,40 @@ export default function AdminCRM() {
   // support du broker. Le délai est chez le broker, pas chez nous. Marquer l'attente évite que la carte se
   // lise comme oubliée — et que la surveillance alerte sur un dossier déjà traité. Deuxième clic = attente
   // levée. Rien n'est envoyé au membre : ce marquage est une note interne, pas une décision.
-  const waitBroker = (a: Action) => {
+  const waitBroker = async (a: Action) => {
     const waiting = a.detail?.waiting_broker != null;
-    if (waiting) { if (window.confirm('Broker replied — clear the “waiting on broker” flag?')) post({ waitBroker: a.id }); return; }
-    const note = window.prompt('⏳ Waiting on the broker to attach this account to your affiliate ID.\n\nOptional note (e.g. "support ticket opened 17/08, member contacted them"):', '');
+    if (waiting) { if (await ask.confirm('Broker replied — clear the “waiting on broker” flag?')) post({ waitBroker: a.id }); return; }
+    const note = await ask.prompt('⏳ Waiting on the broker to attach this account to your affiliate ID.\n\nOptional note (e.g. "support ticket opened 17/08, member contacted them"):', '');
     if (note !== null) post({ waitBroker: a.id, reason: note });
   };
-  const liveAlert = () => { if (window.confirm('Send "🔴 ALGORIA IS LIVE" to every subscribed member?')) post({ liveAlert: true }); };
+  const liveAlert = async () => { if (await ask.confirm('Send "🔴 ALGORIA IS LIVE" to every subscribed member?')) post({ liveAlert: true }); };
   // révéler les identifiants d'un membre À TOUT MOMENT (déchiffrés côté serveur, tracés en timeline)
   const showCreds = (tgId: number) => {
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revealMember: tgId }) })
-      .then(async (r) => { const d = (await r.json()) as { login?: string; server?: string; password?: string; error?: string }; if (d.error) window.alert(d.error); else if (d.password) setSelCreds({ login: d.login ?? '', server: d.server ?? '', password: d.password }); })
+      .then(async (r) => { const d = (await r.json()) as { login?: string; server?: string; password?: string; error?: string }; if (d.error) void ask.alert(d.error); else if (d.password) setSelCreds({ login: d.login ?? '', server: d.server ?? '', password: d.password }); })
       .finally(() => setBusy(false));
   };
   // ENREGISTREMENT DU DÉPÔT dans la foulée de la connexion (demande Mathieu 28/07 : « à 5 dépôts/jour
   // je me perds entre valider, connecter, vérifier ») : un seul prompt, pré-rempli avec le montant
   // DÉCLARÉ — corriger si CellXpert dit autre chose. La com attendue vient du barème (estimateCommission).
   // Annuler = pas de ligne (le filet « LIVE sans dépôt » du registre DEPOSITS la rattrapera).
-  const recordDepositAfterConnect = (a: Action) => {
+  const recordDepositAfterConnect = async (a: Action) => {
     const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id));
     const broker = String(a.detail?.broker ?? m?.broker ?? '').trim().toLowerCase() || null;
     const declared = Number(a.detail?.declared_deposit ?? 0) || null;
-    const v = window.prompt(
+    const v = await ask.prompt(
       `🏦 Log the deposit now? Validated amount ($)\n\nBroker: ${broker ? broker.toUpperCase() : '?'} — expected com auto from the schedule.\nCancel = no line (it will show up in DEPOSITS → "live, no deposit logged").`,
       declared ? String(declared) : '',
+      { type: 'number', ok: 'LOG DEPOSIT' },
     );
     if (v === null) return;
     const amount = Number(v);
-    if (!Number.isFinite(amount) || amount <= 0) return window.alert('Invalid amount — no deposit logged. Add it in DEPOSITS.');
+    if (!Number.isFinite(amount) || amount <= 0) return void ask.alert('Invalid amount — no deposit logged. Add it in DEPOSITS.');
     // garde anti-doublon : même membre, même montant, même jour → la ligne existe déjà (double clic, DONE après CONNECT…)
     const today = new Date().toISOString().slice(0, 10);
     const dup = deposits.some((d) => Number(d.tg_id) === Number(a.tg_id) && Number(d.detail?.amount_usd ?? 0) === amount && String(d.detail?.deposited_at ?? d.created_at).slice(0, 10) === today);
-    if (dup) return window.alert('Already logged today for this member (same amount) — nothing added.');
+    if (dup) return void ask.alert('Already logged today for this member (same amount) — nothing added.');
     const commission = estimateCommission(broker, amount);
     // LE PAYS DANS LA MÊME FOULÉE (17/08). Avant : valider le dépôt, puis RETOURNER dans le CRM chercher le
     // membre pour renseigner son pays. À quatre ou cinq clients par jour, autant d'allers-retours pour une
@@ -458,9 +431,10 @@ export default function AdminCRM() {
     let country: string | null = null;
     if (!m?.country) {
       const guess = geoCountryOf(m?.source);
-      const c = window.prompt(
+      const c = await ask.prompt(
         `🌍 Country of this member?\n\n${guess ? `Detected at signup: ${guess} — press OK to accept.` : 'Not detected (VPN, or member created before geo capture) — type it.'}\n\nAd geos: South Africa · New Zealand · Australia · UK · UAE\nLeave empty to skip (the deposit is logged either way).`,
         guess ?? '',
+        { placeholder: 'country', ok: 'SAVE' },
       );
       const v = (c ?? '').trim();
       // on réaligne la casse sur la liste : « south africa » tapé à la main doit devenir « South Africa »,
@@ -474,22 +448,22 @@ export default function AdminCRM() {
   };
   // connexion AUTO via STH : branche le compte dans le copieur, puis enchaîne `done` (passage LIVE) si OK,
   // puis propose d'enregistrer le dépôt (un prompt) — les 3 gestes en un seul clic.
-  const connectViaSth = (a: Action) => {
-    if (!window.confirm('Connect this account to the copier via STH now?\n\nVerify the deposit first — on success the member goes LIVE.')) return;
+  const connectViaSth = async (a: Action) => {
+    if (!await ask.confirm('Connect this account to the copier via STH now?\n\nVerify the deposit first — on success the member goes LIVE.')) return;
     const id = a.id;
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectSth: id }) })
-      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return window.alert(d.error); post({ done: id }, () => { setCreds((c) => { const n = { ...c }; delete n[id]; return n; }); recordDepositAfterConnect(a); }); })
+      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return void ask.alert(d.error); post({ done: id }, () => { setCreds((c) => { const n = { ...c }; delete n[id]; return n; }); recordDepositAfterConnect(a); }); })
       .catch(() => setBusy(false));
   };
   // RE-connexion STH depuis la fiche membre (ex. déconnecté par erreur sur le dashboard STH) : identifiants
   // déjà en base — rien à ressaisir, ne touche pas au statut du membre.
-  const reconnectSth = (r: Row) => {
+  const reconnectSth = async (r: Row) => {
     const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
-    if (!window.confirm(`Re-connect ${who} to the STH copier?\n\nUses the credentials on file — nothing to retype. Their account re-joins their strategy's master.`)) return;
+    if (!await ask.confirm(`Re-connect ${who} to the STH copier?\n\nUses the credentials on file — nothing to retype. Their account re-joins their strategy's master.`)) return;
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reconnectSth: r.tg_id }) })
-      .then(async (res) => { const d = (await res.json()) as { ok?: boolean; error?: string }; window.alert(d.error ?? '✓ re-connected to the copier'); })
+      .then(async (res) => { const d = (await res.json()) as { ok?: boolean; error?: string }; void ask.alert(d.error ?? '✓ re-connected to the copier'); })
       .finally(() => setBusy(false));
   };
   // vérité STH (diagnostic) : compte MT connecté au copieur ? masters visibles + abonnements — direct depuis leur API
@@ -498,11 +472,11 @@ export default function AdminCRM() {
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthStatusCheck: tgId }) })
       .then(async (r) => {
         const d = (await r.json()) as { connected?: boolean; masters?: Array<Record<string, unknown>>; error?: string };
-        if (d.error) return window.alert(d.error);
+        if (d.error) return void ask.alert(d.error);
         // « géré par l'API » = liste de masters non vide ; le flag connected (bridge MT instantané) peut traîner
         const known = (d.masters ?? []).length > 0;
         const subs = (d.masters ?? []).filter((m) => m.userIsSubscribed === true).map((m) => String(m.name ?? m.id));
-        window.alert(`STH status (live from their API)\n\nAPI-managed: ${known ? '✅ YES' : '❌ NO (manually-added receiver or never connected)'}\nSubscribed to: ${subs.join(', ') || '(none)'}\nMT bridge flag: ${d.connected ? 'up' : 'down (STH reports this on everyone — NOT a fault signal, ignore it)'}\n\nMasters:\n${(d.masters ?? []).map((m) => '• ' + JSON.stringify(m)).join('\n') || '(none visible)'}`);
+        void ask.alert(`STH status (live from their API)\n\nAPI-managed: ${known ? '✅ YES' : '❌ NO (manually-added receiver or never connected)'}\nSubscribed to: ${subs.join(', ') || '(none)'}\nMT bridge flag: ${d.connected ? 'up' : 'down (STH reports this on everyone — NOT a fault signal, ignore it)'}\n\nMasters:\n${(d.masters ?? []).map((m) => `• ${String(m.name ?? m.id ?? '?')} · ${m.userIsSubscribed === true ? 'subscribed' : 'not subscribed'}${m.id != null && m.name != null ? ` · id ${String(m.id)}` : ''}`).join('\n') || '(none visible)'}`);
       })
       .finally(() => setBusy(false));
   };
@@ -528,8 +502,8 @@ export default function AdminCRM() {
     const m = /^geo:([a-z]{2})$/.exec(String(src ?? '').toLowerCase());
     return m ? GEO_LABEL[m[1]] ?? null : null;
   };
-  const setCountry = (tgId: number, value: string) => {
-    const country = value === '__other' ? (window.prompt('Country?') ?? '').trim() : value;
+  const setCountry = async (tgId: number, value: string) => {
+    const country = value === '__other' ? (await ask.prompt('Country?') ?? '').trim() : value;
     if (value === '__other' && !country) return;
     post({ setCountry: { tg_id: tgId, country } });
   };
@@ -557,11 +531,11 @@ export default function AdminCRM() {
   };
   // changement de stratégie en un clic : join STH déclaratif → le receiver bascule sur le master de la nouvelle
   // stratégie, puis `done` clôt la carte. Membres ajoutés à la main dans STH → erreur explicite (à faire à la main).
-  const moveViaSth = (id: string) => {
-    if (!window.confirm("Move this member to their NEW strategy's master via STH now?\n\nWorks for API-connected members. Manually-added receivers must be moved in the STH dashboard (the card shows their STH id).")) return;
+  const moveViaSth = async (id: string) => {
+    if (!await ask.confirm("Move this member to their NEW strategy's master via STH now?\n\nWorks for API-connected members. Manually-added receivers must be moved in the STH dashboard (the card shows their STH id).")) return;
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveSth: id }) })
-      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return window.alert(d.error); post({ done: id }); })
+      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return void ask.alert(d.error); post({ done: id }); })
       .catch(() => setBusy(false));
   };
   // off-board : le client est parti → paused + déconnexion copieur + note (le kick du canal Telegram reste manuel)
@@ -575,27 +549,26 @@ export default function AdminCRM() {
     { key: 'broker_detached', label: '3 — compte non rattaché au broker' },
     { key: 'other', label: '4 — autre motif' },
   ];
-  const offboard = (r: Row) => {
+  const offboard = async (r: Row) => {
     const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
-    const pick = window.prompt(`Off-board ${who} — motif (il choisit le message envoyé au membre) :\n\n${OFFBOARD_MENU.map((m) => m.label).join('\n')}\n\nTape 1-4, ou "0" pour off-boarder SANS prévenir le membre :`, '1');
+    const pick = await ask.prompt(`Off-board ${who} — motif (il choisit le message envoyé au membre) :`, '', { options: [...OFFBOARD_MENU.map((m) => ({ value: m.key, label: m.label })), { value: '__silent', label: '0 — off-boarder SANS prévenir le membre' }], danger: true });
     if (pick === null) return;
-    const choice = pick.trim();
-    const notify = choice !== '0';
-    const reason = OFFBOARD_MENU[Number(choice) - 1]?.key ?? 'withdrawal';
-    if (!window.confirm(`Off-board ${who}?\n\n• status → offboarded (il ne peut PAS se rebrancher seul)\n• copier disconnect via STH\n• ${notify ? `message envoyé au membre (${reason}) avec son lien de récupération` : 'AUCUN message au membre'}\n• DON'T FORGET to remove them from the VIP Telegram channel (manual)`)) return;
+    const notify = pick !== '__silent';
+    const reason = notify ? pick : 'withdrawal';
+    if (!(await ask.confirm(`Off-board ${who}?\n\n• status → offboarded (il ne peut PAS se rebrancher seul)\n• copier disconnect via STH\n• ${notify ? `message envoyé au membre (${reason}) avec son lien de récupération` : 'AUCUN message au membre'}\n• DON'T FORGET to remove them from the VIP Telegram channel (manual)`, { danger: true, ok: 'OFF-BOARD' }))) return;
     post({ offboard: r.tg_id, reason, notify }, () => setSel((s) => (s ? { ...s, status: 'offboarded' } : s)));
   };
 
   // 🚫 BAN / UNBAN — révoque l'accès app d'un compte (concurrent qui copie, abus). Confirmation obligatoire :
   // c'est visible côté client (il tombe sur « accès refusé »), donc jamais sur un clic accidentel.
-  const banMember = (r: Row, undo: boolean) => {
+  const banMember = async (r: Row, undo: boolean) => {
     const who = r.tg_username ? '@' + r.tg_username : (r.tg_name ?? `#${r.member_no}`);
     if (undo) {
-      if (!window.confirm(`Lift the ban on ${who}?\n\nThey'll be able to sign in again. The copier is NOT reconnected automatically.`)) return;
+      if (!await ask.confirm(`Lift the ban on ${who}?\n\nThey'll be able to sign in again. The copier is NOT reconnected automatically.`)) return;
       post({ ban: { tg_id: r.tg_id, undo: true } }, () => setSel((s) => (s ? { ...s, banned_at: null } : s)));
       return;
     }
-    const reason = window.prompt(`🚫 BAN ${who}?\n\n• kills their current session AND blocks any new sign-in\n• disconnects the copier\n• removes them from the VIP whitelist\n\nReason (kept in their timeline):`, 'competitor / scraping the app');
+    const reason = await ask.prompt(`🚫 BAN ${who}?\n\n• kills their current session AND blocks any new sign-in\n• disconnects the copier\n• removes them from the VIP whitelist\n\nReason (kept in their timeline):`, 'competitor / scraping the app', { danger: true, ok: 'BAN' });
     if (reason === null) return;
     post({ ban: { tg_id: r.tg_id, reason } }, () => setSel((s) => (s ? { ...s, banned_at: new Date().toISOString(), status: 'paused' } : s)));
   };
@@ -608,11 +581,11 @@ export default function AdminCRM() {
   // ÉDITER LE NOM DU TITULAIRE — le membre le saisit au wizard et se trompe (vu : « VTMarkets » à la place
   // du nom de la personne). Ce champ relie son pseudo Telegram, son compte broker et la ligne de commission :
   // faux, on ne retrouve plus son dépôt. On ajoute une correction, on n'écrase pas la saisie d'origine.
-  const editLegalName = (tg: number | null | undefined, current: string | null) => {
+  const editLegalName = async (tg: number | null | undefined, current: string | null) => {
     if (tg == null) return;
-    const v = window.prompt('Name on the broker account (as written at the broker — this is what links his deposit to him):', current ?? '');
+    const v = await ask.prompt('Name on the broker account (as written at the broker — this is what links his deposit to him):', current ?? '');
     if (v === null) return;
-    if (v.trim().length < 2) { window.alert('Enter the real full name.'); return; }
+    if (v.trim().length < 2) { void ask.alert('Enter the real full name.'); return; }
     post({ setLegalName: { tg_id: Number(tg), name: v.trim() } });
   };
 
@@ -629,8 +602,8 @@ export default function AdminCRM() {
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ editMember: { tg_id: tg, field, value } }) })
       .then(async (r) => {
         const d = (await r.json()) as { error?: string; sync?: string | null };
-        if (d.error) window.alert(d.error);
-        else if (d.sync?.includes('FAILED')) window.alert(`Saved, BUT the copier was not re-synced:\n${d.sync}\n\nUse 🔗 RECONNECT STH.`);
+        if (d.error) void ask.alert(d.error);
+        else if (d.sync?.includes('FAILED')) void ask.alert(`Saved, BUT the copier was not re-synced:\n${d.sync}\n\nUse 🔗 RECONNECT STH.`);
         load();
       })
       .finally(() => setBusy(false));
@@ -639,7 +612,7 @@ export default function AdminCRM() {
   const editText = (tg: number, field: string, label: string, current: string | null, shown?: string, hint?: string) => (
     <button
       disabled={busy}
-      onClick={() => { const v = window.prompt(hint ? `${label}\n\n${hint}` : label, current ?? ''); if (v !== null) editMember(tg, field, v.trim()); }}
+      onClick={async () => { const v = await ask.prompt(hint ? `${label}\n\n${hint}` : label, current ?? ''); if (v !== null) editMember(tg, field, v.trim()); }}
       className="mono"
       title={`click to fix — ${label}`}
       style={{ fontSize: 11.5, fontWeight: 700, cursor: 'pointer', background: 'transparent', border: 'none', borderBottom: `1px dashed ${current ? 'rgba(130,152,190,.5)' : 'var(--border)'}`, padding: '0 1px', color: current ? 'var(--text)' : 'var(--dim)' }}
@@ -652,7 +625,7 @@ export default function AdminCRM() {
     <select
       disabled={busy}
       value={current}
-      onChange={(e) => { const v = e.target.value; if (v === current) return; if (confirmMsg && !window.confirm(confirmMsg(v))) return; editMember(tg, field, v); }}
+      onChange={async (e) => { const v = e.target.value; if (v === current) return; if (confirmMsg && !await ask.confirm(confirmMsg(v))) return; editMember(tg, field, v); }}
       className="mono"
       title={title}
       style={{ fontSize: 10.5, padding: '3px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: current ? 'var(--text)' : 'var(--dim)', cursor: 'pointer' }}
@@ -671,9 +644,9 @@ export default function AdminCRM() {
       <select
         disabled={busy}
         value={known.includes(cur) ? cur : '__free'}
-        onChange={(e) => {
+        onChange={async (e) => {
           const v = e.target.value;
-          if (v === '__free') { const t = window.prompt('MT server — EXACT string as shown at the broker (a single wrong character stops the copier):', cur); if (t !== null) editMember(r.tg_id, 'mt5_server', t); return; }
+          if (v === '__free') { const t = await ask.prompt('MT server — EXACT string as shown at the broker (a single wrong character stops the copier):', cur); if (t !== null) editMember(r.tg_id, 'mt5_server', t); return; }
           editMember(r.tg_id, 'mt5_server', v);
         }}
         className="mono"
@@ -695,10 +668,10 @@ export default function AdminCRM() {
       <select
         disabled={busy}
         value={inGrid ? cur : '__free'}
-        onChange={(e) => {
+        onChange={async (e) => {
           const v = e.target.value;
-          if (v === '__free') { const t = window.prompt(`Copy size in lots (0.01 to ${LOT_MAX.toFixed(2)}, steps of 0.01) — re-synced to STH immediately:`, cur); if (t !== null && t.trim()) editMember(r.tg_id, 'lot', t.trim().replace(',', '.')); return; }
-          if (window.confirm(`Set the copy size to ${v} lot?\n\nIf they are connected, the copier is re-synced right away.`)) editMember(r.tg_id, 'lot', v);
+          if (v === '__free') { const t = await ask.prompt(`Copy size in lots (0.01 to ${LOT_MAX.toFixed(2)}, steps of 0.01) — re-synced to STH immediately:`, cur, { type: 'number' }); if (t !== null && t.trim()) editMember(r.tg_id, 'lot', t.trim().replace(',', '.')); return; }
+          if (await ask.confirm(`Set the copy size to ${v} lot?\n\nIf they are connected, the copier is re-synced right away.`)) editMember(r.tg_id, 'lot', v);
         }}
         className="mono"
         title="copy size — free entry above the grid, re-synced to STH"
@@ -711,8 +684,8 @@ export default function AdminCRM() {
   };
   // mot de passe MT : jamais affiché ici (🔑 SHOW CREDENTIALS le déchiffre à la demande, horodaté) — on
   // ne fait que le REMPLACER, ce qui est le cas réel : le membre l'a changé chez son broker, la copie tombe.
-  const editPassword = (r: Row) => {
-    const v = window.prompt(`New MT password for ${r.mt5_login ?? 'this account'}\n\nThe TRADER password, not the investor one. It is re-encrypted immediately — after saving, hit 🔗 RECONNECT STH so the copier picks it up.`, '');
+  const editPassword = async (r: Row) => {
+    const v = await ask.prompt(`New MT password for ${r.mt5_login ?? 'this account'}\n\nThe TRADER password, not the investor one. It is re-encrypted immediately — after saving, hit 🔗 RECONNECT STH so the copier picks it up.`, '', { type: 'password', ok: 'REPLACE' });
     if (v === null || !v.trim()) return;
     editMember(r.tg_id, 'mt5_password', v.trim());
   };
@@ -824,34 +797,34 @@ export default function AdminCRM() {
       .then(async (r) => {
         const d = (await r.json()) as { audience?: number; alreadySent?: number; error?: string };
         setBusy(false);
-        if (d.error) return window.alert(d.error);
+        if (d.error) return void ask.alert(d.error);
         const n = d.audience ?? 0;
-        if (!n) return window.alert('No prospect to reach right now (everyone already got it in the last 12h, or every member has deposited).');
-        if (!window.confirm(`Send this campaign to ${n} prospect(s) with no deposit?\n\n${d.alreadySent ? `${d.alreadySent} person(s) already received it in the last 12h and are skipped.\n\n` : ''}Depositors are never included. This cannot be undone.`)) return;
+        if (!n) return void ask.alert('No prospect to reach right now (everyone already got it in the last 12h, or every member has deposited).');
+        if (!await ask.confirm(`Send this campaign to ${n} prospect(s) with no deposit?\n\n${d.alreadySent ? `${d.alreadySent} person(s) already received it in the last 12h and are skipped.\n\n` : ''}Depositors are never included. This cannot be undone.`)) return;
         setBusy(true);
         void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offerBlast: { text: blastText, title: blastTitle || undefined, pushBody: blastBody || undefined, url: '/member/onboarding' } }) })
           .then(async (r2) => {
             const d2 = (await r2.json()) as { audience?: number; dmOk?: number; pushOk?: number; error?: string };
-            if (d2.error) window.alert(d2.error);
-            else window.alert(`✓ Campaign sent\n\n${d2.dmOk ?? 0} Telegram DM delivered\n${d2.pushOk ?? 0} push notification(s)\nout of ${d2.audience ?? 0} prospect(s)`);
+            if (d2.error) void ask.alert(d2.error);
+            else void ask.alert(`✓ Campaign sent\n\n${d2.dmOk ?? 0} Telegram DM delivered\n${d2.pushOk ?? 0} push notification(s)\nout of ${d2.audience ?? 0} prospect(s)`);
             load();
           })
           .finally(() => setBusy(false));
       })
       .catch(() => setBusy(false));
   };
-  const editDepositCom = (d: Deposit) => {
-    const v = window.prompt('Expected commission ($):', String(d.detail?.commission_usd ?? 0));
+  const editDepositCom = async (d: Deposit) => {
+    const v = await ask.prompt('Expected commission ($):', String(d.detail?.commission_usd ?? 0), { type: 'number' });
     if (v !== null && Number.isFinite(Number(v))) post({ updateDeposit: { id: d.id, commission: Number(v) } });
   };
   // montant du dépôt éditable (29/07 — Jamie a déposé en 2 fois 265+250 : la com se corrigeait mais pas le
   // montant → bilan incohérent). L'API updateDeposit acceptait déjà amount, il manquait juste le crayon.
-  const editDepositAmount = (d: Deposit) => {
-    const v = window.prompt('Deposit amount ($) — cumule les dépôts multiples du même compte :', String(d.detail?.amount_usd ?? 0));
+  const editDepositAmount = async (d: Deposit) => {
+    const v = await ask.prompt('Deposit amount ($) — cumule les dépôts multiples du même compte :', String(d.detail?.amount_usd ?? 0), { type: 'number' });
     if (v !== null && Number.isFinite(Number(v)) && Number(v) > 0) post({ updateDeposit: { id: d.id, amount: Number(v) } });
   };
-  const deleteDeposit = (d: Deposit) => {
-    if (window.confirm(`Delete this deposit line ($${Number(d.detail?.amount_usd ?? 0)} · #${d.member_no ?? '—'})? This can't be undone.`)) post({ deleteDeposit: d.id });
+  const deleteDeposit = async (d: Deposit) => {
+    if (await ask.confirm(`Delete this deposit line ($${Number(d.detail?.amount_usd ?? 0)} · #${d.member_no ?? '—'})? This can't be undone.`)) post({ deleteDeposit: d.id });
   };
 
   // ===== PUSH COMPOSER + relance des leads (TOOLS) =====
@@ -861,14 +834,14 @@ export default function AdminCRM() {
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customPush: payload }) })
       .then(async (r) => {
         const d = (await r.json()) as { sent?: number; error?: string };
-        if (d.error) { window.alert(d.error); return; }
+        if (d.error) { void ask.alert(d.error); return; }
         const n = d.sent ?? 0;
         setPushResult(`${label} → delivered to ${n} device${n === 1 ? '' : 's'}${n === 0 ? ' (no push-enabled devices — DM on Telegram instead)' : ''}`);
       })
       .finally(() => setBusy(false));
   };
-  const composerSend = () => {
-    if (pushAud !== 'self' && !window.confirm(`Send this push to ${pushAud.toUpperCase()}? Test it on yourself first if you haven't.`)) return;
+  const composerSend = async () => {
+    if (pushAud !== 'self' && !await ask.confirm(`Send this push to ${pushAud.toUpperCase()}? Test it on yourself first if you haven't.`)) return;
     sendCustomPush({ audience: pushAud, title: pushTitle, body: pushBody, url: pushUrl }, pushAud.toUpperCase());
   };
   // ENVOI PAR LE BOT — indispensable depuis la file du jour : 109 des 219 personnes n'ont pas de @pseudo,
@@ -878,13 +851,13 @@ export default function AdminCRM() {
   // cta: true → le message part avec ses trois boutons (app / canal / Mathieu). C'est une RELANCE :
   // sans eux la personne n'a aucun moyen d'agir, et répondre au bot ne mène nulle part. La réponse
   // conversationnelle du fil BOT ACTIVITY, elle, n'en met pas — voir botDm côté serveur.
-  const sendViaBot = (tgId: number, text: string) => {
-    if (!window.confirm(`Send this to ${tgId} through the Algoria bot?\n\n${text}\n\n[+ buttons: open the app · join the channel · ask Mathieu]`)) return;
+  const sendViaBot = async (tgId: number, text: string) => {
+    if (!await ask.confirm(`Send this to ${tgId} through the Algoria bot?\n\n${text}\n\n[+ buttons: open the app · join the channel · ask Mathieu]`)) return;
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botDm: { tg_id: tgId, text, cta: true } }) })
       .then(async (r) => {
         const d = (await r.json()) as { error?: string };
-        if (d.error) window.alert(`⚠ ${d.error}`);
+        if (d.error) void ask.alert(`⚠ ${d.error}`);
         else load(); // le botDm trace déjà un nudge → la personne sort de la file pour 3 jours
       })
       .finally(() => setBusy(false));
@@ -892,13 +865,13 @@ export default function AdminCRM() {
 
   /** Publie sur le canal choisi, avec bouton. Confirmation OBLIGATOIRE : un post de canal part devant
    *  des milliers de personnes et ne se rattrape pas — l'aperçu montre exactement ce qui va partir. */
-  const sendChannelPost = () => {
+  const sendChannelPost = async () => {
     const text = cpText.trim();
     if (!text || !cpChat) return;
     const target = tgChats.find((c) => String(c.chat_id) === cpChat);
     const label = target?.title ?? cpChat;
     const btn = cpBtn.trim() ? `\n\n[ ${cpBtn.trim()} ] → ${cpUrl.trim()}` : '\n\n(aucun bouton)';
-    if (!window.confirm(`Publier sur « ${label} » ?\n\n${text}${btn}\n\nLe miroir UK et le canal IT suivront automatiquement (bouton compris).`)) return;
+    if (!await ask.confirm(`Publier sur « ${label} » ?\n\n${text}${btn}\n\nLe miroir UK et le canal IT suivront automatiquement (bouton compris).`)) return;
     setBusy(true);
     setCpReport(null);
     void fetch('/api/member/admin', {
@@ -910,7 +883,7 @@ export default function AdminCRM() {
         // Le rapport s'affiche MÊME en cas d'échec : savoir que le miroir est passé mais pas l'italien
         // vaut infiniment mieux qu'un « erreur » global qui laisse deviner ce qui a été publié.
         if (d.report) setCpReport(d.report);
-        if (d.error) window.alert(`⚠ ${d.error}`);
+        if (d.error) void ask.alert(`⚠ ${d.error}`);
         else setCpText('');
       })
       .finally(() => setBusy(false));
@@ -941,7 +914,7 @@ export default function AdminCRM() {
     if (!sel || !noteText.trim()) return;
     post({ addNote: { tg_id: sel.tg_id, text: noteText } }, () => { setNoteText(''); openMember(sel); });
   };
-  const delNote = (id: string) => { if (sel && window.confirm('Delete this note?')) post({ deleteNote: id }, () => openMember(sel)); };
+  const delNote = async (id: string) => { if (sel && await ask.confirm('Delete this note?')) post({ deleteNote: id }, () => openMember(sel)); };
   // résumé d'une action pour la timeline de la fiche — chaque kind a sa ligne parlante
   const actSummary = (a: Action) => {
     const d = (a.detail ?? {}) as Record<string, unknown>;
@@ -1046,6 +1019,7 @@ export default function AdminCRM() {
 
   return (
     <main style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      <DialogHost />
       {/* ===== barre haute : marque + navigation + actions globales ===== */}
       <header style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '12px 22px', borderBottom: '1px solid var(--border)', background: 'rgba(8,16,31,.6)', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1436,7 +1410,7 @@ export default function AdminCRM() {
                 {tgInboxOn ? (
                   <span className="mono" style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--up)', border: '1px solid rgba(31,216,176,.4)', borderRadius: 7, padding: '4px 9px' }}>✓ INBOX ON</span>
                 ) : (
-                  <button disabled={busy} onClick={() => { setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ setupTgWebhook: true }) }).then(async (r) => { const d = (await r.json()) as { error?: string }; if (d.error) window.alert(`⚠ ${d.error}`); else { setTgInboxOn(true); window.alert('✓ Bot inbox enabled — replies to the bot now land here.'); } }).finally(() => setBusy(false)); }}
+                  <button disabled={busy} onClick={() => { setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ setupTgWebhook: true }) }).then(async (r) => { const d = (await r.json()) as { error?: string }; if (d.error) void ask.alert(`⚠ ${d.error}`); else { setTgInboxOn(true); void ask.alert('✓ Bot inbox enabled — replies to the bot now land here.'); } }).finally(() => setBusy(false)); }}
                     title="one-time setup: point the Telegram webhook at the app so replies to the bot are recorded here (+ auto-acknowledgement routing people to you)" style={goldBtn}>🔌 ENABLE INBOX</button>
                 )}
               </div>
@@ -1471,13 +1445,13 @@ export default function AdminCRM() {
                             <input
                               value={botDrafts[b.id] ?? ''}
                               onChange={(e) => setBotDrafts((s) => ({ ...s, [b.id]: e.target.value }))}
-                              onKeyDown={(e) => { if (e.key === 'Enter' && (botDrafts[b.id] ?? '').trim()) { e.preventDefault(); const t = botDrafts[b.id].trim(); setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botDm: { tg_id: b.tg_id, text: t } }) }).then(async (r) => { const dd = (await r.json()) as { error?: string }; if (dd.error) window.alert(`⚠ ${dd.error}`); else { setBotDrafts((s) => ({ ...s, [b.id]: '' })); load(); } }).finally(() => setBusy(false)); } }}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && (botDrafts[b.id] ?? '').trim()) { e.preventDefault(); const t = botDrafts[b.id].trim(); setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botDm: { tg_id: b.tg_id, text: t } }) }).then(async (r) => { const dd = (await r.json()) as { error?: string }; if (dd.error) void ask.alert(`⚠ ${dd.error}`); else { setBotDrafts((s) => ({ ...s, [b.id]: '' })); load(); } }).finally(() => setBusy(false)); } }}
                               placeholder="reply via the bot — lands in their existing chat…"
                               style={{ ...inp, flex: 1, fontSize: 12, padding: '8px 11px' }}
                             />
                             <button
                               disabled={busy || !(botDrafts[b.id] ?? '').trim()}
-                              onClick={() => { const t = (botDrafts[b.id] ?? '').trim(); if (!t) return; setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botDm: { tg_id: b.tg_id, text: t } }) }).then(async (r) => { const dd = (await r.json()) as { error?: string }; if (dd.error) window.alert(`⚠ ${dd.error}`); else { setBotDrafts((s) => ({ ...s, [b.id]: '' })); load(); } }).finally(() => setBusy(false)); }}
+                              onClick={() => { const t = (botDrafts[b.id] ?? '').trim(); if (!t) return; setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botDm: { tg_id: b.tg_id, text: t } }) }).then(async (r) => { const dd = (await r.json()) as { error?: string }; if (dd.error) void ask.alert(`⚠ ${dd.error}`); else { setBotDrafts((s) => ({ ...s, [b.id]: '' })); load(); } }).finally(() => setBusy(false)); }}
                               style={{ padding: '8px 14px', borderRadius: 9, border: 'none', fontWeight: 800, fontSize: 11.5, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: (botDrafts[b.id] ?? '').trim() ? 1 : 0.5 }}
                             >SEND</button>
                           </div>
@@ -2036,8 +2010,8 @@ export default function AdminCRM() {
               <h2 style={secH}>📣 ANNOUNCE TO A SEGMENT (bot DM)</h2>
               <p style={dimP}>One message, sent through the Algoria bot to a whole segment. The tag below is the anti-duplicate lock: anyone who already received it is skipped, so clicking twice is safe.</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <select value={bcAudience} onChange={(e) => setBcAudience(e.target.value as 'ex_s1' | 'live')} className="mono" style={{ fontSize: 11.5, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)' }}>
-                  <option value="ex_s1">ex-S1 — awaiting their move to S2</option>
+                <select value={bcAudience} onChange={(e) => setBcAudience(e.target.value as 'pending' | 'live')} className="mono" style={{ fontSize: 11.5, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)' }}>
+                  <option value="pending">members waiting in the queue (pending)</option>
                   <option value="live">all live + paused members</option>
                 </select>
                 <input value={bcTag} onChange={(e) => setBcTag(e.target.value)} placeholder="anti-duplicate tag" className="mono" style={{ fontSize: 11.5, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', flex: '1 1 190px' }} />
@@ -2066,9 +2040,9 @@ export default function AdminCRM() {
               <h2 style={secH}>🩺 STH AUDIT — who is actually copying?</h2>
               <p style={dimP}>Asks STH, member by member, whether each LIVE account is really subscribed to a master. Paused members are never touched — their empty subscription is deliberate.</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button disabled={busy} onClick={() => { setBusy(true); setSthAudit(null); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthAudit: 'check' }) }).then(async (r) => { const d = await r.json(); if (d.error) window.alert(`⚠ ${d.error}`); else setSthAudit(d); }).finally(() => setBusy(false)); }}
+                <button disabled={busy} onClick={() => { setBusy(true); setSthAudit(null); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthAudit: 'check' }) }).then(async (r) => { const d = await r.json(); if (d.error) void ask.alert(`⚠ ${d.error}`); else setSthAudit(d); }).finally(() => setBusy(false)); }}
                   style={goldBtn}>🔍 CHECK ONLY</button>
-                <button disabled={busy || !sthAudit || !(sthAudit.summary.orphan > 0)} onClick={() => { if (!window.confirm(`Reconnect ${sthAudit?.summary.orphan} member(s) to their strategy? This resumes copying on their live account.`)) return; setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthAudit: 'repair' }) }).then(async (r) => { const d = await r.json(); if (d.error) window.alert(`⚠ ${d.error}`); else setSthAudit(d); }).finally(() => setBusy(false)); }}
+                <button disabled={busy || !sthAudit || !(sthAudit.summary.orphan > 0)} onClick={async () => { if (!await ask.confirm(`Reconnect ${sthAudit?.summary.orphan} member(s) to their strategy? This resumes copying on their live account.`)) return; setBusy(true); void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthAudit: 'repair' }) }).then(async (r) => { const d = await r.json(); if (d.error) void ask.alert(`⚠ ${d.error}`); else setSthAudit(d); }).finally(() => setBusy(false)); }}
                   style={{ ...goldBtn, opacity: sthAudit && sthAudit.summary.orphan > 0 ? 1 : 0.45 }}>🔧 REPAIR ORPHANS</button>
               </div>
               {sthAudit && (
