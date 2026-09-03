@@ -4,6 +4,7 @@ import { rejectMessage, rejectReasonOf } from '@/lib/member/rejectReasons';
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
 import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } from '@/lib/member/sth';
 import { BROKERS } from '@/lib/member/brokers';
+import { estimateCommission } from '@/lib/member/commissions';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
 import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
@@ -289,10 +290,8 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
-  const s = guard(req);
-  if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-  const body = (await req.json().catch(() => ({}))) as {
+// Le corps accepté par l'API admin — un champ par action. `goLive` (03/09) enchaîne cinq actions en une.
+type Body = {
     add?: string; remove?: string; done?: string; reveal?: string; liveAlert?: boolean;
     confirmCommission?: string; cancelCommission?: string; payoutPaid?: string; payoutReject?: string; reason?: string; tx?: string;
     rejectConnect?: string; code?: string;
@@ -309,9 +308,60 @@ export async function POST(req: NextRequest) {
     editMember?: { tg_id: number; field: string; value: string | null };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
     ban?: { tg_id: number; reason?: string; undo?: boolean };
-  };
+  goLive?: { id: string; lots?: number; force?: string; amount?: number; country?: string };
+};
+type AdminSession = NonNullable<ReturnType<typeof guard>>;
+
+export async function POST(req: NextRequest) {
+  const s = guard(req);
+  if (!s) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  const body = (await req.json().catch(() => ({}))) as Body;
+  return run(body, s, req);
+}
+
+/** Toute la logique, séparée de la lecture HTTP pour que `goLive` puisse enchaîner les actions existantes
+ *  (lots → connect → live → dépôt → pays) SANS dupliquer une ligne de chacune : chaque étape est le même
+ *  code que le bouton correspondant, avec les mêmes verrous. */
+async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextResponse> {
   const db = sdb();
   const who = s.username ?? String(s.tgId);
+
+  // ⚡ GO LIVE EN UN TAP (03/09/2026). Valider un dossier demandait quatre boutons et six confirmations :
+  // ✓ LOTS, CONNECT (STH), DONE, montant, pays — à cinq dossiers par jour, sur un téléphone. Une seule
+  // fiche côté admin, et ici l'enchaînement, qui S'ARRÊTE à la première étape en échec : les étapes déjà
+  // passées restent acquises (le lot validé reste validé, la carte reste en file pour la suite) et le
+  // rapport `steps` dit exactement où ça a cassé.
+  if (body.goLive) {
+    const g = body.goLive;
+    const steps: Array<{ step: string; ok: boolean; error?: string }> = [];
+    const call = async (step: string, b: Body): Promise<boolean> => {
+      const d = (await (await run(b, s, req)).json()) as { error?: string };
+      steps.push({ step, ok: !d.error, ...(d.error ? { error: d.error } : {}) });
+      return !d.error;
+    };
+    const fail = () => NextResponse.json({ error: steps.find((x) => !x.ok)?.error ?? 'failed', steps }, { status: 400 });
+    const { data: act } = await db.from('member_actions').select('id,tg_id,detail').eq('id', String(g.id)).eq('kind', 'connect').eq('status', 'pending').limit(1);
+    if (!act?.length) return NextResponse.json({ error: 'connect request not found (already processed?)' }, { status: 404 });
+    const detail = (act[0].detail as Record<string, unknown>) ?? {};
+    const force = String(g.force ?? '').trim().slice(0, 200);
+    const lots = Number(g.lots);
+    if (lotsCleared(detail)) steps.push({ step: 'lots', ok: true });
+    else if (force) { if (!(await call('lots', { lotsOk: String(g.id), reason: force }))) return fail(); }
+    else if (Number.isFinite(lots) && lots > 0) { if (!(await call('lots', { lotsOk: String(g.id), lots }))) return fail(); }
+    else return NextResponse.json({ error: 'activation lots: enter the volume seen on the partner dashboard, or a reason to force', steps }, { status: 400 });
+    if (!(await call('connect', { connectSth: String(g.id) }))) return fail();
+    if (!(await call('live', { done: String(g.id) }))) return fail();
+    const amount = Number(g.amount);
+    if (Number.isFinite(amount) && amount > 0) {
+      const { data: m } = await db.from('members').select('broker').eq('tg_id', act[0].tg_id).limit(1);
+      const broker = String(detail.broker ?? m?.[0]?.broker ?? '').trim().toLowerCase() || null;
+      await call('deposit', { addDeposit: { tg_id: Number(act[0].tg_id), broker: broker ?? undefined, amount, commission: estimateCommission(broker, amount) ?? 0, note: 'logged at go-live' } });
+    }
+    const country = String(g.country ?? '').trim().slice(0, 60);
+    if (country) await call('country', { setCountry: { tg_id: Number(act[0].tg_id), country } });
+    return NextResponse.json({ ok: steps.every((x) => x.ok), steps });
+  }
+
 
   // ===== FICHE MEMBRE — l'historique complet d'un membre + notes privées du CRM =====
   if (body.memberDetail) {

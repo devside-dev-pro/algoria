@@ -8,8 +8,8 @@ import { BROKERS } from '@/lib/member/brokers';
 import { REJECT_REASONS } from '@/lib/member/rejectReasons';
 import { LOT_CHOICES, LOT_MAX } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
-import { ACTIVATION_LOTS } from '@/lib/member/activation';
-import { ask } from '@/components/admin/Dialog';
+import { ACTIVATION_LOTS, lotsStateOf } from '@/lib/member/activation';
+import { ask, toast, type FormField } from '@/components/admin/Dialog';
 import { WL, Row, Action, Affiliate, Deposit, Tab, Center, AdminGate } from './_shared';
 
 export function useAdminState() {
@@ -224,7 +224,7 @@ export function useAdminState() {
   const post = (body: Record<string, unknown>, cb?: () => void) => {
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(async (r) => { const d = (await r.json()) as { error?: string }; if (d.error) void ask.alert(d.error); cb?.(); load(); })
+      .then(async (r) => { const d = (await r.json()) as { error?: string }; if (d.error) toast(`⚠ ${d.error}`, 'error'); else toast('✓ saved'); cb?.(); load(); })
       .finally(() => setBusy(false));
   };
   const reveal = (id: string) => {
@@ -328,6 +328,52 @@ export function useAdminState() {
       country ? () => post({ setCountry: { tg_id: Number(a.tg_id), country } }) : undefined,
     );
   };
+  // ⚡ GO LIVE EN UN TAP (03/09/2026) — une seule fiche (lot constaté, montant, pays) et le serveur
+  // enchaîne lots → connect STH → live → dépôt → pays (voir `goLive` dans l'API). Les anciens boutons
+  // restent pour reprendre un dossier là où il a cassé.
+  const goLive = async (a: Action) => {
+    const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id));
+    const L = lotsStateOf(a.detail as Record<string, unknown>);
+    const cleared = L.ok || L.override != null;
+    const declared = Number(a.detail?.declared_deposit ?? 0) || null;
+    const broker = String(a.detail?.broker ?? m?.broker ?? '').trim().toLowerCase() || null;
+    const guess = m?.country ? null : geoCountryOf(m?.source);
+    const who = nameOf(a.tg_id);
+    const fields: FormField[] = [];
+    if (!cleared) {
+      fields.push({ key: 'lots', label: 'Activation volume seen on the partner dashboard (lots)', value: String(ACTIVATION_LOTS), type: 'number', optional: true, hint: `Expected ${ACTIVATION_LOTS} lot. Not there? Empty this field and write a reason below to force.` });
+      fields.push({ key: 'force', label: 'Force without volume — reason', optional: true, placeholder: 'only if the volume is not there', hint: 'Stays on the card and in the month report.' });
+    }
+    fields.push({ key: 'amount', label: 'Validated deposit ($)', value: declared ? String(declared) : '', type: 'number', optional: true, hint: `Broker ${broker ? broker.toUpperCase() : '?'} — commission from the schedule. Empty = log it later in DEPOSITS.` });
+    if (!m?.country) fields.push({ key: 'country', label: 'Country', value: guess ?? '', optional: true, placeholder: 'country', hint: guess ? 'Detected at signup.' : 'Not detected — type it, or leave empty.' });
+    const v = await ask.form(`⚡ Go live — ${who}\nValidates the activation lot, connects the copier via STH, switches the member LIVE and logs the deposit. One tap, stops at the first failing step.`, fields, { ok: 'GO LIVE' });
+    if (!v) return;
+    const lots = Number(String(v.lots ?? '').replace(',', '.'));
+    const force = String(v.force ?? '').trim();
+    if (!cleared && !force && !(Number.isFinite(lots) && lots > 0)) { toast('Enter the volume seen, or a reason to force.', 'error'); return; }
+    if (!cleared && !force && lots < ACTIVATION_LOTS && !(await ask.confirm(`${lots} lot < ${ACTIVATION_LOTS} lot expected.\nValidate anyway? The broker may refuse the commission.`))) return;
+    let amount = Number(String(v.amount ?? '').replace(',', '.'));
+    if (!(Number.isFinite(amount) && amount > 0)) amount = 0;
+    if (amount > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      const dup = deposits.some((d) => Number(d.tg_id) === Number(a.tg_id) && Number(d.detail?.amount_usd ?? 0) === amount && String(d.detail?.deposited_at ?? d.created_at).slice(0, 10) === today);
+      if (dup) { toast('Deposit already logged today for this member — not logged twice.', 'info'); amount = 0; }
+    }
+    const rawCountry = String(v.country ?? '').trim();
+    const country = rawCountry ? (COUNTRIES.find((x) => x.toLowerCase() === rawCountry.toLowerCase()) ?? rawCountry) : '';
+    setBusy(true);
+    try {
+      const r = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goLive: { id: a.id, ...(cleared ? {} : force ? { force } : { lots }), ...(amount > 0 ? { amount } : {}), ...(country ? { country } : {}) } }) });
+      const d = (await r.json()) as { ok?: boolean; error?: string; steps?: Array<{ step: string; ok: boolean; error?: string }> };
+      const done = (d.steps ?? []).filter((x) => x.ok).map((x) => x.step);
+      if (d.error) toast(`⚠ ${d.error}${done.length ? `\nDone so far: ${done.join(' → ')} — the card stays in the queue for the rest.` : ''}`, 'error');
+      else toast(`⚡ ${who} is LIVE · ${done.join(' → ')}`);
+      setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; });
+      load();
+    } catch (e) {
+      toast(`⚠ ${(e as { message?: string })?.message ?? 'network error'}`, 'error');
+    } finally { setBusy(false); }
+  };
   // connexion AUTO via STH : branche le compte dans le copieur, puis enchaîne `done` (passage LIVE) si OK,
   // puis propose d'enregistrer le dépôt (un prompt) — les 3 gestes en un seul clic.
   const connectViaSth = async (a: Action) => {
@@ -345,7 +391,7 @@ export function useAdminState() {
     if (!await ask.confirm(`Re-connect ${who} to the STH copier?\n\nUses the credentials on file — nothing to retype. Their account re-joins their strategy's master.`)) return;
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reconnectSth: r.tg_id }) })
-      .then(async (res) => { const d = (await res.json()) as { ok?: boolean; error?: string }; void ask.alert(d.error ?? '✓ re-connected to the copier'); })
+      .then(async (res) => { const d = (await res.json()) as { ok?: boolean; error?: string }; if (d.error) toast(`⚠ ${d.error}`, 'error'); else toast('✓ re-connected to the copier'); })
       .finally(() => setBusy(false));
   };
   // vérité STH (diagnostic) : compte MT connecté au copieur ? masters visibles + abonnements — direct depuis leur API
@@ -900,7 +946,7 @@ export function useAdminState() {
   ];
 
 
-  return { tab, setTab, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
+  return { tab, setTab, goLive, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
 }
 
 export type AdminState = ReturnType<typeof useAdminState>;

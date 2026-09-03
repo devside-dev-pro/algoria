@@ -8,7 +8,7 @@ import { useAdmin } from '../_state';
 import { dangerBtn, dimP, goldBtn, miniBtn, okBtn, secH } from '../_shared';
 
 export function QueueTab() {
-  const { KIND_LABEL, actions, busy, connectViaSth, copyDepositInfo, creds, depInfoCopied, legalOf, moveViaSth, nameOf, openMember, pendingTotal, post, recordDepositAfterConnect, rejectConnect, reveal, rows, setCreds, setTab, validateLots, waitBroker } = useAdmin();
+  const { KIND_LABEL, actions, busy, connectViaSth, goLive, copyDepositInfo, creds, depInfoCopied, legalOf, moveViaSth, nameOf, openMember, pendingTotal, post, recordDepositAfterConnect, rejectConnect, reveal, rows, setCreds, setTab, validateLots, waitBroker } = useAdmin();
   return (
           <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <h2 style={secH}>TO APPLY IN SOCIAL TRADE HUB {actions.length > 0 && `· ${pendingTotal ?? actions.length}`}{pendingTotal != null && pendingTotal > actions.length && ` (${actions.length} shown)`}</h2>
@@ -103,6 +103,9 @@ export function QueueTab() {
                     }
                     return <button disabled={busy} onClick={() => validateLots(a)} title={`pointe le dashboard partenaire : ${ACTIVATION_LOTS} lot tradé ? Puis valide ici — c'est ce qui déverrouille le CONNECT.`} style={{ ...goldBtn, fontWeight: 800, color: 'var(--gold)' }}>{L.claimedAt ? '🙋 LOTS ? (déclaré)' : '✓ LOTS ?'}</button>;
                   })()}
+                  {a.kind === 'connect' && !a.detail?.waiting_broker && (
+                    <button disabled={busy} onClick={() => goLive(a)} title="one tap: validate the activation lot, connect the copier via STH, switch LIVE, log the deposit and the country — stops at the first failing step" style={{ ...okBtn, fontWeight: 800 }}>⚡ GO LIVE</button>
+                  )}
                   {a.kind === 'connect' && (
                     <button disabled={busy || !lotsCleared(a.detail as Record<string, unknown>)} onClick={() => connectViaSth(a)} title={lotsCleared(a.detail as Record<string, unknown>) ? 'connect this account to the copier via STH now, then go LIVE + log the deposit (one click, no manual STH entry)' : 'volume d\u2019activation pas encore validé — pointe le dashboard partenaire et clique ✓ LOTS'} style={{ ...okBtn, color: '#06121f', background: lotsCleared(a.detail as Record<string, unknown>) ? 'linear-gradient(90deg,#2be3f5,#2e8bf0)' : 'rgba(130,152,190,.2)', border: 'none', opacity: lotsCleared(a.detail as Record<string, unknown>) ? 1 : 0.5 }}>🔗 CONNECT (STH)</button>
                   )}
