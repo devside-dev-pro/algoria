@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { pushToAdmins } from '@/lib/push/send';
+import { adminLink } from '@/lib/member/notifyOwner';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   await pushToAdmins({
     title: '🚨 ALGORIA RUNNER DOWN',
     body: `No candle written for ${staleMin === Infinity ? '∞' : staleMin} min — the runner looks dead or frozen. Check Railway.`,
-    url: '/admin',
+    url: adminLink('/'), // absolu : sur app.algoria.tech, '/admin' est réécrit en '/member/admin' (page morte)
     tag: 'runner-watchdog',
   }).catch(() => {});
   return NextResponse.json({ ok: false, staleMin, alerted: true });

@@ -5,6 +5,7 @@ import { minDepositFor, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
 import { lotsStateOf } from '@/lib/member/activation';
 import { OFFBOARDED } from '@/lib/member/winback';
 import { BROKERS } from '@/lib/member/brokers';
+import { notifyOwner } from '@/lib/member/notifyOwner';
 
 const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
 
@@ -28,7 +29,22 @@ async function queueAction(tgId: number, kind: string, detail: Record<string, un
       .eq('tg_id', tgId).eq('status', 'pending').in('kind', family);
   }
   const { data } = await db.from('members').select('member_no').eq('tg_id', tgId).limit(1);
-  await db.from('member_actions').insert({ tg_id: tgId, member_no: data?.[0]?.member_no ?? null, kind, detail: detail as never });
+  const memberNo = data?.[0]?.member_no ?? null;
+  await db.from('member_actions').insert({ tg_id: tgId, member_no: memberNo, kind, detail: detail as never });
+  // ALERTE PROPRIÉTAIRE (03/09) : chaque carte qui entre dans la file attend un humain — voir notifyOwner.ts.
+  // Après l'insert, jamais avant : l'alerte dit « il y a une carte », il faut qu'elle existe.
+  const who = `#${memberNo ?? '?'} ${detail.username ? `@${detail.username}` : ''}`.trim();
+  const d = detail as Record<string, unknown>;
+  const alerts: Record<string, { title: string; lines: string[] }> = {
+    connect: { title: '🆕 Dossier à valider', lines: [who, `${d.broker_name ?? d.broker ?? 'broker ?'} · ${d.platform ?? ''} ${d.login ?? ''}`.trim(), `dépôt déclaré ${d.declared_deposit ?? '?'} $ · S${d.strategy ?? '?'}`, d.waiting_broker ? '⏳ compte préexistant : le broker doit rattacher' : d.lots_claimed_at ? '✓ lot d’activation déclaré' : 'lot d’activation pas encore déclaré', d.add_strategy ? '(compte supplémentaire)' : ''] },
+    disconnect: { title: '🔌 Membre déconnecté — copieur à retirer', lines: [who] },
+    pause: { title: '⏸ Pause demandée — STH n’a pas répondu', lines: [who] },
+    resume: { title: '▶️ Reprise demandée — STH n’a pas répondu', lines: [who] },
+    risk_change: { title: '🎚 Changement de lot à appliquer', lines: [who, String(d.to ?? '')] },
+    strategy_change: { title: '🔀 Changement de stratégie à appliquer', lines: [who, `→ S${d.to ?? '?'}`] },
+  };
+  const a = alerts[kind];
+  if (a) void notifyOwner({ ...a, path: '/', tag: `owner-${kind}` });
 }
 
 /**
@@ -466,6 +482,7 @@ export async function POST(req: NextRequest) {
       await db.from('member_actions')
         .update({ detail: { ...detail, lots_claimed_at: new Date().toISOString() } as never })
         .eq('id', card[0].id);
+      void notifyOwner({ title: '✅ Lot d’activation déclaré — à pointer', lines: [`#${detail.member_no ?? ''} ${detail.username ? `@${detail.username}` : ''}`.trim(), `${detail.broker_name ?? detail.broker ?? ''} · ${detail.login ?? ''}`.trim()], path: '/', tag: 'owner-activation' });
     }
     return NextResponse.json({ ok: true, claimed: true });
   } else if (body.action === 'trc20') {
@@ -490,6 +507,7 @@ export async function POST(req: NextRequest) {
     if (amount > available) return NextResponse.json({ error: `only $${Math.max(0, Math.floor(available))} available` }, { status: 400 });
     const { error: perr } = await db.from('referral_payouts').insert({ tg_id: s.tgId, amount, address });
     if (perr) return NextResponse.json({ error: perr.message }, { status: 500 });
+    void notifyOwner({ title: `💸 Retrait demandé — ${amount} $`, lines: [`#${mrow?.[0]?.member_no ?? '?'}`, `USDT TRC20 ${address}`], path: '/', tag: 'owner-withdraw' });
   } else if (body.action === 'disconnect') {
     // DÉCONNECTER / changer de compte de trading : on efface les identifiants MT5 et on repasse le membre en
     // onboarding (broker gardé → il retombe sur l'étape « connexion MT5 »). Une action 'disconnect' part dans la

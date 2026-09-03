@@ -236,6 +236,29 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
     .sort((a, b) => a.days - b.days || b.step - a.step);
 }
 
+/**
+ * CE QUI ATTEND LE PROPRIÉTAIRE, en une requête — pour le rappel quotidien (runner) : dossiers de connexion
+ * en attente (avec l'âge du plus vieux et combien ont déclaré leur lot), retraits demandés. Une carte
+ * bloquée depuis cinq jours doit se distinguer d'une carte arrivée ce matin : c'est l'âge qui le dit.
+ */
+export async function fetchOwnerDigest(): Promise<{ pending: number; oldestHours: number; lotsClaimed: number; payouts: number; payoutsUsd: number }> {
+  const raw = db as unknown as { from: (t: string) => any };
+  const [{ data: cards }, { data: payouts }] = await Promise.all([
+    raw.from('member_actions').select('created_at,detail').eq('kind', 'connect').eq('status', 'pending'),
+    raw.from('referral_payouts').select('amount').eq('status', 'requested'),
+  ]);
+  const now = Date.now();
+  const rows = (cards ?? []) as Array<{ created_at: string; detail: Record<string, unknown> | null }>;
+  const oldest = rows.reduce((m, r) => Math.max(m, now - Date.parse(r.created_at)), 0);
+  return {
+    pending: rows.length,
+    oldestHours: Math.round(oldest / 3_600_000),
+    lotsClaimed: rows.filter((r) => r.detail?.lots_claimed_at || r.detail?.lots_ok).length,
+    payouts: (payouts ?? []).length,
+    payoutsUsd: ((payouts ?? []) as Array<{ amount: number }>).reduce((s, p) => s + Number(p.amount), 0),
+  };
+}
+
 /** Trace une relance (auto ou manuelle) → kind='nudge', status='done' (jamais dans la file support). */
 export async function recordNudge(tgId: number, memberNo: number | null, via: 'auto' | 'manual', note: string, text?: string, error?: string | null) {
   // text = le DM EXACT envoyé par le bot — tracé pour le panneau BOT ACTIVITY de l'admin (« je veux voir
