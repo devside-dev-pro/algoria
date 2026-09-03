@@ -551,9 +551,12 @@ export function Cockpit() {
           </>
         ) : (
           <>
-            {/* règle broadcast 70/30 : un Day P&L rouge ou un win rate < 75% ne s'affichent pas (tuile neutre "—") */}
+            {/* règle broadcast 70/30 : un Day P&L rouge ne s'affiche pas (tuile neutre "—").
+                WIN RATE BRUT depuis le 03/09 (décision Mathieu : une seule définition partout — trades clôturés
+                à P&L > 0, comme History et le recap). Il était masqué sous 75 %, ce qui en faisait un chiffre
+                qui n'apparaissait que quand il flattait — un membre qui compare avec son History le voyait. */}
             <Metric label="Day P&L" value={dayPnl == null || dayPnl < 0 ? '—' : '+' + dayPnl.toFixed(0)} color={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--dim)'} accent={dayPnl != null && dayPnl >= 0 ? 'var(--up)' : 'var(--border)'} />
-            <Metric label={`Win rate · ${stats.n}`} value={stats.ready && stats.winPct >= 0.75 ? (stats.winPct * 100).toFixed(0) + '%' : '—'} color={stats.ready && stats.winPct >= 0.75 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
+            <Metric label={`Win rate · ${stats.n}`} value={stats.ready ? (stats.winPct * 100).toFixed(0) + '%' : '—'} color={stats.ready && stats.winPct >= 0.5 ? 'var(--up)' : 'var(--dim)'} accent="var(--up)" />
             <Metric label="Wins today" value={winsToday > 0 ? '✓ ' + winsToday : '—'} color={winsToday > 0 ? 'var(--up)' : 'var(--dim)'} accent="var(--cyan)" />
             <Metric label="Best trade" value={bestToday > 0 ? '+' + bestToday.toFixed(0) + '$' : '—'} gold={bestToday > 0} color="var(--dim)" accent="var(--gold)" />
           </>
