@@ -4,6 +4,7 @@
 import { SCALP_CONFIG, type EngineConfig } from './config';
 import { GOLD_BREAKOUT, type BreakoutConfig } from './breakout';
 import { BTC_SWING, GOLD_SWING, type SwingConfig } from './swing';
+import { BTC_TREND, GOLD_TREND, type TrendConfig } from './trend';
 import { ACTIVE_STRATEGY as STRAT } from './strategies';
 import type { ContextOptions } from './context';
 
@@ -17,6 +18,11 @@ export interface InstrumentSpec {
   // COUCHE SWING (H1) : position de FOND tenue des jours, slot séparé du scalp, lot dédié — validée au labo.
   // S'exécute même sur un instrument watchOnly (le watch-only ne bloque que l'intraday, sans edge validé).
   swing?: SwingConfig;
+  // COUCHE DE TENDANCE (D1) : cassure de canal journalier, ~9 trades/an/marché tenus des semaines, taille à
+  // 1 % de l'équité, stop tenu par le broker et remonté chaque jour sur le canal de sortie. La seule règle
+  // validée hors échantillon sur 18 ans (voir lib/engine/trend.ts). OFF par défaut : TREND_<SYM>=1 l'active.
+  // S'exécute même sur un instrument watchOnly (comme le swing), et quel que soit le profil de stratégie.
+  trend?: TrendConfig;
   // WATCH-ONLY : chart + desk + bougies + trades MANUELS, mais JAMAIS d'exécution auto INTRADAY (aucun edge validé).
   // Cas d'usage : BTC — le scalp y est interdit, mais la couche swing validée tourne.
   watchOnly?: boolean;
@@ -74,6 +80,10 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     // Levier d'urgence sans déploiement (02/09/2026) : SWING_XAUUSD=0 sur Railway coupe les NOUVELLES entrées
     // swing or ; les positions déjà ouvertes restent gérées par manage.ts. Voir docs/PLAN-DIAGNOSTIC.md §5.
     swing: STRAT.swing && process.env.SWING_XAUUSD !== '0' ? GOLD_SWING : undefined,
+    // 4ᵉ couche : TENDANCE journalière (03/09/2026). Opt-in explicite — c'est le candidat de REMPLACEMENT des
+    // couches ci-dessus, pas une couche de plus : on l'allume sur un master dédié (TREND_XAUUSD=1) avec
+    // SWING_XAUUSD=0, et on la mesure en R sur une saison avant d'y attacher un membre.
+    trend: process.env.TREND_XAUUSD === '1' ? GOLD_TREND : undefined,
   },
   // NAS100 RETIRÉ (produit) : Social Trade Hub ne copie pas l'indice et son sizing en lots est piégeux —
   // les pertes NAS n'apparaissaient QUE sur le compte maître, jamais chez les clients. Focus GOLD + BITCOIN.
@@ -91,6 +101,7 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     // SWING de fond 24/7 (labo 2.7 ans : PF 2.02, +39% à 1% de risque, week-end PF 2.7) — le compte vit le week-end.
     // Coupé sur S1 (aucune position multi-jours sur le profil « journée bouclée »).
     swing: STRAT.swing && process.env.SWING_BTCUSD !== '0' ? BTC_SWING : undefined, // SWING_BTCUSD=0 : même levier que l'or
+    trend: process.env.TREND_BTCUSD === '1' ? BTC_TREND : undefined, // TREND_BTCUSD=1 : même levier que l'or
   },
 ];
 

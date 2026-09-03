@@ -75,8 +75,9 @@ const SPEC: Record<string, { contractSize: number; commissionPerLot: number; sli
 const spec = SPEC[sym] ?? SPEC.XAUUSD;
 
 /** Couche déduite du signal_ref, comme le runner la nomme (même règle que pull-live-fixture.ts). */
-const layerOf = (ref: string | null): 'swing' | 'breakout' | 'scalp' => {
+const layerOf = (ref: string | null): 'trend' | 'swing' | 'breakout' | 'scalp' => {
   const r = (ref ?? '').toLowerCase();
+  if (r.includes('-trend-')) return 'trend';
   if (r.includes('swing')) return 'swing';
   if (r.includes('-bk-') || r.includes('break')) return 'breakout';
   return 'scalp';
@@ -153,7 +154,7 @@ const riskOk = (t: LiveTrade): boolean => {
  *  le prix d'entrée réel. −1 si introuvable dans les 70 minutes (trade non rejouable, compté à part). */
 const FILL_WINDOW = 70;
 const fillCache = new Map<LiveTrade, number>();
-const SIGNAL_TF_MS = (t: LiveTrade) => (layerOf(t.ref) === 'swing' ? 60 : 5) * 60_000; // bougie du signal : H1 (swing) ou M5
+const SIGNAL_TF_MS = (t: LiveTrade) => { const l = layerOf(t.ref); return (l === 'trend' ? 0 : l === 'swing' ? 60 : 5) * 60_000; }; // bougie du signal : H1 (swing) ou M5 ; la tendance D1 entre au marché à l'heure enregistrée
 const fillIndex = (t: LiveTrade): number => {
   const c = fillCache.get(t);
   if (c !== undefined) return c;
@@ -230,7 +231,7 @@ console.log(`M1 : ${bars.length} bougies, ${dayStr(bars[0].time)} → ${dayStr(b
 const layers = [...new Set(rows.map((t) => layerOf(t.ref)))].sort();
 for (const layer of layers) {
   const all = rows.filter((t) => layerOf(t.ref) === layer);
-  const maxBars = layer === 'swing' ? SWING_BARS : SCALP_BARS;
+  const maxBars = layer === 'swing' || layer === 'trend' ? SWING_BARS : SCALP_BARS;
   const noStop = all.filter((t) => !(riskOf(t) > 0)).length;
   const badStop = all.filter((t) => riskOf(t) > 0 && !riskOk(t)).length;
   const noFill = all.filter((t) => riskOk(t) && fillIndex(t) < 0).length;

@@ -6,7 +6,9 @@ import { logNote, updateTradeStop } from '../../lib/supabase/sync';
 // - CUSTOM (stratégie breakout) : breakeven TARDIF + TRAILING — une cassure a besoin d'air, la sécuriser
 //   trop tôt tue l'edge validé (labo : BE 0.8R, trailing 1.2R activé à 1.2R).
 // Le riskDist custom est FIGÉ à l'entrée (après un BE, |open−SL| ne mesure plus le risque initial).
-interface Mgmt { beTrigger: number; trailActivate?: number; trailDist?: number; riskDist: number; ladder?: [number, number][] }
+// newsGuard false : la protection avant annonce NE touche PAS cette position (couche de tendance D1 — remonter
+// le stop d'un trade de plusieurs semaines pour un CPI, c'est en sortir à chaque publication). Défaut : true.
+interface Mgmt { beTrigger: number; trailActivate?: number; trailDist?: number; riskDist: number; ladder?: [number, number][]; newsGuard?: boolean }
 const custom = new Map<string, Mgmt>(); // ticket → gestion spécifique (posée par le runner à l'exécution)
 const peaks = new Map<string, number>(); // ticket → meilleur prix atteint (pour le trailing)
 const done = new Map<string, true>(); // breakeven déjà appliqué
@@ -82,7 +84,7 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
     if (mgmt?.ladder) for (const [t, l] of mgmt.ladder) if (peakR >= t) wantR = Math.max(wantR, l); // paliers
     if (mgmt?.trailActivate != null && mgmt?.trailDist != null && peakR >= mgmt.trailActivate) wantR = Math.max(wantR, peakR - mgmt.trailDist); // trailing
     // ANNONCE IMMINENTE : tout ce qui est en profit passe au breakeven+ sans attendre son beTrigger.
-    const guarded = newsGuard != null && profit > 0;
+    const guarded = newsGuard != null && profit > 0 && mgmt?.newsGuard !== false;
     if (guarded) wantR = Math.max(wantR, 0.05);
     if (wantR === -Infinity) continue; // rien à sécuriser encore
 
