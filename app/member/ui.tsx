@@ -375,7 +375,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   // pas de nav avant connexion NI pendant l'onboarding / l'attente d'approbation (tous les onglets sont verrouillés)
-  const bare = ['/login', '/denied', '/onboarding', '/pending', '/invite'].some((p) => path?.includes(p));
+  const bare = ['/login', '/denied', '/onboarding', '/pending', '/invite', '/recover', '/add-strategy'].some((p) => path?.includes(p)); // écrans-tunnels : la nav en sortirait (audit 03/09 §4)
   useEffect(() => {
     if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/member-sw.js').catch(() => {});
   }, []);
@@ -404,7 +404,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
   const Tab = ({ href, label, icon }: { href: string; label: string; icon: React.ReactNode }) => {
-    const active = path === href || (href !== '/member' && path?.startsWith(href));
+    const active = path === href || (href !== '/member' && path?.startsWith(href)) || (href === '/member/history' && !!path?.startsWith('/member/track-record')); // le track record vit sous History
     return (
       <button
         onClick={() => router.push(href)}
@@ -442,7 +442,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
           {/* ALGORIA AI — le bouton PRINCIPAL : central, surélevé, la marque au centre (le flux live de l'IA) */}
           <button
             onClick={() => router.push('/member/live')}
-            aria-label="Algoria AI — live feed"
+            aria-label="Live — the AI trading feed"
             style={{ flex: 1, maxWidth: 118, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, border: 'none', background: 'transparent', cursor: 'pointer', marginTop: -22 }}
           >
             <span
@@ -456,7 +456,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
             >
               <img src="/brand/algoria-mark.png" alt="" width={32} height={32} style={{ objectFit: 'contain' }} />
             </span>
-            <span style={{ fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800, color: liveActive ? 'var(--cyan)' : 'var(--muted)' }}>Algoria AI</span>
+            <span style={{ fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800, color: liveActive ? 'var(--cyan)' : 'var(--muted)' }}>Live</span>
           </button>
           <Tab href="/member/academy" label="Academy" icon={ICONS.academy} />
           <Tab href="/member/profile" label="Profile" icon={ICONS.profile} />
@@ -483,12 +483,6 @@ export function StatusPill({ status }: { status: Member['status'] }) {
     </span>
   );
 }
-
-export const RISK_TIERS = [
-  { key: 'low', label: 'CAUTIOUS', lot: '0.01', blurb: 'Discover the machine with minimal exposure.' },
-  { key: 'balanced', label: 'BALANCED', lot: '0.05', blurb: 'The recommended setting — visible rhythm, contained risk.' },
-  { key: 'high', label: 'AGGRESSIVE', lot: '0.10', blurb: 'For funded accounts only — bigger swings both ways.' },
-] as const;
 
 // ===== STRATÉGIES — le levier de risque du membre (le lot copieur est FIXE 0.01, plus de sélecteur de lot).
 // AVAILABLE : seules les stratégies dont le master EXISTE sont sélectionnables. Les 3 masters $70k tournent
@@ -575,33 +569,3 @@ export function Check({ checked, onToggle, children }: { checked: boolean; onTog
   );
 }
 
-export function RiskPicker({ value, onPick, busy }: { value: string; onPick: (k: 'low' | 'balanced' | 'high') => void; busy?: boolean }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      {RISK_TIERS.map((t) => {
-        const active = value === t.key;
-        return (
-          <button
-            key={t.key}
-            disabled={busy}
-            onClick={() => onPick(t.key)}
-            style={{
-              textAlign: 'left', display: 'flex', alignItems: 'center', gap: 13, padding: '13px 15px', borderRadius: 12, cursor: 'pointer',
-              border: `1px solid ${active ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
-              background: active ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)',
-              boxShadow: active ? '0 0 16px rgba(43,227,245,.12)' : undefined,
-              color: 'var(--text)', opacity: busy ? 0.6 : 1,
-            }}
-          >
-            <span className="mono" style={{ fontSize: 19, fontWeight: 800, minWidth: 56, color: t.key === 'high' ? 'var(--gold)' : active ? 'var(--cyan)' : 'var(--text)' }}>{t.lot}</span>
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1 }}>{t.label}{t.key === 'balanced' ? <span style={{ color: 'var(--dim)', fontWeight: 500 }}> · default</span> : ''}</span>
-              <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>{t.blurb}</span>
-            </span>
-            {active && <span style={{ marginLeft: 'auto', color: 'var(--cyan)', fontSize: 15 }}>✓</span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}

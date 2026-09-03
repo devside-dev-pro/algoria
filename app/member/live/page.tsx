@@ -34,21 +34,12 @@ function PriceChip({ sym, short, dp, watch, active, onClick }: { sym: string; sh
   );
 }
 
-// compte à rebours vers la prochaine clôture M5 = la prochaine DÉCISION du moteur
-function useScan() {
-  const [clock, setClock] = useState(() => Date.now());
-  useEffect(() => { const iv = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(iv); }, []);
-  const left = 300_000 - (clock % 300_000);
-  return `${Math.floor(left / 60_000)}:${String(Math.floor((left % 60_000) / 1000)).padStart(2, '0')}`;
-}
-
 export default function MemberLive() {
   const { member, unlocked, loading } = useMe();
   const [items, setItems] = useState<any[]>([]);
   const [trades, setTrades] = useState<any[]>([]);
   const [hero, setHero] = useState('XAUUSD');
   const [paywall, setPaywall] = useState(false);
-  const scan = useScan();
   const isWatch = hero === 'BTCUSD';
 
   useEffect(() => {
@@ -102,9 +93,6 @@ export default function MemberLive() {
                 {hero} · M5{meta?.session ? ` · ${meta.session}` : ''}{isWatch ? ' · no intraday scalp' : ''}
               </span>
             </div>
-            <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', textAlign: 'right', borderLeft: '1px solid var(--border)', paddingLeft: 10, lineHeight: 1.2 }}>
-              scan<br /><b style={{ color: 'var(--cyan)', fontSize: 13.5, fontWeight: 700 }}>{scan}</b>
-            </span>
           </div>
 
           {/* ===== LE GRAPHIQUE ROI (garde son propre HUD, aucun overlay par-dessus) ===== */}
