@@ -14,7 +14,8 @@
 // partenaires des brokers. Le pointage reste HUMAIN. Ce que le code apporte n'est donc pas l'automatisation
 // du contrôle, c'est l'IMPOSSIBILITÉ DE L'OUBLIER : sans validation enregistrée, le copieur ne se branche
 // pas. Toute la valeur est là, et elle ne tient qu'à ça.
-export const ACTIVATION_SYMBOL = 'EURUSD';
+// USDJPY et non l'or : le spread XAUUSD coûte au membre sur 1 lot aller-retour, une paire JPY presque rien (décision 03/09).
+export const ACTIVATION_SYMBOL = 'USDJPY';
 
 /** Les deux jambes demandées au membre. 0.5 à l'achat + 0.5 à la vente = 1 lot de volume, exposition nette
  *  NULLE : le membre ne prend aucun risque de marché et ne peut pas perdre d'argent en le faisant. C'est ce

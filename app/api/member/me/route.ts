@@ -448,7 +448,7 @@ export async function POST(req: NextRequest) {
     const { data: mrow } = await db.from('members').select('member_no').eq('tg_id', s.tgId).limit(1);
     await db.from('member_actions').insert({ tg_id: s.tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member (win-back)', detail: { text: '🔄 recovery started — member reopened the wizard after being off-boarded' } as never });
   } else if (body.action === 'activation') {
-    // LE MEMBRE DÉCLARE AVOIR PASSÉ SON LOT D'ACTIVATION (0.5 BUY + 0.5 SELL EURUSD).
+    // LE MEMBRE DÉCLARE AVOIR PASSÉ SON LOT D'ACTIVATION (0.5 BUY + 0.5 SELL sur ACTIVATION_SYMBOL, USDJPY).
     //
     // ⚠️ CETTE DÉCLARATION NE PROUVE RIEN, ET LE CODE NE DOIT JAMAIS FAIRE COMME SI. Elle n'écrit QUE
     // `lots_claimed_at` — jamais `lots_ok`, qui reste la signature d'un humain ayant pointé le dashboard
