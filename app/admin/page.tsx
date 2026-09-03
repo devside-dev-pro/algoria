@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { openTelegram } from '@/lib/telegram';
 import { BROKERS } from '@/lib/member/brokers';
+import { REJECT_REASONS } from '@/lib/member/rejectReasons';
 import { LOT_CHOICES, LOT_MAX } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 import { lotsStateOf, lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
@@ -395,7 +396,18 @@ export default function AdminCRM() {
     if (n < ACTIVATION_LOTS && !window.confirm(`${n} lot < ${ACTIVATION_LOTS} lot attendu.\n\nValider quand même ? La commission risque d'être refusée par le broker.`)) return;
     post({ lotsOk: a.id, lots: n });
   };
-  const rejectConnect = (id: string) => { const reason = window.prompt('Decline reason (shown to the member, e.g. "no deposit found under this name"):'); if (reason !== null && reason.trim()) post({ rejectConnect: id, reason }); };
+  // MOTIFS FERMÉS (03/09) : un numéro suffit, le membre reçoit le texte propre dans sa langue avec la
+  // correction attendue (lib/member/rejectReasons.ts). Un texte libre reste possible (« other »).
+  const rejectConnect = (id: string) => {
+    const menu = REJECT_REASONS.map((r, i) => `${i + 1}. ${r.admin}`).join('\n');
+    const raw = window.prompt(`Motif du refus — tape un NUMÉRO, ou un texte libre :\n\n${menu}`);
+    if (raw === null || !raw.trim()) return;
+    const n = Number(raw.trim());
+    const picked = Number.isInteger(n) && n >= 1 && n <= REJECT_REASONS.length ? REJECT_REASONS[n - 1] : null;
+    if (picked && picked.code !== 'other') { post({ rejectConnect: id, code: picked.code }); return; }
+    const free = picked ? window.prompt('Texte libre (montré au membre) :') : raw;
+    if (free !== null && free.trim()) post({ rejectConnect: id, code: 'other', reason: free.trim() });
+  };
   // EN ATTENTE DU BROKER — le cas « compte préexistant non rattaché à notre numéro d'affilié » : il
   // n'apparaît pas dans le dashboard partenaire, et seul le titulaire peut demander le rattachement au
   // support du broker. Le délai est chez le broker, pas chez nous. Marquer l'attente évite que la carte se

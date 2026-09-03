@@ -6,6 +6,7 @@ import { lotsStateOf } from '@/lib/member/activation';
 import { OFFBOARDED } from '@/lib/member/winback';
 import { BROKERS } from '@/lib/member/brokers';
 import { notifyOwner } from '@/lib/member/notifyOwner';
+import { rejectMessage } from '@/lib/member/rejectReasons';
 
 const TIER_LOT: Record<string, string> = { low: '0.01', balanced: '0.05', high: '0.10' };
 
@@ -113,9 +114,22 @@ export async function GET(req: NextRequest) {
     // CARTE CONNECT EN COURS — porte l'état du lot d'activation, affiché sur l'écran d'attente.
     db.from('member_actions').select('detail,created_at').eq('tg_id', ctx.session.tgId).eq('kind', 'connect').eq('status', 'pending').order('created_at', { ascending: false }).limit(1),
   ]);
+  const rejDetail = rejQ.data?.[0]?.detail as { reject_reason?: string; reject_code?: string } | undefined;
+  const memberLocale = (String((ctx.member as { locale?: string }).locale ?? 'en') === 'it' ? 'it' : 'en') as 'en' | 'it';
   const rejection = (ctx.member as { status?: string }).status === 'onboarding' && rejQ.data?.[0]
-    ? { reason: String((rejQ.data[0].detail as { reject_reason?: string })?.reject_reason ?? 'verification failed'), at: rejQ.data[0].done_at }
+    ? { code: rejDetail?.reject_code ?? 'other', reason: rejectMessage(rejDetail?.reject_code, rejDetail?.reject_reason, memberLocale), at: rejQ.data[0].done_at }
     : null;
+  // PRÉ-REMPLISSAGE DU FORMULAIRE (03/09) : après un refus, le membre corrige UNE chose au lieu de tout
+  // re-saisir — sauf le mot de passe, chiffré, jamais renvoyé. Les identifiants MetaTrader vivent sur la
+  // fiche (effacés seulement par une déconnexion), le reste dans la dernière ligne kyc.
+  const kycD = (kycQ.data?.[0]?.detail as Record<string, unknown> | undefined) ?? {};
+  const mm = ctx.member as { mt5_login?: string | null; mt5_server?: string | null; broker?: string | null };
+  const prefill = kycQ.data?.[0] ? {
+    broker: mm.broker ?? null, login: mm.mt5_login ?? null, server: mm.mt5_server ?? null,
+    platform: kycD.platform === 'mt4' ? 'mt4' : 'mt5', name: typeof kycD.broker_name === 'string' ? kycD.broker_name : null,
+    deposit: Number(kycD.declared_deposit ?? 0) || null, origin: kycD.origin === 'existing' ? 'existing' : 'new',
+    brokerOther: typeof kycD.broker_label === 'string' ? kycD.broker_label : null,
+  } : null;
   const comms = commsQ.data ?? [];
   const payouts = payoutsQ.data ?? [];
   const sumC = (st: string) => comms.filter((c) => c.status === st).reduce((a, c) => a + Number(c.amount), 0);
@@ -162,7 +176,7 @@ export async function GET(req: NextRequest) {
   // 03/09 : un texte fixe « quelques heures » restait affiché au bout de huit jours).
   const pendingCard = connQ.data?.[0] as { detail?: Record<string, unknown> | null; created_at?: string } | undefined;
   const activation = { claimed: lots.claimedAt != null, claimedAt: lots.claimedAt, validated: lots.ok || lots.override != null, submittedAt: pendingCard?.created_at ?? null, waitingBroker: !!pendingCard?.detail?.waiting_broker };
-  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit, activation });
+  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit, activation, prefill });
 }
 
 /** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'risk'|'pause'|'resume', ... } */
@@ -203,6 +217,9 @@ export async function POST(req: NextRequest) {
     if (!login || !server || !password) { void logAttempt(s.tgId, 'mt5', false, 'missing_field'); return NextResponse.json({ error: 'login, server and password are required' }, { status: 400 }); }
     if (fullName.length < 3) { void logAttempt(s.tgId, 'mt5', false, 'missing_name'); return NextResponse.json({ error: 'full name on the broker account is required' }, { status: 400 }); }
     if (!Number.isFinite(deposit) || deposit <= 0) { void logAttempt(s.tgId, 'mt5', false, 'missing_deposit'); return NextResponse.json({ error: 'deposit amount is required' }, { status: 400 }); }
+    // MINIMUM D'ENTRÉE VÉRIFIÉ ICI, À L'ÉTAPE 2 (03/09) — pas à l'étape 3, après la saisie du mot de passe,
+    // où le refus obligeait à tout re-saisir (audit §2.5).
+    if (deposit < MIN_ENTRY_DEPOSIT) { void logAttempt(s.tgId, 'mt5', false, 'below_min'); return NextResponse.json({ error: `the minimum deposit is $${MIN_ENTRY_DEPOSIT} — top up first, then come back` }, { status: 400 }); }
     // LES DEUX ENGAGEMENTS (14/08) — 43% des demandes de connexion étaient refusées, dont ~74% pour la
     // même raison : un compte ouvert AVANT Algoria, donc jamais rattaché au broker et introuvable dans le
     // dashboard partenaire (souvent refusé sous l'étiquette « invalid account »). Le front pose la

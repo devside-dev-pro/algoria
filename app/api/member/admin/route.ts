@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret, encryptSecret } from '@/lib/member/server';
+import { rejectMessage, rejectReasonOf } from '@/lib/member/rejectReasons';
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
 import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } from '@/lib/member/sth';
 import { BROKERS } from '@/lib/member/brokers';
@@ -283,7 +284,7 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     add?: string; remove?: string; done?: string; reveal?: string; liveAlert?: boolean;
     confirmCommission?: string; cancelCommission?: string; payoutPaid?: string; payoutReject?: string; reason?: string; tx?: string;
-    rejectConnect?: string;
+    rejectConnect?: string; code?: string;
     waitBroker?: string; // carte bloquée chez le broker (rattachement affilié) — bascule, voir plus bas
     addDeposit?: { tg_id: number; broker?: string; amount: number; commission?: number; date?: string; note?: string };
     updateDeposit?: { id: string; amount?: number; commission?: number; comStatus?: string; note?: string; broker?: string; date?: string; bookedYm?: string | null };
@@ -459,12 +460,15 @@ export async function POST(req: NextRequest) {
     const { data: rows } = await db.from('member_actions').select('*').eq('id', body.rejectConnect).eq('status', 'pending').limit(1);
     const act = rows?.[0];
     if (!act || act.kind !== 'connect') return NextResponse.json({ error: 'connect request not found (already processed?)' }, { status: 404 });
-    const reason = String(body.reason ?? '').slice(0, 200) || 'verification failed';
+    // MOTIF CODÉ (03/09) : `code` vient de la liste fermée (lib/member/rejectReasons.ts) ; le texte libre ne
+    // sert qu'à « other ». Le membre lit le motif dans sa langue, avec la correction attendue.
+    const code = rejectReasonOf(String(body.code ?? '')) ? String(body.code) : 'other';
+    const reason = rejectMessage(code, String(body.reason ?? '').slice(0, 200), 'en');
     await db.from('member_actions').update({
       status: 'rejected',
       done_at: new Date().toISOString(),
       done_by: who,
-      detail: { ...(act.detail as Record<string, unknown> | null ?? {}), reject_reason: reason } as never,
+      detail: { ...(act.detail as Record<string, unknown> | null ?? {}), reject_code: code, reject_reason: reason } as never,
     }).eq('id', act.id);
     const rejAccountId = (act.detail as { account_id?: string } | null)?.account_id;
     if (rejAccountId) {

@@ -62,11 +62,15 @@ export interface Referral {
  *  voit TOUTE l'app en mode TEASER — contenu exclusif grisé, historique des gains en clair, paywall
  *  « unlock » = wizard broker. Un mur donne envie de partir ; un aperçu grisé donne envie d'entrer.
  *  `unlocked` = admin OU copie activée (live/paused) — c'est LE drapeau que les pages consultent. */
+/** Ce que le formulaire de connexion peut pré-remplir après un refus (jamais le mot de passe). */
+export interface Prefill { broker: string | null; login: string | null; server: string | null; platform: 'mt5' | 'mt4'; name: string | null; deposit: number | null; origin: 'new' | 'existing'; brokerOther: string | null }
+
 export function useMe() {
   const [member, setMember] = useState<Member | null>(null);
   const [accounts, setAccounts] = useState<MemberAccount[]>([]);
   const [referral, setReferral] = useState<Referral | null>(null);
-  const [rejection, setRejection] = useState<{ reason: string; at: string | null } | null>(null);
+  const [rejection, setRejection] = useState<{ code?: string; reason: string; at: string | null } | null>(null);
+  const [prefill, setPrefill] = useState<Prefill | null>(null);
   const [declaredDeposit, setDeclaredDeposit] = useState<number | null>(null); // dépôt annoncé au wizard (grise les stratégies hors budget, même en reprise)
   const [admin, setAdmin] = useState(false);
   const [srvUnlocked, setSrvUnlocked] = useState<boolean | null>(null);
@@ -85,7 +89,7 @@ export function useMe() {
         .then(async (r) => {
           if (r.status === 403) { router.replace('/member/denied'); return null; } // accès révoqué (banni)
           if (r.status === 401) { router.replace('/member/login'); return null; }
-          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { reason: string; at: string | null } | null; accounts?: MemberAccount[]; declaredDeposit?: number | null };
+          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { code?: string; reason: string; at: string | null } | null; accounts?: MemberAccount[]; declaredDeposit?: number | null; prefill?: Prefill | null };
         })
         .then((d) => {
           if (!alive) return;
@@ -95,6 +99,7 @@ export function useMe() {
           setAccounts(d.accounts ?? []);
           setReferral(d.referral ?? null);
           setRejection(d.rejection ?? null);
+          setPrefill(d.prefill ?? null);
           setDeclaredDeposit(d.declaredDeposit ?? null);
           setAdmin(!!d.admin);
           setSrvUnlocked(typeof d.unlocked === 'boolean' ? d.unlocked : null);
@@ -121,7 +126,7 @@ export function useMe() {
   const locale: Locale = member?.locale ? asLocale(member.locale) : guessed;
   useEffect(() => { if (member?.locale) rememberLocale(asLocale(member.locale)); }, [member?.locale]);
   const t = useCallback((key: string) => tr(locale, key), [locale]);
-  return { member, setMember, accounts, referral, rejection, declaredDeposit, admin, unlocked, loading, failed, locale, t };
+  return { member, setMember, accounts, referral, rejection, prefill, declaredDeposit, admin, unlocked, loading, failed, locale, t };
 }
 
 /** Langue des écrans SANS session (login, accès refusé) : choix mémorisé, sinon langue du navigateur. */

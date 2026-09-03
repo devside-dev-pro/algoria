@@ -85,7 +85,7 @@ function SubmitError({ msg, t }: { msg: string | null; t: (k: string) => string 
 }
 
 export default function Onboarding() {
-  const { member, rejection, declaredDeposit, loading, t } = useMe();
+  const { member, rejection, prefill, declaredDeposit, loading, t } = useMe();
   const router = useRouter();
   const [step, setStep] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,6 +129,27 @@ export default function Onboarding() {
   const [ackLink, setAckLink] = useState(false);
   const [ackFunded, setAckFunded] = useState(false);
   const [ackLots, setAckLots] = useState(false); // lot d'activation déclaré — jamais bloquant (voir le bloc)
+  // PRÉ-REMPLISSAGE (03/09) : un membre qui revient (refus, ou wizard laissé à l'étape 2) retrouve tout
+  // sauf son mot de passe. Avant, le formulaire se refermait derrière un refus (origine remise à zéro) et
+  // il fallait re-répondre « d'où vient ce compte ? » puis tout re-saisir — audit §2.6.
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (prefilled || !prefill || !member || member.status !== 'onboarding' || member.onboarding_step < 1) return;
+    setPrefilled(true);
+    setOrigin(prefill.origin);
+    if (prefill.origin === 'existing') setExContinued(true);
+    setPlatform(prefill.platform);
+    if (prefill.broker) setBrokerPick(prefill.broker);
+    if (prefill.brokerOther) setBrokerOther(prefill.brokerOther);
+    if (prefill.login) setLogin(prefill.login);
+    if (prefill.server) {
+      setServer(prefill.server);
+      const known = BROKERS.find((b) => b.key === prefill.broker)?.servers ?? [];
+      if (known.length && !known.includes(prefill.server)) setServerManual(true);
+    }
+    if (prefill.name) setFullName(prefill.name);
+    if (prefill.deposit) setDeposit(String(prefill.deposit));
+  }, [prefill, member, prefilled]);
   useEffect(() => {
     if (!member || member.status !== 'onboarding' || bonusPop) return;
     if ((step ?? member.onboarding_step) !== 0 || (brokerPick ?? member.broker) != null) return;
@@ -186,6 +207,7 @@ export default function Onboarding() {
   if (!password) mt5Missing.push(t('ob.miss.password'));
   if (fullName.trim().length < 3) mt5Missing.push(t('ob.miss.name'));
   if (!Number(deposit)) mt5Missing.push(t('ob.miss.deposit'));
+  else if (Number(deposit) < MIN_ENTRY_DEPOSIT) mt5Missing.push(t('ob.miss.depositMin')); // vérifié ici, pas après le mot de passe (audit §2.5)
   if (!ackLink || !ackFunded) mt5Missing.push(t('ob.miss.acks'));
   const mt5Blocked = busy || mt5Missing.length > 0;
 
@@ -216,8 +238,8 @@ export default function Onboarding() {
         <div className="cardIn" style={{ border: '1px solid rgba(245,194,74,.5)', background: 'rgba(245,194,74,.07)', borderRadius: 12, padding: '12px 15px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <span style={{ fontSize: 16 }}>⚠️</span>
           <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--text)' }}>
-            <b>Your previous request was declined:</b> {rejection.reason}
-            <br /><span style={{ color: 'var(--muted)' }}>Fix your details below and resubmit — approvals are fast when everything checks out.</span>
+            <b>{t('ob.rejected')}:</b> {rejection.reason}
+            <br /><span style={{ color: 'var(--muted)' }}>{prefill ? t('ob.rejected.fix') : 'Fix your details below and resubmit — approvals are fast when everything checks out.'}</span>
           </div>
         </div>
       )}
@@ -433,6 +455,7 @@ export default function Onboarding() {
                 d'ouverture du compte), ce qu'il n'est PAS (le site du broker), et comment le retrouver. */}
             <label style={lbl}>{platform === 'mt4' ? 'MT4' : 'MT5'} password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" style={inp} />
               <span style={{ ...hint, color: 'var(--muted)' }}>{t('ob.pwdHint')}</span>
+              {prefilled && !password && <span style={{ ...hint, color: 'var(--gold)' }}>{t('ob.pwdAgain')}</span>}
               <span style={hint}>{t('ob.pwdLost')}</span>
             </label>
           </div>
