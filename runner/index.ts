@@ -27,10 +27,11 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh, imminent
 const NEWS_GUARD_MIN = 5;
 import { pushToAdmins } from '../lib/push/send';
 import { adminLink, notifyOwner } from '../lib/member/notifyOwner';
+import { sthReady, sthStatus, sthMoveMaster } from '../lib/member/sth';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
@@ -1251,6 +1252,53 @@ async function main() {
     }
   };
   if (!SECONDARY) setInterval(() => void maybeOwnerDigest(), 10 * 60_000);
+
+  // ===== AUDIT STH QUOTIDIEN (03/09/2026) — 07 h UTC, un seul runner. Le bouton « CHECK » de TOOLS
+  // existait depuis le 03/08 (cas #7 : une cliente LIVE chez nous, connectée chez STH, abonnée à AUCUN
+  // master — elle ne recevait plus un trade et personne ne pouvait le voir). Un bouton qu'il faut penser
+  // à cliquer ne protège de rien : le contrôle tourne désormais seul, et ne parle QUE s'il trouve quelque
+  // chose. Rien trouvé = silence.
+  // RÉPARATION : jamais par défaut. Rebrancher un compte, c'est rouvrir des positions chez quelqu'un ;
+  // ALGORIA_STH_AUTOREPAIR=1 l'autorise pour les membres déjà `live` (rétablir l'état voulu), jamais
+  // pour un `pending_copier` (son lot d'activation n'est peut-être pas validé — voir lotsCleared).
+  // Sans STH_PARTNER_LICENSE sur ce runner, l'audit se tait et le dit au démarrage.
+  let lastAuditDay = '';
+  if (!SECONDARY && !sthReady()) console.log('[algoria] audit STH quotidien : OFF (STH_PARTNER_LICENSE absent sur ce runner)');
+  const maybeSthAudit = async () => {
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    if (now.getUTCHours() !== 7 || lastAuditDay === today || !sthReady()) return;
+    lastAuditDay = today;
+    try {
+      const members = await listCopierMembers();
+      const autoRepair = process.env.ALGORIA_STH_AUTOREPAIR === '1';
+      const orphans: string[] = []; const errors: string[] = []; const repaired: string[] = [];
+      for (const m of members) {
+        const name = `#${m.member_no ?? '?'} ${m.tg_username ? '@' + m.tg_username : (m.tg_name ?? '')}`.trim();
+        const st = await sthStatus(String(m.tg_id));
+        if (!st.ok) { errors.push(`${name} · ${st.errorMessage}`); continue; }
+        if ((st.data.masterAccountsList ?? []).length > 0) continue;
+        if (autoRepair && m.status === 'live') {
+          const strategy = Number(m.strategy ?? 2) || 2; const lots = Number(m.lot ?? 0.01) || 0.01;
+          const r = await sthMoveMaster(String(m.tg_id), strategy, lots);
+          if (r.ok) { repaired.push(`${name} → S${strategy}`); await addMemberNote(Number(m.tg_id), m.member_no, `🔧 audit STH auto : connecté mais ne copiait rien → rebranché sur S${strategy} (lots ${lots})`); continue; }
+          errors.push(`${name} · réparation échouée : ${r.error}`);
+          continue;
+        }
+        orphans.push(`${name} (${m.status})`);
+      }
+      console.log(`[algoria] audit STH : ${members.length} compte(s) · ${orphans.length} orphelin(s) · ${repaired.length} réparé(s) · ${errors.length} erreur(s)`);
+      if (!orphans.length && !repaired.length && !errors.length) return;
+      const lines: string[] = [];
+      if (orphans.length) lines.push(`⚠️ connecté(s) mais ne copiant RIEN : ${orphans.join(', ')} → TOOLS › REPAIR ORPHANS`);
+      if (repaired.length) lines.push(`🔧 rebranché(s) automatiquement : ${repaired.join(', ')}`);
+      if (errors.length) lines.push(`⨯ ${errors.slice(0, 5).join(' · ')}${errors.length > 5 ? ` (+${errors.length - 5})` : ''}`);
+      await notifyOwner({ title: `🔎 Audit STH : ${orphans.length + repaired.length + errors.length} compte(s) à voir sur ${members.length}`, lines, path: '/', tag: 'sth-audit' });
+    } catch (e) {
+      console.error('[algoria] audit STH échoué:', e);
+    }
+  };
+  if (!SECONDARY) setInterval(() => void maybeSthAudit(), 10 * 60_000);
 
   // ===== AUTO-APPROBATION des demandes d'adhésion au canal (31/07 — Mathieu les acceptait par lots de
   // 10-20 à la main quand il les voyait). Le webhook Vercel ne peut pas « attendre 3 minutes » (fonction

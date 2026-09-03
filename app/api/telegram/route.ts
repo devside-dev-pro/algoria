@@ -3,7 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import { JOIN_DM, INBOX_ACK, INBOX_ACK_BTN, SUPPORT_TG_URL, SIGNED_IN, SIGNED_IN_BTN, SIGNED_IN_CODE_HINT, LOGIN_CODE_MSG, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
 import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
-import { notifyOwner } from '@/lib/member/notifyOwner';
+import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
+import { draftReply } from '@/lib/member/replyDraft';
+
+// le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
+export const maxDuration = 25;
 
 // Webhook Telegram (bot admin du canal) → alimente la WAITLIST du widget /join.
 // Flux : un viewer clique le lien d'invitation "demander à rejoindre" → Telegram POSTe un chat_join_request ici
@@ -359,6 +363,58 @@ export async function POST(req: Request) {
   // ⚠️ CE WEBHOOK EST LE SEUL DU BOT (Telegram n'en autorise qu'UN) : login + waitlist live + inbox vivent
   // ICI. Ne JAMAIS enregistrer une autre URL de webhook — vécu 26/07 : une route inbox séparée a écrasé
   // celle-ci et cassé la connexion de tous les membres pendant une soirée.
+  // ===== BOUTONS DES DM D'ALERTE (03/09) — « ✅ Envoyer la réponse » / « 🗑 Écarter » sous un message reçu
+  // par le bot. Le brouillon vit sur la ligne bot_reply (detail.draft) ; l'appui d'un ADMIN l'envoie au
+  // membre par le bot, exactement comme une réponse tapée dans l'admin (tracée en nudge). Quelqu'un
+  // d'autre qui appuie n'obtient rien : la liste des admins est celle de notifyOwner.
+  const cq = update?.callback_query;
+  if (cq && db) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const tg = async (method: string, payload: Record<string, unknown>) => token ? fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000), body: JSON.stringify(payload) }).catch(() => null) : null;
+    const answer = (text: string) => tg('answerCallbackQuery', { callback_query_id: cq.id, text: text.slice(0, 190) });
+    const stamp = async (line: string) => {
+      const orig = typeof cq.message?.text === 'string' ? cq.message.text : '';
+      if (cq.message?.chat?.id && cq.message?.message_id) await tg('editMessageText', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, text: `${orig}\n\n${line}`.slice(0, 4000), disable_web_page_preview: true });
+    };
+    try {
+      const m = /^r([dx]):([0-9a-f-]{36})$/i.exec(String(cq.data ?? ''));
+      if (!m) { await answer(''); return NextResponse.json({ ok: true }); }
+      const admins = await adminTgIds();
+      if (!admins.includes(Number(cq.from?.id))) { await answer('Réservé aux admins.'); return NextResponse.json({ ok: true }); }
+      const { data: rows } = await (db as any).from('member_actions').select('id,tg_id,member_no,detail').eq('id', m[2]).eq('kind', 'bot_reply').limit(1);
+      const row = rows?.[0] as { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> | null } | undefined;
+      const detail = row?.detail ?? {};
+      const draft = String(detail.draft ?? '').trim();
+      const by = cq.from?.username ? `@${cq.from.username}` : String(cq.from?.id ?? 'admin');
+      if (!row) { await answer('Message introuvable.'); return NextResponse.json({ ok: true }); }
+      if (m[1].toLowerCase() === 'x') {
+        await (db as any).from('member_actions').update({ detail: { ...detail, draft_dismissed_at: new Date().toISOString(), draft_dismissed_by: by } }).eq('id', row.id);
+        await stamp('🗑 Brouillon écarté — réponds depuis l’admin.');
+        await answer('Écarté.');
+        return NextResponse.json({ ok: true });
+      }
+      if (!draft) { await answer('Pas de brouillon sur ce message.'); return NextResponse.json({ ok: true }); }
+      if (detail.draft_sent_at) { await answer('Déjà envoyé.'); return NextResponse.json({ ok: true }); }
+      const r = await tg('sendMessage', { chat_id: row.tg_id, text: draft, disable_web_page_preview: true });
+      if (!r?.ok) {
+        const err = (await r?.json().catch(() => ({}))) as { description?: string } | undefined;
+        const why = err?.description ?? `HTTP ${r?.status ?? '?'}`;
+        await (db as any).from('member_actions').insert({ tg_id: row.tg_id, member_no: row.member_no, kind: 'nudge', status: 'failed', done_by: by, detail: { via: 'draft', error: why, text: draft } });
+        await answer(`Échec : ${why}`);
+        await stamp(`⨯ Envoi refusé par Telegram : ${why}`);
+        return NextResponse.json({ ok: true });
+      }
+      await (db as any).from('member_actions').insert({ tg_id: row.tg_id, member_no: row.member_no, kind: 'nudge', status: 'done', done_by: by, detail: { via: 'draft', note: `AI draft approved by ${by}`, text: draft } });
+      await (db as any).from('member_actions').update({ detail: { ...detail, draft_sent_at: new Date().toISOString(), draft_sent_by: by } }).eq('id', row.id);
+      await stamp(`✅ Envoyé au membre par ${by}.`);
+      await answer('Envoyé ✓');
+    } catch (e) {
+      console.error('[telegram] draft callback failed:', (e as { message?: string })?.message ?? e);
+      await answer('Erreur, réessaie depuis l’admin.');
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   const msg = update?.message;
   const startPayload = typeof msg?.text === 'string' ? msg.text.match(/^\/start\s+lg_([A-Za-z0-9]{16,64})$/) : null;
   if (db && startPayload && msg?.from?.id) {
@@ -466,34 +522,53 @@ export async function POST(req: Request) {
     try {
       const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1500) || '[media]';
       const tgId = Number(msg.from.id);
-      const { data: mrow } = await (db as any).from('members').select('member_no,locale').eq('tg_id', tgId).limit(1);
+      const { data: mrow } = await (db as any).from('members').select('member_no,locale,status,strategy,broker,tg_name,tg_username').eq('tg_id', tgId).limit(1);
       // ANTI-SPAM ramené de 6 h à 2 h (14/08) : à 6 h, quelqu'un qui repose une question deux heures plus
       // tard n'avait plus RIEN en retour — donc exactement le silence qu'on cherche à supprimer. Deux
       // heures suffisent à ne pas répéter le message dans un même échange, sans laisser une question
       // ultérieure sans réponse.
       const { data: recent } = await (db as any).from('member_actions').select('id').eq('tg_id', tgId).eq('kind', 'bot_reply')
         .gte('created_at', new Date(Date.now() - 2 * 3_600_000).toISOString()).limit(1);
-      await (db as any).from('member_actions').insert({
+      // LES DERNIERS ÉCHANGES (contexte du brouillon) — lus AVANT d'insérer le message courant.
+      const { data: past } = await (db as any).from('member_actions').select('kind,detail,created_at').eq('tg_id', tgId).in('kind', ['bot_reply', 'nudge']).eq('status', 'done')
+        .order('created_at', { ascending: false }).limit(6);
+      const { data: inserted } = await (db as any).from('member_actions').insert({
         tg_id: tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'bot_reply', status: 'done', done_by: 'telegram',
         detail: { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null },
-      });
-      // Le propriétaire est prévenu du message lui-même (03/09) — jusque-là, seul le prospect recevait un
-      // accusé de réception, et la question dormait dans BOT ACTIVITY jusqu'à ce que quelqu'un ouvre l'admin.
-      void notifyOwner({ title: `💬 ${msg.from.username ? `@${msg.from.username}` : msg.from.first_name ?? 'quelqu’un'} a écrit au bot`, lines: [text.slice(0, 300)], path: '/', tag: 'owner-inbox' });
+      }).select('id');
+      const rowId = String((inserted as Array<{ id: string }> | null)?.[0]?.id ?? '');
       const token = process.env.TELEGRAM_BOT_TOKEN;
-      if (token && !recent?.length) {
+      // L'ACCUSÉ DE RÉCEPTION PART D'ABORD (rapide), le brouillon se calcule ensuite.
+      const ackNow = token && !recent?.length;
+      if (ackNow) {
         await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
           body: JSON.stringify({
             chat_id: tgId,
             text: INBOX_ACK[asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale)],
             disable_web_page_preview: true,
-            // BOUTON plutôt qu'un pseudo à recopier : un tap ouvre la conversation avec Mathieu. C'est
-            // toute la différence entre « router » et « mentionner ».
             reply_markup: { inline_keyboard: [[{ text: INBOX_ACK_BTN[asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale)], url: SUPPORT_TG_URL }]] },
           }),
         }).catch(() => {});
       }
+      // BROUILLON DE RÉPONSE (03/09, décision Mathieu) — rédigé, jamais envoyé seul : voir lib/member/replyDraft.ts.
+      const member = (mrow?.[0] as { member_no?: number | null; locale?: string | null; status?: string | null; strategy?: number | null; broker?: string | null; tg_name?: string | null; tg_username?: string | null } | undefined) ?? null;
+      const history = ((past ?? []) as Array<{ kind: string; detail: Record<string, unknown> | null }>).reverse()
+        .map((h) => ({ from: h.kind === 'bot_reply' ? 'member' as const : 'algoria' as const, text: String(h.detail?.text ?? h.detail?.note ?? '') }))
+        .filter((h) => h.text);
+      const draft = text === '[media]' ? null : await draftReply({ text, locale: member?.locale, member, history });
+      if (draft && rowId) {
+        await (db as any).from('member_actions').update({ detail: { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null, draft, draft_model: process.env.ALGORIA_REPLY_MODEL ?? 'haiku' } }).eq('id', rowId);
+      }
+      // Le propriétaire est prévenu du message lui-même (03/09) — jusque-là, seul le prospect recevait un
+      // accusé de réception, et la question dormait dans BOT ACTIVITY jusqu'à ce que quelqu'un ouvre l'admin.
+      // Avec le brouillon et ses deux boutons quand il y en a un.
+      await notifyOwner({
+        title: `💬 ${msg.from.username ? `@${msg.from.username}` : msg.from.first_name ?? 'quelqu’un'} a écrit au bot`,
+        lines: [text.slice(0, 300), ...(draft ? ['', '✍️ Réponse proposée :', draft] : [])],
+        path: '/', tag: 'owner-inbox',
+        ...(draft && rowId ? { buttons: [{ text: '✅ Envoyer la réponse', data: `rd:${rowId}` }, { text: '🗑 Écarter', data: `rx:${rowId}` }] } : {}),
+      });
     } catch (e) {
       console.error('[telegram] bot inbox failed:', (e as { message?: string })?.message ?? e);
     }

@@ -378,6 +378,17 @@ export function DashboardTab() {
                         <p style={{ margin: '4px 0 0', fontSize: 11.5, color: incoming ? 'var(--text)' : 'var(--muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text || '—'}</p>
                         {/* RÉPONSE VIA LE BOT — part dans la conversation que la personne a DÉJÀ avec le bot
                             (le lien t.me échouait sans @username public). Enter ou SEND pour envoyer. */}
+                        {incoming && (d as { draft?: string }).draft && (
+                          <div style={{ marginTop: 7, padding: '8px 10px', borderRadius: 8, border: '1px dashed rgba(43,227,245,.4)', background: 'rgba(43,227,245,.05)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1, color: 'var(--cyan)' }}>✍️ DRAFT REPLY{(d as { draft_sent_at?: string }).draft_sent_at ? ' · SENT FROM TELEGRAM' : ''}</span>
+                              <p style={{ margin: '3px 0 0', fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{(d as { draft?: string }).draft}</p>
+                            </div>
+                            {!(d as { draft_sent_at?: string }).draft_sent_at && (
+                              <button onClick={() => setBotDrafts((s) => ({ ...s, [b.id]: String((d as { draft?: string }).draft ?? '') }))} style={{ ...miniBtn, whiteSpace: 'nowrap' }} title="copy the draft into the reply box below — edit it, then SEND">↓ USE</button>
+                            )}
+                          </div>
+                        )}
                         {incoming && (
                           <div style={{ display: 'flex', gap: 7, marginTop: 7 }}>
                             <input

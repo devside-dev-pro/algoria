@@ -293,6 +293,20 @@ export async function fetchPendingNudgeCandidates(): Promise<Array<{ tg_id: numb
   return out.sort((a, b) => Number(a.claimed) - Number(b.claimed) || a.days - b.days);
 }
 
+/** Membres censés copier (live) ou en passe de l'être (pending_copier), avec un compte MT renseigné —
+ *  le périmètre de l'audit STH quotidien (runner). 'paused' exclu : masterless EXPRÈS. */
+export async function listCopierMembers(): Promise<Array<{ tg_id: number; member_no: number | null; tg_username: string | null; tg_name: string | null; status: string; strategy: number | null; lot: number | null }>> {
+  const raw = db as unknown as { from: (t: string) => any };
+  const { data } = await raw.from('members').select('tg_id,member_no,tg_username,tg_name,status,strategy,lot')
+    .in('status', ['live', 'pending_copier']).not('mt5_login', 'is', null).limit(500);
+  return (data ?? []) as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; tg_name: string | null; status: string; strategy: number | null; lot: number | null }>;
+}
+
+/** Note privée sur la fiche d'un membre (timeline admin). */
+export async function addMemberNote(tgId: number, memberNo: number | null, text: string, by = 'runner'): Promise<void> {
+  await (db as unknown as { from: (t: string) => any }).from('member_actions').insert({ tg_id: tgId, member_no: memberNo, kind: 'note', status: 'done', done_by: by, detail: { text } });
+}
+
 /**
  * CE QUI ATTEND LE PROPRIÉTAIRE, en une requête — pour le rappel quotidien (runner) : dossiers de connexion
  * en attente (avec l'âge du plus vieux et combien ont déclaré leur lot), retraits demandés. Une carte

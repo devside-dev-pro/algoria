@@ -21,7 +21,7 @@ export const adminLink = (path = '/'): string => `${ADMIN_URL}${path.startsWith(
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Identifiants Telegram des admins : OWNER_TG_IDS (liste de nombres) puis ADMIN_TG_USERNAMES résolus en base. */
-async function adminTgIds(): Promise<number[]> {
+export async function adminTgIds(): Promise<number[]> {
   const direct = (process.env.OWNER_TG_IDS ?? '').split(/[\s,]+/).map((s) => Number(s)).filter((n) => Number.isFinite(n) && n > 0);
   const names = (process.env.ADMIN_TG_USERNAMES ?? '').split(/[\s,@]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (!names.length) return direct;
@@ -44,6 +44,8 @@ export interface OwnerAlert {
   lines?: string[]; // détail, une info par ligne (pseudo, broker, montant…)
   path?: string; // page admin à ouvrir (défaut : la racine)
   tag: string; // regroupe les pushs de même nature
+  /** Boutons d'action dans le DM (callback_data, traités par le webhook Telegram). Ex. « Envoyer la réponse ». */
+  buttons?: Array<{ text: string; data: string }>;
 }
 
 /** Envoie l'alerte aux admins (DM Telegram + push). Retourne ce qui est parti ; n'échoue jamais. */
@@ -59,7 +61,7 @@ export async function notifyOwner(a: OwnerAlert): Promise<{ dm: number; push: nu
       await Promise.all(ids.map(async (chat_id) => {
         const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
-          body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [[{ text: 'Ouvrir l’admin', url }]] } }),
+          body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [...(a.buttons?.length ? [a.buttons.map((b) => ({ text: b.text, callback_data: b.data.slice(0, 64) }))] : []), [{ text: 'Ouvrir l’admin', url }]] } }),
         }).catch(() => null);
         if (r?.ok) dm++;
       }));
