@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { openTelegram } from '@/lib/telegram';
 import { BROKERS } from '@/lib/member/brokers';
+import { REJECT_REASONS } from '@/lib/member/rejectReasons';
 import { LOT_CHOICES, LOT_MAX } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 import { lotsStateOf, lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
@@ -171,6 +172,7 @@ export default function AdminCRM() {
   // ===== registre des dépôts : mois affiché + formulaire de saisie =====
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [pushTgIds, setPushTgIds] = useState<number[]>([]); // tg_id ayant au moins 1 appareil abonné aux alertes
+  const [pendingTotal, setPendingTotal] = useState<number | null>(null); // vrai nombre de cartes en attente (la liste est plafonnée à 500)
   const [nudges, setNudges] = useState<{ tg_id: number; created_at: string; done_by?: string }[]>([]); // historique des relances (auto + manuelles)
   // SEGMENTATION de la file du jour : qui a déjà écrit au bot, qui s'est fait refuser une connexion.
   const [spokeTgIds, setSpokeTgIds] = useState<number[]>([]);
@@ -299,10 +301,11 @@ export default function AdminCRM() {
         setDeniedAs(d.username ?? null);
         return setState('forbidden');
       }
-      const d = (await r.json()) as { whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[]; spokeTgIds?: number[]; rejectedTgIds?: number[]; botBlocked?: number[] };
+      const d = (await r.json()) as { pendingTotal?: number; whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[]; spokeTgIds?: number[]; rejectedTgIds?: number[]; botBlocked?: number[] };
       setWl(d.whitelist);
       setRows(d.members);
       setActions(d.actions ?? []);
+      setPendingTotal(typeof d.pendingTotal === 'number' ? d.pendingTotal : null);
       setAff(d.affiliate ?? null);
       setDeposits(d.deposits ?? []);
       setPushTgIds(d.pushTgIds ?? []);
@@ -395,7 +398,18 @@ export default function AdminCRM() {
     if (n < ACTIVATION_LOTS && !window.confirm(`${n} lot < ${ACTIVATION_LOTS} lot attendu.\n\nValider quand même ? La commission risque d'être refusée par le broker.`)) return;
     post({ lotsOk: a.id, lots: n });
   };
-  const rejectConnect = (id: string) => { const reason = window.prompt('Decline reason (shown to the member, e.g. "no deposit found under this name"):'); if (reason !== null && reason.trim()) post({ rejectConnect: id, reason }); };
+  // MOTIFS FERMÉS (03/09) : un numéro suffit, le membre reçoit le texte propre dans sa langue avec la
+  // correction attendue (lib/member/rejectReasons.ts). Un texte libre reste possible (« other »).
+  const rejectConnect = (id: string) => {
+    const menu = REJECT_REASONS.map((r, i) => `${i + 1}. ${r.admin}`).join('\n');
+    const raw = window.prompt(`Motif du refus — tape un NUMÉRO, ou un texte libre :\n\n${menu}`);
+    if (raw === null || !raw.trim()) return;
+    const n = Number(raw.trim());
+    const picked = Number.isInteger(n) && n >= 1 && n <= REJECT_REASONS.length ? REJECT_REASONS[n - 1] : null;
+    if (picked && picked.code !== 'other') { post({ rejectConnect: id, code: picked.code }); return; }
+    const free = picked ? window.prompt('Texte libre (montré au membre) :') : raw;
+    if (free !== null && free.trim()) post({ rejectConnect: id, code: 'other', reason: free.trim() });
+  };
   // EN ATTENTE DU BROKER — le cas « compte préexistant non rattaché à notre numéro d'affilié » : il
   // n'apparaît pas dans le dashboard partenaire, et seul le titulaire peut demander le rattachement au
   // support du broker. Le délai est chez le broker, pas chez nous. Marquer l'attente évite que la carte se
@@ -1480,7 +1494,12 @@ export default function AdminCRM() {
         {/* ===== QUEUE — à appliquer dans Social Trade Hub ===== */}
         {tab === 'queue' && (
           <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <h2 style={secH}>TO APPLY IN SOCIAL TRADE HUB {actions.length > 0 && `· ${actions.length}`}</h2>
+            <h2 style={secH}>TO APPLY IN SOCIAL TRADE HUB {actions.length > 0 && `· ${pendingTotal ?? actions.length}`}{pendingTotal != null && pendingTotal > actions.length && ` (${actions.length} shown)`}</h2>
+            {actions.length > 0 && (() => {
+              const oldest = Math.max(...actions.map((a) => Date.now() - Date.parse(a.created_at)));
+              const h = Math.floor(oldest / 3_600_000);
+              return <p style={{ ...dimP, color: h >= 72 ? '#ff8a5c' : h >= 24 ? 'var(--gold)' : 'var(--dim)' }}>oldest card waiting {h >= 48 ? `${Math.floor(h / 24)} days` : `${h} h`} · sorted oldest first</p>;
+            })()}
             {actions.length === 0 && <p style={dimP}>Queue clear — nothing to apply.</p>}
             {actions.map((a) => (
               <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
@@ -1501,12 +1520,13 @@ export default function AdminCRM() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(a.detail?.lot ?? '?')}${a.detail?.strategy ? ` · S${String(a.detail.strategy)}` : ''}${a.detail?.add_strategy ? ` · ➕ EXTRA ACCOUNT #${String(a.detail?.account_no ?? '?')} (STH id ${String(a.tg_id)}-${String(a.detail?.account_no ?? '?')})` : ''} · `}
+                      {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(rows.find((r) => Number(r.tg_id) === Number(a.tg_id))?.lot ?? a.detail?.lot ?? '?')}${a.detail?.strategy ? ` · S${String(a.detail.strategy)}` : ''}${a.detail?.add_strategy ? ` · ➕ EXTRA ACCOUNT #${String(a.detail?.account_no ?? '?')} (STH id ${String(a.tg_id)}-${String(a.detail?.account_no ?? '?')})` : ''} · `}
                       {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')}) · `}
                       {a.kind === 'strategy_change' && `→ S${String(a.detail?.to ?? '?')} · `}
                       {/* l'ID que STH affiche pour ce membre (UserID = tg_id) — pour le retrouver dans le dashboard STH */}
                       {['strategy_change', 'pause', 'resume', 'disconnect'].includes(a.kind) && `STH id ${String(a.tg_id)} · `}
                       {new Date(a.created_at).toLocaleString('en-GB')}
+                      {(() => { const h = Math.floor((Date.now() - Date.parse(a.created_at)) / 3_600_000); return <b style={{ marginLeft: 6, color: h >= 72 ? '#ff8a5c' : h >= 24 ? 'var(--gold)' : 'var(--dim)' }}>⏱ {h >= 48 ? `${Math.floor(h / 24)} d` : `${h} h`}</b>; })()}
                     </div>
                     {/* la ligne VÉRIFICATION : tout ce qu'il faut contrôler chez le broker AVANT d'approuver.
                         Anciennes demandes (sans les nouveaux champs) : broker/@ récupérés de la fiche membre + ⚠ sur le manquant */}
@@ -1551,7 +1571,7 @@ export default function AdminCRM() {
                     })()}
                   </div>
                   {a.kind === 'connect' && (
-                    <button onClick={() => copyDepositInfo(a)} title="copie « nouveau dépôt à vérifier » (nom, login, broker, montant) — à coller dans le groupe WhatsApp du staff" style={depInfoCopied === a.id ? { ...goldBtn, color: 'var(--up)' } : goldBtn}>{depInfoCopied === a.id ? '✓ COPIÉ' : '📋 WHATSAPP'}</button>
+                    <button onClick={() => copyDepositInfo(a)} title="copie « nouveau dépôt à vérifier » (nom, login, broker, montant) — à coller dans le groupe WhatsApp du staff" style={depInfoCopied === a.id ? { ...goldBtn, color: 'var(--up)' } : goldBtn}>{depInfoCopied === a.id ? '✓ COPIÉ' : '📋 COPY FOR STAFF'}</button>
                   )}
                   {a.kind === 'connect' && !creds[a.id] && (
                     <button disabled={busy} onClick={() => reveal(a.id)} title="decrypt the member's MT5 password (timestamped)" style={goldBtn}>🔑 REVEAL</button>
@@ -1572,14 +1592,14 @@ export default function AdminCRM() {
                   {a.kind === 'strategy_change' && (
                     <button disabled={busy} onClick={() => moveViaSth(a.id)} title="move this member's receiver to their new strategy's master via the STH API (API-connected members only — manually-added receivers must be moved in the STH dashboard)" style={{ ...okBtn, color: '#06121f', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', border: 'none' }}>🔀 MOVE (STH)</button>
                   )}
-                  <button disabled={busy || (a.kind === 'connect' && !lotsCleared(a.detail as Record<string, unknown>))} onClick={() => post({ done: a.id }, () => { setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }); if (a.kind === 'connect') recordDepositAfterConnect(a); })} title="mark done manually (if you connected the account in STH yourself) — connect cards also offer to log the deposit" style={a.kind === 'connect' && !lotsCleared(a.detail as Record<string, unknown>) ? { ...okBtn, opacity: 0.4 } : okBtn}>✓ DONE</button>
+                  <button disabled={busy || (a.kind === 'connect' && !lotsCleared(a.detail as Record<string, unknown>))} onClick={() => post({ done: a.id }, () => { setCreds((c) => { const n = { ...c }; delete n[a.id]; return n; }); if (a.kind === 'connect') recordDepositAfterConnect(a); })} title="mark CONNECTED without calling STH: member goes LIVE, gets a push, referral commission is created — use only if the copier was connected by hand (if you connected the account in STH yourself) — connect cards also offer to log the deposit" style={a.kind === 'connect' && !lotsCleared(a.detail as Record<string, unknown>) ? { ...okBtn, opacity: 0.4 } : okBtn}>✓ DONE</button>
                   {a.kind === 'connect' && (
                     <button disabled={busy} onClick={() => waitBroker(a)} title="account not attached to your affiliate ID — the member must ask the broker's support to attach it. Marks the card as blocked upstream so it stops reading as forgotten. Click again once the broker replied." style={a.detail?.waiting_broker ? { ...goldBtn, color: 'var(--gold)', fontWeight: 800 } : miniBtn}>{a.detail?.waiting_broker ? '⏳ WAITING' : '⏳ BROKER'}</button>
                   )}
                   {a.kind === 'connect' && (
                     <button disabled={busy} onClick={() => rejectConnect(a.id)} title="verification failed → member goes back to the wizard with your reason, can resubmit" style={dangerBtn}>REJECT</button>
                   )}
-                  <button disabled={busy} onClick={() => post({ dismiss: a.id })} title="dismiss without applying anything (stale/spam card — no side effects)" style={miniBtn}>✕</button>
+                  <button disabled={busy} onClick={() => post({ dismiss: a.id })} title="dismiss without applying anything (stale/spam card — no side effects)" style={miniBtn}>✕ DISMISS</button>
                 </div>
                 {creds[a.id] && (
                   <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.06)' }}>
@@ -1629,7 +1649,7 @@ export default function AdminCRM() {
               {sel.mt5_login && <button disabled={busy} onClick={() => sthCheck(sel.tg_id)} title="ask the STH API directly: is this member's MT account connected to the copier, and which masters does it see?" style={goldBtn}>🔍 STH STATUS</button>}
               {/* TOUJOURS visible : « paused » peut venir du membre lui-même (bouton pause copy) — masquer
                   l'off-board sur un membre en pause bloquait pile le cas « il a retiré, je veux le sortir » */}
-              <button disabled={busy} onClick={() => offboard(sel)} title="client left → status paused + copier disconnect (STH or queued) + timeline note (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>
+              <button disabled={busy} onClick={() => offboard(sel)} title="client left → status offboarded (win-back DM sent) + copier disconnect (STH or queued) + timeline note (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>
               {/* 🚫 BAN — coupe l'accès à l'app : session en cours ET reconnexion. Pour les concurrents /
                   abus, pas pour un client qui part (→ OFF-BOARD). Réversible. */}
               {sel.banned_at ? (
