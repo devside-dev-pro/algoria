@@ -13,6 +13,7 @@ import { swingSignal, swingMinBars } from '../lib/engine/swing';
 import { activeInstruments } from '../lib/engine/instruments';
 import { fetchCandles, recordEdgeHealth, logNote } from '../lib/supabase/sync';
 import { pushToAdmins } from '../lib/push/send';
+import { adminLink } from '../lib/member/notifyOwner';
 import type { Bar } from '../lib/engine/types';
 
 const DAY = 86_400_000;
@@ -93,7 +94,7 @@ export async function runSentinel(): Promise<Verdict[]> {
   const line = verdicts.map((v) => `${v.status === 'ok' ? '✓' : v.status === 'watch' ? '~' : v.status === 'alert' ? '✗' : '·'} ${v.strategy} PF ${v.profitFactor?.toFixed(2) ?? '—'}`).join(' · ');
   await logNote(`EDGE SENTINEL · weekly re-validation on fresh data → ${line || 'no data'}`, 'info');
   if (alerts.length) {
-    await pushToAdmins({ title: `⚠ EDGE ALERT — ${alerts.length} strategy(ies) degrading`, body: alerts.join(' | ').slice(0, 240), url: '/member/admin', tag: 'edge-alert' }).catch(() => {});
+    await pushToAdmins({ title: `⚠ EDGE ALERT — ${alerts.length} strategy(ies) degrading`, body: alerts.join(' | ').slice(0, 240), url: adminLink('/'), tag: 'edge-alert' }).catch(() => {});
     await logNote(`⚠ EDGE ALERT: ${alerts.join(' · ')}`, 'veto');
   }
   console.log(`[algoria] sentinelle : ${verdicts.length} stratégies re-validées · ${alerts.length} alerte(s)`);

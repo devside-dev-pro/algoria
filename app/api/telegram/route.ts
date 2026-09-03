@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { JOIN_DM, INBOX_ACK, INBOX_ACK_BTN, SUPPORT_TG_URL, SIGNED_IN, SIGNED_IN_BTN, SIGNED_IN_CODE_HINT, LOGIN_CODE_MSG, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
 import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
+import { notifyOwner } from '@/lib/member/notifyOwner';
 
 // Webhook Telegram (bot admin du canal) → alimente la WAITLIST du widget /join.
 // Flux : un viewer clique le lien d'invitation "demander à rejoindre" → Telegram POSTe un chat_join_request ici
@@ -476,6 +477,9 @@ export async function POST(req: Request) {
         tg_id: tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'bot_reply', status: 'done', done_by: 'telegram',
         detail: { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null },
       });
+      // Le propriétaire est prévenu du message lui-même (03/09) — jusque-là, seul le prospect recevait un
+      // accusé de réception, et la question dormait dans BOT ACTIVITY jusqu'à ce que quelqu'un ouvre l'admin.
+      void notifyOwner({ title: `💬 ${msg.from.username ? `@${msg.from.username}` : msg.from.first_name ?? 'quelqu’un'} a écrit au bot`, lines: [text.slice(0, 300)], path: '/', tag: 'owner-inbox' });
       const token = process.env.TELEGRAM_BOT_TOKEN;
       if (token && !recent?.length) {
         await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {

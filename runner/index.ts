@@ -26,10 +26,11 @@ import { refreshCalendar, newsWindows, dueAnnouncements, calendarFresh, imminent
 // au même moment, plutôt que d'annoncer un risque qu'on ne couvre pas.
 const NEWS_GUARD_MIN = 5;
 import { pushToAdmins } from '../lib/push/send';
+import { adminLink, notifyOwner } from '../lib/member/notifyOwner';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, updateTradeStop, listOpenTradesWithInitialStop, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard } from '../lib/member/i18n';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
@@ -995,7 +996,7 @@ async function main() {
     void pushToAdmins({
       title: '⚠ CALENDRIER ÉCO INDISPONIBLE',
       body: 'Plus de lockout news ni de protection avant publication — le moteur trade sans filet macro.',
-      url: '/member/admin', tag: 'eco-calendar',
+      url: adminLink('/'), tag: 'eco-calendar',
     }).catch(() => {});
   };
   void refreshCalendarGuarded(true);
@@ -1118,7 +1119,7 @@ async function main() {
       const { pushToAdmins } = await import('../lib/push/send');
       await pushToAdmins({
         title: '🚨 TUNNEL BLOQUÉ — plus personne ne peut connecter son compte',
-        body: msg, url: '/member/admin', tag: 'funnel-down',
+        body: msg, url: adminLink('/'), tag: 'funnel-down',
       }).catch(() => {});
     } catch (e) {
       console.error('[algoria] contrôle tunnel échoué:', (e as { message?: string })?.message ?? e);
@@ -1176,6 +1177,29 @@ async function main() {
     }
   };
   if (!SECONDARY) setInterval(() => void maybeNudge(), 3600_000); // relances = un seul runner (S2), sinon triple envoi
+
+  // RAPPEL QUOTIDIEN AU PROPRIÉTAIRE (03/09/2026) — 08 h UTC, un seul runner. L'alerte à l'arrivée d'une carte
+  // (lib/member/notifyOwner.ts) dit « il y en a une nouvelle » ; celle-ci dit « il en reste », avec l'âge du
+  // plus vieux dossier — ce qui manquait le 03/09 : six dossiers en attente, le plus vieux depuis huit jours,
+  // et rien pour le rappeler. Silence si rien n'attend.
+  let lastDigestDay = '';
+  const maybeOwnerDigest = async () => {
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    if (now.getUTCHours() !== 8 || lastDigestDay === today) return;
+    lastDigestDay = today;
+    try {
+      const d = await fetchOwnerDigest();
+      if (!d.pending && !d.payouts) return;
+      const lines: string[] = [];
+      if (d.pending) lines.push(`${d.pending} dossier(s) de connexion en attente · le plus vieux depuis ${d.oldestHours >= 48 ? `${Math.round(d.oldestHours / 24)} j` : `${d.oldestHours} h`} · ${d.lotsClaimed} avec lot déclaré`);
+      if (d.payouts) lines.push(`${d.payouts} retrait(s) demandé(s) · ${Math.round(d.payoutsUsd)} $`);
+      await notifyOwner({ title: '📋 Ce qui t’attend ce matin', lines, path: '/', tag: 'owner-digest' });
+    } catch (e) {
+      console.error('[algoria] rappel propriétaire échoué:', e);
+    }
+  };
+  if (!SECONDARY) setInterval(() => void maybeOwnerDigest(), 10 * 60_000);
 
   // ===== AUTO-APPROBATION des demandes d'adhésion au canal (31/07 — Mathieu les acceptait par lots de
   // 10-20 à la main quand il les voyait). Le webhook Vercel ne peut pas « attendre 3 minutes » (fonction
