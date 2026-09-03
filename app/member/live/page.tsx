@@ -29,7 +29,7 @@ function PriceChip({ sym, short, dp, watch, active, onClick }: { sym: string; sh
       <span style={{ fontSize: 15, fontWeight: 700, color: px ? (px.dir >= 0 ? 'var(--up)' : 'var(--down)') : 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>
         {px ? px.mid.toFixed(dp) : '—'}
       </span>
-      {watch && <span style={{ fontSize: 8, letterSpacing: 1, color: 'var(--gold)', fontWeight: 800, marginTop: 1 }}>◆ WATCH · SWING</span>}
+      {watch && <span style={{ fontSize: 8, letterSpacing: 1, color: 'var(--gold)', fontWeight: 800, marginTop: 1 }}>◆ SWING ONLY</span>}
     </button>
   );
 }
@@ -87,10 +87,10 @@ export default function MemberLive() {
               <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.3, color: stColor, display: 'flex', alignItems: 'center', gap: 6 }}>
                 {glyphOf(meta?.state)} {stateWord}
                 {conf != null && <span style={{ fontSize: 9.5, color: 'var(--dim)', fontWeight: 600, fontFamily: 'var(--mono, ui-monospace)' }}>· {conf}%</span>}
-                {isWatch && <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', background: 'rgba(245,194,74,.08)', borderRadius: 5, padding: '1px 6px' }}>◆ SWING ONLY</span>}
+                {isWatch && <span title="Position trades held for days — no intraday scalping on Bitcoin" style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', background: 'rgba(245,194,74,.08)', borderRadius: 5, padding: '1px 6px' }}>◆ SWING ONLY</span>}
               </span>
               <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', letterSpacing: 0.4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {hero} · M5{meta?.session ? ` · ${meta.session}` : ''}{isWatch ? ' · no intraday scalp' : ''}
+                {hero} · M5{meta?.session ? ` · ${meta.session}` : ''}
               </span>
             </div>
           </div>

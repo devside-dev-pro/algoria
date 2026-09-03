@@ -1,12 +1,12 @@
 # Algoria AI
 
-Cockpit de trading IA spécialisé **or (XAU/USD)** — analyse temps réel, signaux par confluence, exécution via MetaTrader, copy vers le réel via Social Trader Hub.
+Cockpit de trading IA sur **l'or (XAU/USD) et le Bitcoin** — analyse temps réel, signaux par confluence, exécution via MetaTrader, copy vers le réel via Social Trader Hub.
 
 ## Architecture
 
 - **`lib/engine/`** — le cerveau (déterministe, partagé live ⇄ backtest) :
   `context` (régime / session / macro) → `features/` (confluence) → `score` → `trade` (SL/TP/sizing) → `risk` (le gardien).
-- **`runner/`** — service Node always-on : tient la connexion **MetaApi**, fait tourner le moteur, place les ordres sur le compte **master démo**, écrit tout dans Supabase.
+- **`runner/`** — service Node always-on : tient la connexion **MetaApi**, fait tourner le moteur, place les ordres sur le compte **master**, écrit tout dans Supabase.
 - **`app/` + `components/`** — le cockpit Next.js (read-only), alimenté par **Supabase Realtime**.
 - **`backtest/`** — rejoue `runTick` sur l'historique (le même code que le live) : expectancy, profit factor, drawdown, tuning.
 
