@@ -68,3 +68,17 @@ Les membres copiés en lot fixe par STH prennent le risque en dollars de LEUR lo
   montré que ces mécaniques ne créent pas d'edge, et le backtest de la couche n'en contient pas.
 - Pas de « protection des gains » (variante +16,7 %) pour l'instant : elle n'a été vue que sur une
   sortie, on ne retient pas la meilleure ligne d'un tableau.
+
+## 5. Bascule de S2 (décision Mathieu, 03/09) — variables Railway du service S2
+
+```
+SCALP_XAUUSD=0     # plus de scalp ni de breakout intraday sur l'or (watch-only, comme le BTC)
+SWING_XAUUSD=0     # plus de nouvelle entrée swing or
+SWING_BTCUSD=0     # plus de nouvelle entrée swing BTC
+TREND_XAUUSD=1     # tendance journalière or
+TREND_BTCUSD=1     # tendance journalière BTC
+```
+
+Les positions déjà ouvertes gardent leur gestion jusqu'à leur sortie ; aucune n'est fermée par la bascule.
+Le cockpit, le desk, les bougies et le trade manuel continuent. Le master prend 1 % de SON équité par trade ;
+un membre copié en lot fixe prend « largeur du stop × son lot » — voir §3 pour l'équité minimale.
