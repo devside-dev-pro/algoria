@@ -8,6 +8,7 @@ import { useMe, StatusPill, StrategyPicker, Locked, UnlockSheet, type Member, ty
 import { TRC20_RE } from '@/lib/member/affiliate';
 import { LOT_CHOICES, LOT_MAX, LOT_STEP, isLotAllowed } from '@/lib/member/lots';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
+import { ask, DialogHost } from '@/components/admin/Dialog';
 
 // Alertes push : wins d'Algoria, recap du jour, annonce de live. Opt-in explicite (permission navigateur).
 // Logique partagée avec la popup d'install (lib/push/client.ts) — ici c'est le réglage manuel dans Profile.
@@ -87,22 +88,22 @@ export default function Profile() {
   const setLot = (lot: number) => {
     setBusy(true);
     void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'lot', lot }) })
-      .then(async (r) => { const d = (await r.json()) as { member?: Member; error?: string }; if (d.error) window.alert(d.error); if (d.member) { setMember(d.member); setCustomLot(''); } })
+      .then(async (r) => { const d = (await r.json()) as { member?: Member; error?: string }; if (d.error) void ask.alert(d.error); if (d.member) { setMember(d.member); setCustomLot(''); } })
       .finally(() => setBusy(false));
   };
   // SAISIE LIBRE de la taille de copie — la grille s'arrête à 0.10 et bridait les gros comptes. Au-delà de
   // la grille on demande confirmation : c'est le seul réglage de l'app qui multiplie directement les pertes
   // autant que les gains, et un zéro de trop se voit mal dans un champ.
-  const applyCustomLot = () => {
+  const applyCustomLot = async () => {
     const lot = Math.round(Number(customLot.replace(',', '.')) * 100) / 100;
-    if (!isLotAllowed(lot)) { window.alert(`Enter a size between ${LOT_STEP.toFixed(2)} and ${LOT_MAX.toFixed(2)}, in steps of 0.01.\n\nNeed more than ${LOT_MAX.toFixed(2)}? Message the team — we'll set it up with you.`); return; }
-    if (lot > 0.1 && !window.confirm(`Copy every trade at ${lot.toFixed(2)} lot?\n\nThat is ${Math.round(lot / 0.01)}× the smallest size. Your wins AND your losses scale with it — the guideline is 0.01 per ~$500 of balance, so ${lot.toFixed(2)} suits a balance of roughly $${(lot / 0.01 * 500).toLocaleString('en-US')}.`)) return;
+    if (!isLotAllowed(lot)) { void ask.alert(`Enter a size between ${LOT_STEP.toFixed(2)} and ${LOT_MAX.toFixed(2)}, in steps of 0.01.\n\nNeed more than ${LOT_MAX.toFixed(2)}? Message the team — we'll set it up with you.`); return; }
+    if (lot > 0.1 && !(await ask.confirm(`Copy every trade at ${lot.toFixed(2)} lot?\n\nThat is ${Math.round(lot / 0.01)}× the smallest size. Your wins AND your losses scale with it — the guideline is 0.01 per ~$500 of balance, so ${lot.toFixed(2)} suits a balance of roughly $${(lot / 0.01 * 500).toLocaleString('en-US')}.`, { ok: 'YES, COPY AT THIS SIZE' }))) return;
     setLot(lot);
   };
   // DÉCONNECTER le compte de trading : coupe la copie (queue une action pour STH) et repasse en onboarding
   // pour reconnecter / changer de broker. Confirmation obligatoire (destructif).
-  const disconnect = () => {
-    if (!window.confirm('Disconnect your trading account? This stops the copy and you’ll re-enter your MT5 details to reconnect.')) return;
+  const disconnect = async () => {
+    if (!(await ask.confirm('Disconnect your trading account?\nThis stops the copy and you’ll re-enter your MT5 details to reconnect.', { danger: true, ok: 'DISCONNECT' }))) return;
     setDisc(true);
     void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'disconnect' }) })
       .then((r) => (r.ok ? router.push('/member/onboarding') : setDisc(false)))
@@ -112,6 +113,7 @@ export default function Profile() {
 
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
+      <DialogHost />
       {/* identité */}
       <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}>
         {member.photo_url
