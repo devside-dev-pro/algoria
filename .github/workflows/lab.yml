@@ -1,0 +1,57 @@
+# LABO À LA DEMANDE (03/09/2026) — faire tourner un script de backtest DANS GITHUB, sans machine de Mathieu.
+#
+# Pourquoi : les labos lisent les bougies dans Supabase (lecture publique, clé anonyme déjà dans
+# scripts/pull-cache.mjs) et tournaient jusqu'ici sur le WSL de Mathieu, à qui on demandait de coller la sortie.
+# Son travail, ce sont les vidéos et les membres, pas les commandes. Ici, n'importe qui (ou Claude, via
+# l'API Actions) déclenche un labo et lit la sortie dans le journal du job.
+# Aucun secret nécessaire pour les bougies. Le tribunal des entrées (trades live) a besoin de
+# SUPABASE_URL / SUPABASE_SERVICE_KEY : à ajouter dans Settings → Secrets → Actions si on veut le lancer ici.
+name: lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: 'script à lancer (ex. backtest/edge-lab-d1.ts)'
+        required: true
+        default: 'backtest/edge-lab-d1.ts'
+      args:
+        description: 'arguments (ex. XAUUSD --since 2026-08-11)'
+        required: false
+        default: 'XAUUSD'
+      caches:
+        description: 'bougies à charger, liste SYMBOLE:TF (ex. XAUUSD:D1,BTCUSD:D1)'
+        required: false
+        default: 'XAUUSD:D1'
+      live_trades:
+        description: 'exporter aussi les trades live (nécessite les secrets Supabase) : oui / non'
+        required: false
+        default: 'non'
+
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: bougies
+        run: |
+          for pair in $(echo "${{ inputs.caches }}" | tr ',' ' '); do
+            sym="${pair%%:*}"; tf="${pair##*:}"
+            node scripts/pull-cache.mjs "$sym" "$tf"
+          done
+      - name: trades live
+        if: ${{ inputs.live_trades == 'oui' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: npx tsx scripts/pull-live-trades.ts
+      - name: labo
+        run: npx tsx ${{ inputs.script }} ${{ inputs.args }}

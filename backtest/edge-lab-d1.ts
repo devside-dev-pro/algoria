@@ -19,6 +19,14 @@
 //      stop 2 ATR(20 j), horizon 20 jours de bourse.
 //   S. Filtre SMA 200 — long si clôture > SMA200 et SMA200 montante, short si l'inverse ; même cadence, même stop.
 //   K. Cassure de canal Donchian 50 / 100 jours — entrée à la clôture qui sort du canal, stop 2 ATR, horizon 40 j.
+//   R. RETOUR À LA MOYENNE (ajouté le 03/09 à la demande de Mathieu : « les deux meilleures stratégies pour un auto,
+//      c'est le retour à la moyenne et le suivi de tendance ») — trois règles classiques, paramètres de la
+//      littérature posés avant de regarder, horizon 10 j (un retour à la moyenne se joue en quelques jours) :
+//        R1. RSI(2) < 10 → long, > 90 → short (Connors) ; R1s : la même avec le filtre SMA 200 (long au-dessus,
+//            short en dessous — la version « officielle ») ;
+//        R2. trois clôtures de baisse d'affilée → long ; trois de hausse → short ;
+//        R3. clôture sous la bande de Bollinger basse (20 j, 2 σ) → long ; au-dessus de la haute → short.
+//      Comparées à la ligne de base Z10 (même horizon de 10 j), pas à Z (20 j) : le taux de +1R dépend de l'horizon.
 //   Z. Ligne de base — une entrée chaque lundi, long ET short, stop 2 ATR. Le hasard de chaque année.
 //
 //   npx tsx scripts/backfill-gaps.ts XAUUSD D1 --from 2014-01-01 --broker Gold
@@ -67,7 +75,7 @@ function measure(e: Entry, maxBars: number): Out | null {
   return { i: i0, dir: e.dir, risk: e.risk, mfe: best, stopped, endR };
 }
 
-interface Cand { key: string; name: string; horizon: number; gen: () => Entry[] }
+interface Cand { key: string; name: string; horizon: number; base?: string; gen: () => Entry[] }
 const CANDS: Cand[] = [];
 const WARM = 260;
 
@@ -112,12 +120,41 @@ for (const N of [50, 100]) {
   } });
 }
 
-// Z. Ligne de base : chaque lundi, long ET short, stop 2 ATR.
-CANDS.push({ key: 'Z', name: 'Z · LIGNE DE BASE — chaque lundi, long et short, stop 2 ATR(20 j)', horizon: 20, gen: () => {
-  const out: Entry[] = [];
-  for (let i = WARM; i < n; i++) if (isMonday(bars[i].time)) { out.push({ i, dir: 1, risk: 2 * atr20[i] }); out.push({ i, dir: -1, risk: 2 * atr20[i] }); }
+// R. Retour à la moyenne (horizon 10 j, un trade par excès : 3 jours de latence après chaque entrée).
+const rsi2 = new Array<number>(n).fill(50);
+{ // RSI de Wilder, période 2
+  let ag = 0, al = 0;
+  for (let i = 1; i < n; i++) {
+    const d = bars[i].close - bars[i - 1].close; const g = Math.max(d, 0), l = Math.max(-d, 0);
+    if (i <= 2) { ag += g / 2; al += l / 2; } else { ag = (ag + g) / 2; al = (al + l) / 2; }
+    rsi2[i] = al === 0 ? 100 : ag === 0 ? 0 : 100 - 100 / (1 + ag / al);
+  }
+}
+const bb = new Array<{ lo: number; hi: number }>(n).fill({ lo: 0, hi: 0 });
+{ for (let i = 19; i < n; i++) { let s = 0; for (let k = i - 19; k <= i; k++) s += bars[k].close; const m = s / 20; let v = 0; for (let k = i - 19; k <= i; k++) v += (bars[k].close - m) ** 2; const sd = Math.sqrt(v / 20); bb[i] = { lo: m - 2 * sd, hi: m + 2 * sd }; } }
+const mrFamily = (key: string, name: string, sig: (i: number) => 1 | -1 | 0) => CANDS.push({ key, name, horizon: 10, base: 'Z10', gen: () => {
+  const out: Entry[] = []; let cool = 0;
+  for (let i = WARM; i < n; i++) { if (cool > 0) { cool--; continue; } const d = sig(i); if (d) { out.push({ i, dir: d, risk: 2 * atr20[i] }); cool = 3; } }
   return out;
 } });
+mrFamily('R1', 'R1 · RSI(2) < 10 → long, > 90 → short, stop 2 ATR, horizon 10 j', (i) => (rsi2[i] < 10 ? 1 : rsi2[i] > 90 ? -1 : 0));
+mrFamily('R1s', 'R1s · RSI(2) avec filtre SMA 200 (long seulement au-dessus, short seulement en dessous), horizon 10 j', (i) => (rsi2[i] < 10 && bars[i].close > sma200[i] ? 1 : rsi2[i] > 90 && bars[i].close < sma200[i] ? -1 : 0));
+mrFamily('R2', 'R2 · trois clôtures de baisse d\'affilée → long, trois de hausse → short, stop 2 ATR, horizon 10 j', (i) => {
+  const c = (k: number) => bars[i - k].close;
+  if (c(0) < c(1) && c(1) < c(2) && c(2) < c(3)) return 1;
+  if (c(0) > c(1) && c(1) > c(2) && c(2) > c(3)) return -1;
+  return 0;
+});
+mrFamily('R3', 'R3 · clôture sous la bande de Bollinger basse (20 j, 2 σ) → long, au-dessus de la haute → short, horizon 10 j', (i) => (bars[i].close < bb[i].lo ? 1 : bars[i].close > bb[i].hi ? -1 : 0));
+
+// Z. Ligne de base : chaque lundi, long ET short, stop 2 ATR — à l'horizon 20 j (familles M, S, K) et 10 j (famille R).
+for (const [key, h] of [['Z', 20], ['Z10', 10]] as Array<[string, number]>) {
+  CANDS.push({ key, name: `${key} · LIGNE DE BASE — chaque lundi, long et short, stop 2 ATR(20 j), horizon ${h} j`, horizon: h, gen: () => {
+    const out: Entry[] = [];
+    for (let i = WARM; i < n; i++) if (isMonday(bars[i].time)) { out.push({ i, dir: 1, risk: 2 * atr20[i] }); out.push({ i, dir: -1, risk: 2 * atr20[i] }); }
+    return out;
+  } });
+}
 
 // ===== Rapport =====
 const periods = [...new Set(bars.map((b) => year(b.time)))].sort();
@@ -136,25 +173,27 @@ console.log(`\n================  LABO D'EDGE JOURNALIER — ${sym} D1 · ${n} jo
 console.log(`Barre : +1R avant −1R ≥ base + 5 pts · espérance réelle après coûts > 0 (TP 1R ou 2R) · sur chaque année jugée (n ≥ ${MIN_N}).`);
 if (n < 1500) console.log(`⚠️ ${n} jours seulement (${(n / 252).toFixed(1)} ans) : l'historique est court pour juger une direction de fond — voir --from dans backfill-gaps.`);
 
-const baseCells = new Map<string, Cell>();
-for (const cand of [...CANDS].sort((a, b) => (a.key === 'Z' ? -1 : b.key === 'Z' ? 1 : 0))) {
+const isBase = (k: string) => k === 'Z' || k === 'Z10';
+const baseCells = new Map<string, Map<string, Cell>>(); // ligne de base → année → cellule
+for (const cand of [...CANDS].sort((a, b) => (isBase(a.key) ? -1 : isBase(b.key) ? 1 : 0))) {
   const outs = cand.gen().map((e) => measure(e, cand.horizon)).filter((o): o is Out => !!o);
   const byP = new Map<string, Cell>(); const byDir: Record<string, Cell> = { long: empty(), short: empty() }; const tot = empty();
   for (const o of outs) { const p = year(bars[o.i].time); if (!byP.has(p)) byP.set(p, empty()); add(byP.get(p)!, o); add(byDir[o.dir === 1 ? 'long' : 'short'], o); add(tot, o); }
-  if (cand.key === 'Z') for (const [p, c] of byP) baseCells.set(p, c);
+  if (isBase(cand.key)) baseCells.set(cand.key, byP);
+  const baseFor = baseCells.get(cand.base ?? 'Z') ?? new Map<string, Cell>();
   console.log(`\n────────  ${cand.name}  ·  ${outs.length} entrées  ────────`);
   console.log(`${'année'.padEnd(8)} ${'n'.padStart(5)} ${'+1R'.padStart(5)} ${'+2R'.padStart(5)} ${'base'.padStart(5)} ${'E[TP1R]'.padStart(8)} ${'E[TP2R]'.padStart(8)}`);
   const judged: boolean[] = [];
   for (const p of periods) {
     const c = byP.get(p); if (!c || !c.n) continue;
-    const base = baseCells.get(p); const b1 = base && base.n ? pct(base.p1, base.n) : NaN;
+    const base = baseFor.get(p); const b1 = base && base.n ? pct(base.p1, base.n) : NaN;
     const p1 = pct(c.p1, c.n);
     const ok = !Number.isNaN(b1) && p1 >= b1 + 5 && (exp1(c) > 0 || exp2(c) > 0);
     if (c.n >= MIN_N) judged.push(ok);
     console.log(`${p.padEnd(8)} ${String(c.n).padStart(5)} ${(p1 + '%').padStart(5)} ${(pct(c.p2, c.n) + '%').padStart(5)} ${(Number.isNaN(b1) ? '—' : b1 + '%').padStart(5)} ${f2(exp1(c)).padStart(8)} ${f2(exp2(c)).padStart(8)}${c.n < MIN_N ? '   (trop peu)' : ok ? '   ✓' : '   ✗'}`);
   }
   console.log(`${'TOTAL'.padEnd(8)} ${String(tot.n).padStart(5)} ${(pct(tot.p1, tot.n) + '%').padStart(5)} ${(pct(tot.p2, tot.n) + '%').padStart(5)} ${''.padStart(5)} ${f2(exp1(tot)).padStart(8)} ${f2(exp2(tot)).padStart(8)}   long ${byDir.long.n} · ${pct(byDir.long.p1, byDir.long.n)} %  ·  short ${byDir.short.n} · ${pct(byDir.short.p1, byDir.short.n)} %`);
-  if (cand.key !== 'Z') {
+  if (!isBase(cand.key)) {
     const fails = judged.filter((j) => !j).length;
     const verdict = judged.length >= 5 && fails === 0 ? '✅ PASSE LA BARRE sur chaque année jugée' : judged.length < 5 ? `— ${judged.length} année(s) jugeable(s), il en faut 5` : `✗ tombe (${fails}/${judged.length} années sous la barre)`;
     console.log(`VERDICT : ${verdict}`);
