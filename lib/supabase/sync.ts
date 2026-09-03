@@ -170,6 +170,21 @@ export async function fetchCandles(symbol: string, timeframe: string, sinceMs: n
 /** Candidats à la RELANCE AUTO : prospects en onboarding depuis 1 à 21 jours, pas touchés (nudge) depuis 3 jours.
  *  Le vocal perso de Mathieu reste l'arme n°1 (file manuelle dans l'admin) — ceci est le FILET pour la longue
  *  traîne qu'il n'a pas le temps de toucher. Cap appliqué par l'appelant. */
+/** tg_id → date du dernier refus DÉFINITIF de Telegram (bot bloqué, compte supprimé…). Partagé par les deux
+ *  files de relance : voir le commentaire « qui a fermé la porte au bot » dans fetchNudgeCandidates. */
+async function fetchBlockedSince(raw: { from: (t: string) => any }): Promise<Map<number, number>> {
+  const { data: failed } = await raw
+    .from('member_actions').select('tg_id,detail,created_at')
+    .eq('kind', 'nudge').eq('status', 'failed');
+  const blockedSince = new Map<number, number>();
+  for (const f of (failed ?? []) as Array<{ tg_id: number; detail: { error?: string } | null; created_at: string }>) {
+    if (!isPermanentTelegramFailure(f.detail?.error)) continue;
+    const t = Number(f.tg_id); const at = Date.parse(f.created_at);
+    if ((blockedSince.get(t) ?? 0) < at) blockedSince.set(t, at);
+  }
+  return blockedSince;
+}
+
 export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; member_no: number | null; tg_username: string | null; days: number; step: number }>> {
   const now = Date.now();
   // tables « membre » hors du schéma typé du runner (comme edge_health) → cast assumé
@@ -210,15 +225,7 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
   //
   // La CHRONOLOGIE tranche, jamais la simple existence d'un refus passé : quelqu'un peut débloquer le bot.
   // Un envoi réussi postérieur au dernier refus rouvre donc le canal, et la personne redevient candidate.
-  const { data: failed } = await raw
-    .from('member_actions').select('tg_id,detail,created_at')
-    .eq('kind', 'nudge').eq('status', 'failed');
-  const blockedSince = new Map<number, number>();
-  for (const f of (failed ?? []) as Array<{ tg_id: number; detail: { error?: string } | null; created_at: string }>) {
-    if (!isPermanentTelegramFailure(f.detail?.error)) continue;
-    const t = Number(f.tg_id); const at = Date.parse(f.created_at);
-    if ((blockedSince.get(t) ?? 0) < at) blockedSince.set(t, at);
-  }
+  const blockedSince = await fetchBlockedSince(raw);
   return (members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string; onboarding_step: number | null }>)
     .map((m) => ({ tg_id: Number(m.tg_id), member_no: m.member_no, tg_username: m.tg_username, days: Math.floor((now - Date.parse(m.created_at)) / 86_400_000), step: Number(m.onboarding_step ?? 0) }))
     .filter((m) => {
@@ -234,6 +241,56 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
     // le message qui compte — la décision est chaude — et c'était le seul qui ne partait jamais. À
     // ancienneté égale, celui qui a déjà franchi une étape (step 1 : broker choisi, MT5 en cours) passe avant.
     .sort((a, b) => a.days - b.days || b.step - a.step);
+}
+
+/**
+ * RELANCE DES DOSSIERS EN ATTENTE (03/09/2026). Un membre `pending_copier` a déposé et rempli le formulaire :
+ * c'est le prospect le plus chaud du système, et jusqu'ici il ne recevait PLUS RIEN (fetchNudgeCandidates ne
+ * regarde que `onboarding`). Or la moitié des dossiers attendent le LOT D'ACTIVATION que le membre n'a pas
+ * déclaré — le seul geste qui débloque son copieur, et il ne sait pas qu'il le bloque.
+ *  · lot NON déclaré → un rappel à 24 h, puis tous les 3 jours, avec les deux ordres à passer ;
+ *  · lot déclaré ou broker à attendre (compte préexistant) → UN seul message rassurant à 24 h, jamais répété :
+ *    répéter « rien à faire de ton côté » pendant que l'équipe tarde serait pire que le silence.
+ * Les relances de cette file se reconnaissent à leur note `PENDING …` dans member_actions.
+ */
+export async function fetchPendingNudgeCandidates(): Promise<Array<{ tg_id: number; member_no: number | null; locale: 'en' | 'it'; days: number; claimed: boolean }>> {
+  const now = Date.now();
+  const raw = db as unknown as { from: (t: string) => any };
+  const { data: members } = await raw.from('members').select('tg_id,member_no,locale').eq('status', 'pending_copier');
+  if (!members?.length) return [];
+  const ids = (members as Array<{ tg_id: number }>).map((m) => Number(m.tg_id));
+  const [{ data: cards }, { data: nudges }, blockedSince] = await Promise.all([
+    raw.from('member_actions').select('tg_id,created_at,detail').eq('kind', 'connect').eq('status', 'pending').in('tg_id', ids),
+    raw.from('member_actions').select('tg_id,created_at').eq('kind', 'nudge').eq('status', 'done').like('detail->>note', 'PENDING%').in('tg_id', ids),
+    fetchBlockedSince(raw),
+  ]);
+  // la carte la plus récente par membre
+  const card = new Map<number, { at: number; detail: Record<string, unknown> }>();
+  for (const c of (cards ?? []) as Array<{ tg_id: number; created_at: string; detail: Record<string, unknown> | null }>) {
+    const t = Number(c.tg_id); const at = Date.parse(c.created_at);
+    if ((card.get(t)?.at ?? 0) < at) card.set(t, { at, detail: c.detail ?? {} });
+  }
+  const lastNudge = new Map<number, number>();
+  for (const n of (nudges ?? []) as Array<{ tg_id: number; created_at: string }>) {
+    const t = Number(n.tg_id); const at = Date.parse(n.created_at);
+    if ((lastNudge.get(t) ?? 0) < at) lastNudge.set(t, at);
+  }
+  const out: Array<{ tg_id: number; member_no: number | null; locale: 'en' | 'it'; days: number; claimed: boolean }> = [];
+  for (const m of members as Array<{ tg_id: number; member_no: number | null; locale: string | null }>) {
+    const t = Number(m.tg_id);
+    const c = card.get(t);
+    if (!c) continue; // pending sans carte en attente : rattrapage manuel, pas une relance
+    const age = now - c.at;
+    if (age < 86_400_000 || age > 60 * 86_400_000) continue; // jamais avant 24 h ; au-delà de 60 j c'est un dossier mort
+    const blocked = blockedSince.get(t);
+    const last = lastNudge.get(t);
+    if (blocked && (last ?? 0) < blocked) continue;
+    const d = c.detail;
+    const claimed = !!d.lots_claimed_at || d.lots_ok === true || !!d.waiting_broker;
+    if (claimed ? last != null : last != null && now - last < 3 * 86_400_000) continue;
+    out.push({ tg_id: t, member_no: m.member_no, locale: m.locale === 'it' ? 'it' : 'en', days: Math.floor(age / 86_400_000), claimed });
+  }
+  return out.sort((a, b) => Number(a.claimed) - Number(b.claimed) || a.days - b.days);
 }
 
 /**

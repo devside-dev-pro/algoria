@@ -30,8 +30,9 @@ import { adminLink, notifyOwner } from '../lib/member/notifyOwner';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard } from '../lib/member/i18n';
+import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
 const TF = '5m';
@@ -1185,6 +1186,46 @@ async function main() {
     } catch (e) {
       console.error('[algoria] relance auto échouée:', e);
     }
+    // ── DOSSIERS EN ATTENTE (03/09) — voir fetchPendingNudgeCandidates. Le lot d'activation se passe sur
+    // ACTIVATION_SYMBOL (USDJPY, décision Mathieu : jamais l'or, le spread coûte trop sur 1 lot).
+    try {
+      const { sendDm } = await import('./telegram');
+      const { pushToUser } = await import('../lib/push/send');
+      const pend = await fetchPendingNudgeCandidates();
+      if (!pend.length) return;
+      const legs = ACTIVATION_LEGS.map((l) => `${l.lots} ${l.side}`).join(' + ');
+      console.log(`[algoria] dossiers en attente : ${pend.length} relance(s) · ${pend.filter((p) => !p.claimed).length} sans lot déclaré`);
+      let sent = 0;
+      for (const c of pend) {
+        await new Promise((r) => setTimeout(r, 150));
+        const m = pendingNudgeMessage(c.locale, c.claimed, legs);
+        let dm = await sendDm(c.tg_id, m.dm, ctaKeyboard(c.locale, '/member/pending'));
+        let dmErr = dm ? null : lastDmFailure();
+        if (!dm && dmErr && /too many requests|429/i.test(dmErr)) {
+          const wait = Math.min(30, Number(/retry after (\d+)/i.exec(dmErr)?.[1] ?? 3)) * 1000;
+          await new Promise((r) => setTimeout(r, wait));
+          dm = await sendDm(c.tg_id, m.dm, ctaKeyboard(c.locale, '/member/pending'));
+          dmErr = dm ? null : lastDmFailure();
+        }
+        const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: '/member/pending', tag: 'algoria-pending' }).catch(() => 0);
+        await recordNudge(c.tg_id, c.member_no, 'auto', `PENDING J+${c.days} ${c.claimed ? 'lot déclaré' : 'lot manquant'} · dm ${dm ? 'ok' : `refusé (${dmErr ?? 'no-chat'})`} · push ${push ? 'ok' : 'none'}`, dm ? m.dm : undefined, !dm && !push ? (dmErr ?? 'no-chat') : null);
+        if (dm || push) sent++;
+      }
+      console.log(`[algoria] dossiers en attente : ${sent}/${pend.length} membre(s) touché(s)`);
+    } catch (e) {
+      console.error('[algoria] relance des dossiers en attente échouée:', e);
+    }
+  };
+  // Deux messages, deux langues. Le premier DEMANDE le geste (avec les deux ordres exacts et l'argument qui
+  // le rend acceptable : exposition nette nulle) ; le second RASSURE, et il ne part qu'une fois.
+  const pendingNudgeMessage = (locale: 'en' | 'it', claimed: boolean, legs: string): { dm: string; title: string; body: string } => {
+    if (claimed)
+      return locale === 'it'
+        ? { dm: `Il tuo account è in mano al team ✅\nNon devi fare nulla da parte tua: ti avvisiamo nel momento esatto in cui la copia sarà attiva.\n\nQualcosa non è chiaro? @mathieu_algoria è a un messaggio di distanza.`, title: '✅ Il team sta verificando il tuo account', body: 'Nulla da fare da parte tua. Ti avvisiamo appena la copia è attiva.' }
+        : { dm: `Your account is with the team ✅\nNothing to do on your side — we'll ping you the minute your copy is live.\n\nAnything unclear? @mathieu_algoria is one message away.`, title: '✅ The team is checking your account', body: 'Nothing to do on your side. We’ll ping you the minute your copy is live.' };
+    return locale === 'it'
+      ? { dm: `La tua configurazione è arrivata ✅ Manca UNA cosa prima di attivare la copia:\n\nApri il tuo MT5, piazza ${legs} su ${ACTIVATION_SYMBOL} e chiudi entrambi. Un acquisto e una vendita della stessa taglia si annullano: nessun rischio di mercato, solo lo spread. È il volume che il broker richiede per registrare il tuo account.\n\nFatto? Tocca « L'ho fatto » nell'app 👇\n👉 app.algoria.tech/member/pending`, title: '⏳ Un ultimo passo — 30 secondi', body: `${legs} su ${ACTIVATION_SYMBOL}, poi chiudi. Nessun rischio di mercato. È quello che sblocca la tua copia.` }
+      : { dm: `Your setup is in ✅ ONE thing left before we switch your copy on:\n\nOpen your MT5, place ${legs} on ${ACTIVATION_SYMBOL} and close both. A buy and a sell of the same size cancel out — no market risk, just the spread. That's the volume the broker needs to register your account.\n\nDone? Tap "I've placed both trades" in the app 👇\n👉 app.algoria.tech/member/pending`, title: '⏳ One last step — 30 seconds', body: `${legs} on ${ACTIVATION_SYMBOL}, then close both. No market risk. That’s what unlocks your copy.` };
   };
   if (!SECONDARY) setInterval(() => void maybeNudge(), 3600_000); // relances = un seul runner (S2), sinon triple envoi
 
