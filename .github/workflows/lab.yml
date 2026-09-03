@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22 # ≥ 22 : WebSocket natif, exigé par supabase-js (Node 20 plante dans pull-cache.mjs)
           cache: npm
       - run: npm ci --ignore-scripts
       - name: bougies
