@@ -148,14 +148,13 @@ export function Telemetry({ state, signals, symbol = 'XAUUSD' }: { state: any; s
       const isLive = now - lastRealAt.current < 2800;
       if (isLive !== f.live) { f.live = isLive; setLive(isLive); }
       if (!isLive) {
-        // micro-marche aléatoire autour du dernier mid → le flux respire sans le runner
-        const step = (Math.random() - 0.5) * Math.max(0.02, f.atr * 0.01);
-        const prev = f.mid;
-        const mid = Math.max(1, prev + step);
-        f.dPx = mid - prev; f.dPct = prev ? ((mid - prev) / prev) * 100 : 0; f.up = mid >= prev;
-        f.mid = mid; f.bid = mid - f.spread / 2; f.ask = mid + f.spread / 2; f.ticks++; f.velocity = f.dPx;
-        const s = seen.current; s.sum += mid; s.n++; f.vwap = s.sum / s.n;
-        f.feedLagMs = 38 + ((Math.random() * 16) | 0);
+        // PLUS DE FLUX FABRIQUÉ (audit 03/09). Cette branche faisait une marche aléatoire autour du dernier
+        // prix « pour que le flux respire sans le runner » — diffusée sous « THE AI RUNS THIS STREAM ».
+        // Un prix inventé n'est pas un prix : quand le runner se tait, le panneau le dit et attend.
+        f.feedLagMs = 0;
+        if (f.ticks % 30 === 0) push('ENGINE', '◌ feed idle — waiting for the runner…', 'var(--dim)');
+        f.ticks++;
+        return;
       }
       const { tag, text } = pickLine(f);
       push(tag, text, TAG_COLOR[tag] ?? 'var(--muted)');
@@ -173,7 +172,7 @@ export function Telemetry({ state, signals, symbol = 'XAUUSD' }: { state: any; s
     <section className="panel mono" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11.5 }}>
         <span style={{ color: 'var(--cyan)' }}>ALGORIA&nbsp;AI · mission&nbsp;control</span>
-        <span className={live ? 'pulse' : ''} style={{ color: live ? 'var(--up)' : 'var(--dim)', fontSize: 10.5, letterSpacing: 0.5 }}>{live ? '● LIVE FEED' : '◌ SIM FEED'}</span>
+        <span className={live ? 'pulse' : ''} style={{ color: live ? 'var(--up)' : 'var(--dim)', fontSize: 10.5, letterSpacing: 0.5 }}>{live ? '● LIVE FEED' : '◌ FEED IDLE'}</span>
       </div>
       <div ref={scroller} className="deskscroll" style={{ padding: '6px 10px', fontSize: 11, lineHeight: 1.5, flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
         {lines.map((l) => (
