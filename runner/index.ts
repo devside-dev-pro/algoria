@@ -1142,7 +1142,10 @@ async function main() {
       // est d'environ 200 envois par jour, chacun ne recevant au plus un message tous les trois jours.
       // ALGORIA_NUDGE_MAX_PER_DAY surcharge sans redéploiement ; 150 ms entre deux envois pour rester sous
       // les limites du bot (Telegram tolère ~30 messages par seconde, on en fait ~6).
-      const NUDGE_MAX = Number(process.env.ALGORIA_NUDGE_MAX_PER_DAY ?? 250) || 250;
+      // DÉBRIDÉ (03/09, décision Mathieu : « il doit pouvoir envoyer toutes les relances, même 100 par jour ») :
+      // 1 000 par passage, soit toute la file. Telegram tolère ~30 messages/s, on en fait ~6 ; un 429 est
+      // attendu (retry_after) puis renvoyé une fois.
+      const NUDGE_MAX = Number(process.env.ALGORIA_NUDGE_MAX_PER_DAY ?? 1000) || 1000;
       const all = await fetchNudgeCandidates();
       const candidates = all.slice(0, NUDGE_MAX);
       const bucket = (d: number) => (d <= 7 ? 'J+1-7' : d <= 14 ? 'J+8-14' : d <= 30 ? 'J+15-30' : 'J+31-60');
@@ -1161,8 +1164,15 @@ async function main() {
         // 'en' assumé : les six variantes de nudgeMessage sont écrites en anglais uniquement, des boutons
         // italiens sous un texte anglais seraient incohérents. Le jour où les variantes seront traduites,
         // c'est ici qu'il faudra passer la langue du membre (fetchNudgeCandidates ne la remonte pas encore).
-        const dm = await sendDm(c.tg_id, m.dm, ctaKeyboard('en', '/member/onboarding'));
-        const dmErr = dm ? null : lastDmFailure(); // à lire JUSTE après l'appel (voir runner/telegram.ts)
+        let dm = await sendDm(c.tg_id, m.dm, ctaKeyboard('en', '/member/onboarding'));
+        let dmErr = dm ? null : lastDmFailure(); // à lire JUSTE après l'appel (voir runner/telegram.ts)
+        if (!dm && dmErr && /too many requests|429/i.test(dmErr)) {
+          // limite de débit Telegram : on attend ce qu'il demande (retry after N) et on renvoie UNE fois
+          const wait = Math.min(30, Number(/retry after (\d+)/i.exec(dmErr)?.[1] ?? 3)) * 1000;
+          await new Promise((r) => setTimeout(r, wait));
+          dm = await sendDm(c.tg_id, m.dm, ctaKeyboard('en', '/member/onboarding'));
+          dmErr = dm ? null : lastDmFailure();
+        }
         const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: c.step <= 0 ? '/member/academy' : '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
         // Un DM refusé ne s'écrit plus 'done'. Nuance qui compte : si la PUSH est passée, la personne A
         // bien été touchée — l'échec ne concerne que le canal Telegram, et écrire 'failed' la ferait
