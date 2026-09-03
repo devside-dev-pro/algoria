@@ -242,3 +242,17 @@ export const goldBtn: CSSProperties = { border: '1px solid rgba(245,194,74,.45)'
 export const dangerBtn: CSSProperties = { border: '1px solid rgba(255,107,138,.4)', background: 'transparent', color: 'rgba(210,150,165,.85)', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' };
 export const miniBtn: CSSProperties = { border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', borderRadius: 6, padding: '1px 8px', fontSize: 10, cursor: 'pointer' };
 
+
+/** Écran étroit (téléphone) ? — l'admin est utilisé « à 70 % sur le téléphone » : les tableaux à 9 colonnes
+ *  deviennent des cartes, les champs prennent toute la largeur. false au premier rendu (SSR), puis suivi live. */
+export function useNarrow(maxPx = 720): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${maxPx}px)`);
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [maxPx]);
+  return narrow;
+}
