@@ -104,7 +104,7 @@ export default function MemberHistory() {
                   <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.6, whiteSpace: 'nowrap' }}>
                     {s.icon} {s.name}
                   </span>
-                  <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: st && st.trades ? (green ? 'var(--up)' : 'rgba(210,150,165,.85)') : 'var(--dim)' }}>
+                  <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: st && st.trades ? (green ? 'var(--up)' : 'var(--muted)') : 'var(--dim)' }}>
                     {st && st.trades ? fmtYou(st.net) : '—'}
                   </span>
                   <span className="mono" style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>
@@ -133,7 +133,7 @@ export default function MemberHistory() {
             <Stat label="TRADES" value={String(trades.length)} />
             <Stat label="WINS" value={trades.length ? `${Math.round((wins / trades.length) * 100)}%` : '—'} color="var(--up)" />
             {/* le NET à SON échelle, honnête (rouge inclus) — un « — » qui masque le rouge sent le cache-misère */}
-            <Stat label="NET (YOUR SIZE)" value={trades.length ? fmtYou(trades.reduce((a, t) => a + you(t), 0)) : '—'} gold={trades.reduce((a, t) => a + you(t), 0) > 0} color={trades.reduce((a, t) => a + you(t), 0) > 0 ? undefined : 'rgba(210,150,165,.85)'} />
+            <Stat label="NET (YOUR SIZE)" value={trades.length ? fmtYou(trades.reduce((a, t) => a + you(t), 0)) : '—'} gold={trades.reduce((a, t) => a + you(t), 0) > 0} color={trades.reduce((a, t) => a + you(t), 0) > 0 ? undefined : 'var(--muted)'} />
           </div>
           <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
             Algoria trades a <b style={{ color: 'var(--muted)' }}>$70k master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b> (master in small).
@@ -161,6 +161,9 @@ export default function MemberHistory() {
             if (g && g.day === day) g.items.push(t);
             else groups.push({ day, items: [t] });
           }
+          // COULEURS (03/09, décision Mathieu) : les pertes sont en gris, pas en rose-rouge, et une journée négative
+          // n'a plus de fond rouge. Après une semaine rouge, tout l'historique l'était — « ça ne donne pas envie de
+          // rester », et c'est le moment où les retraits arrivent. Le vert reste réservé aux gains.
           return groups.map((g) => {
             const dayYou = g.items.reduce((a, t) => a + you(t), 0);
             const dayWins = g.items.filter((t) => Number(t.pnl) > 0).length;
@@ -168,11 +171,11 @@ export default function MemberHistory() {
             return (
               <div key={g.day} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {unlocked && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: dayGreen ? 'rgba(38,224,166,.07)' : 'rgba(210,150,165,.06)', border: `1px solid ${dayGreen ? 'rgba(38,224,166,.25)' : 'rgba(210,150,165,.18)'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: dayGreen ? 'rgba(38,224,166,.07)' : 'rgba(130,152,190,.06)', border: `1px solid ${dayGreen ? 'rgba(38,224,166,.25)' : 'rgba(130,152,190,.18)'}` }}>
                     <span className="mono" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: 'var(--muted)' }}>{g.day.toUpperCase()}</span>
                     <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{g.items.length} trades · {Math.round((dayWins / g.items.length) * 100)}% wins</span>
                     <span style={{ flex: 1 }} />
-                    <span className="mono" style={{ fontSize: 13.5, fontWeight: 800, color: dayGreen ? 'var(--up)' : 'rgba(210,150,165,.85)' }}>{fmtYou(dayYou)}</span>
+                    <span className="mono" style={{ fontSize: 13.5, fontWeight: 800, color: dayGreen ? 'var(--up)' : 'var(--muted)' }}>{fmtYou(dayYou)}</span>
                   </div>
                 )}
                 {g.items.map((t) => {
@@ -180,17 +183,17 @@ export default function MemberHistory() {
                   return (
                     <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 0 7px 10px', borderBottom: '1px solid rgba(130,152,190,.1)', opacity: win ? 1 : 0.55 }}>
                       <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', minWidth: 34 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
                       <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol}</span>
                       <span style={{ flex: 1 }} />
                       {t.reason === 'be' && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>BE</span>}
                       {unlocked ? (
                         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 74 }}>
-                          <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
+                          <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
                           <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>master {Number(t.pnl) > 0 ? '+' : ''}{Number(t.pnl).toFixed(0)}$</span>
                         </span>
                       ) : (
-                        <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
+                        <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
                       )}
                       {/* UN SEUL bouton, texte explicite. Carte paysage ; QR = SON lien de parrainage */}
                       {win && (

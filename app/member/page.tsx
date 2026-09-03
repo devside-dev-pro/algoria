@@ -5,7 +5,7 @@
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, STRATEGY_AVAILABLE, type Member, type MemberAccount, type Referral } from './ui';
+import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, STRATEGY_AVAILABLE, type Member, type MemberAccount } from './ui';
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 
@@ -15,7 +15,6 @@ export default function MemberHome() {
   const { member, setMember, accounts, referral, unlocked, loading } = useMe();
   const [trades, setTrades] = useState<FeedTrade[]>([]);
   const [clientLot, setClientLot] = useState(0.01);
-  const [busy, setBusy] = useState(false);
   const [paywall, setPaywall] = useState(false);
   interface Social { members: number; live: number; joins48h: number; lastLiveNo: number | null; lastLiveHours: number | null }
   const [social, setSocial] = useState<Social | null>(null);
@@ -43,13 +42,6 @@ export default function MemberHome() {
   // c'est exactement là qu'on le perd. Le lien du message Telegram mène au même endroit.
   if (member.status === 'offboarded') { router.replace('/member/recover'); return null; }
 
-  const act = (action: 'pause' | 'resume') => {
-    setBusy(true);
-    void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
-      .then(async (r) => { const d = (await r.json()) as { member?: Member }; if (d.member) setMember(d.member); })
-      .finally(() => setBusy(false));
-  };
-
   const wins = trades.filter((t) => Number(t.pnl) > 0);
   const winTotal = wins.reduce((a, t) => a + Number(t.pnl), 0);
   const pendingReview = member.status === 'pending_copier';
@@ -70,11 +62,6 @@ export default function MemberHome() {
         {unlocked && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <StatusPill status={member.status} />
-            {(member.status === 'live' || member.status === 'paused') && (
-              <button disabled={busy} onClick={() => act(member.status === 'paused' ? 'resume' : 'pause')} style={{ marginLeft: 'auto', border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)', color: member.status === 'paused' ? 'var(--up)' : 'var(--muted)', borderRadius: 9, padding: '7px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                {member.status === 'paused' ? '▶ RESUME COPYING' : '⏸ PAUSE COPYING'}
-              </button>
-            )}
           </div>
         )}
       </section>
@@ -148,16 +135,16 @@ export default function MemberHome() {
           return (
             <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 9, opacity: win ? 1 : 0.55 }}>
               <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 38 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-              <span style={{ fontSize: 10, fontWeight: 700, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲' : '▼'}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲' : '▼'}</span>
               <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol}</span>
               <span style={{ flex: 1 }} />
               {unlocked ? (
                 <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                  <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
+                  <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
                   <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>({Number(t.pnl) > 0 ? '+' : ''}{Number(t.pnl).toFixed(0)}$)</span>
                 </span>
               ) : (
-                <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'rgba(210,150,165,.75)' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
+                <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
               )}
             </div>
           );
@@ -177,7 +164,6 @@ export default function MemberHome() {
           content. On surfe sur la dopamine des wins juste au-dessus : "Algoria vient de te faire gagner,
           amène ton crew et touche 10% du dépôt de chaque ami financé". La mécanique complète (retrait, historique,
           paliers) reste dans le Profil ; ici c'est le déclencheur en un tap. */}
-      {unlocked && referral?.code && <InviteCard referral={referral} hasWins={wins.length > 0} />}
 
       <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />
     </main>
@@ -220,52 +206,6 @@ function AddStrategyCard({ member, accounts }: { member: Member; accounts: Membe
             ➕ ADD A STRATEGY
           </a>
         </>
-      )}
-    </section>
-  );
-}
-
-function InviteCard({ referral, hasWins }: { referral: Referral; hasWins: boolean }) {
-  const [copied, setCopied] = useState(false);
-  // % du dépôt du filleul (plafonné) — le montant exact dépend de ce que l'ami dépose, on annonce le taux
-  const pct = Math.round((referral.rewardRate || 0.1) * 100);
-  const cap = referral.rewardCapUsd || 200;
-  const link = `https://app.algoria.tech/r/${referral.code}`;
-  const share = () => {
-    const text = 'Algoria is the AI that trades gold & Bitcoin for me on autopilot — my account just copies it. Get in with my link 👇';
-    if (typeof navigator !== 'undefined' && navigator.share) void navigator.share({ title: 'Join Algoria', text, url: link }).catch(() => {});
-    else { void navigator.clipboard?.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1600); }
-  };
-  const earned = referral.totalEarnedUsd || 0;
-  return (
-    <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, borderColor: 'rgba(245,194,74,.4)', boxShadow: '0 0 22px rgba(245,194,74,.07)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-        <span style={{ fontSize: 17 }}>💸</span>
-        <h2 style={{ margin: 0, fontSize: 15.5 }}>Invite friends — earn <span className="goldText">{pct}%</span> of what they deposit</h2>
-      </div>
-      <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
-        {hasWins
-          ? <>Algoria&rsquo;s on a roll right now — the perfect moment to bring someone in. You pocket <b className="goldText">{pct}%</b> of every friend&rsquo;s deposit when their account is funded, up to <b className="goldText">${cap}</b> each, paid in USDT.</>
-          : <>Every friend whose account gets funded pays you <b className="goldText">{pct}% of their deposit</b> — up to <b className="goldText">${cap}</b> each, straight to your wallet in USDT. Share once, earn on repeat.</>}
-      </p>
-      <button onClick={share} style={{ padding: '13px 16px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)', boxShadow: '0 8px 24px rgba(245,166,35,.24)' }}>
-        {copied ? '✓ LINK COPIED — paste it anywhere' : '🚀 SHARE MY INVITE LINK'}
-      </button>
-      {(referral.activated > 0 || earned > 0) ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5 }}>
-          <span style={{ color: 'var(--muted)' }}><b style={{ color: 'var(--up)' }}>{referral.activated}</b> activated</span>
-          <span style={{ color: 'var(--dim)' }}>·</span>
-          <span className="goldText" style={{ fontWeight: 800 }}>${earned} earned</span>
-          {referral.nextMilestone && (
-            <>
-              <span style={{ flex: 1 }} />
-              <span style={{ color: 'var(--dim)', fontSize: 10.5 }}>{referral.nextMilestone.remaining} more → +${referral.nextMilestone.bonus}</span>
-            </>
-          )}
-          <a href="/member/profile" style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--cyan)', textDecoration: 'none', fontWeight: 700 }}>track →</a>
-        </div>
-      ) : (
-        <a href="/member/profile" style={{ margin: 0, fontSize: 11.5, color: 'var(--cyan)', textDecoration: 'none', fontWeight: 700 }}>See how it works & track your earnings →</a>
       )}
     </section>
   );
