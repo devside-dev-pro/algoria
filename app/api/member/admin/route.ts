@@ -1088,7 +1088,7 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       body: JSON.stringify({
         url: 'https://www.algoria.tech/api/telegram',
         ...(secret ? { secret_token: secret } : {}),
-        allowed_updates: ['chat_join_request', 'chat_member', 'message', 'channel_post', 'my_chat_member'],
+        allowed_updates: ['chat_join_request', 'chat_member', 'message', 'channel_post', 'my_chat_member', 'callback_query'], // callback_query (03/09) : boutons « Envoyer la réponse » des DM d'alerte
       }),
     });
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
