@@ -70,6 +70,12 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     config: XAUUSD_SCALP,
     ctx: SCALP_CTX,
     enabled: true, // toujours actif (comportement live actuel)
+    // SCALP_XAUUSD=0 (03/09/2026, décision Mathieu : « remplacer S2, pas recréer un master ») : coupe le scalp
+    // de confluence ET le breakout intraday sur l'or, sans toucher au cockpit (chart, desk, manuel) ni aux
+    // couches swing/tendance qui ont leurs propres leviers. Même mécanisme que le BTC : watch-only. Le
+    // diagnostic du 02/09 a montré que ce scalp est à la ligne de base (46-52 % de +1R avant −1R sur 2 ans,
+    // toutes sessions) — on le remplace par la couche de tendance (TREND_XAUUSD=1). Défaut : inchangé.
+    watchOnly: process.env.SCALP_XAUUSD === '0',
     // 2ᵉ cerveau : cassures Donchian 8h — EN PLUS du scalp (labo 30.5j : PF 1.50, +$2248, ~3.6 setups/j,
     // tiers ✅✅✅). Le scalp joue les rejets, le breakout joue les cassures. Cap 1 position/symbole partagé.
     // S1 les coupe : une position tenue des heures/jours casse la promesse « objectif du jour puis stop ».
