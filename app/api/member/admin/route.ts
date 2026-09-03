@@ -117,7 +117,9 @@ export async function GET(req: NextRequest) {
     // RELANCES (kind='nudge', auto + manuelles) : nourrit la file « RELANCES DU JOUR » (qui a été touché quand).
     // `status='done'` : un envoi ÉCHOUÉ n'est pas un contact. Sans cette garde, un membre que le bot
     // n'a pas pu joindre sortirait de la file pendant 3 jours — on masquerait la personne à rattraper.
-    db.from('member_actions').select('tg_id,created_at,done_by').eq('kind', 'nudge').eq('status', 'done').order('created_at', { ascending: false }).limit(500),
+    // FENÊTRE 15 JOURS, pas « les 500 dernières » (03/09) : depuis que le bot est débridé (~200 envois/jour), 500
+    // lignes couvrent moins de trois jours et la mémoire du cooldown (3 à 14 j) devenait fausse sans le dire.
+    db.from('member_actions').select('tg_id,created_at,done_by').eq('kind', 'nudge').eq('status', 'done').gte('created_at', new Date(Date.now() - 15 * 86_400_000).toISOString()).order('created_at', { ascending: false }).limit(5000),
     // HEARTBEAT runner : la dernière bougie écrite (BTC 24/7 → toujours attendue) — bandeau rouge si > 20 min.
     db.from('candles').select('time').order('time', { ascending: false }).limit(1),
     // NOMS LÉGAUX (kyc.broker_name, déclarés au wizard) : LE pont entre les 3 identités d'une personne
@@ -302,7 +304,7 @@ export async function POST(req: NextRequest) {
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
     setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
-    botBroadcast?: { audience: 'ex_s1' | 'live'; text: string; tag: string; cta?: boolean };
+    botBroadcast?: { audience: 'pending' | 'live'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
     editMember?: { tg_id: number; field: string; value: string | null };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
@@ -984,7 +986,7 @@ export async function POST(req: NextRequest) {
     // de se (re)brancher est precisement celui qu'on doit rattraper. 'paused' reste hors perimetre.
     const { data: lives } = await (db as any).from('members')
       .select('tg_id,member_no,tg_username,tg_name,status,strategy,lot,mt5_login')
-      .in('status', ['live', 'pending_copier']).not('mt5_login', 'is', null).limit(60) as {
+      .in('status', ['live', 'pending_copier']).not('mt5_login', 'is', null).limit(200) as { // 60 → 200 (audit 03/09 : 38 comptes aujourd'hui, l'audit doit rester complet)
         data: Array<{ tg_id: number; member_no: number | null; tg_username: string | null; tg_name: string | null; status: string; strategy: number | null; lot: number | null; mt5_login: string | null }> | null };
     const rows: Array<Record<string, unknown>> = [];
     for (const m of lives ?? []) {
@@ -1193,21 +1195,11 @@ export async function POST(req: NextRequest) {
 
     // ── qui reçoit ──────────────────────────────────────────────────────────────────────────────────
     let targets: Array<{ tg_id: number; member_no: number | null; tg_name: string | null; locale?: string | null }> = [];
-    if (audience === 'ex_s1') {
-      // Tous les membres qui portent une carte de mouvement DEPUIS S1 — quel que soit son statut.
-      //
-      // ⚠️ CORRIGÉ LE 20/08, ET C'ÉTAIT UN VRAI DÉFAUT. La première version ne prenait que les cartes
-      // encore 'pending'. Or la marche à suivre que j'avais moi-même donnée à Mathieu était : faire les
-      // mouvements STH D'ABORD, envoyer l'annonce ENSUITE — ce qui vidait l'audience au fur et à mesure.
-      // Résultat en production : sur 17 destinataires, l'annonce n'est partie qu'aux 4 dont le mouvement
-      // avait échoué. Les 13 correctement déplacés n'ont rien reçu, précisément parce que tout s'était
-      // bien passé pour eux. Une audience ne doit pas dépendre de l'avancement d'une tâche.
-      const { data } = await db.from('member_actions').select('tg_id').eq('kind', 'strategy_change').eq('detail->>from' as never, '1' as never);
-      const ids = [...new Set((data ?? []).map((r) => Number(r.tg_id)).filter(Boolean))];
-      if (ids.length) {
-        const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name,locale').in('tg_id', ids).is('banned_at', null);
-        targets = (ms ?? []) as typeof targets;
-      }
+    // SEGMENTS GÉNÉRIQUES (03/09). L'audience « ex-S1 » codée en dur ne servait qu'à l'annonce du 20/08 :
+    // une campagne d'un jour n'a rien à faire dans le code. 'pending' = dossiers en file (pending_copier).
+    if (audience === 'pending') {
+      const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name,locale').eq('status', 'pending_copier').is('banned_at', null);
+      targets = (ms ?? []) as typeof targets;
     } else if (audience === 'live') {
       const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name,locale').in('status', ['live', 'paused']).is('banned_at', null);
       targets = (ms ?? []) as typeof targets;
