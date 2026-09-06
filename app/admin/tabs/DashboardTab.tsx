@@ -371,7 +371,7 @@ export function DashboardTab() {
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                           <span style={{ fontSize: 12, fontWeight: 750, color: 'var(--text)' }}>{label}</span>
                           {who?.member_no != null && <span className="mono goldText" style={{ fontSize: 10, fontWeight: 800 }}>#{who.member_no}</span>}
-                          <span className="mono" style={{ fontSize: 9.5, fontWeight: failed ? 800 : 400, color: failed ? '#ff5a5a' : 'var(--dim)' }}>{failed ? `NOT DELIVERED — ${failReason}` : incoming ? 'replied to the bot' : (d as { via?: string }).via === 'manual' ? '👤 your personal touch (logged)' : (d as { via?: string }).via === 'admin' ? '💬 you replied via the bot' : (d as { via?: string }).via === 'broadcast' ? '📣 broadcast sent' : 'auto-nudge sent'}</span>
+                          <span className="mono" style={{ fontSize: 9.5, fontWeight: failed ? 800 : 400, color: failed ? '#ff5a5a' : 'var(--dim)' }}>{failed ? `NOT DELIVERED — ${failReason}` : incoming ? 'replied to the bot' : (d as { via?: string }).via === 'manual' ? '👤 your personal touch (logged)' : (d as { via?: string }).via === 'admin' ? '💬 you replied via the bot' : (d as { via?: string }).via === 'draft' ? '✍️ draft approved from Telegram' : (d as { via?: string }).via === 'auto-reply' ? '🤖 auto-reply (simple question)' : (d as { via?: string }).via === 'broadcast' ? '📣 broadcast sent' : 'auto-nudge sent'}</span>
                           <span style={{ flex: 1 }} />
                           <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{new Date(b.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
@@ -381,10 +381,10 @@ export function DashboardTab() {
                         {incoming && (d as { draft?: string }).draft && (
                           <div style={{ marginTop: 7, padding: '8px 10px', borderRadius: 8, border: '1px dashed rgba(43,227,245,.4)', background: 'rgba(43,227,245,.05)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1, color: 'var(--cyan)' }}>✍️ DRAFT REPLY{(d as { draft_sent_at?: string }).draft_sent_at ? ' · SENT FROM TELEGRAM' : ''}</span>
+                              <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1, color: 'var(--cyan)' }}>✍️ DRAFT REPLY{(d as { draft_sent_at?: string }).draft_sent_at ? ' · SENT FROM TELEGRAM' : (d as { auto_sent_at?: string }).auto_sent_at ? ' · SENT AUTOMATICALLY' : ''}{(d as { auto_deleted_at?: string }).auto_deleted_at ? ' · DELETED' : ''}</span>
                               <p style={{ margin: '3px 0 0', fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{(d as { draft?: string }).draft}</p>
                             </div>
-                            {!(d as { draft_sent_at?: string }).draft_sent_at && (
+                            {!(d as { draft_sent_at?: string }).draft_sent_at && !(d as { auto_sent_at?: string }).auto_sent_at && (
                               <button onClick={() => setBotDrafts((s) => ({ ...s, [b.id]: String((d as { draft?: string }).draft ?? '') }))} style={{ ...miniBtn, whiteSpace: 'nowrap' }} title="copy the draft into the reply box below — edit it, then SEND">↓ USE</button>
                             )}
                           </div>

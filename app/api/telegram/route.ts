@@ -4,7 +4,7 @@ import { JOIN_DM, INBOX_ACK, INBOX_ACK_BTN, SUPPORT_TG_URL, SIGNED_IN, SIGNED_IN
 import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
-import { draftReply } from '@/lib/member/replyDraft';
+import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 25;
@@ -377,7 +377,7 @@ export async function POST(req: Request) {
       if (cq.message?.chat?.id && cq.message?.message_id) await tg('editMessageText', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, text: `${orig}\n\n${line}`.slice(0, 4000), disable_web_page_preview: true });
     };
     try {
-      const m = /^r([dx]):([0-9a-f-]{36})$/i.exec(String(cq.data ?? ''));
+      const m = /^r([dxu]):([0-9a-f-]{36})$/i.exec(String(cq.data ?? ''));
       if (!m) { await answer(''); return NextResponse.json({ ok: true }); }
       const admins = await adminTgIds();
       if (!admins.includes(Number(cq.from?.id))) { await answer('Réservé aux admins.'); return NextResponse.json({ ok: true }); }
@@ -387,6 +387,19 @@ export async function POST(req: Request) {
       const draft = String(detail.draft ?? '').trim();
       const by = cq.from?.username ? `@${cq.from.username}` : String(cq.from?.id ?? 'admin');
       if (!row) { await answer('Message introuvable.'); return NextResponse.json({ ok: true }); }
+      if (m[1].toLowerCase() === 'u') {
+        // ↩️ SUPPRIMER une réponse partie seule (mode autonome) : le bot efface son propre message chez le
+        // membre (Telegram l'autorise 48 h), et la fiche garde la trace. C'est le filet du mode autonome.
+        const mid = Number(detail.auto_message_id);
+        if (!mid) { await answer('Rien à supprimer.'); return NextResponse.json({ ok: true }); }
+        const r = await tg('deleteMessage', { chat_id: row.tg_id, message_id: mid });
+        if (!r?.ok) { await answer('Suppression refusée par Telegram (plus de 48 h ?).'); return NextResponse.json({ ok: true }); }
+        await (db as any).from('member_actions').update({ detail: { ...detail, auto_deleted_at: new Date().toISOString(), auto_deleted_by: by } }).eq('id', row.id);
+        await (db as any).from('member_actions').insert({ tg_id: row.tg_id, member_no: row.member_no, kind: 'note', status: 'done', done_by: by, detail: { text: `↩️ auto-reply deleted by ${by}: “${draft.slice(0, 120)}”` } });
+        await stamp(`↩️ Réponse automatique supprimée chez le membre par ${by}.`);
+        await answer('Supprimée.');
+        return NextResponse.json({ ok: true });
+      }
       if (m[1].toLowerCase() === 'x') {
         await (db as any).from('member_actions').update({ detail: { ...detail, draft_dismissed_at: new Date().toISOString(), draft_dismissed_by: by } }).eq('id', row.id);
         await stamp('🗑 Brouillon écarté — réponds depuis l’admin.');
@@ -538,37 +551,58 @@ export async function POST(req: Request) {
       }).select('id');
       const rowId = String((inserted as Array<{ id: string }> | null)?.[0]?.id ?? '');
       const token = process.env.TELEGRAM_BOT_TOKEN;
-      // L'ACCUSÉ DE RÉCEPTION PART D'ABORD (rapide), le brouillon se calcule ensuite.
-      const ackNow = token && !recent?.length;
-      if (ackNow) {
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
-          body: JSON.stringify({
-            chat_id: tgId,
-            text: INBOX_ACK[asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale)],
-            disable_web_page_preview: true,
-            reply_markup: { inline_keyboard: [[{ text: INBOX_ACK_BTN[asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale)], url: SUPPORT_TG_URL }]] },
-          }),
-        }).catch(() => {});
-      }
-      // BROUILLON DE RÉPONSE (03/09, décision Mathieu) — rédigé, jamais envoyé seul : voir lib/member/replyDraft.ts.
+      const loc = asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale);
+      const tgSend = async (payload: Record<string, unknown>) => token ? fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000), body: JSON.stringify({ chat_id: tgId, disable_web_page_preview: true, ...payload }) }).catch(() => null) : null;
+      // RÉPONSE (03/09 brouillon, 06/09 autonomie sur les questions simples) — voir lib/member/replyDraft.ts.
       const member = (mrow?.[0] as { member_no?: number | null; locale?: string | null; status?: string | null; strategy?: number | null; broker?: string | null; tg_name?: string | null; tg_username?: string | null } | undefined) ?? null;
       const history = ((past ?? []) as Array<{ kind: string; detail: Record<string, unknown> | null }>).reverse()
         .map((h) => ({ from: h.kind === 'bot_reply' ? 'member' as const : 'algoria' as const, text: String(h.detail?.text ?? h.detail?.note ?? '') }))
         .filter((h) => h.text);
       const draft = text === '[media]' ? null : await draftReply({ text, locale: member?.locale, member, history });
-      if (draft && rowId) {
-        await (db as any).from('member_actions').update({ detail: { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null, draft, draft_model: process.env.ALGORIA_REPLY_MODEL ?? 'haiku' } }).eq('id', rowId);
+      // GARDE-FOUS DU MODE AUTONOME : question jugée simple, mode ON, et pas plus d'UNE réponse automatique
+      // par 10 min ni de TROIS par 24 h pour la même personne — au-delà, c'est une conversation, donc Mathieu.
+      let autoOk = Boolean(draft?.auto) && AUTOREPLY_ON && !!token;
+      if (autoOk) {
+        const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
+        const { data: autos } = await (db as any).from('member_actions').select('created_at').eq('tg_id', tgId).eq('kind', 'nudge').eq('status', 'done').eq('detail->>via' as never, 'auto-reply' as never).gte('created_at', since);
+        const list = (autos ?? []) as Array<{ created_at: string }>;
+        if (list.length >= 3 || list.some((a) => Date.now() - Date.parse(a.created_at) < 10 * 60_000)) autoOk = false;
       }
-      // Le propriétaire est prévenu du message lui-même (03/09) — jusque-là, seul le prospect recevait un
-      // accusé de réception, et la question dormait dans BOT ACTIVITY jusqu'à ce que quelqu'un ouvre l'admin.
-      // Avec le brouillon et ses deux boutons quand il y en a un.
-      await notifyOwner({
-        title: `💬 ${msg.from.username ? `@${msg.from.username}` : msg.from.first_name ?? 'quelqu’un'} a écrit au bot`,
-        lines: [text.slice(0, 300), ...(draft ? ['', '✍️ Réponse proposée :', draft] : [])],
-        path: '/', tag: 'owner-inbox',
-        ...(draft && rowId ? { buttons: [{ text: '✅ Envoyer la réponse', data: `rd:${rowId}` }, { text: '🗑 Écarter', data: `rx:${rowId}` }] } : {}),
-      });
+      const baseDetail = { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null };
+      let autoMessageId: number | null = null;
+      if (autoOk && draft) {
+        const r = await tgSend({ text: draft.text });
+        const j = r?.ok ? ((await r.json().catch(() => ({}))) as { result?: { message_id?: number } }) : null;
+        autoMessageId = Number(j?.result?.message_id) || null;
+        if (autoMessageId) {
+          await (db as any).from('member_actions').insert({ tg_id: tgId, member_no: member?.member_no ?? null, kind: 'nudge', status: 'done', done_by: 'bot', detail: { via: 'auto-reply', note: 'AI auto-reply (simple question)', text: draft.text } });
+        } else autoOk = false; // Telegram a refusé → on retombe sur le brouillon à valider
+      }
+      if (!autoOk && token && !recent?.length) {
+        // ACCUSÉ DE RÉCEPTION (route vers l'humain) — seulement quand la réponse n'est pas partie seule
+        await tgSend({ text: INBOX_ACK[loc], reply_markup: { inline_keyboard: [[{ text: INBOX_ACK_BTN[loc], url: SUPPORT_TG_URL }]] } });
+      }
+      if (draft && rowId) {
+        await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft: draft.text, draft_model: process.env.ALGORIA_REPLY_MODEL ?? 'haiku', draft_intent: draft.auto ? 'simple' : 'human', ...(autoOk && autoMessageId ? { auto_sent_at: new Date().toISOString(), auto_message_id: autoMessageId } : {}) } }).eq('id', rowId);
+      }
+      // Le propriétaire voit tout : le message, et soit la réponse partie (avec « Supprimer »), soit le
+      // brouillon à valider (« Envoyer » / « Écarter »).
+      const who = msg.from.username ? `@${msg.from.username}` : msg.from.first_name ?? 'quelqu’un';
+      if (autoOk && draft) {
+        await notifyOwner({
+          title: `🤖 Réponse automatique à ${who}`,
+          lines: [text.slice(0, 300), '', '↳ ' + draft.text],
+          path: '/', tag: 'owner-inbox',
+          ...(rowId ? { buttons: [{ text: '↩️ Supprimer la réponse', data: `ru:${rowId}` }] } : {}),
+        });
+      } else {
+        await notifyOwner({
+          title: `💬 ${who} a écrit au bot`,
+          lines: [text.slice(0, 300), ...(draft ? ['', '✍️ Réponse proposée :', draft.text] : [])],
+          path: '/', tag: 'owner-inbox',
+          ...(draft && rowId ? { buttons: [{ text: '✅ Envoyer la réponse', data: `rd:${rowId}` }, { text: '🗑 Écarter', data: `rx:${rowId}` }] } : {}),
+        });
+      }
     } catch (e) {
       console.error('[telegram] bot inbox failed:', (e as { message?: string })?.message ?? e);
     }
