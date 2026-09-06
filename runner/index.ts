@@ -410,7 +410,11 @@ async function main() {
           else if (!vipDayDoneAnnounced) {
             vipDayDoneAnnounced = true;
             if (state.dayDoneReason === 'loss') {
-              // ANALYSE DE PERTE — rassurer les VIP : pourquoi c'était dur (marché) + discipline/contrôle.
+              // JOURNÉE FERMÉE SUR LE CAP : PLUS DE POST (06/09, décision Mathieu). Le message « day closed,
+              // downside protected » + l'analyse de perte tombaient sur un canal déjà rouge — un membre qui
+              // vient de perdre n'a pas besoin qu'on lui explique le marché. Le DAILY WRAP du soir dit la
+              // journée, une fois. (Code conservé pour rallumer si un jour le canal le réclame.)
+              if (process.env.VIP_LOSS_REVIEW === '1') {
               const why = marketRead(context);
               const stats = await fetchDayTradeStats().catch(() => null);
               const clause = narrationReady()
@@ -419,6 +423,7 @@ async function main() {
               void postVip(
                 `🛡️ <b>${VIP_TAG} — day closed, downside protected</b>\n\n${why} — a cluster of stops, not a drift. The daily cap did its job: your loss is bounded for the day.${clause ? `\n\n<i>${clause}</i>` : ''}\n\nWe never force trades. Fresh start tomorrow. 🔁`,
               );
+              }
             } else if (state.dayDoneReason === 'lock') {
               // RATCHET : journée verrouillée EN PROFIT après un pic — message positif (on protège les gains).
               void postVip(`🔒 <b>${VIP_TAG} — gains locked, wrapped for the day</b>\n\nThe day peaked, gave a little back, and the safety ratchet closed the book <b>while still green</b>. Profit protected — no give-back spiral.`);
@@ -1392,7 +1397,6 @@ async function main() {
     return true;
   };
   let lastRecapHour = new Date().getUTCHours(); // pas de recap au démarrage — on attend la prochaine heure pleine
-  let lastPulseKey = ''; // dédup du pulse 4h : "jour:nbTrades" — on ne reposte que si le compteur a bougé
   if (!SECONDARY) setInterval(() => {
     void (async () => {
       const h = new Date().getUTCHours();
@@ -1491,17 +1495,10 @@ async function main() {
               if (isRecord) badges.push(`⚡ <b>New record day</b> — +${usd(today.net)}, our best since launch`);
               if (badges.length) void postVip(`${badges.join('\n')}\n\n<i>This is the track record building in real time. 👊</i>`);
             }
-          } else if (h % 4 === 0) {
-            // PULSE preuve-de-vie — SEULEMENT s'il y a du NOUVEAU depuis le dernier pulse (compteur de
-            // trades du jour). Sans ce verrou : 5 messages identiques « 2 trades · 100% win » en boucle
-            // toute la journée (vécu le samedi 26/07 — les 2 clôtures BTC passaient la garde 0-trade et
-            // le pulse répétait la même info toutes les 4 h). Un pulse qui ne dit rien de neuf se tait.
-            const pulseKey = `${new Date().toISOString().slice(0, 10)}:${stats.trades}`;
-            if (pulseKey !== lastPulseKey) {
-              lastPulseKey = pulseKey;
-              void postVip(`${stats.net >= 0 ? '🟢' : '🔴'} ${VIP_TAG} <b>working</b> · ${stats.trades} trades · ${wr}% win today`);
-            }
           }
+          // PULSE « 🔴 working · N trades » toutes les 4 h : SUPPRIMÉ le 06/09 (décision Mathieu). Sur une
+          // journée rouge il tapissait le canal de rouge sans rien apprendre à personne ; sur une verte, le
+          // bilan du soir suffit. Un seul DAILY WRAP par jour, vert ou rouge, honnête — et c'est tout.
         }
         // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
         // JOUR ROUGE : ON PARLE AUSSI (19/08). Jusqu'ici la notification du soir ne partait que si la
