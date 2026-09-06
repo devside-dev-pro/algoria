@@ -14,6 +14,7 @@ import { checkRisk } from '../lib/engine/risk';
 import { breakoutSignal } from '../lib/engine/breakout';
 import { swingSignal, swingMinBars } from '../lib/engine/swing';
 import { trendSignal, trendExit, trendLot, closedDailyBars } from '../lib/engine/trend';
+import { zoneStep, zoneSignal, brokerOffsetMs, brokerDay, ZONE_IDLE, type ZoneState } from '../lib/engine/zone';
 import { DEFAULT_CONFIG } from '../lib/engine/config';
 import { activeInstruments, type InstrumentSpec } from '../lib/engine/instruments';
 import { ACTIVE_STRATEGY } from '../lib/engine/strategies';
@@ -31,7 +32,7 @@ import { sthReady, sthStatus, sthMoveMaster } from '../lib/member/sth';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
@@ -346,11 +347,15 @@ async function main() {
               // Les positions de TENDANCE (D1) ne sont PAS fermées par le cap journalier : leur risque est
               // borné à 1 % de l'équité par le stop du broker, et une règle qui se juge sur des semaines ne
               // peut pas être coupée par un compteur de la journée. Sans couche de tendance, comportement inchangé.
-              const keep = inst.trend ? new Set((await listOpenTrendTrades(DISPLAY)).map((t) => t.ticket)) : new Set<string>();
+              // Idem pour les positions de ZONE : stop et objectif tenus par le broker, règle jugée sur des mois.
+              const keep = new Set<string>([
+                ...(inst.trend ? (await listOpenTrendTrades(DISPLAY)).map((t) => t.ticket) : []),
+                ...(inst.zone ? (await listOpenZoneTrades(DISPLAY)).map((t) => t.ticket) : []),
+              ]);
               const toClose = openHere.filter((p) => !keep.has(String(p.id)));
               if (!keep.size) await closeAll(stream, BROKER);
               else for (const p of toClose) await closePosition(stream, String(p.id));
-              await logNote(`🛑 daily loss cap hit — closed ${toClose.length} open position(s) to bound the day${keep.size ? ` (${keep.size} trend position kept, its stop is held by the broker)` : ''}`, 'veto');
+              await logNote(`🛑 daily loss cap hit — closed ${toClose.length} open position(s) to bound the day${keep.size ? ` (${keep.size} trend/zone position kept, its stop is held by the broker)` : ''}`, 'veto');
             } catch (e) { console.error('[algoria] hard-cap close échec:', e); }
           }
         }
@@ -698,6 +703,73 @@ async function main() {
       setInterval(() => void trendPass(), 5 * 60_000);
     }
 
+    // ===== COUCHE « ZONE » (M5) — cassure du range de la veille puis retest (06/09/2026), voir lib/engine/zone.ts =====
+    // Décision Mathieu du 06/09 après l'arène des EA publics (backtest/ea-arena.ts) : « go la connecter ». Les
+    // chiffres, bons et mauvais, sont en tête de lib/engine/zone.ts ; ici on ne fait qu'exécuter la règle.
+    //   · la machine cassure → retest tourne sur CHAQUE M5 close (agrégateur dédié, même ticks que le scalp) ;
+    //   · la zone = la dernière D1 CLOSE du broker (relue une fois par heure) ; le décalage broker se déduit d'elle ;
+    //   · le filtre EMA50/200 et l'ATR14 lisent les H1 closes (agrégateur H1 dédié) ;
+    //   · à l'entrée : au marché, SL/TP posés au broker, AUCUNE gestion tick par tick (beTrigger 0, pas de
+    //     protection avant annonce) — la règle rejouée n'en avait pas, on ne lui en ajoute pas ;
+    //   · une position de zone à la fois, relue en base (signal_ref *-zone-*), jamais en mémoire seule.
+    let zoneM5Agg: ((bid: number, ask: number, t: number) => void) | null = null;
+    let zoneH1Agg: ((bid: number, ask: number, t: number) => void) | null = null;
+    if (inst.zone) {
+      const ZC = inst.zone;
+      let zst: ZoneState = ZONE_IDLE;
+      // H1 closes : la dernière bougie renvoyée par le broker est en général celle EN COURS → écartée.
+      let h1Closed: Bar[] = (await loadHistory(account, BROKER, '1h', 1000).catch(() => [] as Bar[])).filter((b) => Date.now() >= b.time + 3_600_000);
+      let d1: Bar[] = [];
+      let d1Key = '';
+      const refreshD1 = async () => {
+        const key = new Date().toISOString().slice(0, 13); // une relecture par heure : la veille ne change qu'au rollover
+        if (key === d1Key) return;
+        try { d1 = closedDailyBars(await loadHistory(account, BROKER, '1d', 10), Date.now()); d1Key = key; } catch (e) { console.error(`[algoria] zone ${DISPLAY} D1 échoué:`, e); }
+      };
+      await refreshD1();
+      const prevDay = () => (d1.length ? { high: d1[d1.length - 1].high, low: d1[d1.length - 1].low } : null);
+      // Réchauffage : les M5 du jour broker déjà passées rejouent la machine (une cassure d'avant le redémarrage
+      // garde son attente de retest). Les décisions d'entrée du rejeu sont ignorées — on ne rattrape rien.
+      {
+        const off = brokerOffsetMs(d1);
+        const today = brokerDay(Date.now(), off);
+        for (const b of seed) if (brokerDay(b.time, off) === today) zst = zoneStep(zst, { m5: b, h1Closed, prevDay: prevDay(), offsetMs: off, hasPosition: true }, ZC).state;
+      }
+      zoneH1Agg = makeAggregator('1h', h1Closed, (bars) => { h1Closed = bars; });
+      const onM5 = async (bars: Bar[]) => {
+        try {
+          await refreshD1();
+          const m5 = bars[bars.length - 1];
+          const offsetMs = brokerOffsetMs(d1);
+          const open = await listOpenZoneTrades(DISPLAY);
+          const r = zoneStep(zst, { m5, h1Closed, prevDay: prevDay(), offsetMs, hasPosition: open.length > 0 }, ZC);
+          if (r.state.waiting && !zst.waiting) console.log(`[algoria] zone ${DISPLAY} : cassure ${r.state.dir === 1 ? 'haussière' : 'baissière'} de la veille (${r.state.dir === 1 ? r.state.zh : r.state.zl}) — attente du retest`);
+          zst = r.state;
+          if (r.skipped) { console.log(`[algoria] zone ${DISPLAY} : ${r.skipped}`); return; }
+          if (!r.entry) return;
+          if (killed) { console.log(`[algoria] zone ${DISPLAY} : retest valide mais kill switch actif`); return; }
+          const px = terminal.price(BROKER);
+          if (!px?.bid || !px?.ask) return;
+          const mid = (Number(px.bid) + Number(px.ask)) / 2;
+          const sig = zoneSignal(DISPLAY, r.entry, ZC, mode, mid, inst.config.priceStep ?? 0.01);
+          const freshState = readState(terminal, BROKER, state);
+          if (freshState.spread > inst.config.risk.maxSpread) { await logSignal(sig, { code: `risk: spread ${freshState.spread.toFixed(2)}`, status: 'rejected' }); return; }
+          const veto = portfolioVeto({ positions: (terminal.positions ?? []) as any[], symbol: BROKER });
+          if (veto) { await logSignal(sig, { code: `portfolio: ${veto}`.slice(0, 250), status: 'rejected' }); return; }
+          const ticket = await executeSignal(sig);
+          if (ticket) {
+            rememberManagement(ticket, { beTrigger: 0, riskDist: Math.abs(sig.entry - sig.stopLoss), newsGuard: false });
+            await logNote(`📍 ZONE ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]} (${ZC.slAtr}× / ${ZC.tpAtr}× ATR H1, lot ${ZC.lot}) — yesterday's ${sig.direction === 'long' ? 'high' : 'low'} ${r.entry.level} broken then retested · broker holds SL/TP, no trailing`, 'order');
+            if (vipReady() && !SECONDARY) void postVip(`📍 <b>ZONE position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction.toUpperCase()}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n🎯 TP  <code>${sig.takeProfits[0]}</code>\n${VIP_RULE}\n<i>Yesterday's range broken, then retested. Fixed stop and target held by the broker — no trailing. Can hold overnight.</i>`);
+          }
+        } catch (e) {
+          console.error(`[algoria] zone ${DISPLAY} échoué:`, e);
+        }
+      };
+      zoneM5Agg = makeAggregator(TF, seed, (bars) => void onM5(bars));
+      console.log(`[algoria] couche ZONE active sur ${DISPLAY} (veille cassée + retest · session ${ZC.sessionFrom}-${ZC.sessionTo}h broker · SL ${ZC.slAtr}×ATR H1 · TP ${ZC.tpAtr}× · lot ${ZC.lot} · H1 closes ${h1Closed.length} · D1 ${d1.length}${zst.waiting ? ' · retest en attente' : ''})`);
+    }
+
     // Agrégateur M1 LÉGER : log chaque bougie M1 clôturée (chart + data fraîche backtest), sans retenir l'historique.
     let m1cur: Bar | null = null;
     const feedM1 = (mid: number, t: number) => {
@@ -748,6 +820,8 @@ async function main() {
           // fois par jour sur le canal de sortie (trendPass). Restaurée même si TREND_<SYM> a été coupé entre
           // temps : une position ouverte garde sa règle jusqu'à sa sortie.
           if (r.ref.includes('-trend-')) rememberManagement(r.ticket, { beTrigger: 0, riskDist, newsGuard: false });
+          // ZONE : même chose — SL/TP du broker, rien d'autre (la règle rejouée au labo n'a aucune gestion).
+          else if (r.ref.includes('-zone-')) rememberManagement(r.ticket, { beTrigger: 0, riskDist, newsGuard: false });
           else if (r.ref.includes('-swing-') && SWc) rememberManagement(r.ticket, { beTrigger: SWc.beTrigger, trailActivate: SWc.trailActivate, trailDist: SWc.trailDist, ladder: SWc.ladder, riskDist });
           else if (r.ref.includes('-bk-') && inst.breakout) rememberManagement(r.ticket, { beTrigger: inst.breakout.beTrigger, trailActivate: inst.breakout.trailActivate, trailDist: inst.breakout.trailDist, riskDist });
           // même correctif qu'à l'exécution (voir le bloc hasCustomMgmt) : tester TOUTE gestion custom, pas le
@@ -755,7 +829,7 @@ async function main() {
           else if (inst.config.beTrigger != null || inst.config.ladder != null || (inst.config.trailActivate != null && inst.config.trailDist != null))
             rememberManagement(r.ticket, { beTrigger: inst.config.beTrigger ?? 0, ladder: inst.config.ladder, trailActivate: inst.config.trailActivate, trailDist: inst.config.trailDist, riskDist });
           else continue; // aucune gestion custom définie → le défaut EST la gestion
-          await logNote(`🔧 management restored on ${DISPLAY} position ${r.ticket} (${r.ref.includes('-trend-') ? 'trend' : r.ref.includes('-swing-') ? 'swing' : r.ref.includes('-bk-') ? 'breakout' : 'scalp'} · risk ${riskDist.toFixed(2)}) — ${r.ref.includes('-trend-') ? 'daily channel stop only, tick management off' : 'stop ladder + trailing are live again'}`, 'order');
+          await logNote(`🔧 management restored on ${DISPLAY} position ${r.ticket} (${r.ref.includes('-trend-') ? 'trend' : r.ref.includes('-zone-') ? 'zone' : r.ref.includes('-swing-') ? 'swing' : r.ref.includes('-bk-') ? 'breakout' : 'scalp'} · risk ${riskDist.toFixed(2)}) — ${r.ref.includes('-trend-') ? 'daily channel stop only, tick management off' : r.ref.includes('-zone-') ? 'broker SL/TP only, tick management off' : 'stop ladder + trailing are live again'}`, 'order');
         }
       } catch (e) {
         console.error('[algoria] restauration gestion échec:', (e as { message?: string })?.message ?? e);
@@ -771,6 +845,8 @@ async function main() {
         if (!stale) {
           agg(p.bid, p.ask, Date.now());
           swingAgg?.(p.bid, p.ask, Date.now()); // agrégateur H1 de la couche swing
+          zoneM5Agg?.(p.bid, p.ask, Date.now()); // agrégateurs de la couche zone (M5 décision, H1 filtre)
+          zoneH1Agg?.(p.bid, p.ask, Date.now());
           feedM1((p.bid + p.ask) / 2, Date.now());
           broadcastTick(DISPLAY, p.bid, p.ask); // tick tagué symbole → le cockpit multi-symbole suit le marché choisi
         }

@@ -549,6 +549,13 @@ export async function listOpenTrendTrades(symbol: string): Promise<Array<{ ticke
   return (data ?? []).map((r: Record<string, unknown>) => ({ ticket: String(r.ticket), direction: r.direction === 'short' ? 'short' : 'long', entry: Number(r.entry) }));
 }
 
+/** Positions de ZONE (cassure de la veille + retest) ouvertes sur ce symbole — slot séparé (signal_ref *-zone-*),
+ *  relu en base à chaque retest : une position de zone à la fois, l'état survit aux redémarrages. */
+export async function listOpenZoneTrades(symbol: string): Promise<Array<{ ticket: string; direction: 'long' | 'short'; entry: number }>> {
+  const { data } = await db.from('trades').select('ticket,direction,entry').eq('symbol', symbol).eq('strategy' as never, STRAT_ID as never).is('closed_at', null).ilike('signal_ref', '%-zone-%');
+  return (data ?? []).map((r: Record<string, unknown>) => ({ ticket: String(r.ticket), direction: r.direction === 'short' ? 'short' : 'long', entry: Number(r.entry) }));
+}
+
 /**
  * Positions ENCORE OUVERTES en base, avec le stop D'ORIGINE du signal qui les a créées.
  *

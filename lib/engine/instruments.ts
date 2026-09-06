@@ -5,6 +5,7 @@ import { SCALP_CONFIG, type EngineConfig } from './config';
 import { GOLD_BREAKOUT, type BreakoutConfig } from './breakout';
 import { BTC_SWING, GOLD_SWING, type SwingConfig } from './swing';
 import { BTC_TREND, GOLD_TREND, type TrendConfig } from './trend';
+import { GOLD_ZONE, type ZoneConfig } from './zone';
 import { ACTIVE_STRATEGY as STRAT } from './strategies';
 import type { ContextOptions } from './context';
 
@@ -23,6 +24,11 @@ export interface InstrumentSpec {
   // validée hors échantillon sur 18 ans (voir lib/engine/trend.ts). OFF par défaut : TREND_<SYM>=1 l'active.
   // S'exécute même sur un instrument watchOnly (comme le swing), et quel que soit le profil de stratégie.
   trend?: TrendConfig;
+  // COUCHE « ZONE » (06/09/2026) : cassure du range de la veille + retest sur M5, SL/TP à l'ATR H1 tenus par le
+  // broker, aucun trailing. Règles de l'EA public blackXAU (variante sans trail), rejouées dans
+  // backtest/ea-arena.ts — voir lib/engine/zone.ts pour les chiffres, y compris ceux qui fâchent. OFF par
+  // défaut : ZONE_<SYM>=1 l'active. Tourne même sur un instrument watchOnly (comme le swing et la tendance).
+  zone?: ZoneConfig;
   // WATCH-ONLY : chart + desk + bougies + trades MANUELS, mais JAMAIS d'exécution auto INTRADAY (aucun edge validé).
   // Cas d'usage : BTC — le scalp y est interdit, mais la couche swing validée tourne.
   watchOnly?: boolean;
@@ -90,6 +96,9 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     // couches ci-dessus, pas une couche de plus : on l'allume sur un master dédié (TREND_XAUUSD=1) avec
     // SWING_XAUUSD=0, et on la mesure en R sur une saison avant d'y attacher un membre.
     trend: process.env.TREND_XAUUSD === '1' ? GOLD_TREND : undefined,
+    // 5ᵉ couche : ZONE de la veille (06/09/2026, décision Mathieu « go la connecter » après l'arène des EA).
+    // Opt-in explicite, pensé pour tourner AVEC SCALP_XAUUSD=0 et SWING_XAUUSD=0 : elle remplace, elle ne s'ajoute pas.
+    zone: process.env.ZONE_XAUUSD === '1' ? GOLD_ZONE : undefined,
   },
   // NAS100 RETIRÉ (produit) : Social Trade Hub ne copie pas l'indice et son sizing en lots est piégeux —
   // les pertes NAS n'apparaissaient QUE sur le compte maître, jamais chez les clients. Focus GOLD + BITCOIN.
