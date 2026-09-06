@@ -11,7 +11,10 @@
 //   · la même entrée avec une direction AU HASARD fait +44 810 $ : l'essentiel du gain, c'est l'or qui monte
 //     sur la période, pas la règle. La direction apporte ~+11 k$ sur 271 trades ;
 //   · depuis le 1er juin 2026 : 40 trades · +27 837 $ · PF 1,40 · creux −29 013 $. Trop peu de trades pour
-//     conclure. Un membre à 0,01 lot divise tout par 100 : le pire creux vaut −500 $ sur un compte à 200 $.
+//     conclure. Un membre à 0,01 lot divise tout par 100 : le pire creux vaut −500 $ sur un compte à 200 $ ;
+//   · la VERSION LIVE (ce fichier : EMA causale, entrée au marché — variante « L » de l'arène, 06/09) : 257 trades ·
+//     37 % · +76 768 $ · PF 1,22 · creux −27 506 $ · 12 mois verts sur 24 ; au hasard +15 522 $ (PF 1,04).
+//     Depuis juin 2026 : 41 trades · +27 604 $ · PF 1,39 · creux −23 511 $ ; au hasard +11 120 $.
 // Mathieu a vu ces chiffres et a décidé de la connecter (« Go la connecter »). Opt-in : ZONE_XAUUSD=1.
 //
 // RÈGLES (les mêmes que l'arène, sans en changer une) :

@@ -10,10 +10,12 @@ deux ans de nos bougies M5 dans `backtest/ea-arena.ts`, puis branchée dans le r
 |---|---|---|---|---|---|
 | sans trail, telle que l'EA | 271 | 35 % | +55 644 $ | 1,15 | −49 941 $ |
 | idem, direction au hasard | 259 | | +44 810 $ | 1,12 | −44 427 $ |
-| version live (EMA causale, entrée au marché) | voir le dernier run du labo | | | | |
+| **version live** (EMA causale, entrée au marché) = ce que le runner fait | 257 | 37 % | +76 768 $ | 1,22 | −27 506 $ |
+| version live, direction au hasard | 254 | 35 % | +15 522 $ | 1,04 | −42 278 $ |
 
-Depuis le 1er juin 2026 : 40 trades, +27 837 $, PF 1,40, creux −29 013 $. Trop peu de trades pour conclure.
-Le hasard fait 80 % du résultat sur deux ans : c'est l'or qui monte, la règle n'apporte qu'une dizaine de k$.
+Depuis le 1er juin 2026, version live : 41 trades, +27 604 $, PF 1,39, creux −23 511 $ ; au hasard +11 120 $.
+12 mois verts sur 24 ; pires mois −10 337 $ (nov. 2025) et −9 310 $ (août 2025) ; trois mois rouges d'affilée
+en été 2025 (−18,6 k$). Un membre à 0,01 lot divise tout par 100 : le pire creux vaut −275 $.
 Mathieu a vu ces chiffres et a décidé de la connecter.
 
 ## Règle
