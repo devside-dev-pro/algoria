@@ -73,7 +73,11 @@ function step(p: Pos, b: Bar, mgmt: Mgmt | null): Trade | null {
 }
 
 // ===== A. blackXAU — zone de la veille, cassure M5, retest, EMA H1, ATR H1 =====
-function runBlackXAU(opts: { tightTrail: boolean; randomDir: boolean; seed: number }): Trade[] {
+// `live` (06/09, après la mise en production de la règle dans lib/engine/zone.ts) : ce que le runner PEUT faire —
+//   · filtre EMA CAUSAL : l'EMA des H1 closes prolongée par la clôture M5 courante (la version d'origine lisait la
+//     clôture de l'heure ENTIÈRE qui contient la M5, soit jusqu'à 55 min d'avance) ;
+//   · entrée AU MARCHÉ sur la clôture de la M5 de retest, SL/TP mesurés depuis ce prix (l'original entrait au niveau).
+function runBlackXAU(opts: { tightTrail: boolean; randomDir: boolean; seed: number; live?: boolean }): Trade[] {
   const trades: Trade[] = []; let pos: Pos | null = null; let rnd = opts.seed;
   const rand = () => { rnd = (rnd * 1103515245 + 12345) & 0x7fffffff; return rnd / 0x7fffffff; };
   let waiting = false, dir: 1 | -1 = 1, bkTime = 0, zoneDay = -1, zh = 0, zl = 0;
@@ -104,12 +108,18 @@ function runBlackXAU(opts: { tightTrail: boolean; randomDir: boolean; seed: numb
     const touched = dir === 1 ? b.low <= level : b.high >= level;
     if (!touched || pos) continue;
     const h = h1IndexOfM5[i];
-    const emaOk = dir === 1 ? h1[h].close > ema50[h] && h1[h].close > ema200[h] : h1[h].close < ema50[h] && h1[h].close < ema200[h];
+    let emaOk: boolean;
+    if (opts.live) {
+      if (h < 1) continue;
+      const k50 = 2 / 51, k200 = 2 / 201;
+      const e50 = b.close * k50 + ema50[h - 1] * (1 - k50), e200 = b.close * k200 + ema200[h - 1] * (1 - k200);
+      emaOk = dir === 1 ? b.close > e50 && b.close > e200 : b.close < e50 && b.close < e200;
+    } else emaOk = dir === 1 ? h1[h].close > ema50[h] && h1[h].close > ema200[h] : h1[h].close < ema50[h] && h1[h].close < ema200[h];
     waiting = false;
     if (!emaOk || h < 1) continue;
     const atr = atrH1[h - 1]; if (!atr) continue;
     const useDir: 1 | -1 = opts.randomDir ? (rand() < 0.5 ? 1 : -1) : dir;
-    const entry = level;
+    const entry = opts.live ? b.close : level;
     pos = { dir: useDir, entry, sl: entry - useDir * 1.5 * atr, tp: entry + useDir * 3 * atr, sl0: entry - useDir * 1.5 * atr, openT: b.time, peakProfit: 0 };
     // la bougie de retest peut déjà toucher le stop/TP
     const t = step(pos, b, null); if (t) { trades.push(t); pos = null; }
@@ -173,6 +183,8 @@ const A = runBlackXAU({ tightTrail: true, randomDir: false, seed: 7 });
 const A2 = runBlackXAU({ tightTrail: false, randomDir: false, seed: 7 });
 const AZ = runBlackXAU({ tightTrail: true, randomDir: true, seed: 11 });
 const AZ2 = runBlackXAU({ tightTrail: false, randomDir: true, seed: 11 });
+const L = runBlackXAU({ tightTrail: false, randomDir: false, seed: 7, live: true });
+const LZ = runBlackXAU({ tightTrail: false, randomDir: true, seed: 11, live: true });
 const B = runGoldORB({ randomDir: false, seed: 7 });
 const BZ = runGoldORB({ randomDir: true, seed: 11 });
 console.log('\n── SYNTHÈSE (2 ans)');
@@ -180,11 +192,13 @@ summary('A  blackXAU tel quel (trail 1 $)', A);
 summary('A′ blackXAU sans trail (SL/TP)', A2);
 summary('Z  blackXAU direction au hasard', AZ);
 summary('Z′ idem sans trail', AZ2);
+summary('L  blackXAU sans trail, VERSION LIVE (EMA causale, entrée au marché)', L);
+summary('LZ idem direction au hasard', LZ);
 summary('B  GOLD_ORB tel quel', B);
 summary('Z  GOLD_ORB direction au hasard', BZ);
 console.log('\n── PAR MOIS (net $ pour 1 lot, nombre de trades)');
-byMonth('A  blackXAU', A); byMonth('A′ blackXAU sans trail', A2); byMonth('B  GOLD_ORB', B);
+byMonth('A  blackXAU', A); byMonth('A′ blackXAU sans trail', A2); byMonth('L  version live', L); byMonth('B  GOLD_ORB', B);
 const last3 = (ts: Trade[]) => ts.filter((t) => t.closeT >= Date.UTC(2026, 5, 1));
 console.log('\n── DEPUIS LE 1er JUIN 2026 (la période où notre moteur perd)');
-summary('A  blackXAU', last3(A)); summary('A′ blackXAU sans trail', last3(A2)); summary('B  GOLD_ORB', last3(B));
+summary('A  blackXAU', last3(A)); summary('A′ blackXAU sans trail', last3(A2)); summary('L  version live', last3(L)); summary('LZ live au hasard', last3(LZ)); summary('B  GOLD_ORB', last3(B));
 console.log('\nLecture : un EA qui ne bat pas sa version au hasard n’a pas de direction ; un EA vert seulement sur 2025 a surfé le bull run.');
