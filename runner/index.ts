@@ -933,6 +933,65 @@ async function main() {
   const primary = engines[0];
   console.log(`[algoria] ${engines.length} moteur(s) actif(s) · primaire=${primary.inst.display}`);
 
+  // ===== CHIEN DE GARDE DU FLUX DE PRIX (06/09/2026) =====
+  // Vécu le 06/09 à 16:06 UTC : l'abonnement MetaApi aux cotations s'est éteint en silence sur S2. Le process
+  // tournait (snapshots de compte chaque minute, auto-approbations Telegram), mais toute cotation était
+  // « périmée » (> 90 s) : plus une bougie, plus un signal, pendant 2 h 14, jusqu'à un redémarrage à la main.
+  // Le seul témoin était l'alerte « RUNNER SILENT » de l'admin, que Mathieu a dû voir lui-même — et S3, qui
+  // n'écrit pas de bougies, n'a pas de témoin du tout. D'où ce garde, sur les trois services :
+  //   · toutes les 60 s, on mesure l'âge de la cotation la plus fraîche parmi les instruments dont le marché
+  //     DOIT être ouvert : les 24/7 (BTC) toujours ; les autres hors week-end (ven 21h → dim 22h UTC) et hors
+  //     pause quotidienne (21h UTC) ;
+  //   · ≥ 10 min sans cotation → on se réabonne aux prix (une fois par 10 min), on le dit en note ;
+  //   · ≥ 20 min → on prévient Mathieu (DM + push) et on SORT avec le code 1 : Railway relance le process,
+  //     qui repart en warm boot en quelques secondes et reboucle l'historique manquant. Les positions ouvertes
+  //     ne risquent rien : leurs stops sont chez le broker, et la gestion est restaurée au redémarrage.
+  // Ce n'est pas un diagnostic — c'est un fusible. Sans cotation, ce runner ne sert à rien : autant repartir.
+  {
+    const RESUB_MIN = 10, EXIT_MIN = 20;
+    let lastResub = 0;
+    const marketShouldBeOpen = (inst: InstrumentSpec, now: Date): boolean => {
+      if (inst.ctx.h24) return true;
+      const d = now.getUTCDay(), h = now.getUTCHours();
+      if (d === 6) return false; // samedi
+      if (d === 5 && h >= 21) return false; // vendredi soir
+      if (d === 0 && h < 22) return false; // dimanche avant la réouverture
+      return h !== 21; // pause quotidienne
+    };
+    const feedWatchdog = async () => {
+      try {
+        const now = new Date();
+        const expected = engines.filter((e) => marketShouldBeOpen(e.inst, now));
+        if (!expected.length) return;
+        let freshest = 0;
+        for (const e of expected) {
+          const p = terminal.price(e.inst.broker);
+          const t = p?.time ? new Date(p.time).getTime() : 0;
+          if (Number.isFinite(t)) freshest = Math.max(freshest, t);
+        }
+        if (!freshest) freshest = startedAt; // jamais coté depuis le boot : on compte depuis le démarrage
+        const staleMin = (Date.now() - freshest) / 60_000;
+        if (staleMin < RESUB_MIN) return;
+        const syms = expected.map((e) => e.inst.display).join('+');
+        if (staleMin >= EXIT_MIN) {
+          console.error(`[algoria] FEED DEAD — ${syms} sans cotation depuis ${staleMin.toFixed(0)} min malgré le réabonnement → sortie, Railway relance`);
+          await logNote(`🔌 feed dead — no ${syms} quote for ${staleMin.toFixed(0)} min despite re-subscribing · restarting the runner (open positions keep their broker stops)`, 'veto').catch(() => {});
+          await notifyOwner({ title: `🔌 ${VIP_TAG} runner: price feed dead ${staleMin.toFixed(0)} min — auto-restart`, lines: [`${syms} had no quote since ${new Date(freshest).toISOString().slice(11, 16)} UTC`, 'Re-subscribe did not help. Exiting so Railway restarts the process.'], tag: 'feed-dead' }).catch(() => {});
+          setTimeout(() => process.exit(1), 1500); // laisse partir la note et le DM
+          return;
+        }
+        if (Date.now() - lastResub < RESUB_MIN * 60_000) return;
+        lastResub = Date.now();
+        console.warn(`[algoria] FEED STALE — ${syms} sans cotation depuis ${staleMin.toFixed(0)} min → réabonnement aux prix`);
+        for (const e of engines) await stream.subscribeToMarketData(e.inst.broker).catch((err: unknown) => console.error(`[algoria] réabonnement ${e.inst.display} échoué:`, err));
+        await logNote(`🔌 feed stale — no ${syms} quote for ${staleMin.toFixed(0)} min · re-subscribed to market data (restart in ${EXIT_MIN} min if it stays silent)`, 'veto').catch(() => {});
+      } catch (e) {
+        console.error('[algoria] feed watchdog échoué:', e);
+      }
+    };
+    setInterval(() => void feedWatchdog(), 60_000);
+  }
+
   // Diagnostic STRATÉGIE au boot — chaque runner/master tourne UN profil (env ALGORIA_STRATEGY, défaut S2).
   {
     console.log(`[algoria] strategy: ${ACTIVE_STRATEGY.label} · intraday ${ACTIVE_STRATEGY.intraday ?? 'scalp'}${ACTIVE_STRATEGY.intraday === 'breakout' ? ` N${ACTIVE_STRATEGY.breakoutN ?? 96}` : ` thr ${ACTIVE_STRATEGY.thresholdScalp} · RR ${ACTIVE_STRATEGY.targetRR}`} · asia ${ACTIVE_STRATEGY.tradeAsia ? 'on' : 'OFF'} · caps +${ACTIVE_STRATEGY.dailyProfitTargetPct * 100}%/−${ACTIVE_STRATEGY.maxDailyLossPct * 100}% · swing ${ACTIVE_STRATEGY.swing ? 'on' : 'off'} · breakout ${ACTIVE_STRATEGY.breakout ? 'on' : 'off'}`);
