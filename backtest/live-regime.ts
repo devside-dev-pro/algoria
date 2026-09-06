@@ -28,7 +28,8 @@ const barsPath = `backtest/.cache/${sym}-D1-15.json`;
 const tradesPath = 'backtest/fixtures/live-trades.json';
 for (const f of [barsPath, tradesPath]) if (!existsSync(f)) { console.error(`${f} absent`); process.exit(1); }
 const bars = (JSON.parse(readFileSync(barsPath, 'utf8')) as Bar[]).sort((a, b) => a.time - b.time);
-const all = JSON.parse(readFileSync(tradesPath, 'utf8')) as LiveTrade[];
+const parsed = JSON.parse(readFileSync(tradesPath, 'utf8')) as LiveTrade[] | { rows: LiveTrade[] };
+const all: LiveTrade[] = Array.isArray(parsed) ? parsed : parsed.rows;
 const trades = all.filter((t) => t.symbol === sym && strategies.includes(Number(t.strategy)) && t.closedAt >= since && t.pnl != null && t.openedAt);
 if (!trades.length) { console.error('aucun trade à juger'); process.exit(1); }
 
