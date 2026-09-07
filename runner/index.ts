@@ -942,13 +942,19 @@ async function main() {
   //   · toutes les 60 s, on mesure l'âge de la cotation la plus fraîche parmi les instruments dont le marché
   //     DOIT être ouvert : les 24/7 (BTC) toujours ; les autres hors week-end (ven 21h → dim 22h UTC) et hors
   //     pause quotidienne (21h UTC) ;
-  //   · ≥ 10 min sans cotation → on se réabonne aux prix (une fois par 10 min), on le dit en note ;
-  //   · ≥ 20 min → on prévient Mathieu (DM + push) et on SORT avec le code 1 : Railway relance le process,
+  //   · ≥ 10 min sans cotation → on se réabonne aux prix, on le dit en note ;
+  //   · si le flux retombe en panne dans les 30 min qui suivent un réabonnement, OU s'il reste muet 20 min
+  //     malgré lui → on prévient Mathieu (DM + push) et on SORT avec le code 1 : Railway relance le process,
   //     qui repart en warm boot en quelques secondes et reboucle l'historique manquant. Les positions ouvertes
   //     ne risquent rien : leurs stops sont chez le broker, et la gestion est restaurée au redémarrage.
   // Ce n'est pas un diagnostic — c'est un fusible. Sans cotation, ce runner ne sert à rien : autant repartir.
+  //
+  // POURQUOI LA RÈGLE « RECHUTE » (07/09/2026) : la première version ne comptait que les minutes de silence.
+  // Or un réabonnement fait toujours arriver UNE cotation fraîche — le compteur repartait de zéro, le flux
+  // remourait 2 à 3 min plus tard, et le garde se réabonnait toutes les 11 min de 09:54 à 13:32 sans jamais
+  // redémarrer : 16 bougies par heure au lieu de 60, toute la séance du lundi, jusqu'à un restart à la main.
   {
-    const RESUB_MIN = 10, EXIT_MIN = 20;
+    const RESUB_MIN = 10, EXIT_MIN = 20, RELAPSE_MIN = 30;
     let lastResub = 0;
     const marketShouldBeOpen = (inst: InstrumentSpec, now: Date): boolean => {
       if (inst.ctx.h24) return true;
@@ -973,10 +979,12 @@ async function main() {
         const staleMin = (Date.now() - freshest) / 60_000;
         if (staleMin < RESUB_MIN) return;
         const syms = expected.map((e) => e.inst.display).join('+');
-        if (staleMin >= EXIT_MIN) {
-          console.error(`[algoria] FEED DEAD — ${syms} sans cotation depuis ${staleMin.toFixed(0)} min malgré le réabonnement → sortie, Railway relance`);
-          await logNote(`🔌 feed dead — no ${syms} quote for ${staleMin.toFixed(0)} min despite re-subscribing · restarting the runner (open positions keep their broker stops)`, 'veto').catch(() => {});
-          await notifyOwner({ title: `🔌 ${VIP_TAG} runner: price feed dead ${staleMin.toFixed(0)} min — auto-restart`, lines: [`${syms} had no quote since ${new Date(freshest).toISOString().slice(11, 16)} UTC`, 'Re-subscribe did not help. Exiting so Railway restarts the process.'], tag: 'feed-dead' }).catch(() => {});
+        const relapse = lastResub > 0 && Date.now() - lastResub < RELAPSE_MIN * 60_000; // rechute après un réabonnement récent
+        if (staleMin >= EXIT_MIN || relapse) {
+          const why = relapse ? `feed died again ${((Date.now() - lastResub) / 60_000).toFixed(0)} min after re-subscribing` : `no quote for ${staleMin.toFixed(0)} min despite re-subscribing`;
+          console.error(`[algoria] FEED DEAD — ${syms} : ${why} → sortie, Railway relance`);
+          await logNote(`🔌 feed dead — ${syms}: ${why} · restarting the runner (open positions keep their broker stops)`, 'veto').catch(() => {});
+          await notifyOwner({ title: `🔌 ${VIP_TAG} runner: price feed dead — auto-restart`, lines: [`${syms}: ${why}`, `last quote ${new Date(freshest).toISOString().slice(11, 16)} UTC`, 'Exiting so Railway restarts the process.'], tag: 'feed-dead' }).catch(() => {});
           setTimeout(() => process.exit(1), 1500); // laisse partir la note et le DM
           return;
         }
