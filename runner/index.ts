@@ -982,9 +982,25 @@ async function main() {
         const relapse = lastResub > 0 && Date.now() - lastResub < RELAPSE_MIN * 60_000; // rechute après un réabonnement récent
         if (staleMin >= EXIT_MIN || relapse) {
           const why = relapse ? `feed died again ${((Date.now() - lastResub) / 60_000).toFixed(0)} min after re-subscribing` : `no quote for ${staleMin.toFixed(0)} min despite re-subscribing`;
-          console.error(`[algoria] FEED DEAD — ${syms} : ${why} → sortie, Railway relance`);
-          await logNote(`🔌 feed dead — ${syms}: ${why} · restarting the runner (open positions keep their broker stops)`, 'veto').catch(() => {});
-          await notifyOwner({ title: `🔌 ${VIP_TAG} runner: price feed dead — auto-restart`, lines: [`${syms}: ${why}`, `last quote ${new Date(freshest).toISOString().slice(11, 16)} UTC`, 'Exiting so Railway restarts the process.'], tag: 'feed-dead' }).catch(() => {});
+          // REDEPLOY METAAPI AUTOMATIQUE (07/09/2026, décision Mathieu « oui pour les 3 »). Le 07/09, huit heures
+          // aveugles sur S2 : une réplique MetaApi morte, l'autre incapable de finir sa synchronisation, et deux
+          // redémarrages Railway plus un redéploiement du code n'y ont rien fait. Ce qui a marché : le bouton
+          // Undeploy/Redeploy du tableau de bord MetaApi, qui recrée le terminal côté MetaApi. Le runner a le
+          // jeton : il le presse lui-même, puis sort pour se reconnecter au terminal neuf.
+          // Garde-fous : jamais si le compte n'est pas en état DEPLOYED (un redéploiement est déjà en cours), et
+          // jamais dans la première heure du process (on vient peut-être de le faire — pas de boucle de
+          // redéploiements toutes les 30 min si MetaApi est vraiment en panne : on se contente de repartir).
+          let redeployed = false;
+          if (Date.now() - startedAt >= 60 * 60_000) {
+            try {
+              await account.reload();
+              if (account.state === 'DEPLOYED') { await account.redeploy(); redeployed = true; }
+              else console.warn(`[algoria] feed watchdog : compte MetaApi en état ${account.state}, pas de redeploy`);
+            } catch (e) { console.error('[algoria] redeploy MetaApi échoué:', (e as { message?: string })?.message ?? e); }
+          }
+          console.error(`[algoria] FEED DEAD — ${syms} : ${why} → ${redeployed ? 'redeploy MetaApi demandé, ' : ''}sortie, Railway relance`);
+          await logNote(`🔌 feed dead — ${syms}: ${why} · ${redeployed ? 'MetaApi account redeploy requested · ' : ''}restarting the runner (open positions keep their broker stops)`, 'veto').catch(() => {});
+          await notifyOwner({ title: `🔌 ${VIP_TAG} runner: price feed dead — ${redeployed ? 'MetaApi redeploy + restart' : 'auto-restart'}`, lines: [`${syms}: ${why}`, `last quote ${new Date(freshest).toISOString().slice(11, 16)} UTC`, redeployed ? 'MetaApi account redeploy requested (like the dashboard button). Exiting so Railway restarts the process onto the new terminal.' : 'Exiting so Railway restarts the process.'], tag: 'feed-dead' }).catch(() => {});
           setTimeout(() => process.exit(1), 1500); // laisse partir la note et le DM
           return;
         }

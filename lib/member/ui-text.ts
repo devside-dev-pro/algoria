@@ -88,6 +88,18 @@ export const UI: Dict = {
 
   // ===== wizard : étapes 2 (connexion MT) et 3 (stratégie) =====
   'ob.other': { en: 'I\'d rather use another broker', it: 'Preferisco usare un altro broker' },
+  // ARRÊT AVANT LE FORMULAIRE POUR UN BROKER HORS PARTENAIRES (07/09/2026, décision Mathieu). Sur 41 demandes
+  // de connexion en deux semaines, 26 refusées, presque toutes « compte non ouvert via le lien » : des
+  // identifiants saisis pour rien, des jours perdus, et l'examen à la main pour Mathieu. On le dit AVANT.
+  'ob.other.stopTitle': { en: 'An account at a non-partner broker is refused at review.', it: 'Un conto presso un broker non partner viene rifiutato alla verifica.' },
+  'ob.other.stopBody': {
+    en: 'Algoria is free for you because the partner broker pays us on your trading volume. An account at another broker brings nothing to the broker, so it is not accepted — 26 of the last 41 requests were refused for exactly this. Two ways in:',
+    it: 'Algoria è gratuita per te perché il broker partner ci paga sul tuo volume di trading. Un conto presso un altro broker non porta nulla al broker, quindi non viene accettato — 26 delle ultime 41 richieste sono state rifiutate proprio per questo. Due strade:',
+  },
+  'ob.other.stopNew': { en: '① Open a new account with a partner broker through the link (10 minutes)', it: '① Apri un nuovo conto con un broker partner tramite il link (10 minuti)' },
+  'ob.other.stopAsk': { en: '② Residents of some countries can pay for access directly and keep their broker — ask Mathieu first', it: '② I residenti di alcuni paesi possono pagare l’accesso direttamente e tenere il proprio broker — chiedi prima a Mathieu' },
+  'ob.other.ackDirect': { en: 'Mathieu confirmed I can keep this broker (direct access)', it: 'Mathieu ha confermato che posso tenere questo broker (accesso diretto)' },
+  'ob.miss.directAccess': { en: 'Mathieu’s confirmation for a non-partner broker', it: 'la conferma di Mathieu per un broker non partner' },
   'ob.othersLabel': { en: 'OTHER PARTNER BROKERS — SAME MINIMUMS', it: 'ALTRI BROKER PARTNER — STESSI MINIMI' },
   'ob.selected': { en: '✓ selected', it: '✓ scelto' },
   'ob.openAccount': { en: 'open account ↗', it: 'apri conto ↗' },

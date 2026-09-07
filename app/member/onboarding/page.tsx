@@ -129,6 +129,7 @@ export default function Onboarding() {
   const [ackLink, setAckLink] = useState(false);
   const [ackFunded, setAckFunded] = useState(false);
   const [ackLots, setAckLots] = useState(false); // lot d'activation déclaré — jamais bloquant (voir le bloc)
+  const [ackDirect, setAckDirect] = useState(false); // broker hors partenaires : Mathieu a confirmé l'accès direct (payant) — sinon refus certain
   // PRÉ-REMPLISSAGE (03/09) : un membre qui revient (refus, ou wizard laissé à l'étape 2) retrouve tout
   // sauf son mot de passe. Avant, le formulaire se refermait derrière un refus (origine remise à zéro) et
   // il fallait re-répondre « d'où vient ce compte ? » puis tout re-saisir — audit §2.6.
@@ -201,6 +202,9 @@ export default function Onboarding() {
   const mt5Missing: string[] = [];
   if (!picked) mt5Missing.push(t('ob.miss.broker'));
   else if (picked === 'other' && brokerOther.trim().length < 2) mt5Missing.push(t('ob.miss.brokerName'));
+  // BROKER HORS PARTENAIRES : refus certain à l'examen sauf accès direct confirmé par Mathieu (07/09/2026).
+  // On bloque le formulaire plutôt que de laisser saisir des identifiants pour rien — voir le panneau d'arrêt.
+  if (picked === 'other' && !ackDirect) mt5Missing.push(t('ob.miss.directAccess'));
   if (!login) mt5Missing.push(t('ob.miss.login'));
   if (!server) mt5Missing.push(t('ob.miss.server'));
   else if (demoServer) mt5Missing.push(t('ob.miss.demo')); // le bloc rouge dédié le détaille déjà au-dessus
@@ -422,7 +426,20 @@ export default function Onboarding() {
             {/* BROKER HORS PARTENAIRES : on n'a ni lien ni liste de serveurs pour lui — le membre écrit le
                 nom, et le support fait la connexion au copieur à la main (le nom exact du serveur MT ne
                 s'invente pas, et une faute de frappe bloquerait la copie sans message clair). */}
+            {/* ARRÊT AVANT LE FORMULAIRE (07/09/2026, décision Mathieu). 26 refus sur 41 demandes en deux
+                semaines, presque tous « compte non ouvert via le lien » : on le dit ici, avant les
+                identifiants, avec les deux seules issues. Le formulaire ne s'ouvre que si Mathieu a
+                confirmé l'accès direct (résidents de certains pays) — sinon c'est un refus certain. */}
             {picked === 'other' && (
+              <div className="cardIn" style={{ border: '1px solid rgba(255,107,107,.5)', background: 'rgba(255,107,107,.07)', borderRadius: 12, padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}><b>{t('ob.other.stopTitle')}</b></div>
+                <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--muted)' }}>{t('ob.other.stopBody')}</div>
+                <button onClick={() => { setOrigin(null); setStep(0); }} style={{ ...ctaGold, border: 'none', cursor: 'pointer', textAlign: 'left' }}>{t('ob.other.stopNew')}</button>
+                <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--muted)', textDecoration: 'underline' }}>{t('ob.other.stopAsk')}</a>
+                <Check checked={ackDirect} onToggle={() => setAckDirect((v) => !v)}>{t('ob.other.ackDirect')}</Check>
+              </div>
+            )}
+            {picked === 'other' && ackDirect && (
               <label style={lbl}>Broker name
                 <input value={brokerOther} onChange={(e) => setBrokerOther(e.target.value)} placeholder="e.g. IC Markets" style={inp} />
                 <span style={hint}>We&rsquo;ll connect your account by hand — someone will confirm within a few hours.</span>
