@@ -168,6 +168,10 @@ def main() -> int:
     a = ap.parse_args()
     markets = [a.market] if a.market else [m.strip() for m in (env("DESK_MARKETS", "XAUUSD,BTCUSD") or "").split(",") if m.strip()]
     trade_date = a.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # DESK_DRY_RUN=1 (variable Railway) vaut --dry-run : un redéploiement relit les variables mais garde l'ancienne
+    # commande de démarrage, donc le mode se pilote par variable, sans nouveau build.
+    if env("DESK_DRY_RUN") == "1":
+        a.dry_run = True
     if not a.dry_run and not env("ANTHROPIC_API_KEY"):
         print("[desk] ANTHROPIC_API_KEY manquante", file=sys.stderr)
         return 2
