@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
+import { TRACK_SINCE_MS } from '@/lib/member/trackSince';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,7 @@ export async function GET() {
   ]);
   const rafale = new Set((signalsQ.data ?? []).filter((x) => JSON.stringify(x.rationale ?? '').includes('RAFALE') || JSON.stringify(x.rationale ?? '').includes('ACTION mode')).map((x) => String(x.ticket)));
   const wins = (tradesQ.data ?? [])
-    .filter((t) => Number(t.pnl) >= 5 && String(t.symbol) !== 'NAS100' && !isShowTrade(t, rafale))
+    .filter((t) => Number(t.pnl) >= 5 && String(t.symbol) !== 'NAS100' && !isShowTrade(t, rafale) && Date.parse(String(t.closed_at)) >= TRACK_SINCE_MS)
     .map((t) => ({ symbol: String(t.symbol), direction: String(t.direction), pnl: Math.round(Number(t.pnl)), closed_at: t.closed_at as string }));
   const dayStart = brokerDayStartMs();
   const today = wins.filter((t) => Date.parse(t.closed_at) >= dayStart);

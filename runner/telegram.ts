@@ -5,7 +5,12 @@
 import { ACTIVE_STRATEGY } from '../lib/engine/strategies';
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
-const VIP = process.env.TELEGRAM_VIP_CHAT ?? '';
+// SILENCE DU CANAL (09/09/2026, décision Mathieu, bloc A) : VIP_SILENT=1 sur Railway coupe TOUS les posts
+// automatiques (wraps du soir, cartes de trade, setups, journée bouclée) sans toucher au reste du runner.
+// Un canal qui n'a que du rouge à publier ne doit rien publier. Le bouton LIVE ALERT de l'admin (Vercel) reste
+// le seul canal de publication, à la main. Défaut : inchangé.
+const SILENT = process.env.VIP_SILENT === '1';
+const VIP = SILENT ? '' : (process.env.TELEGRAM_VIP_CHAT ?? '');
 
 /** Le canal VIP est-il configuré ? (sinon tous les posts sont des no-op silencieux). */
 export const vipReady = (): boolean => Boolean(TOKEN && VIP);

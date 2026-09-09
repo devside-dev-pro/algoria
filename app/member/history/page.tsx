@@ -22,11 +22,13 @@ export default function MemberHistory() {
   const [view, setView] = useState<number | null>(null);
   const [mine, setMine] = useState<number | null>(null);
   const [stats, setStats] = useState<Array<{ id: number; trades: number; wins: number; net: number }>>([]);
+  const [trackSince, setTrackSince] = useState<string | null>(null); // départ du track record visible (lib/member/trackSince.ts)
   useEffect(() => {
     void fetch(`/api/member/feed${view ? `?strategy=${view}` : ''}`).then(async (r) => {
       if (!r.ok) return;
-      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; strategyStats?: Array<{ id: number; trades: number; wins: number; net: number }>; memberStrategy?: number; viewStrategy?: number };
+      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; strategyStats?: Array<{ id: number; trades: number; wins: number; net: number }>; memberStrategy?: number; viewStrategy?: number; trackSince?: string };
       setTrades(d.trades);
+      if (d.trackSince) setTrackSince(d.trackSince);
       if (d.clientLot) setClientLot(d.clientLot);
       setStats(d.strategyStats ?? []);
       if (d.memberStrategy) setMine(d.memberStrategy);
@@ -123,6 +125,17 @@ export default function MemberHistory() {
 
       {/* prospect : le serveur n'envoie que les gains → on l'ASSUME (highlight reel) au lieu d'afficher
           un win rate 100% qui sentirait le faux. L'historique complet arrive avec l'accès. */}
+      {/* PAGE BLANCHE DATÉE (09/09/2026, bloc A) : tant que le départ du track record visible a moins de 30 jours,
+          on dit pourquoi l'historique est court ou vide — un moteur qui repart, une date, pas un trou. */}
+      {trackSince && Date.now() - Date.parse(trackSince) < 30 * 86_400_000 && (
+        <section className="panel" style={{ padding: '13px 15px', border: '1px solid rgba(245,194,74,.45)', background: 'rgba(245,194,74,.06)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>NEW CHAPTER · SINCE {new Date(trackSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase()}</span>
+          <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)' }}>
+            The trading engine is being rebuilt and the track record restarts from this date. Nothing is hidden from members who were copying before — ask Mathieu for your own statement anytime.
+          </p>
+        </section>
+      )}
+
       {unlocked ? (
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* MÊME FENÊTRE QUE LE SÉLECTEUR — 7 jours, écrit noir sur blanc. Ces trois chiffres reprennent
@@ -136,7 +149,7 @@ export default function MemberHistory() {
             <Stat label="NET (YOUR SIZE)" value={trades.length ? fmtYou(trades.reduce((a, t) => a + you(t), 0)) : '—'} gold={trades.reduce((a, t) => a + you(t), 0) > 0} color={trades.reduce((a, t) => a + you(t), 0) > 0 ? undefined : 'var(--muted)'} />
           </div>
           <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
-            Algoria trades a <b style={{ color: 'var(--muted)' }}>$70k master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b> (master in small).
+            Algoria trades a <b style={{ color: 'var(--muted)' }}>master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b> (master in small).
           </p>
         </section>
       ) : (
