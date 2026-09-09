@@ -1,0 +1,5 @@
+# ALGORIA DESK — le framework TradingAgents (TauricResearch), épinglé sur un commit précis (v0.4.0, 06/09/2026).
+# On ne copie pas le dépôt : on l'installe. Monter de version = changer ce hash, relire le CHANGELOG, relancer
+# cinq analyses et les lire avant de déployer.
+tradingagents @ git+https://github.com/TauricResearch/TradingAgents@be952b8eccb49720509af544c6675233bc1f10d0
+requests>=2.32
