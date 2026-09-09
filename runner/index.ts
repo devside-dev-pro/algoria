@@ -1221,14 +1221,14 @@ async function main() {
       switch (touch) {
         case 1: return { dm: `Ciao, sono Mathieu 👋\nTi sei iscritto ad Algoria due giorni fa e non ho ancora tue notizie. Qualsiasi domanda, anche piccola: scrivimi direttamente, rispondo io a tutti.\n\n— Mathieu`, title: '👋 Mathieu ti ha scritto', body: 'Qualsiasi domanda, scrivimi direttamente — rispondo io.' };
         case 2: return { dm: `È passata una settimana 🙂 Nessuna pressione.\nSe è il broker o il deposito a frenarti, dimmelo: ti accompagno io in 5 minuti, dal vivo.\n\n— Mathieu`, title: '🙂 Una settimana dopo', body: 'Se qualcosa ti frena, dimmelo — ti accompagno io in 5 minuti.' };
-        case 3: return { dm: `Due settimane. Tengo il canale aperto per te: quello che cambio, quello che funziona, in pubblico.\nQuando sarà il momento giusto per te, sono a un messaggio di distanza.\n\n— Mathieu`, title: '📢 Il canale resta aperto per te', body: 'Quando sarà il momento giusto, sono a un messaggio di distanza.' };
+        case 3: return { dm: `Due settimane. Il canale resta aperto per te: ogni giorno ci trovi cosa succede, in pubblico.\nQuando sarà il momento giusto per te, sono a un messaggio di distanza.\n\n— Mathieu`, title: '📢 Il canale resta aperto per te', body: 'Quando sarà il momento giusto, sono a un messaggio di distanza.' };
         default: return { dm: `Ultimo messaggio da parte mia su questo 🤝\nIl tuo codice ALGORIA100 (100 % di bonus sul deposito da RaiseFX) resta valido per te, e la mia porta resta aperta. Il giorno in cui vorrai iniziare, scrivimi semplicemente « pronto ».\n\n— Mathieu`, title: '🤝 Ultimo messaggio — ALGORIA100 resta tuo', body: 'Il codice resta valido, la porta resta aperta. Scrivimi « pronto » quando vuoi.' };
       }
     }
     switch (touch) {
       case 1: return { dm: `Hey, Mathieu here 👋\nYou joined Algoria two days ago and I haven't heard from you yet. Any question, even a small one — write to me directly, I answer everyone myself.\n\n— Mathieu`, title: '👋 Mathieu wrote to you', body: 'Any question — write to me directly, I answer everyone myself.' };
       case 2: return { dm: `It's been a week 🙂 No pressure.\nIf the broker step or the deposit is what's holding you, tell me — I'll walk you through it in 5 minutes, live.\n\n— Mathieu`, title: '🙂 One week in', body: 'If something is holding you back, tell me — 5 minutes, live.' };
-      case 3: return { dm: `Two weeks in. I keep the channel open for you: what I'm changing, what's working, in public.\nWhen your timing is right, I'm one message away.\n\n— Mathieu`, title: '📢 The channel stays open for you', body: 'When your timing is right, I’m one message away.' };
+      case 3: return { dm: `Two weeks in. The channel stays open for you: every day, what's happening, in public.\nWhen your timing is right, I'm one message away.\n\n— Mathieu`, title: '📢 The channel stays open for you', body: 'When your timing is right, I’m one message away.' };
       default: return { dm: `Last message from me on this 🤝\nYour code ALGORIA100 (100% deposit bonus at RaiseFX) stays valid for you, and my door stays open. The day you want to start, just write me "ready".\n\n— Mathieu`, title: '🤝 Last message — ALGORIA100 stays yours', body: 'The code stays valid, the door stays open. Write me "ready" whenever.' };
     }
   };
