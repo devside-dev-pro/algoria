@@ -20,3 +20,7 @@ build
 
 # backtest data cache
 backtest/.cache/
+
+# python (desk/)
+__pycache__/
+*.pyc
