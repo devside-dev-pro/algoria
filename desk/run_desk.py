@@ -162,8 +162,9 @@ def make_brief(market: str, rating: str, decision: str, reports: list[dict]) -> 
     keys = ", ".join(r["agent"] for r in reports) or "none"
     try:
         client = anthropic.Anthropic()
+        # pas de temperature : les modèles Claude 5 la refusent, et le SDK 1.x n'a plus l'argument
         msg = client.messages.create(
-            model=model, max_tokens=1500, temperature=0.3,
+            model=model, max_tokens=1500,
             system=BRIEF_SYSTEM + "\nAgent keys present today (use only these): " + keys,
             messages=[{"role": "user", "content": "\n".join(parts)}],
         )
