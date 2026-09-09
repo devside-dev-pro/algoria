@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   // les 30 dernières analyses publiées (jamais les passages à blanc) : la première est celle du jour
   const { data: runs } = await db
     .from('desk_runs')
-    .select('id,market,run_date,rating,price,summary,decision_md,lang,duration_s,agents,price_1d,price_3d,price_7d,created_at')
+    .select('id,market,run_date,rating,price,summary,decision_md,brief,lang,duration_s,agents,price_1d,price_3d,price_7d,created_at')
     .eq('market', market).eq('published', true).eq('dry_run', false)
     .order('run_date', { ascending: false }).limit(30);
   const list = (runs ?? []) as Array<Record<string, unknown>>;
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     ? (((await db.from('desk_reports').select('agent,team,content_md').eq('run_id', run.id)).data ?? []) as Array<{ agent: string; team: string; content_md: string }>)
     : [];
   // l'historique ne porte pas les verdicts complets (lourds) : date, note, prix, et le prix à 1/3/7 jours
-  const history = list.map(({ decision_md: _d, summary: _s, agents: _a, ...rest }) => rest);
+  const history = list.map(({ decision_md: _d, summary: _s, agents: _a, brief: _b, ...rest }) => rest);
   const res = NextResponse.json({ market, run, reports, history });
   res.headers.set('Cache-Control', 'private, max-age=60');
   return res;
