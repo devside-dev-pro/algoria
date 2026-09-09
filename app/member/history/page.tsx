@@ -131,7 +131,7 @@ export default function MemberHistory() {
         <section className="panel" style={{ padding: '13px 15px', border: '1px solid rgba(245,194,74,.45)', background: 'rgba(245,194,74,.06)', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>NEW CHAPTER · SINCE {new Date(trackSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase()}</span>
           <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)' }}>
-            The trading engine is being rebuilt and the track record restarts from this date. Nothing is hidden from members who were copying before — ask Mathieu for your own statement anytime.
+            A new chapter starts here: the track record restarts from this date. Members who were copying before can ask Mathieu for their own statement anytime.
           </p>
         </section>
       )}
