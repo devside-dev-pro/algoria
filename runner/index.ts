@@ -33,7 +33,7 @@ import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
-import { ctaKeyboard } from '../lib/member/i18n';
+import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
 
@@ -1211,50 +1211,26 @@ async function main() {
   // ===== RECAP HORAIRE du desk : à chaque heure pleine, une carte "SESSION RECAP" (stats réelles du jour,
   // hors BEAST) + une clause IA d'ambiance. Rythme le stream et rappelle le track record sans intervention. =====
   // ===== MACHINE D'ACTIVATION (relance auto onboarding) — le levier n°1 : 84% des inscrits ne financent jamais.
-  // SÉQUENCE MULTI-TOUCH adaptée à (étape, ancienneté) au lieu d'un ping unique répété. Le vocal perso de
-  // Mathieu reste l'arme ultime (file RELANCES admin) ; ceci touche automatiquement toute la longue traîne.
-  // Étape 0 = mur du dépôt (broker + $500) → réchauffer par la PREUVE (vidéo académie) + réassurance.
-  // Étape 1 = connexion MT5 → « tu y es presque, un pas ». Chaque jour à 10h UTC, dédup 3 j, cap 20/j.
-  const ACADEMY = 'app.algoria.tech/academy';
-  // Séquence par ancienneté (bucket) × étape. Touche 1 douce → preuve → adresse le mur → perso → dernier appel.
-  const nudgeMessage = (step: number, days: number): { dm: string; title: string; body: string } => {
-    const s0 = step <= 0; // pas encore commencé (mur du dépôt) vs étape 1 (connexion MT5)
-    if (days <= 2)
-      return s0
-        ? { dm: `Hey — welcome to Algoria 👋\nBefore anything, watch this 2-min video from the founder — it shows exactly what you just joined and how it works:\n\n🎥 ${ACADEMY}\n\nNo rush. When you're ready, your AI is waiting.`, title: '🎥 Start here — 2 min from the founder', body: 'See what Algoria is and how it trades for you. Watch the welcome video.' }
-        : { dm: `You're literally one step from live 🚀 — just connect your MT5 and Algoria starts trading for you.\n\n👉 app.algoria.tech/member/onboarding\n\nStuck? Message @mathieu_algoria, he'll walk you through it in 2 min.`, title: '🚀 One step from live', body: 'Connect your MT5 and the AI takes over. Need a hand? We got you.' };
-    if (days <= 5)
-      return { dm: `Quick proof while you decide 👇\nAlgoria runs 3 strategies live every day — wins, stops and the daily wrap are all posted transparently. This is the engine that would be copying to YOUR account.\n\n🎥 See how it works: ${ACADEMY}\n\nWhenever you're ready.`, title: '📊 Real trades, every day', body: '3 strategies working live. See the proof, then decide.' };
-    // J+6+ : les bloqués du MUR DU DÉPÔT (s0) reçoivent l'ARME DE CLOSING — le code ALGORIA100
-    // (100% de bonus de dépôt RaiseFX, confirmé cumulable avec notre lien IB). Cadré « exclusif,
-    // pas public » + toujours « double ta puissance de trading » (crédit broker), JAMAIS « double
-    // ton argent » (le bonus n'est pas du cash retirable). Étape 1 (s1) : déjà déposé → pas de code,
-    // ce serait de la confusion pure.
-    if (days <= 9)
-      return s0
-        ? { dm: `The only thing left is opening your broker account and a starting deposit — that's the part people overthink 🙂\n\nSo here's something I don't hand out publicly 🎁 Use the code ALGORIA100 when you fund your RaiseFX account and the broker adds 100% of your deposit in trading credit. Deposit $300 → the AI trades with $600 of buying power.\n\nAnd remember:\n• You can start from just $200 (STEADY strategy)\n• YOUR deposit stays yours — withdraw it anytime\n• Risk is capped every single day\n\n👉 app.algoria.tech/member/onboarding\nWant me to walk you through it live? → @mathieu_algoria`, title: '🎁 Exclusive code: ALGORIA100', body: '100% deposit bonus at RaiseFX — double your trading power. Not public, use it while it lasts.' }
-        : { dm: `You're SO close — the MT5 connection is the final step and it takes 60 seconds.\n👉 app.algoria.tech/member/onboarding\n\nIf the broker step is tripping you up, message @mathieu_algoria — he does this all day.`, title: '⏱️ 60 seconds to live', body: 'Just the MT5 connection left. Need help? Message Mathieu.' };
-    if (days <= 14)
-      return s0
-        ? { dm: `Hey, it's worth 2 minutes of your time 🙂\nIf anything held you back — the broker, the deposit, a doubt — just tell me. Message @mathieu_algoria directly and I'll sort it with you personally. No pressure, no sales pitch.\n\nP.S. Your code ALGORIA100 is still active — 100% deposit bonus at RaiseFX, it doubles your trading power the day you start.`, title: '👋 Anything holding you back?', body: 'Message Mathieu directly — and your ALGORIA100 bonus code is still active.' }
-        : { dm: `Hey, it's worth 2 minutes of your time 🙂\nIf anything held you back — the broker, the deposit, a doubt — just tell me. Message @mathieu_algoria directly and I'll sort it with you personally. No pressure, no sales pitch.`, title: '👋 Anything holding you back?', body: 'Message Mathieu directly — he’ll sort it with you personally.' };
-    // ===== LA TRAÎNE (J+15 → J+60) — réécrite le 14/08 en élargissant la fenêtre =====
-    // Le « Last note from me » était le SEUL message au-delà de J+14. Sur une fenêtre de 21 jours il
-    // partait deux fois ; sur 60 jours il serait parti une dizaine de fois, et un adieu répété dix fois
-    // n'est plus un adieu, c'est une farce qui abîme la marque. Surtout, il ferme la porte alors que la
-    // raison d'élargir est précisément qu'elle reste ouverte : « certains ont besoin de 30/40 jours ».
-    // Trois temps, du plus engageant au plus sobre — et un seul vrai adieu, tout à la fin.
-    if (days <= 21)
-      return s0
-        ? { dm: `No rush, really 🙂\nAlgoria keeps trading whether you're in or not — that's the point of it. Your access stays open, and your code ALGORIA100 (100% deposit bonus at RaiseFX) is still on your account.\n👉 app.algoria.tech/member/onboarding`, title: '🎁 Your bonus code is still on your account', body: 'ALGORIA100 — 100% deposit bonus at RaiseFX, whenever you start.' }
-        : { dm: `No rush 🙂 Your MT5 connection is the only thing left, and it takes 60 seconds whenever you're ready.\n👉 app.algoria.tech/member/onboarding`, title: '⏱️ 60 seconds left', body: 'Just the MT5 connection. Whenever you’re ready.' };
-    // J+22 → J+45 : on ne redemande RIEN. On donne des nouvelles — les résultats sont le seul argument
-    // qui travaille tout seul pendant qu'on attend que le moment soit bon.
-    if (days <= 45)
-      return { dm: `Still running 📈\nAlgoria has been trading every single day since you signed up — gold and Bitcoin, three strategies, wins and stops posted publicly. Nothing to do on your side, but the door is still open when your timing is right.\n\n🎥 ${ACADEMY}`, title: '📈 Algoria is still trading every day', body: 'Wins and stops posted publicly. Your access is still open.' };
-    // J+46+ : le vrai dernier message, envoyé une fois toutes les deux semaines. Il DIT qu'il est le
-    // dernier automatique, et laisse la porte humaine ouverte — sans ça, on perd les gens qui reviennent.
-    return { dm: `Last automatic message from me 🤝\nI'll stop the reminders here — but your Algoria access doesn't expire, and neither does the invitation. The day your timing is right, everything is where you left it:\n👉 app.algoria.tech/member/onboarding\n\nAnd @mathieu_algoria stays one message away, whenever that is.`, title: '🤝 Your access doesn’t expire', body: 'Last automatic reminder — the door stays open whenever you’re ready.' };
+  // QUATRE RELANCES, UNE FOIS CHACUNE (bloc B, 09/09/2026, décision Mathieu). Voir fetchNudgeCandidates pour
+  // la mécanique (48 h, 7 j, 14 j, 30 j ; inscrits depuis ALGORIA_NUDGE_SINCE ; jamais de rattrapage en rafale).
+  // Le texte est celui d'un humain qui écrit à la main : court, signé, deux boutons (lui écrire, revenir sur le
+  // canal), aucun lien vers un formulaire. Mathieu relit et réécrit ces textes à sa façon — ce sont les siens.
+  // Le seul argument commercial est le code ALGORIA100, à la dernière relance, comme « dernière chance ».
+  const touchMessage = (touch: 1 | 2 | 3 | 4, locale: Locale): { dm: string; title: string; body: string } => {
+    if (locale === 'it') {
+      switch (touch) {
+        case 1: return { dm: `Ciao, sono Mathieu 👋\nTi sei iscritto ad Algoria due giorni fa e non ho ancora tue notizie. Qualsiasi domanda, anche piccola: scrivimi direttamente, rispondo io a tutti.\n\n— Mathieu`, title: '👋 Mathieu ti ha scritto', body: 'Qualsiasi domanda, scrivimi direttamente — rispondo io.' };
+        case 2: return { dm: `È passata una settimana 🙂 Nessuna pressione.\nSe è il broker o il deposito a frenarti, dimmelo: ti accompagno io in 5 minuti, dal vivo.\n\n— Mathieu`, title: '🙂 Una settimana dopo', body: 'Se qualcosa ti frena, dimmelo — ti accompagno io in 5 minuti.' };
+        case 3: return { dm: `Due settimane. Tengo il canale aperto per te: quello che cambio, quello che funziona, in pubblico.\nQuando sarà il momento giusto per te, sono a un messaggio di distanza.\n\n— Mathieu`, title: '📢 Il canale resta aperto per te', body: 'Quando sarà il momento giusto, sono a un messaggio di distanza.' };
+        default: return { dm: `Ultimo messaggio da parte mia su questo 🤝\nIl tuo codice ALGORIA100 (100 % di bonus sul deposito da RaiseFX) resta valido per te, e la mia porta resta aperta. Il giorno in cui vorrai iniziare, scrivimi semplicemente « pronto ».\n\n— Mathieu`, title: '🤝 Ultimo messaggio — ALGORIA100 resta tuo', body: 'Il codice resta valido, la porta resta aperta. Scrivimi « pronto » quando vuoi.' };
+      }
+    }
+    switch (touch) {
+      case 1: return { dm: `Hey, Mathieu here 👋\nYou joined Algoria two days ago and I haven't heard from you yet. Any question, even a small one — write to me directly, I answer everyone myself.\n\n— Mathieu`, title: '👋 Mathieu wrote to you', body: 'Any question — write to me directly, I answer everyone myself.' };
+      case 2: return { dm: `It's been a week 🙂 No pressure.\nIf the broker step or the deposit is what's holding you, tell me — I'll walk you through it in 5 minutes, live.\n\n— Mathieu`, title: '🙂 One week in', body: 'If something is holding you back, tell me — 5 minutes, live.' };
+      case 3: return { dm: `Two weeks in. I keep the channel open for you: what I'm changing, what's working, in public.\nWhen your timing is right, I'm one message away.\n\n— Mathieu`, title: '📢 The channel stays open for you', body: 'When your timing is right, I’m one message away.' };
+      default: return { dm: `Last message from me on this 🤝\nYour code ALGORIA100 (100% deposit bonus at RaiseFX) stays valid for you, and my door stays open. The day you want to start, just write me "ready".\n\n— Mathieu`, title: '🤝 Last message — ALGORIA100 stays yours', body: 'The code stays valid, the door stays open. Write me "ready" whenever.' };
+    }
   };
   // ===== ALARME TUNNEL (16/08/2026) — le capteur qui manquait ==========================================
   // Une vérification ajoutée le 14/08 refusait TOUTES les connexions de compte. Personne ne l'a su
@@ -1314,37 +1290,32 @@ async function main() {
       const NUDGE_MAX = Number(process.env.ALGORIA_NUDGE_MAX_PER_DAY ?? 1000) || 1000;
       const all = await fetchNudgeCandidates();
       const candidates = all.slice(0, NUDGE_MAX);
-      const bucket = (d: number) => (d <= 7 ? 'J+1-7' : d <= 14 ? 'J+8-14' : d <= 30 ? 'J+15-30' : 'J+31-60');
+      const bucket = (t: number) => `T${t}`;
       const counts = new Map<string, number>();
-      for (const c of candidates) counts.set(bucket(c.days), (counts.get(bucket(c.days)) ?? 0) + 1);
+      for (const c of candidates) counts.set(bucket(c.touch), (counts.get(bucket(c.touch)) ?? 0) + 1);
       console.log(`[algoria] activation : ${candidates.length} relance(s) à envoyer sur ${all.length} éligible(s) · ${[...counts.entries()].map(([k, v]) => `${k}: ${v}`).join(' · ')}${all.length > NUDGE_MAX ? ` · ${all.length - NUDGE_MAX} reportée(s) à demain (les plus anciens)` : ''}`);
       let sent = 0;
       for (const c of candidates) {
         await new Promise((r) => setTimeout(r, 150));
-        const m = nudgeMessage(c.step, c.days);
-        // TROIS PORTES sur CHAQUE relance auto. Le bouton « parler à Mathieu » existait depuis le 14/08
-        // (deux variantes sur six ne donnaient aucun point de contact, et répondre à ce DM revient à écrire
-        // au bot, qui ne lit rien). Il en manquait deux, constatées le 24/08 : REPRENDRE — l'app, l'action
-        // qu'on veut réellement voir cliquée — et REVENIR — le canal, parce qu'on relance en majorité des
-        // gens qui l'ont quitté et qu'un lien à redemander est un aller-retour de trop pour un tiède.
-        // 'en' assumé : les six variantes de nudgeMessage sont écrites en anglais uniquement, des boutons
-        // italiens sous un texte anglais seraient incohérents. Le jour où les variantes seront traduites,
-        // c'est ici qu'il faudra passer la langue du membre (fetchNudgeCandidates ne la remonte pas encore).
-        let dm = await sendDm(c.tg_id, m.dm, ctaKeyboard('en', '/member/onboarding'));
+        const m = touchMessage(c.touch, c.locale);
+        // DEUX PORTES, dans la langue du membre : écrire à Mathieu, revenir sur le canal. Pas de lien app
+        // (bloc B : la relance ramène vers l'humain, elle ne vend pas).
+        let dm = await sendDm(c.tg_id, m.dm, humanKeyboard(c.locale));
         let dmErr = dm ? null : lastDmFailure(); // à lire JUSTE après l'appel (voir runner/telegram.ts)
         if (!dm && dmErr && /too many requests|429/i.test(dmErr)) {
           // limite de débit Telegram : on attend ce qu'il demande (retry after N) et on renvoie UNE fois
           const wait = Math.min(30, Number(/retry after (\d+)/i.exec(dmErr)?.[1] ?? 3)) * 1000;
           await new Promise((r) => setTimeout(r, wait));
-          dm = await sendDm(c.tg_id, m.dm, ctaKeyboard('en', '/member/onboarding'));
+          dm = await sendDm(c.tg_id, m.dm, humanKeyboard(c.locale));
           dmErr = dm ? null : lastDmFailure();
         }
-        const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: c.step <= 0 ? '/member/academy' : '/member/onboarding', tag: 'algoria-nudge' }).catch(() => 0);
+        const push = await pushToUser(c.tg_id, { title: m.title, body: m.body, url: '/member', tag: 'algoria-nudge' }).catch(() => 0);
         // Un DM refusé ne s'écrit plus 'done'. Nuance qui compte : si la PUSH est passée, la personne A
         // bien été touchée — l'échec ne concerne que le canal Telegram, et écrire 'failed' la ferait
         // relancer demain alors qu'elle vient de recevoir une notification. On ne marque donc l'échec que
         // lorsque AUCUN des deux canaux n'a abouti.
-        await recordNudge(c.tg_id, c.member_no, 'auto', `J+${c.days} step${c.step} · dm ${dm ? 'ok' : `refusé (${dmErr ?? 'no-chat'})`} · push ${push ? 'ok' : 'none'}`, dm ? m.dm : undefined, !dm && !push ? (dmErr ?? 'no-chat') : null);
+        // la note commence par `T<n>` : c'est ce que fetchNudgeCandidates relit pour ne jamais renvoyer la même relance
+        await recordNudge(c.tg_id, c.member_no, 'auto', `T${c.touch} J+${c.days} step${c.step} · dm ${dm ? 'ok' : `refusé (${dmErr ?? 'no-chat'})`} · push ${push ? 'ok' : 'none'}`, dm ? m.dm : undefined, !dm && !push ? (dmErr ?? 'no-chat') : null);
         if (dm || push) sent++;
       }
       if (candidates.length) console.log(`[algoria] activation : ${sent}/${candidates.length} prospect(s) touché(s)`);
