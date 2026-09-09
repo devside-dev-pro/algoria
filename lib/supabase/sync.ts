@@ -185,38 +185,53 @@ async function fetchBlockedSince(raw: { from: (t: string) => any }): Promise<Map
   return blockedSince;
 }
 
-export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; member_no: number | null; tg_username: string | null; days: number; step: number }>> {
+/** Les QUATRE relances (bloc B, 09/09/2026) : jour d'ancienneté à partir duquel chacune est due. */
+export const NUDGE_TOUCHES: ReadonlyArray<{ touch: 1 | 2 | 3 | 4; day: number }> = [
+  { touch: 1, day: 2 }, // 48 h : « je n'ai pas eu de tes nouvelles »
+  { touch: 2, day: 7 }, // une semaine : « qu'est-ce qui bloque ? »
+  { touch: 3, day: 14 }, // deux semaines : « je te garde la porte ouverte »
+  { touch: 4, day: 30 }, // un mois : « dernier message, code ALGORIA100 »
+];
+/** Seuls les inscrits à partir de cette date reçoivent la séquence (décision Mathieu 09/09 : on ne relance plus
+ *  en masse les 1 000 anciens ; eux auront UNE campagne de réactivation, à la main, quand le produit sera prêt). */
+export const NUDGE_SINCE: string = process.env.ALGORIA_NUDGE_SINCE ?? '2026-09-09T00:00:00Z';
+
+/**
+ * RELANCES FIXES — quatre messages, une fois chacun (bloc B, 09/09/2026, décision Mathieu).
+ *
+ * Avant : une cadence glissante (tous les 3, 7 puis 14 jours) sur 60 jours, six textes de vente adaptés à
+ * l'étape et à l'ancienneté. Mesuré la semaine du 31/08 : 1 086 envois à 728 personnes, 3 passages live,
+ * 136 blocages du bot. « Harceler les gens avec un bot n'est pas la solution ; le bot est là pour relancer,
+ * les remettre sur le canal et les renvoyer vers moi. »
+ *
+ * Maintenant : à 48 h, 7 jours, 14 jours et 30 jours après l'inscription, un message court signé Mathieu,
+ * deux boutons (lui écrire, revenir sur le canal), jamais de formulaire. Chaque relance part UNE fois : la
+ * trace est la note `T<n> …` dans member_actions. Si plusieurs seuils sont passés d'un coup (panne, reprise),
+ * on n'envoie que la plus tardive — jamais quatre messages en quatre jours pour rattraper.
+ */
+export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; member_no: number | null; tg_username: string | null; locale: 'en' | 'it'; days: number; step: number; touch: 1 | 2 | 3 | 4 }>> {
   const now = Date.now();
   // tables « membre » hors du schéma typé du runner (comme edge_health) → cast assumé
   const raw = db as unknown as { from: (t: string) => any };
-  // FENÊTRE 21 → 60 JOURS (14/08, décision Mathieu : « certains ont besoin de 30/40 jours avant d'être
-  // prêts »). Vrai dans ce métier : le frein n'est pas l'intérêt, c'est le moment où l'argent est
-  // disponible. Quelqu'un qui s'inscrit en fin de mois peut n'avoir de quoi déposer que six semaines plus
-  // tard, et il n'y a aucune raison de le rayer entre-temps.
   const { data: members } = await raw
-    .from('members').select('tg_id,member_no,tg_username,created_at,onboarding_step')
+    .from('members').select('tg_id,member_no,tg_username,created_at,onboarding_step,locale')
     .eq('status', 'onboarding')
-    .gte('created_at', new Date(now - 60 * 86_400_000).toISOString())
-    .lte('created_at', new Date(now - 1 * 86_400_000).toISOString());
+    .gte('created_at', new Date(Math.max(Date.parse(NUDGE_SINCE) || 0, now - 45 * 86_400_000)).toISOString())
+    .lte('created_at', new Date(now - 2 * 86_400_000).toISOString());
   if (!members?.length) return [];
-  // CADENCE DÉGRESSIVE — indispensable dès qu'on élargit. À 3 jours d'intervalle sur 60 jours, chacun
-  // recevrait une VINGTAINE de DM : ce n'est plus une relance, c'est du harcèlement, et ça se paie en
-  // blocages du bot. On garde le rythme serré tant que la décision est chaude (2 semaines), puis on
-  // espace : hebdomadaire jusqu'à un mois, toutes les deux semaines au-delà.
-  const cooldownDays = (days: number): number => (days <= 14 ? 3 : days <= 30 ? 7 : 14);
+  // Ce que chacun a DÉJÀ reçu : la plus haute relance envoyée (note `T<n>`), envois réussis seulement.
   const { data: nudges } = await raw
-    .from('member_actions').select('tg_id,created_at')
+    .from('member_actions').select('tg_id,detail')
     .eq('kind', 'nudge')
-    // SEULS LES ENVOIS RÉUSSIS COMPTENT. Un cooldown mesure « depuis quand cette personne n'a pas été
-    // DÉRANGÉE » — un DM que Telegram a refusé n'a dérangé personne. Sans cette garde, un membre que le
-    // bot n'arrive pas à joindre se ferait imposer 3 à 14 jours de silence à chaque tentative ratée,
-    // c'est-à-dire exactement l'inverse de ce que la relance doit faire.
     .eq('status', 'done')
-    .gte('created_at', new Date(now - 15 * 86_400_000).toISOString()); // couvre le plus long cooldown
-  const lastNudge = new Map<number, number>();
-  for (const n of (nudges ?? []) as Array<{ tg_id: number; created_at: string }>) {
-    const t = Number(n.tg_id); const at = Date.parse(n.created_at);
-    if ((lastNudge.get(t) ?? 0) < at) lastNudge.set(t, at);
+    .gte('created_at', NUDGE_SINCE)
+    .like('detail->>note' as never, 'T%' as never);
+  const lastTouch = new Map<number, number>();
+  for (const n of (nudges ?? []) as Array<{ tg_id: number; detail: { note?: string } | null }>) {
+    const m = /^T([1-4])\b/.exec(String(n.detail?.note ?? ''));
+    if (!m) continue;
+    const t = Number(n.tg_id); const idx = Number(m[1]);
+    if ((lastTouch.get(t) ?? 0) < idx) lastTouch.set(t, idx);
   }
   // ── QUI A FERMÉ LA PORTE AU BOT ────────────────────────────────────────────────────────────────────
   // Sans ça, la relance automatique retente indéfiniment ceux qui ont bloqué le bot : chaque nuit, un
@@ -226,21 +241,17 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
   // La CHRONOLOGIE tranche, jamais la simple existence d'un refus passé : quelqu'un peut débloquer le bot.
   // Un envoi réussi postérieur au dernier refus rouvre donc le canal, et la personne redevient candidate.
   const blockedSince = await fetchBlockedSince(raw);
-  return (members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string; onboarding_step: number | null }>)
-    .map((m) => ({ tg_id: Number(m.tg_id), member_no: m.member_no, tg_username: m.tg_username, days: Math.floor((now - Date.parse(m.created_at)) / 86_400_000), step: Number(m.onboarding_step ?? 0) }))
-    .filter((m) => {
-      const blocked = blockedSince.get(m.tg_id);
-      if (blocked && (lastNudge.get(m.tg_id) ?? 0) < blocked) return false;
-      const last = lastNudge.get(m.tg_id);
-      return !last || now - last > cooldownDays(m.days) * 86_400_000;
-    })
-    // LES PLUS RÉCENTS D'ABORD (03/09/2026, décision Mathieu : « priorité aux nouveaux »). Sans tri, la liste
-    // arrivait dans l'ordre de la base (les plus anciens en tête) et le plafond quotidien du runner servait
-    // toujours les mêmes : mesuré le 03/09, sur 920 prospects dans la fenêtre, les 217 inscrits de la
-    // semaine n'avaient JAMAIS reçu un message, et les 149 de plus d'un mois l'avaient tous reçu. Le J+1 est
-    // le message qui compte — la décision est chaude — et c'était le seul qui ne partait jamais. À
-    // ancienneté égale, celui qui a déjà franchi une étape (step 1 : broker choisi, MT5 en cours) passe avant.
-    .sort((a, b) => a.days - b.days || b.step - a.step);
+  const out: Array<{ tg_id: number; member_no: number | null; tg_username: string | null; locale: 'en' | 'it'; days: number; step: number; touch: 1 | 2 | 3 | 4 }> = [];
+  for (const m of members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string; onboarding_step: number | null; locale: string | null }>) {
+    const tg = Number(m.tg_id);
+    if (blockedSince.has(tg)) continue; // a bloqué le bot : on n'insiste pas (il peut toujours écrire à Mathieu)
+    const days = Math.floor((now - Date.parse(m.created_at)) / 86_400_000);
+    const due = [...NUDGE_TOUCHES].reverse().find((t) => days >= t.day); // la plus tardive des relances dues
+    if (!due || due.touch <= (lastTouch.get(tg) ?? 0)) continue;
+    out.push({ tg_id: tg, member_no: m.member_no, tg_username: m.tg_username, locale: m.locale === 'it' ? 'it' : 'en', days, step: Number(m.onboarding_step ?? 0), touch: due.touch });
+  }
+  // les plus récents d'abord : la première relance est celle qui compte, la décision est encore chaude
+  return out.sort((a, b) => a.days - b.days || b.step - a.step);
 }
 
 /**

@@ -114,6 +114,12 @@ const CTA_ASK: Record<Locale, string> = { en: '💬 Ask Mathieu', it: '💬 Scri
  * des secours. `appPath` cible la page utile ('/member/onboarding' pour une relance, '/member' pour une
  * annonce à quelqu'un de déjà actif) — l'app redirige de toute façon si le membre n'est pas au bon stade.
  */
+/** Clavier des RELANCES HUMAINES (bloc B, 09/09/2026) : deux portes seulement — parler à Mathieu, revenir sur le
+ *  canal. Pas de lien vers l'app : la relance ne vend rien, elle ramène vers l'humain et vers le groupe. */
+export function humanKeyboard(locale: Locale = 'en'): { inline_keyboard: Array<Array<{ text: string; url: string }>> } {
+  return { inline_keyboard: [[{ text: CTA_ASK[locale], url: SUPPORT_TG_URL }], [{ text: CTA_CHANNEL[locale], url: CHANNEL_INVITE_URL }]] };
+}
+
 export function ctaKeyboard(locale: Locale = 'en', appPath = '/member'): { inline_keyboard: Array<Array<{ text: string; url: string }>> } {
   const path = appPath.startsWith('/') ? appPath : `/${appPath}`;
   return {

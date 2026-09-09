@@ -22,8 +22,11 @@ import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from './activa
 import { APP_URL } from './i18n';
 
 const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
-/** Mode autonome : ON sauf ALGORIA_BOT_AUTOREPLY=0 (coupe-circuit sans redéploiement). */
-export const AUTOREPLY_ON = process.env.ALGORIA_BOT_AUTOREPLY !== '0';
+/** Mode autonome : OFF par défaut depuis le 09/09/2026 (bloc B, décision Mathieu : « le bot parle trop, les gens
+ *  ont l'impression de parler à une IA »). Le bot ne répond plus jamais seul ; il accuse réception et renvoie vers
+ *  Mathieu. Le brouillon continue d'arriver à Mathieu avec ses boutons — c'est son outil, pas la voix du bot.
+ *  ALGORIA_BOT_AUTOREPLY=1 rallume l'autonomie sans redéploiement, si un jour on le veut de nouveau. */
+export const AUTOREPLY_ON = process.env.ALGORIA_BOT_AUTOREPLY === '1';
 
 const STRATEGY_NAMES: Record<number, string> = { 1: 'S1 STEADY', 2: 'S2 BALANCED', 3: 'S3 TURBO' };
 
