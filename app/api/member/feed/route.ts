@@ -3,6 +3,7 @@ import { verifySession, SESSION_COOKIE, sdb, isAdmin, isVip } from '@/lib/member
 import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { inMaintenance } from '@/lib/member/maintenance';
 import { OFFBOARDED } from '@/lib/member/winback';
+import { TRACK_SINCE, TRACK_SINCE_MS } from '@/lib/member/trackSince';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,8 @@ export async function GET(req: NextRequest) {
     // récente, pas un track record — celui-ci vit sur /member/track-record. La borne par DATE et non par
     // nombre de lignes est ce qui rend les trois colonnes comparables : à « les N derniers trades », celle
     // qui trade le plus écrasait les autres dans le lot et couvrait une période bien plus courte qu'elles.
-    db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot,strategy').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', new Date(Date.now() - 7 * 86_400_000).toISOString()).order('closed_at', { ascending: false }).limit(500),
+    // borne basse : les 7 derniers jours, jamais avant le départ du track record visible (lib/member/trackSince.ts)
+    db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot,strategy').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', new Date(Math.max(Date.now() - 7 * 86_400_000, TRACK_SINCE_MS)).toISOString()).order('closed_at', { ascending: false }).limit(500),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
   ]);
   // même règle que /api/member/me : admin OU copie activée OU whitelist VIP/équipe (CM…)
@@ -106,5 +108,5 @@ export async function GET(req: NextRequest) {
         return { id, trades: rows.length, wins: rows.filter((t) => Number(t.pnl) > 0).length, net };
       })
     : [];
-  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, strategyStats, memberStrategy, viewStrategy });
+  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, strategyStats, memberStrategy, viewStrategy, trackSince: TRACK_SINCE });
 }

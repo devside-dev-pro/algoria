@@ -84,7 +84,7 @@ export default function Funnel() {
               </>
             ) : (
               <>
-                <Stat label="Banked · 7 days" value={proof ? `+$${proof.week.total}` : '—'} accent="var(--gold)" mono />
+                <Stat label="Banked · 7 days" value={proof && proof.week.total > 0 ? `+$${proof.week.total}` : '—'} accent="var(--gold)" mono />
                 <Stat label="Markets" value="GOLD · BTC" accent="var(--cyan)" />
                 <Stat label="XAU/USD" value={px ? px.mid.toFixed(1) : '—'} accent="var(--gold)" mono />
               </>
