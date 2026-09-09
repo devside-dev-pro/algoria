@@ -139,7 +139,10 @@ def run_market(store: Store, market: str, trade_date: str, dry_run: bool) -> Non
         if text and str(text).strip():
             reports.append({"agent": key, "team": team, "content_md": str(text)})
     decision = str(final_state.get("final_trade_decision") or "")
-    summary = decision.strip().split("\n\n")[0][:600] if decision else ""
+    # le résumé = le paragraphe « Executive Summary » du gérant (la ligne « Rating » seule ne dit rien)
+    import re
+    m = re.search(r"\*\*Executive Summary\*\*:?\s*(.*?)(?:\n\s*\n|$)", decision, re.S | re.I)
+    summary = (m.group(1).strip() if m else decision.strip().split("\n\n")[0])[:600] if decision else ""
     row = {
         "market": market,
         "run_date": trade_date,
