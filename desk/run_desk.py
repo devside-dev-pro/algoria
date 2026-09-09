@@ -18,6 +18,8 @@ Variables d'environnement (posées sur Railway, jamais ici) :
   DESK_QUICK_MODEL         défaut "claude-haiku-4-5"  (analystes, lecture des données)
   DESK_DEBATE_ROUNDS       défaut 1 (chaque tour ajoute deux appels de modèle et du coût)
   DESK_LANGUAGE            défaut "English" (la langue des rapports lisibles ; le débat interne reste en anglais)
+  DESK_BRIEF_MODEL         défaut = DESK_DEEP_MODEL (le brief « tout le monde », une passe de modèle en plus)
+  DESK_FORCE               "1" pour refaire un marché déjà analysé ce jour (sinon on ne repaie pas le graphe)
 """
 
 from __future__ import annotations
@@ -103,11 +105,98 @@ class Store:
             if not r.ok:
                 raise RuntimeError(f"desk_reports insert HTTP {r.status_code}: {r.text[:300]}")
 
+    def find_run(self, market: str, run_date: str) -> dict | None:
+        r = requests.get(
+            f"{self.url}/rest/v1/desk_runs",
+            params={"select": "id,dry_run,rating,decision_md,brief", "market": f"eq.{market}", "run_date": f"eq.{run_date}", "limit": "1"},
+            headers=self.h, timeout=15,
+        )
+        rows = r.json() if r.ok else []
+        return rows[0] if rows else None
+
+    def fetch_reports(self, run_id: str) -> list[dict]:
+        r = requests.get(
+            f"{self.url}/rest/v1/desk_reports",
+            params={"select": "agent,team,content_md", "run_id": f"eq.{run_id}"}, headers=self.h, timeout=15,
+        )
+        return r.json() if r.ok else []
+
+    def patch_run(self, run_id: str, fields: dict) -> None:
+        r = requests.patch(f"{self.url}/rest/v1/desk_runs", params={"id": f"eq.{run_id}"}, headers=self.h, data=json.dumps(fields), timeout=30)
+        if not r.ok:
+            raise RuntimeError(f"desk_runs patch HTTP {r.status_code}: {r.text[:300]}")
+
+
+# ── Le brief : la version « monsieur et madame tout le monde » (10/09/2026, retour Mathieu : « une encyclopédie,
+# personne ne va lire ça »). Une passe de modèle en plus, hors du graphe, qui lit tout le travail du desk et le
+# rend en langage courant : un titre, trois phrases, ce que la note veut dire, deux prix, ce qui ferait changer
+# d'avis, et une ligne par agent (pour ouvrir le détail seulement si on veut). Pas de jargon, pas de promesse.
+BRIEF_SYSTEM = """You write for Algoria Desk, a mobile app read by ordinary people who follow gold and bitcoin but are not traders.
+You receive today's full internal work of an AI analyst desk (analysts, bull/bear debate, trader, risk team, manager's verdict).
+Turn it into a short brief in plain English. Rules: everyday words, no jargon (no RSI, MACD, SMA, Bollinger, Elliott, COT,
+wave, confluence, divergence...); when a level matters, give the price, not the indicator that produced it. Short sentences.
+Concrete and honest, never salesy, never a promise. Never say "buy now" or "sell now": describe what the desk thinks and
+what would change its mind. Answer with ONE JSON object and nothing else:
+{
+ "headline": "one sentence, max 90 characters, what today is about",
+ "story": ["exactly three sentences, max 160 characters each: what is going on and why it matters, for a non-trader"],
+ "call": "max 220 characters: what the desk's rating means in practice, in everyday words",
+ "levels": {"floor": number or null, "ceiling": number or null},
+ "flip": {"up": "one sentence: what would make the desk turn positive", "down": "one sentence: what would make it turn negative"},
+ "voices": {"<agent key>": "one line, max 110 characters, that agent's takeaway"}
+}"""
+
+
+def make_brief(market: str, rating: str, decision: str, reports: list[dict]) -> dict | None:
+    """≈ 5 centimes par marché. Un échec ici ne casse jamais le run : pas de brief, l'app retombe sur le résumé."""
+    try:
+        import anthropic
+    except ImportError:
+        print("[desk] paquet anthropic absent : pas de brief", file=sys.stderr)
+        return None
+    model = env("DESK_BRIEF_MODEL") or env("DESK_DEEP_MODEL", "claude-sonnet-5") or "claude-sonnet-5"
+    label = MARKETS[market]["label"]
+    parts = [f"# Market: {label} ({market})\n# Manager's rating: {rating}\n\n## Manager's verdict\n{decision[:6000]}"]
+    for r in reports:
+        parts.append(f"\n## Agent `{r['agent']}` ({r.get('team', '')})\n{str(r.get('content_md') or '')[:5000]}")
+    keys = ", ".join(r["agent"] for r in reports) or "none"
+    try:
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=model, max_tokens=1500, temperature=0.3,
+            system=BRIEF_SYSTEM + "\nAgent keys present today (use only these): " + keys,
+            messages=[{"role": "user", "content": "\n".join(parts)}],
+        )
+        text = "".join(getattr(b, "text", "") for b in msg.content)
+        start, end = text.find("{"), text.rfind("}")
+        brief = json.loads(text[start:end + 1])
+        if not isinstance(brief, dict) or not str(brief.get("headline") or "").strip():
+            raise ValueError("brief sans headline")
+        brief["model"] = model
+        return brief
+    except Exception as e:  # noqa: BLE001 — on log, on continue
+        print(f"[desk] brief {market} : {type(e).__name__}: {str(e)[:200]}", file=sys.stderr, flush=True)
+        return None
+
 
 # ── Une analyse ───────────────────────────────────────────────────────────────────────────────────────────────
 def run_market(store: Store, market: str, trade_date: str, dry_run: bool) -> None:
     spec = MARKETS[market]
     started = time.time()
+    # Déjà analysé ce jour (un nouveau build Railway relance la commande) : on ne repaie pas le graphe. Sans
+    # DESK_FORCE=1 on complète seulement ce qui manque au run existant — le brief.
+    existing = store.find_run(market, trade_date)
+    if not dry_run and existing and not existing.get("dry_run") and env("DESK_FORCE") != "1":
+        if existing.get("brief"):
+            print(f"[desk] {market} · {trade_date} · déjà analysé, brief présent : rien à faire", flush=True)
+            return
+        reports = store.fetch_reports(existing["id"])
+        brief = make_brief(market, existing.get("rating") or "REVIEW", existing.get("decision_md") or "", reports)
+        if brief:
+            store.patch_run(existing["id"], {"brief": brief})
+        print(f"[desk] {market} · {trade_date} · brief {'ajouté' if brief else 'ÉCHEC'} sur le run existant", flush=True)
+        return
+
     price = store.latest_price(market)
     print(f"[desk] {market} · {trade_date} · prix {price} · analystes {','.join(spec['analysts'])}", flush=True)
 
@@ -143,6 +232,10 @@ def run_market(store: Store, market: str, trade_date: str, dry_run: bool) -> Non
     import re
     m = re.search(r"\*\*Executive Summary\*\*:?\s*(.*?)(?:\n\s*\n|$)", decision, re.S | re.I)
     summary = (m.group(1).strip() if m else decision.strip().split("\n\n")[0])[:600] if decision else ""
+    if dry_run:
+        brief = {"headline": "DRY RUN — nothing was analysed.", "story": [], "call": "", "levels": {}, "flip": {}, "voices": {}}
+    else:
+        brief = make_brief(market, rating, decision, reports)
     row = {
         "market": market,
         "run_date": trade_date,
@@ -157,10 +250,11 @@ def run_market(store: Store, market: str, trade_date: str, dry_run: bool) -> Non
         "dry_run": dry_run,
         "published": True,
         "agents": [r["agent"] for r in reports],
+        "brief": brief,
     }
     run_id = store.upsert_run(row)
     store.replace_reports(run_id, [{"run_id": run_id, **r} for r in reports])
-    print(f"[desk] {market} · {rating} · {len(reports)} rapports · {row['duration_s']} s · run {run_id}", flush=True)
+    print(f"[desk] {market} · {rating} · {len(reports)} rapports · brief {'oui' if brief else 'NON'} · {row['duration_s']} s · run {run_id}", flush=True)
 
 
 def main() -> int:

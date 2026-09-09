@@ -3,3 +3,5 @@
 # cinq analyses et les lire avant de déployer.
 tradingagents @ git+https://github.com/TauricResearch/TradingAgents@be952b8eccb49720509af544c6675233bc1f10d0
 requests>=2.32
+# le brief « tout le monde » (une passe de modèle en plus, hors du graphe) parle au SDK Anthropic directement
+anthropic>=0.40
