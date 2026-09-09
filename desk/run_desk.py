@@ -87,6 +87,39 @@ class Store:
         except Exception:
             return None
 
+    def close_at(self, market: str, ts_ms: int) -> float | None:
+        """La dernière clôture au plus tard à cet instant — nos bougies, jamais une source extérieure.
+
+        M5 puis M1 : ce sont les seules unités que le runner écrit en continu (M15 et H1 sont d'anciens imports,
+        ils s'arrêtent en cours de route — vérifié le 10/09). H1 reste en dernier recours pour les vieux runs.
+        Un marché fermé (week-end, jour férié) renvoie la dernière clôture connue : c'est le prix qu'un membre
+        aurait vu, donc c'est celui qu'on affiche. Au-delà de quatre jours d'écart, on n'écrit rien plutôt qu'un
+        chiffre trompeur.
+        """
+        for tf in ("M5", "M1", "H1"):
+            try:
+                r = requests.get(
+                    f"{self.url}/rest/v1/candles",
+                    params={"select": "close,time", "symbol": f"eq.{market}", "timeframe": f"eq.{tf}",
+                            "time": f"lte.{ts_ms}", "order": "time.desc", "limit": "1"},
+                    headers=self.h, timeout=15,
+                )
+                rows = r.json() if r.ok else []
+                if rows and ts_ms - int(rows[0]["time"]) <= 4 * 86_400_000:
+                    return float(rows[0]["close"])
+            except Exception:
+                continue
+        return None
+
+    def runs_missing_prices(self, limit: int = 60) -> list[dict]:
+        r = requests.get(
+            f"{self.url}/rest/v1/desk_runs",
+            params={"select": "id,market,created_at,price,price_1d,price_3d,price_7d", "dry_run": "eq.false",
+                    "order": "run_date.desc", "limit": str(limit)},
+            headers=self.h, timeout=20,
+        )
+        return r.json() if r.ok else []
+
     def upsert_run(self, row: dict) -> str:
         r = requests.post(
             f"{self.url}/rest/v1/desk_runs",
@@ -178,6 +211,54 @@ def make_brief(market: str, rating: str, decision: str, reports: list[dict]) -> 
     except Exception as e:  # noqa: BLE001 — on log, on continue
         print(f"[desk] brief {market} : {type(e).__name__}: {str(e)[:200]}", file=sys.stderr, flush=True)
         return None
+
+
+# ── Le suivi des appels (10/09/2026) ─────────────────────────────────────────────────────────────────────────
+# Chaque matin, avant d'analyser, on va chercher ce que le prix a fait 1, 3 et 7 jours après chaque appel passé.
+# C'est la moitié honnête du desk : l'app affiche ces chiffres tels quels, bons ou mauvais. Source unique : nos
+# propres bougies (le même prix que le graphique de l'app), jamais celle qu'ont lue les agents.
+HORIZONS = (("price_1d", 1), ("price_3d", 3), ("price_7d", 7))
+
+
+def parse_ts(value: str) -> datetime | None:
+    """PostgREST rend « 2026-09-09 15:15:15.754177+00 » — pas toujours digeste pour fromisoformat."""
+    s = (value or "").strip().replace(" ", "T")
+    if s.endswith("+00"):
+        s += ":00"
+    for candidate in (s, s.split(".")[0] + "+00:00" if "." in s else s):
+        try:
+            d = datetime.fromisoformat(candidate)
+            return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def backfill_prices(store: Store) -> None:
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    filled = 0
+    for run in store.runs_missing_prices():
+        started = parse_ts(str(run.get("created_at") or ""))
+        if not started:
+            continue
+        patch = {}
+        for field, days in HORIZONS:
+            if run.get(field) is not None:
+                continue
+            target = int(started.timestamp() * 1000) + days * 86_400_000
+            if target > now_ms:
+                continue  # l'échéance n'est pas encore passée : on ne devine pas
+            price = store.close_at(str(run.get("market") or ""), target)
+            if price is not None:
+                patch[field] = price
+        if patch:
+            try:
+                store.patch_run(str(run["id"]), patch)
+                filled += 1
+                print(f"[desk] suivi {run.get('market')} · {' '.join(sorted(patch))}", flush=True)
+            except Exception as e:  # noqa: BLE001 — le suivi ne doit jamais empêcher l'analyse du jour
+                print(f"[desk] suivi {run.get('market')} : {type(e).__name__}: {str(e)[:150]}", file=sys.stderr, flush=True)
+    print(f"[desk] suivi des appels : {filled} run(s) complété(s)", flush=True)
 
 
 # ── Une analyse ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -278,6 +359,11 @@ def main() -> int:
         print("[desk] ANTHROPIC_API_KEY manquante", file=sys.stderr)
         return 2
     store = Store()
+    # Le suivi des appels passés d'abord : court, gratuit, et il doit tourner même si une analyse échoue ensuite.
+    try:
+        backfill_prices(store)
+    except Exception:  # noqa: BLE001
+        print(f"[desk] suivi des appels ÉCHEC\n{traceback.format_exc()}", file=sys.stderr, flush=True)
     failures = 0
     for m in markets:
         if m not in MARKETS:
