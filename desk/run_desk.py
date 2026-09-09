@@ -186,6 +186,10 @@ def run_market(store: Store, market: str, trade_date: str, dry_run: bool) -> Non
     # Déjà analysé ce jour (un nouveau build Railway relance la commande) : on ne repaie pas le graphe. Sans
     # DESK_FORCE=1 on complète seulement ce qui manque au run existant — le brief.
     existing = store.find_run(market, trade_date)
+    # Un passage à blanc n'écrase jamais une vraie analyse du jour (l'upsert le ferait sans ce garde-fou).
+    if dry_run and existing and not existing.get("dry_run"):
+        print(f"[desk] {market} · {trade_date} · vraie analyse déjà en base, le passage à blanc ne la touche pas", flush=True)
+        return
     if not dry_run and existing and not existing.get("dry_run") and env("DESK_FORCE") != "1":
         if existing.get("brief"):
             print(f"[desk] {market} · {trade_date} · déjà analysé, brief présent : rien à faire", flush=True)
