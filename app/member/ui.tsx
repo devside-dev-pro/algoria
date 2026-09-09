@@ -442,7 +442,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
           {/* ALGORIA AI — le bouton PRINCIPAL : central, surélevé, la marque au centre (le flux live de l'IA) */}
           <button
             onClick={() => router.push('/member/live')}
-            aria-label="Live — the AI trading feed"
+            aria-label="Desk — the AI analysts' desk"
             style={{ flex: 1, maxWidth: 118, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, border: 'none', background: 'transparent', cursor: 'pointer', marginTop: -22 }}
           >
             <span
@@ -456,7 +456,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
             >
               <img src="/brand/algoria-mark.png" alt="" width={32} height={32} style={{ objectFit: 'contain' }} />
             </span>
-            <span style={{ fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800, color: liveActive ? 'var(--cyan)' : 'var(--muted)' }}>Live</span>
+            <span style={{ fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800, color: liveActive ? 'var(--cyan)' : 'var(--muted)' }}>Desk</span>
           </button>
           <Tab href="/member/academy" label="Academy" icon={ICONS.academy} />
           <Tab href="/member/profile" label="Profile" icon={ICONS.profile} />
