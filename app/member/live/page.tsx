@@ -10,7 +10,7 @@
 // Le desk est de la MATIÈRE À LIRE, pas une promesse : aucun chiffre de performance ici.
 // Ouvert à tout compte connecté (c'est l'accroche du produit).
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { Chart } from '@/components/Chart';
+import { TradingViewChart } from '@/components/TradingViewChart';
 import { DeskMarkdown } from '@/components/DeskMarkdown';
 import { usePrice } from '@/lib/cockpit/useRealtime';
 import { useMe, LoadFailed } from '../ui';
@@ -179,8 +179,8 @@ export default function MemberDesk() {
       {tab === 'brief' && (
         <>
           {/* LE GRAPHIQUE D'ABORD — compact, en H1 : le contexte en un coup d'œil, pas un poste de trading */}
-          <section style={{ position: 'relative', height: 'min(38vh, 250px)', minHeight: 190, borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(43,227,245,.3)', background: '#070f1d' }}>
-            <Chart key={hero} symbol={hero} signals={[]} wins={[]} defaultTf="H1" broadcast />
+          <section style={{ position: 'relative', height: 'min(42vh, 290px)', minHeight: 220, borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(43,227,245,.3)', background: '#070f1d' }}>
+            <TradingViewChart key={hero} symbol={hero} interval="60" />
           </section>
           {(floor || ceiling) && (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -275,7 +275,7 @@ export default function MemberDesk() {
       {tab === 'calls' && data && (
         <Section title="The desk’s calls · what the price did next">
           <p style={{ margin: '0 0 6px', fontSize: 11.5, lineHeight: 1.55, color: 'var(--muted)' }}>
-            Every morning call, then the reference price 1, 3 and 7 days later. Filled in as the days pass. Shown as is, right or wrong — that is the point.
+            Every morning call, the price the desk saw, and what that price did 1, 3 and 7 days later. Measured on our own chart, filled in as the days pass. Shown as is, right or wrong — that is the point.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div className="mono" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.3fr 1fr 1fr 1fr', gap: 6, fontSize: 9, letterSpacing: 1, color: 'var(--dim)', fontWeight: 800, padding: '0 4px' }}>
@@ -285,7 +285,10 @@ export default function MemberDesk() {
               const r = rating(h.rating);
               return (
                 <div key={h.run_date} className="mono" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.3fr 1fr 1fr 1fr', gap: 6, fontSize: 11, padding: '7px 4px', borderBottom: '1px solid rgba(130,152,190,.12)', alignItems: 'center' }}>
-                  <span style={{ color: 'var(--muted)' }}>{new Date(h.run_date + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <span style={{ color: 'var(--muted)' }}>{new Date(h.run_date + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
+                    <span style={{ fontSize: 9, color: 'var(--dim)' }}>{h.price != null ? Number(h.price).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}</span>
+                  </span>
                   <span style={{ color: r.color, fontWeight: 800 }}>{r.glyph} {r.word}</span>
                   <span style={{ color: 'var(--dim)' }}>{pct(h.price, h.price_1d)}</span>
                   <span style={{ color: 'var(--dim)' }}>{pct(h.price, h.price_3d)}</span>
