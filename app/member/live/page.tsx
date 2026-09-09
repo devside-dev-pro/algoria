@@ -10,7 +10,7 @@
 // Le desk est de la MATIÈRE À LIRE, pas une promesse : aucun chiffre de performance ici.
 // Ouvert à tout compte connecté (c'est l'accroche du produit).
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { Chart } from '@/components/Chart';
+import { TradingViewChart } from '@/components/TradingViewChart';
 import { DeskMarkdown } from '@/components/DeskMarkdown';
 import { usePrice } from '@/lib/cockpit/useRealtime';
 import { useMe, LoadFailed } from '../ui';
@@ -179,8 +179,8 @@ export default function MemberDesk() {
       {tab === 'brief' && (
         <>
           {/* LE GRAPHIQUE D'ABORD — compact, en H1 : le contexte en un coup d'œil, pas un poste de trading */}
-          <section style={{ position: 'relative', height: 'min(38vh, 250px)', minHeight: 190, borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(43,227,245,.3)', background: '#070f1d' }}>
-            <Chart key={hero} symbol={hero} signals={[]} wins={[]} defaultTf="H1" broadcast />
+          <section style={{ position: 'relative', height: 'min(42vh, 290px)', minHeight: 220, borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(43,227,245,.3)', background: '#070f1d' }}>
+            <TradingViewChart key={hero} symbol={hero} interval="60" />
           </section>
           {(floor || ceiling) && (
             <div style={{ display: 'flex', gap: 8 }}>
