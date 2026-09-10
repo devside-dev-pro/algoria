@@ -11,8 +11,9 @@ export const dynamic = 'force-dynamic';
 //
 // Trois règles, dans l'ordre d'importance :
 //  1. UNE SEULE FOIS par analyse — `desk_runs.announced_at` (migration algoria_desk_runs_announced_at) ;
-//     rejouer la route ne renvoie rien. Elle rattrape aussi les analyses des trois derniers jours qui
-//     n'auraient pas été annoncées (run en retard, cron manqué).
+//     rejouer la route ne renvoie rien. Elle rattrape une analyse en retard (publiée après le cron de la
+//     veille) tant qu'elle est la plus récente en attente. Une lecture plus ancienne que celle du jour est
+//     classée sans notification : personne ne veut être réveillé pour l'analyse d'avant-hier.
 //  2. LE VIP NE PARLE PAS TOUT SEUL. Décision Mathieu du 09/09 : plus aucun post automatique dans les canaux.
 //     Le post VIP est donc derrière DESK_VIP_POST=1, absent par défaut — la route ne peut pas publier sans
 //     qu'il l'ait décidé. Le push aux membres, lui, est de l'app vers ses propres membres : pas un canal.
@@ -97,10 +98,15 @@ export async function GET(req: NextRequest) {
   let vipSent = 0;
   if (vipOn) for (const r of ofDay) if (await postVipCard(r)) vipSent++;
 
-  await db.from('desk_runs').update({ announced_at: new Date().toISOString() }).in('id', ofDay.map((r) => r.id));
+  // Les analyses plus anciennes encore en attente sont classées sans notification : on ne réveille personne
+  // pour la lecture d'avant-hier. Sans ça elles resteraient éternellement « à annoncer » et fausseraient le
+  // compte (constaté le 10/09 : les deux analyses du 09/09 traînaient en attente).
+  const stale = runs.filter((r) => r.run_date !== day).map((r) => r.id);
+  const now = new Date().toISOString();
+  await db.from('desk_runs').update({ announced_at: now }).in('id', [...ofDay.map((r) => r.id), ...stale]);
   // Journalisé, parce que le corps de la réponse d'un cron ne se lit nulle part : sans cette ligne, savoir ce
   // qui est parti demande un accès à la base (vécu le 10/09, connecteur Supabase indisponible au moment de vérifier).
   const skipped = ((data ?? []) as Row[]).length - runs.length;
-  console.log(`[desk-publish] ${day} · ${ofDay.map((r) => r.market).join(',')} · push ${pushed} · vip ${vipOn ? vipSent : 'off'}${skipped ? ` · ${skipped} sans brief, non annoncée(s)` : ''} · « ${body} »`);
-  return NextResponse.json({ ok: true, day, announced: ofDay.length, markets: ofDay.map((r) => r.market), pushed, vip: vipOn ? vipSent : 'off', skipped });
+  console.log(`[desk-publish] ${day} · ${ofDay.map((r) => r.market).join(',')} · push ${pushed} · vip ${vipOn ? vipSent : 'off'}${skipped ? ` · ${skipped} sans brief, non annoncée(s)` : ''}${stale.length ? ` · ${stale.length} plus ancienne(s) classée(s) sans notification` : ''} · « ${body} »`);
+  return NextResponse.json({ ok: true, day, announced: ofDay.length, markets: ofDay.map((r) => r.market), pushed, vip: vipOn ? vipSent : 'off', skipped, stale: stale.length });
 }

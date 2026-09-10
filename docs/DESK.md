@@ -65,9 +65,18 @@ Coût observé le 09/09 : environ 1,3 $ par marché et par jour pour l'analyse, 
 
 ## Lancer une analyse à la main
 
-Un service planifié Railway **ne tourne qu'à l'heure du cron** : un déploiement ne lance pas la commande. Pour
-forcer un passage, il faut retirer le cron, redéployer, puis le remettre. C'est le seul point de friction connu,
-et c'est ce que le panneau admin devra automatiser.
+Un service planifié Railway **ne tourne qu'à l'heure du cron**. Deux pièges, tous deux vécus :
+
+1. Tant que le cron est posé, **aucun déploiement ne lance la commande** — ni un build, ni un redéploiement.
+2. Un **redéploiement rejoue la configuration du déploiement précédent**. Retirer le cron puis redéployer ne
+   suffit donc pas : le conteneur ne démarre pas (constaté le 10/09, build refait, image poussée, zéro log
+   d'exécution). Il faut un **nouveau build**.
+
+La recette qui marche : retirer le cron, **pousser un commit** (le build qui suit lance la commande), lire les
+logs, puis remettre `0 6 * * *` et vérifier avec `get-status` que le cron est bien reposé.
+
+En pratique on n'en a presque jamais besoin : un brief manquant est retenté tout seul pendant trois jours, et le
+suivi des appels se rattrape aussi. C'est ce que le panneau admin devra rendre inutile.
 
 ## Vérifier sans rien envoyer
 
