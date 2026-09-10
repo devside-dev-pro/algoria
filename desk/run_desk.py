@@ -30,7 +30,7 @@ import os
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -111,6 +111,16 @@ class Store:
                 continue
         return None
 
+    def runs_missing_brief(self, days: int = 3) -> list[dict]:
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        r = requests.get(
+            f"{self.url}/rest/v1/desk_runs",
+            params={"select": "id,market,run_date,rating,decision_md", "dry_run": "eq.false", "brief": "is.null",
+                    "run_date": f"gte.{since}", "order": "run_date.desc"},
+            headers=self.h, timeout=20,
+        )
+        return r.json() if r.ok else []
+
     def runs_missing_prices(self, limit: int = 60) -> list[dict]:
         r = requests.get(
             f"{self.url}/rest/v1/desk_runs",
@@ -180,8 +190,25 @@ what would change its mind. Answer with ONE JSON object and nothing else:
 }"""
 
 
+def parse_brief(text: str) -> dict:
+    """Le JSON du modèle, tolérant : clôtures markdown, phrase d'introduction, texte après l'accolade."""
+    t = text.strip()
+    if "```" in t:  # ```json … ``` → on garde l'intérieur
+        parts = t.split("```")
+        t = max((p[4:] if p.lower().startswith("json") else p for p in parts[1::2]), key=len, default=t)
+    start, end = t.find("{"), t.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("aucun objet JSON dans la réponse")
+    return json.loads(t[start:end + 1])
+
+
 def make_brief(market: str, rating: str, decision: str, reports: list[dict]) -> dict | None:
-    """≈ 5 centimes par marché. Un échec ici ne casse jamais le run : pas de brief, l'app retombe sur le résumé."""
+    """≈ 5 centimes par marché. Un échec ici ne casse jamais le run : pas de brief, l'app retombe sur le résumé.
+
+    max_tokens large (10/09/2026) : le brief de l'or est mort en JSONDecodeError avec 1500 jetons. Ces modèles
+    réfléchissent avant de répondre et cette réflexion se paie sur le même budget — 1500 suffisait tout juste au
+    BTC et coupait l'or au milieu de son JSON. Deux essais, parce qu'une réponse coupée est une loterie.
+    """
     try:
         import anthropic
     except ImportError:
@@ -193,24 +220,27 @@ def make_brief(market: str, rating: str, decision: str, reports: list[dict]) -> 
     for r in reports:
         parts.append(f"\n## Agent `{r['agent']}` ({r.get('team', '')})\n{str(r.get('content_md') or '')[:5000]}")
     keys = ", ".join(r["agent"] for r in reports) or "none"
-    try:
-        client = anthropic.Anthropic()
-        # pas de temperature : les modèles Claude 5 la refusent, et le SDK 1.x n'a plus l'argument
-        msg = client.messages.create(
-            model=model, max_tokens=1500,
-            system=BRIEF_SYSTEM + "\nAgent keys present today (use only these): " + keys,
-            messages=[{"role": "user", "content": "\n".join(parts)}],
-        )
-        text = "".join(getattr(b, "text", "") for b in msg.content)
-        start, end = text.find("{"), text.rfind("}")
-        brief = json.loads(text[start:end + 1])
-        if not isinstance(brief, dict) or not str(brief.get("headline") or "").strip():
-            raise ValueError("brief sans headline")
-        brief["model"] = model
-        return brief
-    except Exception as e:  # noqa: BLE001 — on log, on continue
-        print(f"[desk] brief {market} : {type(e).__name__}: {str(e)[:200]}", file=sys.stderr, flush=True)
-        return None
+    system = BRIEF_SYSTEM + "\nAgent keys present today (use only these): " + keys
+    for attempt in (1, 2):
+        text = ""
+        try:
+            client = anthropic.Anthropic()
+            # pas de temperature : les modèles Claude 5 la refusent, et le SDK 1.x n'a plus l'argument
+            msg = client.messages.create(
+                model=model, max_tokens=8000,
+                system=system if attempt == 1 else system + "\nAnswer with the JSON object ONLY. No preamble, no code fence.",
+                messages=[{"role": "user", "content": "\n".join(parts)}],
+            )
+            text = "".join(getattr(b, "text", "") for b in msg.content)
+            brief = parse_brief(text)
+            if not isinstance(brief, dict) or not str(brief.get("headline") or "").strip():
+                raise ValueError("brief sans headline")
+            brief["model"] = model
+            return brief
+        except Exception as e:  # noqa: BLE001 — on log ce qui est revenu, sinon l'échec est indébuggable
+            print(f"[desk] brief {market} essai {attempt} : {type(e).__name__}: {str(e)[:200]} | fin de réponse : {text[-160:]!r}",
+                  file=sys.stderr, flush=True)
+    return None
 
 
 # ── Le suivi des appels (10/09/2026) ─────────────────────────────────────────────────────────────────────────
@@ -232,6 +262,26 @@ def parse_ts(value: str) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+def repair_briefs(store: Store) -> None:
+    """Une analyse sans brief est muette : l'app retombe sur le résumé du gérant et l'annonce du jour la saute.
+
+    Le brief est la seule pièce qu'on peut refaire sans repayer le graphe (les rapports sont déjà en base), donc
+    on retente les trois derniers jours à chaque passage. Vécu le 10/09 : le brief de l'or a été coupé par un
+    budget de jetons trop court et l'or est resté sans titre lisible jusqu'au lendemain.
+    """
+    for run in store.runs_missing_brief():
+        market = str(run.get("market") or "")
+        if market not in MARKETS:
+            continue
+        reports = store.fetch_reports(str(run["id"]))
+        if not reports:
+            continue  # rien à résumer : ce n'est pas un brief manquant, c'est une analyse vide
+        brief = make_brief(market, str(run.get("rating") or "REVIEW"), str(run.get("decision_md") or ""), reports)
+        if brief:
+            store.patch_run(str(run["id"]), {"brief": brief})
+            print(f"[desk] brief rattrapé · {market} · {run.get('run_date')}", flush=True)
 
 
 def backfill_prices(store: Store) -> None:
@@ -375,6 +425,15 @@ def main() -> int:
         except Exception:
             failures += 1
             print(f"[desk] {m} ÉCHEC\n{traceback.format_exc()}", file=sys.stderr, flush=True)
+
+    # Après les analyses : rattraper les briefs manquants, puis repasser sur le suivi. Ce second passage n'est
+    # pas un doublon — une analyse de la veille est datée de l'heure où elle a tourné (06:12, pas 06:00), donc
+    # son échéance à un jour tombe APRÈS le premier passage d'aujourd'hui et serait sinon reportée d'un jour.
+    for step, fn in (("rattrapage des briefs", repair_briefs), ("suivi des appels (2e passage)", backfill_prices)):
+        try:
+            fn(store)
+        except Exception:  # noqa: BLE001 — aucun de ces deux-là ne doit faire échouer le run
+            print(f"[desk] {step} ÉCHEC\n{traceback.format_exc()}", file=sys.stderr, flush=True)
     return 1 if failures else 0
 
 

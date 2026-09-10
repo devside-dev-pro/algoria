@@ -77,7 +77,10 @@ export async function GET(req: NextRequest) {
 
   // sans brief, il n'y a rien de lisible à annoncer : on attend le passage qui le complétera
   const runs = ((data ?? []) as Row[]).filter((r) => r.brief && String(r.brief.headline ?? '').trim());
-  if (!runs.length) return NextResponse.json({ ok: true, announced: 0 });
+  if (!runs.length) {
+    console.log(`[desk-publish] rien à annoncer (${((data ?? []) as Row[]).length} analyse(s) sans brief)`);
+    return NextResponse.json({ ok: true, announced: 0 });
+  }
 
   // une seule notification, même quand les deux marchés sortent ensemble : deux buzz d'affilée, c'est du spam
   const day = runs[runs.length - 1].run_date;
@@ -95,5 +98,9 @@ export async function GET(req: NextRequest) {
   if (vipOn) for (const r of ofDay) if (await postVipCard(r)) vipSent++;
 
   await db.from('desk_runs').update({ announced_at: new Date().toISOString() }).in('id', ofDay.map((r) => r.id));
-  return NextResponse.json({ ok: true, day, announced: ofDay.length, markets: ofDay.map((r) => r.market), pushed, vip: vipOn ? vipSent : 'off' });
+  // Journalisé, parce que le corps de la réponse d'un cron ne se lit nulle part : sans cette ligne, savoir ce
+  // qui est parti demande un accès à la base (vécu le 10/09, connecteur Supabase indisponible au moment de vérifier).
+  const skipped = ((data ?? []) as Row[]).length - runs.length;
+  console.log(`[desk-publish] ${day} · ${ofDay.map((r) => r.market).join(',')} · push ${pushed} · vip ${vipOn ? vipSent : 'off'}${skipped ? ` · ${skipped} sans brief, non annoncée(s)` : ''} · « ${body} »`);
+  return NextResponse.json({ ok: true, day, announced: ofDay.length, markets: ofDay.map((r) => r.market), pushed, vip: vipOn ? vipSent : 'off', skipped });
 }
