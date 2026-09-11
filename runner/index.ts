@@ -32,6 +32,11 @@ import { sthReady, sthStatus, sthMoveMaster } from '../lib/member/sth';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { startCopyObserver } from './observer';
+
+// MODE COPIE : ce compte reçoit ses trades d'un copieur externe, nos moteurs ne décident plus rien ici.
+// Lu une fois, au chargement, parce que plusieurs endroits doivent se taire quand il est actif — voir
+// l'annonce de fin de journée plus bas, qui affirmerait une chose fausse.
+const COPY_MODE = process.env.ALGORIA_COPY_OBSERVE === '1';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
@@ -411,7 +416,13 @@ async function main() {
         // ===== CANAL VIP : une fois la journée d'une stratégie bouclée (dayDone : objectif / cap / ratchet),
         // CHAQUE runner annonce SA fin de journée (étiquetée) — le canal montre la vie des 3 stratégies.
         // Les setups manuels restent S2 uniquement (sinon 3× le même spam).
-        if (isPrimary && !inst.watchOnly && vipReady()) {
+        //
+        // JAMAIS EN MODE COPIE (11/09/2026). `dayDone` se déduit du P&L du jour du compte, pas de qui a pris
+        // les trades : sur un compte alimenté par un copieur, il devient vrai tout seul et le canal recevrait
+        // « daily target hit — wrapped up for the day » alors que la source continue de trader. On annoncerait
+        // une fermeture qui n'a pas lieu, à des gens qui paient. Idem pour le setup manuel juste en dessous,
+        // qui dit « ALGORIA is done for the day ». Tant que nos moteurs ne décident pas, ils ne commentent pas.
+        if (isPrimary && !inst.watchOnly && vipReady() && !COPY_MODE) {
           if (!state.dayDone) vipDayDoneAnnounced = false; // ré-armé au reset quotidien
           else if (!vipDayDoneAnnounced) {
             vipDayDoneAnnounced = true;
@@ -942,7 +953,7 @@ async function main() {
   //   · un recorder ATTRAPE-TOUT capte les clôtures des symboles non configurés (le compte source trade ce
   //     qu'il veut ; l'or et le BTC gardent leur propre recorder, qui sait calculer le R).
   // OFF par défaut : sur un compte qui trade ses propres signaux, ces deux-là n'ont rien à faire.
-  if (process.env.ALGORIA_COPY_OBSERVE === '1') {
+  if (COPY_MODE) {
     const covered = new Set(engines.map((e) => e.inst.broker));
     stream.addSynchronizationListener(new DealRecorder(null, '', covered));
     startCopyObserver({ terminal, label: 'copie' });
