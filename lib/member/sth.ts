@@ -4,14 +4,14 @@
 // Doc : POST /Partner/{connect-customer-copier | join-master-account | get-user-status | disconnect}.
 const BASE = process.env.STH_BASE_URL ?? 'https://socialtradehubapp.com';
 const LICENSE = process.env.STH_PARTNER_LICENSE ?? '';
+// UN SEUL MASTER (11/09/2026). Il y avait ici une table MASTER_BY_STRATEGY — un master par stratégie, avec
+// pour S2 un `STH_MASTER_ID_S2 ?? STH_MASTER_ID`. Cette précédence était un piège silencieux : changer
+// STH_MASTER_ID ne changeait rien tant qu'une variable _S2 oubliée traînait, et personne ne pouvait le voir
+// depuis le code. Le jour où les membres sont passés sur un master externe, c'est exactement ce qui aurait
+// envoyé chaque NOUVEL inscrit vers l'ancien master pendant que les anciens copiaient le bon.
+// Il n'y a plus qu'une stratégie (S1 et S3 sont retirées, voir maintenance.ts) : une variable, un master,
+// aucune précédence à deviner.
 const MASTER_ID = process.env.STH_MASTER_ID ?? ''; // id du master Algoria dans STH ; sinon auto-découvert via get-user-status
-// MULTI-STRATÉGIES : un master par stratégie (S1 Steady / S2 Balanced / S3 Turbo). S2 retombe sur
-// STH_MASTER_ID (le master historique). Stratégie sans master configuré → repli MASTER_ID/auto-découverte.
-const MASTER_BY_STRATEGY: Record<number, string> = {
-  1: process.env.STH_MASTER_ID_S1 ?? '',
-  2: process.env.STH_MASTER_ID_S2 ?? process.env.STH_MASTER_ID ?? '',
-  3: process.env.STH_MASTER_ID_S3 ?? '',
-};
 
 export const sthReady = (): boolean => Boolean(LICENSE);
 
@@ -70,11 +70,9 @@ export function sthDisconnect(userId: string) {
  *  (la liste envoyée REMPLACE les abonnements) : un seul appel = changement de master. Ne marche que pour
  *  les membres connectés via l'API ; les receivers ajoutés à la main dans le dashboard STH sont invisibles
  *  ici → erreur explicite pour que le support les déplace à la main. */
-export async function sthMoveMaster(userId: string, strategy: number, lots: number): Promise<{ ok: boolean; error: string }> {
-  // JAMAIS de repli silencieux vers le master historique pour S1/S3 : brancher quelqu'un sur une stratégie
-  // qu'il n'a pas choisie est pire qu'un message d'erreur. S2 garde le repli — MASTER_ID EST son master.
-  const masterId = MASTER_BY_STRATEGY[strategy] || (strategy === 2 ? MASTER_ID : '');
-  if (!masterId) return { ok: false, error: `no master configured for S${strategy} (set STH_MASTER_ID_S${strategy})` };
+export async function sthMoveMaster(userId: string, _strategy: number, lots: number): Promise<{ ok: boolean; error: string }> {
+  const masterId = MASTER_ID;
+  if (!masterId) return { ok: false, error: 'no master configured (set STH_MASTER_ID)' };
   // ON TENTE, ON NE PRÉ-JUGE PLUS (26/08). Le garde isApiKnown vivait ici ; avec un drapeau MT faux pour
   // tout le monde il se réduit à « possède déjà des masters » — et refusait donc précisément les deux
   // populations qu'il devait servir : le membre EN PAUSE (sthPauseCopy vide sa liste de masters, c'est
@@ -186,11 +184,8 @@ export async function sthConnectAndJoin(o: {
     const after = await sthStatus(o.userId);
     if (!isApiKnown(after)) return { ok: false, error: c.errorMessage };
   }
-  // 2) master id : celui de la STRATÉGIE du membre d'abord, sinon env global, sinon auto-découverte.
-  //    Comme sthMoveMaster : jamais de repli silencieux vers le master historique pour S1/S3 — brancher
-  //    quelqu'un sur une stratégie qu'il n'a pas choisie est pire qu'une erreur affichée.
-  let masterId = (o.strategy != null ? MASTER_BY_STRATEGY[o.strategy] : '') || (o.strategy == null || o.strategy === 2 ? MASTER_ID : '');
-  if (!masterId && o.strategy != null && o.strategy !== 2) return { ok: false, error: `no master configured for S${o.strategy} (set STH_MASTER_ID_S${o.strategy})` };
+  // 2) master id : la variable d'environnement, sinon auto-découverte sous la licence.
+  let masterId = MASTER_ID;
   if (!masterId) {
     const st = await sthStatus(o.userId);
     if (!st.ok) return { ok: false, error: `connected, but master lookup failed: ${st.errorMessage}` };
