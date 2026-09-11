@@ -156,8 +156,9 @@ export const UI: Dict = {
   // revient (déconnexion, refus) et veut en changer — lui proposer « aprine uno » le laisse croire
   // qu'il n'est pas au bon endroit.
   'ob.changeBroker': { en: '← Change broker or open a new account', it: '← Cambia broker o apri un nuovo conto' },
-  'ob.step3': { en: '3 · Choose your strategy', it: '3 · Scegli la tua strategia' },
-  'ob.step3.sub': { en: 'Every strategy copies at the same fixed size — your risk lever is the strategy itself. You can switch anytime from your Profile.', it: 'Tutte le strategie copiano con la stessa size fissa — la tua leva di rischio è la strategia stessa. Puoi cambiarla quando vuoi dal Profilo.' },
+  // UNE SEULE STRATÉGIE (11/09/2026) : il n'y a plus de choix à faire, l'étape confirme au lieu de demander.
+  'ob.step3': { en: '3 · Start copying ALGORIA 2.0', it: '3 · Inizia a copiare ALGORIA 2.0' },
+  'ob.step3.sub': { en: 'One engine, one master account. Every trade it takes is copied to your account automatically, at a fixed size.', it: 'Un solo motore, un solo master. Ogni operazione viene copiata automaticamente sul tuo conto, con size fissa.' },
   'ob.saving': { en: 'SAVING…', it: 'SALVATAGGIO…' },
   'ob.startCta': { en: '⚡ START COPYING ALGORIA', it: '⚡ INIZIA A COPIARE ALGORIA' },
   'ob.backMt5': { en: '← Back to MT5 details', it: '← Torna ai dati MT5' },

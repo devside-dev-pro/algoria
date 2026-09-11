@@ -4,11 +4,12 @@
 // Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StrategyPicker, bestStrategyFor, LoadFailed, useUILocale, SUPPORT_TG, Check, STRATEGY_UI, STRATEGY_AVAILABLE } from '../ui';
+import { useMe, LoadFailed, useUILocale, SUPPORT_TG, Check } from '../ui';
 import { tgHref } from '@/lib/telegram';
 import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/member/brokers';
 import { brokerAttachMessage } from '@/lib/member/ui-text';
 import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, minDepositFor } from '@/lib/member/minimums';
+import { LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/member/activation';
 
@@ -100,7 +101,6 @@ export default function Onboarding() {
   // titulaire et le dépôt déclaré, la file admin était aveugle (n'importe qui pouvait raconter n'importe quoi)
   const [fullName, setFullName] = useState('');
   const [deposit, setDeposit] = useState('');
-  const [strategy, setStrategy] = useState(2); // 1=Steady · 2=Balanced (défaut) · 3=Turbo — lot copieur fixe 0.01
   // ⚠️ ce 2 est une PRÉFÉRENCE, pas la valeur envoyée : elle est ramenée dans le budget plus bas (stratChoice)
   const [brokerPick, setBrokerPick] = useState<string | null>(null); // broker cliqué (le lien ouvre un onglet, on retient le choix)
   const [showOthers, setShowOthers] = useState(false);
@@ -180,19 +180,16 @@ export default function Onboarding() {
   const rest = ranked.slice(1);
   const othersOpen = showOthers || (picked != null && picked !== lead.key);
 
-  // ÉTAPE 3 — la sélection ne peut JAMAIS porter sur une stratégie hors budget (12/08). `strategy` vaut 2
-  // (BALANCED, min $500) par défaut : un membre à $200 arrivait donc avec un profil coché ET grisé, un
-  // bouton START muet, et aucun moyen de comprendre qu'il fallait cliquer STEADY. Plusieurs adhésions
-  // bloquées là. On ramène ici la valeur affichée ET envoyée dans ce que le dépôt débloque réellement.
-  // Le dépôt vient du champ local (saisi à l'étape 2) ou de la fiche KYC (reprise du wizard plus tard).
+  // ÉTAPE 3 — il n'y a plus de sélection : une seule stratégie, donc un seul chemin. Ne reste que le
+  // contrôle du minimum. Le dépôt vient du champ local (étape 2) ou de la fiche KYC (reprise plus tard).
   // serveur de démonstration : son nom le dit toujours (« …-Demo », « Demo-Server »). 7% des refus.
   const demoServer = /demo/i.test(server);
   // un login MetaTrader est un NUMÉRO (6-10 chiffres en base). Une adresse email ou des lettres = la
   // personne a saisi l'identifiant de son espace client broker — 1er motif de refus. On avertit seulement.
   const loginLooksWrong = login.trim().length > 0 && !/^\d{4,12}$/.test(login.trim());
   const budgetUsd = Number(deposit) > 0 ? Number(deposit) : declaredDeposit ?? undefined;
-  const affordable = budgetUsd == null || budgetUsd >= minDepositFor(strategy);
-  const stratChoice = affordable ? strategy : bestStrategyFor(budgetUsd) ?? 0; // 0 = rien de débloqué (dépôt sous le minimum d'entrée)
+  // Reste le SEUL garde de cette étape : le dépôt déclaré couvre-t-il le minimum ? Le serveur le revérifie.
+  const belowMinimum = budgetUsd != null && budgetUsd > 0 && budgetUsd < minDepositFor(LIVE_STRATEGY);
 
   // CE QUI MANQUE ENCORE, NOMMÉ (02/09/2026). Le bouton CONNECT portait une condition `disabled` de dix
   // termes et ne disait rien : champ oublié = bouton inerte, sans un mot. Le même tableau sert maintenant
@@ -279,14 +276,11 @@ export default function Onboarding() {
             <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
               <strong style={{ color: 'var(--gold)' }}>{t('ob.min.title')}</strong> {t('ob.min.body')}
             </p>
-            {/* LUS DEPUIS LA SOURCE DE VÉRITÉ (audit 03/09). Cette ligne était écrite en dur — « BALANCED $500 »
-                — alors que minimums.ts disait $200 et que le sélecteur, deux écrans plus loin, affichait
-                « min $200 » : le même tunnel donnait deux minimums. Et S1, en maintenance, y figurait encore.
-                Une stratégie qu'on ne peut pas choisir n'a pas de minimum à annoncer. */}
+            {/* LU DEPUIS LA SOURCE DE VÉRITÉ (audit 03/09). Cette ligne était écrite en dur — « BALANCED $500 »
+                — alors que minimums.ts disait $200 : le même tunnel annonçait deux minimums différents.
+                C'était une énumération par stratégie ; il n'y en a plus qu'une, donc un seul chiffre. */}
             <p className="mono" style={{ margin: 0, fontSize: 11, color: 'var(--muted)', letterSpacing: 0.3 }}>
-              {STRATEGY_UI.filter((s) => STRATEGY_AVAILABLE.includes(s.id)).map((s, i) => (
-                <span key={s.id}>{i > 0 && ' · '}{s.icon} {s.name} <b style={{ color: 'var(--text)' }}>${STRATEGY_MIN_DEPOSIT[s.id].toLocaleString('en-US')}</b></span>
-              ))}
+              ⚡ ALGORIA 2.0 <b style={{ color: 'var(--text)' }}>${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY].toLocaleString('en-US')}</b> minimum
             </p>
             <p style={{ ...pMuted, margin: 0, fontSize: 11.5, color: 'var(--dim)' }}>{t('ob.min.warn')}</p>
           </div>
@@ -570,15 +564,24 @@ export default function Onboarding() {
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h2 style={{ fontSize: 15, margin: 0 }}>{t('ob.step3')}</h2>
           <p style={pMuted}>{t('ob.step3.sub')}</p>
-          {/* budget = dépôt déclaré à l'étape 2 : les stratégies au-dessus sont grisées avec le minimum affiché */}
-          <StrategyPicker value={stratChoice} onPick={setStrategy} busy={busy} budget={budgetUsd} />
-          {stratChoice === 0 && (
+          {/* PLUS DE SÉLECTEUR (11/09/2026). Cette étape demandait au membre de choisir entre trois
+              stratégies ; il n'y en a plus qu'une, et deux des trois n'ont même plus de master. Une question
+              dont toutes les réponses sauf une sont fausses n'est pas un choix, c'est un piège. L'étape
+              confirme donc ce qu'il rejoint, au lieu de le lui faire deviner. */}
+          <div className="panel" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 13, borderColor: 'rgba(43,227,245,.32)' }}>
+            <span style={{ fontSize: 22, minWidth: 32 }}>⚡</span>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: 1 }}>ALGORIA 2.0</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>Copied to your account automatically — you never place an order yourself.</span>
+            </span>
+          </div>
+          {belowMinimum && (
             <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: 'var(--gold)' }}>
               Your declared deposit (${budgetUsd}) is below the ${MIN_ENTRY_DEPOSIT} minimum to start copying.
               Fund your account, then go back and update the amount — or message us and we&rsquo;ll sort it out.
             </p>
           )}
-          <button disabled={busy || stratChoice === 0} onClick={() => run({ action: 'strategy', choice: stratChoice }, 'done')} style={cta(busy || stratChoice === 0)}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
+          <button disabled={busy || belowMinimum} onClick={() => run({ action: 'strategy', choice: LIVE_STRATEGY }, 'done')} style={cta(busy || belowMinimum)}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
           <SubmitError msg={err} t={t} />
           <button onClick={() => setStep(1)} style={linkBtn}>{t('ob.backMt5')}</button>
         </section>

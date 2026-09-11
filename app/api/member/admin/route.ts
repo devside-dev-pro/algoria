@@ -572,7 +572,10 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     void pushToUser(Number(act.tg_id), {
       title: 'Connection request declined',
       body: `${reason} — open the app to fix your details and resubmit.`,
-      url: rejAccountId ? '/member/add-strategy' : '/member/onboarding',
+      // Le second compte n'existe plus comme fonctionnalité (11/09/2026, une seule stratégie) : l'écran
+      // /member/add-strategy est supprimé. Un refus portant sur un second compte renvoie donc à l'accueil
+      // plutôt que vers une page morte — un lien qui tombe sur un 404 est pire qu'un lien générique.
+      url: rejAccountId ? '/member' : '/member/onboarding',
       tag: 'algoria-connect',
     });
     return NextResponse.json({ ok: true });

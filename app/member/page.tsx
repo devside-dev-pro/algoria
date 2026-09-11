@@ -5,7 +5,7 @@
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, STRATEGY_AVAILABLE, type Member, type MemberAccount } from './ui';
+import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount } from './ui';
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 
@@ -126,10 +126,19 @@ export default function MemberHome() {
           assumée : "LATEST WINS") ; le flux complet et honnête arrive avec l'accès débloqué */}
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: unlocked ? 'var(--muted)' : 'var(--gold)' }}>{unlocked ? 'ALGORIA — LATEST TRADES' : '✨ ALGORIA — LATEST WINS'}</h2>
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: unlocked ? 'var(--muted)' : 'var(--gold)' }}>{unlocked ? 'ALGORIA 2.0 — LATEST TRADES' : '✨ ALGORIA 2.0 — LATEST WINS'}</h2>
           {wins.length > 0 && <span className="mono" style={{ fontSize: 11, color: 'var(--up)' }}>{unlocked ? `✓ ${wins.length}/${trades.length} wins` : `✓ ${wins.length} wins`}</span>}
         </div>
-        {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>The AI is hunting — trades appear here as they close.</p>}
+        {/* ÉTAT VIDE — il sera la RÈGLE quelques jours (2.0 vient d'être branché, aucun trade enregistré
+            avant sa première séance), et c'est l'écran que voient les inscrits non activés. Il ne doit donc
+            ni faire croire à une panne, ni meubler avec des chiffres qu'on n'a pas : il dit ce qui se passe. */}
+        {trades.length === 0 && (
+          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)', lineHeight: 1.55 }}>
+            {unlocked
+              ? 'ALGORIA 2.0 is hunting — trades appear here as they close.'
+              : 'ALGORIA 2.0 just went live. Its first trades land here as they close — be set up before they do.'}
+          </p>
+        )}
         {trades.map((t) => {
           const win = Number(t.pnl) > 0;
           return (
@@ -150,15 +159,9 @@ export default function MemberHome() {
           );
         })}
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
-          {unlocked ? `Shown at your copy size (${clientLot} lot) — master account in brackets.` : 'Her best recent trades — members’ accounts copied these automatically. The complete live history unlocks with your access.'}
+          {unlocked ? `Shown at your copy size (${clientLot} lot) — master account in brackets.` : 'ALGORIA 2.0’s recent wins — members’ accounts copied every one of them automatically. Losses, live positions and the full history unlock with your access.'}
         </p>
       </section>
-
-      {/* ➕ MULTI-STRATÉGIES — l'upsell de continuité : le membre live voit dans le VIP les wins des
-          stratégies qu'il n'a PAS ("+$571 S1 STEADY" alors qu'il est en S2)… cette carte est la réponse.
-          Argument honnête : la décorrélation est réelle (quand une stratégie a un jour rouge, les autres
-          compensent souvent). Un compte par stratégie, chez un nouveau broker. */}
-      {unlocked && ['live', 'paused'].includes(member.status) && <AddStrategyCard member={member} accounts={accounts} />}
 
       {/* PARRAINAGE — sur le Home, là où le membre regarde ses gains chaque jour = le moment où il est
           content. On surfe sur la dopamine des wins juste au-dessus : "Algoria vient de te faire gagner,
@@ -170,46 +173,6 @@ export default function MemberHome() {
   );
 }
 
-const STRAT_LABEL: Record<number, { icon: string; name: string }> = { 1: { icon: '🛡️', name: 'S1 STEADY' }, 2: { icon: '⚖️', name: 'S2 BALANCED' }, 3: { icon: '🔥', name: 'S3 TURBO' } };
-
-function AddStrategyCard({ member, accounts }: { member: Member; accounts: MemberAccount[] }) {
-  const active = accounts.filter((a) => a.status !== 'rejected');
-  const used = new Set<number>([Number(member.strategy ?? 2), ...active.map((a) => a.strategy)]);
-  const missing = STRATEGY_AVAILABLE.filter((id) => !used.has(id)); // jamais une stratégie en maintenance : la page cible la refuserait (audit 03/09)
-  const pending = active.filter((a) => a.status === 'pending');
-  if (missing.length === 0 && pending.length === 0) return null; // flotte complète → rien à vendre
-  return (
-    <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'rgba(43,227,245,.3)' }}>
-      {pending.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--gold)' }}>
-          <span>⧗</span>
-          <span><b>{STRAT_LABEL[pending[0].strategy]?.name}</b> — new account under review, unlocks automatically.</span>
-        </div>
-      )}
-      {missing.length > 0 && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ fontSize: 16 }}>➕</span>
-            <h2 style={{ margin: 0, fontSize: 15 }}>Run {missing.length > 1 ? 'more strategies' : 'the missing strategy'} in parallel</h2>
-          </div>
-          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.6 }}>
-            You&rsquo;re on <b style={{ color: 'var(--text)' }}>{STRAT_LABEL[Number(member.strategy ?? 2)]?.name}</b>. Members running several strategies get real diversification — when one has a red day, the others often cover it.
-          </p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {missing.map((id) => (
-              <span key={id} className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 9px', background: 'rgba(10,17,31,.55)' }}>
-                {STRAT_LABEL[id].icon} {STRAT_LABEL[id].name} · from ${STRATEGY_MIN_DEPOSIT[id]}
-              </span>
-            ))}
-          </div>
-          <a href="/member/add-strategy" style={{ padding: '12px 16px', borderRadius: 11, textAlign: 'center', textDecoration: 'none', fontWeight: 800, letterSpacing: 0.5, fontSize: 12.5, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>
-            ➕ ADD A STRATEGY
-          </a>
-        </>
-      )}
-    </section>
-  );
-}
 
 const ctaGold = {
   padding: '14px 16px', borderRadius: 13, border: 'none', cursor: 'pointer', textAlign: 'center',

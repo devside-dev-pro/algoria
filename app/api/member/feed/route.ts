@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, isVip } from '@/lib/member/server';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
-import { inMaintenance } from '@/lib/member/maintenance';
+import { inMaintenance, LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { OFFBOARDED } from '@/lib/member/winback';
 import { TRACK_SINCE, TRACK_SINCE_MS } from '@/lib/member/trackSince';
 
@@ -38,20 +38,13 @@ export async function GET(req: NextRequest) {
   // (marché retiré : STH ne l'a jamais copié — ses pertes n'existent que sur le compte maître,
   // les montrer aux membres serait un rouge qui n'est pas le leur)
   const rafale = new Set((signalsQ.data ?? []).filter((x) => JSON.stringify(x.rationale ?? '').includes('RAFALE') || JSON.stringify(x.rationale ?? '').includes('ACTION mode')).map((x) => String(x.ticket)));
-  const memberStrategy = Number((memberQ.data?.[0] as { strategy?: number } | undefined)?.strategy ?? 2) || 2;
-  // COMPARER LES TROIS STRATÉGIES (04/08, demande d'un VIP : « je ne vois que l'historique de ma S1, ou
-  // aussi S2/S3 ? »). Le membre peut consulter n'importe laquelle ; la sienne reste celle par défaut.
-  // Voir qu'une autre stratégie était verte le jour où la sienne saigne évite le réflexe de retrait, et
-  // aide à choisir avant d'ouvrir un second compte. Consultation seule : ça ne change AUCUN branchement.
-  const asked = Number(req.nextUrl.searchParams.get('strategy') ?? 0);
-  // STRATÉGIE EN MAINTENANCE : ni consultable, ni affichée. On retombe sur S2 (le moteur de référence)
-  // plutôt que de servir un écran vide — un membre déplacé depuis une stratégie retirée doit voir
-  // QUELQUE CHOSE, pas un trou. Décision Mathieu du 20/08 sur S1.
-  const viewStrategy = [1, 2, 3].includes(asked) && !inMaintenance(asked) ? asked : (inMaintenance(memberStrategy) ? 2 : memberStrategy);
-  // Les trades des stratégies en maintenance sont RETIRÉS DE L'AFFICHAGE, pas de la base : le filtre est
-  // ici, les lignes restent intactes dans `trades` et reviennent dès qu'on retire l'id de la liste.
+  // UNE SEULE STRATÉGIE (11/09/2026). Il y avait ici un paramètre `?strategy=` — le membre pouvait
+  // consulter l'historique des trois. Le comparateur qu'il alimentait est retiré : il n'y a plus rien à
+  // comparer, et un sélecteur dont deux entrées sur trois n'ont plus de moteur ne renseigne personne.
+  // Les trades des stratégies retirées sont RETIRÉS DE L'AFFICHAGE, pas de la base : le filtre est ici,
+  // les lignes restent intactes dans `trades` et reviennent dès qu'on retire l'id de maintenance.ts.
   const clean = (tradesQ.data ?? []).filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100' && !inMaintenance(Number((t as { strategy?: number }).strategy ?? 2)));
-  let trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === viewStrategy);
+  let trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY);
   // PROSPECTS : la BANDE-ANNONCE, pas le flux brut — un curieux qui arrive sur 2 SL d'affilée ne rejoint
   // jamais, même après des semaines vertes. On ne montre que les GAINS (l'UI l'assume : "highlights") ;
   // l'historique complet, honnête, s'ouvre avec l'accès débloqué.
@@ -97,16 +90,5 @@ export async function GET(req: NextRequest) {
     lastLiveNo: lastLive && lastLiveHours != null && lastLiveHours < 72 ? Number(lastLive.member_no) : null,
     lastLiveHours: lastLive && lastLiveHours != null && lastLiveHours < 72 ? lastLiveHours : null,
   };
-  // Résumé des TROIS stratégies sur la même fenêtre — c'est lui qui alimente le sélecteur, pour qu'on voie
-  // laquelle tient sans avoir à cliquer sur chacune. Net converti À L'ÉCHELLE DU MEMBRE : son lot copieur
-  // est FIXE, donc identique quelle que soit la stratégie — la comparaison est exacte, pas une projection.
-  // Réservé aux accès débloqués : un prospect ne voit que des gains filtrés, un net y serait mensonger.
-  const strategyStats = unlocked
-    ? [1, 2, 3].filter((id) => !inMaintenance(id)).map((id) => {
-        const rows = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === id);
-        const net = rows.reduce((a, t) => a + Number(t.pnl) * clientLot / (Number(t.lot) > 0 ? Number(t.lot) : 1), 0);
-        return { id, trades: rows.length, wins: rows.filter((t) => Number(t.pnl) > 0).length, net };
-      })
-    : [];
-  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, strategyStats, memberStrategy, viewStrategy, trackSince: TRACK_SINCE });
+  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, trackSince: TRACK_SINCE });
 }

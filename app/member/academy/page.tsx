@@ -5,7 +5,6 @@
 // Vidéos : NEXT_PUBLIC_WELCOME_VIDEO_URL + NEXT_PUBLIC_STRATEGY_VIDEO_URL (Vercel). Fichier .mp4/.webm
 // (bucket Supabase « academy » public) → lecteur natif PORTRAIT (tournage vertical) ; sinon iframe 16:9.
 import { useEffect, useState } from 'react';
-import { STRATEGY_UI, STRATEGY_AVAILABLE } from '../ui';
 
 const WELCOME = process.env.NEXT_PUBLIC_WELCOME_VIDEO_URL ?? '';
 const STRATEGY = process.env.NEXT_PUBLIC_STRATEGY_VIDEO_URL ?? '';
@@ -20,7 +19,7 @@ const svg = (d: string) => (
 // « déjà à l'intérieur » — un prospect anonyme voit la vignette verrouillée → connexion Telegram pour débloquer.
 const SECTIONS = [
   { key: 'welcome', icon: svg('M8 5.5v13l11-6.5L8 5.5z'), title: 'Welcome to Algoria', blurb: 'What you just joined, and what happens next.', url: WELCOME, gated: false },
-  { key: 'strategy', icon: svg('M12 3v18M12 6l6 2-2.5 6a4 4 0 0 1-7 0L6 8l6-2zM6 8l-2.5 6a4 4 0 0 0 7 0'), title: 'Choosing your strategy', blurb: `${STRATEGY_UI.filter((s) => STRATEGY_AVAILABLE.includes(s.id)).map((s) => `${s.icon} ${s.name}`).join(', ')} — which profile fits you.`, url: STRATEGY, gated: true },
+  { key: 'strategy', icon: svg('M12 3v18M12 6l6 2-2.5 6a4 4 0 0 1-7 0L6 8l6-2zM6 8l-2.5 6a4 4 0 0 0 7 0'), title: 'Meet ALGORIA 2.0', blurb: 'The engine your account copies — what it trades, and how it decides.', url: STRATEGY, gated: true },
   { key: 'how', icon: svg('M4 17l4-6 3 3.5L16 8l4 5M4 21h16'), title: 'How Algoria trades', blurb: 'How the AI picks its trades, and why it stands aside around news.', url: '', gated: true },
   { key: 'mt5', icon: svg('M4 4h16v14H4zM4 22h16M8 12l2.5-3 2 2.5L16 8'), title: 'Reading your MT5', blurb: 'Follow your copies like a pro.', url: '', gated: true },
 ];
