@@ -345,7 +345,11 @@ async function main() {
         // instrument (au lieu de les laisser courir jusqu'à leur stop, au-delà du cap). Filet live contre le
         // « la journée saigne bien au-delà de −4% » (vécu le 15/07). Une seule fois par jour. Sur objectif/ratchet
         // (target/lock) on NE ferme PAS — les gagnants sont déjà protégés par leur trailing, et le swing peut courir.
-        if (state.dayDone && state.dayDoneReason === 'loss' && hardClosedDay !== state.dayStamp) {
+        // JAMAIS EN MODE COPIE (11/09/2026) — et c'est le plus grave des trois. `dayDone` se déduit du P&L du
+        // jour du COMPTE, pas de qui a pris les trades : sur un compte alimenté par un copieur, un mauvais
+        // jour de la source ferait fermer SES positions par NOTRE cap, au pire moment, au creux de la journée.
+        // On paie une stratégie pour ses décisions ; on ne la débranche pas au milieu d'un trade.
+        if (!COPY_MODE && state.dayDone && state.dayDoneReason === 'loss' && hardClosedDay !== state.dayStamp) {
           hardClosedDay = state.dayStamp ?? '';
           const openHere = ((terminal.positions ?? []) as any[]).filter((p) => p.symbol === BROKER);
           if (openHere.length) {
@@ -814,6 +818,7 @@ async function main() {
     // bien un redémarrage qu'une position ouverte à la main pendant que le runner tournait.
     let lastRestore = 0;
     const ensureManagement = async () => {
+      if (COPY_MODE) return; // rien à restaurer : en mode copie on ne gère aucun stop (voir manageBreakeven)
       if (Date.now() - lastRestore < 60_000) return;
       const live = ((terminal.positions ?? []) as any[]).filter((x) => x.symbol === BROKER && x.stopLoss != null);
       const orphans = live.filter((x) => !hasManagement(String(x.id)));
@@ -880,7 +885,11 @@ async function main() {
       // `calendarFresh()` est exigé ici : sans calendrier à jour, `imminentHighImpact` renverrait null en
       // permanence et on croirait à tort qu'aucune annonce n'approche (voir l'alerte de fraîcheur plus bas).
       const soon = calendarFresh() ? imminentHighImpact(NEWS_GUARD_MIN) : null;
-      await manageBreakeven(stream, terminal, BROKER, soon?.title ?? null); // no-op sur les ordres nus (sans SL)
+      // JAMAIS EN MODE COPIE : manageBreakeven ne filtre que sur le SYMBOLE, pas sur qui a ouvert la position
+      // (« elle rattrape aussi bien un redémarrage qu'une position ouverte à la main », dit son commentaire).
+      // Sur un compte copié elle adopterait les positions de la source et lui remonterait ses stops au
+      // breakeven, puis les traînerait — en écrasant exactement ce pour quoi on la paie.
+      if (!COPY_MODE) await manageBreakeven(stream, terminal, BROKER, soon?.title ?? null); // no-op sur les ordres nus (sans SL)
     };
 
 
@@ -1561,7 +1570,13 @@ async function main() {
       lastRecapHour = h;
       // CONTENU PROGRAMMÉ (indépendant du nombre de trades du jour) : briefing 06h UTC (avant Londres),
       // pédagogie 14h UTC (rotation déterministe par jour). Gaté par l'env VIP + marché OUVERT.
-      if (vipReady() && goldOpen()) {
+      //
+      // COUPÉ EN MODE COPIE (11/09/2026, décision Mathieu : « le blabla du VIP qui ne s'arrêtait jamais,
+      // c'était devenu du spam »). Ces deux-là postent qu'il se passe quelque chose ou non — un briefing
+      // générique et une astuce en rotation, tous les jours, pour meubler. Un canal qui parle tous les jours
+      // sans rien avoir à dire apprend à ses lecteurs à ne plus l'ouvrir, et le jour où un vrai message
+      // arrive il est enterré sous le reste. Ce qui reste : ce qui s'est réellement passé sur le compte.
+      if (vipReady() && goldOpen() && !COPY_MODE) {
         try {
           if (h === 6) { const c = await fetchLatestContext(); if (c) void postVip(briefing(c)); }
           else if (h === 14) void postVip(VIP_TIPS[Math.floor(Date.now() / 86_400_000) % VIP_TIPS.length]);
@@ -1627,8 +1642,13 @@ async function main() {
             else if (stats.net >= 0) void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  green day 🟢\n\nAll copied to your account. See you tomorrow. 👊`);
             else void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  ${wr}% win\n\nRisk stayed capped and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁`);
 
-            // 🏆 TRADE DU JOUR (le meilleur gagnant flotte, ≥ $200) — LE forward parfait vers le public.
+            // TROPHÉES ET BADGES : COUPÉS EN MODE COPIE (11/09/2026). Le wrap ci-dessus a déjà dit la journée
+            // avec ses vrais chiffres ; le « trade du jour », celui de la semaine, la série de jours verts et
+            // les records répètent la même journée sous trois emballages de plus. C'est ce cumul qui avait
+            // transformé le canal en spam. Un fait, une fois.
             const dayStartIso = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+            if (!COPY_MODE) {
+            // 🏆 TRADE DU JOUR (le meilleur gagnant flotte, ≥ $200) — LE forward parfait vers le public.
             const top = await fetchTopTrade(dayStartIso).catch(() => null);
             if (top && top.pnl >= 200)
               void postVip(`🏆 <b>TRADE OF THE DAY</b>\n${VIP_RULE}\n${VIP_TAGS[top.strategy] ?? `S${top.strategy}`}\n<b>+${usd(top.pnl)}</b> on ${top.symbol}\n${VIP_RULE}\n<i>Cleanly executed and copied to every account on this strategy.</i>`);
@@ -1652,6 +1672,7 @@ async function main() {
               if (isRecord) badges.push(`⚡ <b>New record day</b> — +${usd(today.net)}, our best since launch`);
               if (badges.length) void postVip(`${badges.join('\n')}\n\n<i>This is the track record building in real time. 👊</i>`);
             }
+            } // fin du bloc trophées — coupé en mode copie
           }
           // PULSE « 🔴 working · N trades » toutes les 4 h : SUPPRIMÉ le 06/09 (décision Mathieu). Sur une
           // journée rouge il tapissait le canal de rouge sans rien apprendre à personne ; sur une verte, le
