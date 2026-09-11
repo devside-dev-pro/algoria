@@ -80,7 +80,15 @@ interface TradeCtx {
 export class DealRecorder extends Base {
   private readonly ctx = new Map<string, TradeCtx>(); // positionId → contexte (pour calculer R + reason)
 
-  constructor(private readonly brokerSymbol: string, private readonly displaySymbol: string) {
+  /** brokerSymbol NULL = mode ATTRAPE-TOUT (11/09/2026) : enregistre les clôtures de TOUS les symboles sauf
+   *  ceux déjà couverts par un instrument configuré, qui ont leur propre recorder et leur contexte de R.
+   *  Nécessaire depuis qu'un copieur externe alimente le compte : il trade ce qu'il veut, pas seulement l'or
+   *  et le BTC, et une clôture sur un symbole non configuré n'était enregistrée nulle part. */
+  constructor(
+    private readonly brokerSymbol: string | null,
+    private readonly displaySymbol: string,
+    private readonly excluded: ReadonlySet<string> = new Set(),
+  ) {
     super();
   }
 
@@ -90,7 +98,10 @@ export class DealRecorder extends Base {
   }
 
   async onDealAdded(_instanceIndex: string, deal: any): Promise<void> {
-    if (deal?.symbol !== this.brokerSymbol) return;
+    const sym = String(deal?.symbol ?? '');
+    if (this.brokerSymbol === null) { if (!sym || this.excluded.has(sym)) return; }
+    else if (sym !== this.brokerSymbol) return;
+    const display = this.brokerSymbol === null ? sym : this.displaySymbol;
     if (deal?.type !== 'DEAL_TYPE_BUY' && deal?.type !== 'DEAL_TYPE_SELL') return; // ignore balance/commission/etc.
     if (deal?.entryType === 'DEAL_ENTRY_IN') return; // l'ouverture est gérée par le runner (placeSignal)
 
@@ -116,10 +127,10 @@ export class DealRecorder extends Base {
     // La base est l'UNIQUE verrou : si la clôture n'est pas neuve (deal rélivré par MetaApi sur reconnexion/resync,
     // ou plusieurs instanceIndex), recordTradeClose renvoie false → on NE reposte PAS la carte VIP ni le push.
     // (Cause du bug 24/07 : mêmes gains postés 2× dans le VIP — onDealAdded se déclenchait plusieurs fois.)
-    const fresh = await recordTradeClose(ticket, this.displaySymbol, { exit, pnl, r, reason, closedAt: when });
+    const fresh = await recordTradeClose(ticket, display, { exit, pnl, r, reason, closedAt: when });
     if (!fresh) return;
-    if (pnl > 0) maybePushWin(this.displaySymbol, pnl);
-    vipTradeClose(this.displaySymbol, pnl, reason, c?.entry, exit, ticket);
+    if (pnl > 0) maybePushWin(display, pnl);
+    vipTradeClose(display, pnl, reason, c?.entry, exit, ticket);
   }
 
   /** Raison de sortie par proximité : TP, SL, breakeven — ou TRAIL (stop verrouillé NET au-dessus de l'entrée,
