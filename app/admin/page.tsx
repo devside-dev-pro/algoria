@@ -13,6 +13,7 @@ import { QueueTab } from './tabs/QueueTab';
 import { MembersTab } from './tabs/MembersTab';
 import { DepositsTab } from './tabs/DepositsTab';
 import { AffiliateTab } from './tabs/AffiliateTab';
+import { DeskTab } from './tabs/DeskTab';
 import { ToolsTab } from './tabs/ToolsTab';
 
 export default function AdminCRM() {
@@ -90,6 +91,9 @@ export default function AdminCRM() {
 
           {/* ===== AFFILIATE — l'argent des parrains ===== */}
           {tab === 'affiliate' && <AffiliateTab />}
+
+          {/* ===== DESK — ce que le desk d'analystes a produit, et le retrait d'une lecture ===== */}
+          {tab === 'desk' && <DeskTab />}
 
           {/* ===== TOOLS — la boîte à outils de l'opérateur : push composer, relance des leads, legacy ===== */}
           {tab === 'tools' && <ToolsTab />}

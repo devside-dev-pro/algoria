@@ -942,6 +942,8 @@ export function useAdminState() {
     { key: 'members', label: 'MEMBERS', badge: rows.length },
     { key: 'deposits', label: 'DEPOSITS', badge: deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending').length + liveNoDeposit.length },
     { key: 'affiliate', label: 'AFFILIATE', badge: (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) },
+    // DESK : l'onglet se charge tout seul (lecture seule + publier/dépublier), il ne passe pas par cet état.
+    { key: 'desk', label: 'DESK' },
     { key: 'tools', label: 'TOOLS' },
   ];
 
