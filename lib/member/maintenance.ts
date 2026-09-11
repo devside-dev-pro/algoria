@@ -38,7 +38,23 @@
 // n'est attaché à S1 (les 33 sont passés sur S2 le 20/08), donc la laisser trader sur le master est un
 // test en avant à exposition client NULLE. On la rouvrira aux membres — et on remontera le minimum de S2
 // de $200 à $500, voir minimums.ts — quand ses chiffres le justifieront, pas avant.
-export const STRATEGIES_IN_MAINTENANCE: number[] = [1];
+//
+// ── S3 TURBO AJOUTÉE LE 11/09/2026 : il n'y a plus qu'une stratégie ──────────────────────────────────
+// Les membres ne suivent plus nos moteurs, ils suivent un compte externe (Algoria 2.0) via le copieur, et
+// S1 comme S3 ont été supprimées de MetaApi. Leurs runners sont en CRASHED, leurs masters n'existent plus.
+//
+// S3 était pourtant TOUJOURS dans le sélecteur : un membre déclarant $1000 pouvait la choisir à l'étape 3,
+// passer en `pending_copier`, et voir son branchement échouer sur « no master configured for S3 » — un
+// message que personne ne lui montre. Il restait dans la file, sans stratégie qui tourne, sans explication.
+// Avec 1 150 comptes en onboarding, ce n'était pas une hypothèse.
+//
+// On la CACHE plutôt que de la supprimer, exactement comme S1 : c'est réversible, ça sort du sélecteur, du
+// flux et du minimum annoncé, et ça ne touche pas aux lignes déjà écrites (décision Mathieu du 20/08 :
+// « masquer, pas supprimer »). Le retrait complet de la notion de stratégie est un chantier à part.
+//
+// Le « from $200 » de la pub est préservé : S2 porte déjà le palier $200 (voir minimums.ts), donc le
+// minimum d'entrée annoncé ne bouge pas d'un dollar.
+export const STRATEGIES_IN_MAINTENANCE: number[] = [1, 3];
 
 // Stratégies dont le runner n'ouvre plus aucune position. VIDE depuis le 21/08 : S1 doit trader pour
 // pouvoir prouver sa correction. Remettre un id ici est l'arrêt d'urgence — à réserver aux cas où une

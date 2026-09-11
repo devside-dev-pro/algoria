@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin, isVip } from '@/lib/member/server';
 import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, commissionTermsFor, nextMilestone } from '@/lib/member/affiliate';
 import { minDepositFor, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
+import { inMaintenance } from '@/lib/member/maintenance';
 import { lotsStateOf } from '@/lib/member/activation';
 import { OFFBOARDED } from '@/lib/member/winback';
 import { BROKERS } from '@/lib/member/brokers';
@@ -299,6 +300,13 @@ export async function POST(req: NextRequest) {
     // du membre est la stratégie). Fin du wizard OU changement depuis le profil (→ file : move de master STH).
     const choice = Number(body.choice ?? 0);
     if (![1, 2, 3].includes(choice)) return NextResponse.json({ error: 'invalid strategy' }, { status: 400 });
+    // VERROU SERVEUR SUR LA MAINTENANCE (11/09/2026). Le sélecteur grise déjà les stratégies retirées,
+    // mais rien ne l'imposait ici : un appel direct — ou un écran resté ouvert avant le retrait de S3 —
+    // posait `strategy: 3` en base et faisait passer le membre en `pending_copier`. Le branchement STH
+    // échouait ensuite sur « no master configured for S3 », et il restait dans la file sans explication.
+    // Une stratégie qu'on ne peut plus brancher doit être refusée AU MOMENT DU CHOIX, avec une phrase que
+    // le membre comprend, pas trois étapes plus loin dans un message technique qu'il ne verra jamais.
+    if (inMaintenance(choice)) return NextResponse.json({ error: 'this strategy is not available right now — pick another one' }, { status: 400 });
     patch.strategy = choice;
     if (cur.status === 'onboarding') {
       const [{ data: mrow }, { data: kyc }] = await Promise.all([
