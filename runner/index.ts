@@ -1252,20 +1252,29 @@ async function main() {
   // Le texte est celui d'un humain qui écrit à la main : court, signé, deux boutons (lui écrire, revenir sur le
   // canal), aucun lien vers un formulaire. Mathieu relit et réécrit ces textes à sa façon — ce sont les siens.
   // Le seul argument commercial est le code ALGORIA100, à la dernière relance, comme « dernière chance ».
+  //
+  // ALGORIA 2.0 (11/09/2026). Les quatre textes ne disaient RIEN du produit — ils demandaient des nouvelles
+  // sans jamais donner de raison de revenir. Or il y en a une, vraie : le moteur a changé. Elle est donc
+  // ajoutée aux relances 2, 3 et 4. La relance de 48 h reste intacte : à ce stade la personne vient de
+  // s'inscrire, lui vendre quoi que ce soit casserait le seul message qui ne vend rien.
+  // AUCUN CHIFFRE DE PERFORMANCE ici, et ce n'est pas un oubli : 2.0 n'a pas encore un seul trade enregistré
+  // chez nous. Un « +X % cette semaine » serait inventé. Ce qu'on affirme — le moteur a changé, il tourne,
+  // les membres le copient — est vérifiable aujourd'hui. Le jour où le chiffre existe, il pourra être lu
+  // en base et inséré ici.
   const touchMessage = (touch: 1 | 2 | 3 | 4, locale: Locale): { dm: string; title: string; body: string } => {
     if (locale === 'it') {
       switch (touch) {
         case 1: return { dm: `Ciao, sono Mathieu 👋\nTi sei iscritto ad Algoria due giorni fa e non ho ancora tue notizie. Qualsiasi domanda, anche piccola: scrivimi direttamente, rispondo io a tutti.\n\n— Mathieu`, title: '👋 Mathieu ti ha scritto', body: 'Qualsiasi domanda, scrivimi direttamente — rispondo io.' };
-        case 2: return { dm: `È passata una settimana 🙂 Nessuna pressione.\nSe è il broker o il deposito a frenarti, dimmelo: ti accompagno io in 5 minuti, dal vivo.\n\n— Mathieu`, title: '🙂 Una settimana dopo', body: 'Se qualcosa ti frena, dimmelo — ti accompagno io in 5 minuti.' };
-        case 3: return { dm: `Due settimane. Il canale resta aperto per te: ogni giorno ci trovi cosa succede, in pubblico.\nQuando sarà il momento giusto per te, sono a un messaggio di distanza.\n\n— Mathieu`, title: '📢 Il canale resta aperto per te', body: 'Quando sarà il momento giusto, sono a un messaggio di distanza.' };
-        default: return { dm: `Ultimo messaggio da parte mia su questo 🤝\nIl tuo codice ALGORIA100 (100 % di bonus sul deposito da RaiseFX) resta valido per te, e la mia porta resta aperta. Il giorno in cui vorrai iniziare, scrivimi semplicemente « pronto ».\n\n— Mathieu`, title: '🤝 Ultimo messaggio — ALGORIA100 resta tuo', body: 'Il codice resta valido, la porta resta aperta. Scrivimi « pronto » quando vuoi.' };
+        case 2: return { dm: `È passata una settimana 🙂 Nessuna pressione.\nNel frattempo una cosa è cambiata: il motore non è più lo stesso. ALGORIA 2.0 è in funzione, ed è quello che i conti dei membri copiano adesso.\nSe è il broker o il deposito a frenarti, dimmelo: ti accompagno io in 5 minuti, dal vivo.\n\n— Mathieu`, title: '⚡ ALGORIA 2.0 è in funzione', body: 'Il motore è cambiato. Se qualcosa ti frena, dimmelo — 5 minuti, dal vivo.' };
+        case 3: return { dm: `Due settimane. Il canale resta aperto per te: ogni giorno ci trovi cosa succede, in pubblico.\nDa quando c'è ALGORIA 2.0, quello che passa lì sono le sue operazioni — copiate automaticamente sui conti dei membri. Tu le vedi, semplicemente non le ricevi.\nQuando sarà il momento giusto per te, sono a un messaggio di distanza.\n\n— Mathieu`, title: '📢 Quello che passa nel canale, i membri lo ricevono', body: 'Tu le vedi, semplicemente non le ricevi. Sono a un messaggio di distanza.' };
+        default: return { dm: `Ultimo messaggio da parte mia su questo 🤝\nALGORIA 2.0 continua a lavorare, che tu ci sia o no. Il tuo codice ALGORIA100 (100 % di bonus sul deposito da RaiseFX) resta valido per te, e la mia porta resta aperta. Il giorno in cui vorrai iniziare, scrivimi semplicemente « pronto ».\n\n— Mathieu`, title: '🤝 Ultimo messaggio — ALGORIA100 resta tuo', body: 'Il codice resta valido, la porta resta aperta. Scrivimi « pronto » quando vuoi.' };
       }
     }
     switch (touch) {
       case 1: return { dm: `Hey, Mathieu here 👋\nYou joined Algoria two days ago and I haven't heard from you yet. Any question, even a small one — write to me directly, I answer everyone myself.\n\n— Mathieu`, title: '👋 Mathieu wrote to you', body: 'Any question — write to me directly, I answer everyone myself.' };
-      case 2: return { dm: `It's been a week 🙂 No pressure.\nIf the broker step or the deposit is what's holding you, tell me — I'll walk you through it in 5 minutes, live.\n\n— Mathieu`, title: '🙂 One week in', body: 'If something is holding you back, tell me — 5 minutes, live.' };
-      case 3: return { dm: `Two weeks in. The channel stays open for you: every day, what's happening, in public.\nWhen your timing is right, I'm one message away.\n\n— Mathieu`, title: '📢 The channel stays open for you', body: 'When your timing is right, I’m one message away.' };
-      default: return { dm: `Last message from me on this 🤝\nYour code ALGORIA100 (100% deposit bonus at RaiseFX) stays valid for you, and my door stays open. The day you want to start, just write me "ready".\n\n— Mathieu`, title: '🤝 Last message — ALGORIA100 stays yours', body: 'The code stays valid, the door stays open. Write me "ready" whenever.' };
+      case 2: return { dm: `It's been a week 🙂 No pressure.\nOne thing did change in the meantime: the engine isn't the same one. ALGORIA 2.0 is live, and it's what members' accounts copy now.\nIf the broker step or the deposit is what's holding you, tell me — I'll walk you through it in 5 minutes, live.\n\n— Mathieu`, title: '⚡ ALGORIA 2.0 is live', body: 'The engine changed. If something is holding you back, tell me — 5 minutes, live.' };
+      case 3: return { dm: `Two weeks in. The channel stays open for you: every day, what's happening, in public.\nSince ALGORIA 2.0 took over, what goes through there is its trades — copied to members' accounts automatically. You get to watch them. You just don't get them.\nWhen your timing is right, I'm one message away.\n\n— Mathieu`, title: '📢 What goes through the channel, members receive', body: 'You get to watch them — you just don’t get them. I’m one message away.' };
+      default: return { dm: `Last message from me on this 🤝\nALGORIA 2.0 keeps working whether you're in or not. Your code ALGORIA100 (100% deposit bonus at RaiseFX) stays valid for you, and my door stays open. The day you want to start, just write me "ready".\n\n— Mathieu`, title: '🤝 Last message — ALGORIA100 stays yours', body: 'The code stays valid, the door stays open. Write me "ready" whenever.' };
     }
   };
   // ===== ALARME TUNNEL (16/08/2026) — le capteur qui manquait ==========================================
