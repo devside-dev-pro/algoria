@@ -82,3 +82,30 @@ suivi des appels se rattrape aussi. C'est ce que le panneau admin devra rendre i
 
 `GET /api/cron/desk-publish?dry=1` rend exactement ce qui partirait — la notification et le texte VIP — sans rien
 pousser ni marquer comme annoncé.
+
+---
+
+# À FAIRE — refaire le canal VIP
+
+Noté le 11/09/2026, décision Mathieu : « créer un VIP digne de ce nom, intéressant à suivre ».
+
+Le canal postait un briefing chaque matin, une astuce chaque après-midi, le trade du jour, celui de la semaine,
+les séries de jours verts et les records — en plus des cartes de trade et du wrap. Ces messages partaient qu'il
+se passe quelque chose ou non, et plusieurs racontaient la même journée sous des emballages différents. Le
+résultat était du remplissage, et un canal qui parle tous les jours sans rien avoir à dire apprend à ses
+lecteurs à ne plus l'ouvrir.
+
+Le remplissage est coupé (mode copie). Reste à décider ce qui le remplace. Quelques pistes, à trancher avec
+Mathieu, pas à implémenter d'office :
+
+- **La rareté comme règle.** Un message part parce qu'un fait le justifie, jamais parce que l'heure est venue.
+- **Ce qui manque aujourd'hui** : on annonce les sorties, jamais les entrées. Un canal où les positions sont
+  annoncées AVANT de savoir comment elles finissent est vérifiable ; un canal qui ne montre que des gains
+  clôturés ne l'est pas, et ça se sent.
+- **Le desk** a de la matière écrite chaque matin et un suivi honnête de ses appels. Le VIP pourrait en être la
+  vitrine plutôt que de produire son propre bavardage.
+- **La voix.** Les textes actuels sont écrits par le runner, au ton marketing. Mathieu reprend les bulles vidéo :
+  un canal où il parle vaut mieux qu'un canal qui poste des emojis.
+
+Ce qui ne doit pas revenir : plusieurs messages pour un même fait, et un message qui affirme une chose que le
+compte ne fait pas (voir le « daily target hit » coupé en mode copie).
