@@ -6,11 +6,10 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
 import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
-import { STRATEGY_AVAILABLE } from '../ui';
 
 const CHECKS = [
   'Broker account opened through the Algoria link',
-  `Minimum deposit confirmed ($${MIN_ENTRY_DEPOSIT}–$${Math.max(...STRATEGY_AVAILABLE.map((id) => STRATEGY_MIN_DEPOSIT[id])).toLocaleString('en-US')} depending on your strategy)`,
+  `Minimum deposit confirmed ($${MIN_ENTRY_DEPOSIT})`, // une seule stratégie : un seul minimum, plus de fourchette « selon ta stratégie »
   `Activation volume traded (${ACTIVATION_LOTS} lot on ${ACTIVATION_SYMBOL})`,
   'Account linked to the Algoria copier',
 ];

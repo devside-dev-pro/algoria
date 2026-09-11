@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { useMe, StatusPill, StrategyPicker, Locked, UnlockSheet, type Member, type Referral, LoadFailed } from '../ui';
+import { useMe, StatusPill, Locked, UnlockSheet, type Member, type Referral, LoadFailed } from '../ui';
 import { TRC20_RE } from '@/lib/member/affiliate';
 import { LOT_CHOICES, LOT_MAX, LOT_STEP, isLotAllowed } from '@/lib/member/lots';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
@@ -258,14 +258,21 @@ export default function Profile() {
         />
       )}
 
-      {/* Strategy Studio — le levier de risque du membre (stratégie + taille de copie) */}
+      {/* CE QUE LE MEMBRE COPIE (11/09/2026). C'était un sélecteur de stratégie — le « levier de risque ».
+          Il n'y a plus qu'un moteur : proposer un choix dont deux options sur trois n'ont plus de master
+          aurait transformé un réglage en panne. Le levier de risque restant est la taille de copie, juste
+          en dessous, et elle est réelle. */}
       <Locked unlocked={unlocked} onUnlock={() => setPaywall(true)} label="STRATEGY — MEMBERS ONLY">
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>YOUR STRATEGY</h2>
-          <StrategyPicker value={member.strategy ?? 2} busy={busy || !unlocked} onPick={(id) => act('strategy', id)} />
-          {/* texte corrigé le 30/07 : depuis le passage en full-auto (STH), le changement est immédiat —
-              la file support n'est plus qu'un repli si l'API refuse (receiver ajouté à la main). */}
-          <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Applied instantly — your account moves to the strategy&apos;s master right away.</p>
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>YOU&rsquo;RE COPYING</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+            <span style={{ fontSize: 22, minWidth: 32 }}>⚡</span>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: 1 }}>ALGORIA 2.0</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>Every trade it takes is mirrored to your account automatically.</span>
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Your risk lever is the copy size below — it decides how much of each trade lands on your account.</p>
         </section>
       </Locked>
 

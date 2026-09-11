@@ -375,7 +375,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   // pas de nav avant connexion NI pendant l'onboarding / l'attente d'approbation (tous les onglets sont verrouillés)
-  const bare = ['/login', '/denied', '/onboarding', '/pending', '/invite', '/recover', '/add-strategy'].some((p) => path?.includes(p)); // écrans-tunnels : la nav en sortirait (audit 03/09 §4)
+  const bare = ['/login', '/denied', '/onboarding', '/pending', '/invite', '/recover'].some((p) => path?.includes(p)); // écrans-tunnels : la nav en sortirait (audit 03/09 §4)
   useEffect(() => {
     if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/member-sw.js').catch(() => {});
   }, []);
@@ -485,74 +485,11 @@ export function StatusPill({ status }: { status: Member['status'] }) {
 }
 
 // ===== STRATÉGIES — le levier de risque du membre (le lot copieur est FIXE 0.01, plus de sélecteur de lot).
-// AVAILABLE : seules les stratégies dont le master EXISTE sont sélectionnables. Les 3 masters $70k tournent
-// (runners S1/S2/S3 + STH) depuis le 20/07 → tout est ouvert. Les membres existants restent en S2 (défaut).
-// Une stratégie EN MAINTENANCE sort du sélecteur : personne ne peut plus la choisir tant qu'elle n'est
-// pas réparée. Source unique dans lib/member/maintenance.ts — voir le dossier S1 du 20/08.
-export const STRATEGY_AVAILABLE = [1, 2, 3].filter((id) => !inMaintenance(id));
-export const STRATEGY_UI = [
-  { id: 1, icon: '🛡️', name: 'STEADY', tag: 'Small daily target, tight caps', blurb: 'Hunts a small profit every day, then stops. Daily loss capped tight. No overnight positions.' },
-  { id: 2, icon: '⚖️', name: 'BALANCED', tag: 'The reference engine', blurb: 'The strategy behind our track record — scalp + core positions, balanced daily caps.' },
-  { id: 3, icon: '🔥', name: 'TURBO', tag: 'More trades, more variance', blurb: 'Aggressive: more trades, wider caps. For those who accept bigger swings both ways.' },
-] as const;
-
-/** La stratégie la plus HAUTE que ce budget débloque (null si le budget est sous le minimum d'entrée).
- *  budget absent/0 = pas de contrainte connue → on ne restreint rien. */
-export function bestStrategyFor(budget?: number, exclude?: number[]): number | null {
-  const ok = STRATEGY_AVAILABLE.filter((id) => !exclude?.includes(id))
-    .filter((id) => !(budget != null && budget > 0 && budget < (STRATEGY_MIN_DEPOSIT[id] ?? 500)));
-  return ok.length ? Math.max(...ok) : null;
-}
-
-/** budget (optionnel) = dépôt déclaré : les stratégies au-dessus du budget sont grisées avec le minimum
- *  affiché — le membre voit tout de suite pourquoi et combien il faudrait. exclude = stratégies déjà prises
- *  (multi-comptes : on ne propose que celles qu'il n'a pas).
- *
- *  ⚠️ Une ligne GRISÉE n'est JAMAIS affichée comme sélectionnée (12/08). BALANCED est la valeur par défaut
- *  du wizard : un membre à $200 arrivait à l'étape 3 avec BALANCED coché ✓ ET grisé, donc impossible à
- *  décocher, pendant que le bouton START restait muet — il croyait avoir choisi et n'avait plus qu'à
- *  cliquer. Plusieurs adhésions bloquées là (« I tried to click but not clicking »). Le coche ne doit
- *  décrire que ce qui est réellement sélectionnable ; l'appelant, lui, ramène la valeur dans le domaine
- *  autorisé (voir bestStrategyFor). */
-export function StrategyPicker({ value, onPick, busy, budget, exclude }: { value: number; onPick: (id: number) => void; busy?: boolean; budget?: number; exclude?: number[] }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      {STRATEGY_UI.filter((s) => !exclude?.includes(s.id)).map((s) => {
-        const min = STRATEGY_MIN_DEPOSIT[s.id] ?? 500;
-        const underBudget = budget != null && budget > 0 && budget < min;
-        const available = STRATEGY_AVAILABLE.includes(s.id) && !underBudget;
-        const active = value === s.id && available;
-        return (
-          <button
-            key={s.id}
-            disabled={busy || !available}
-            onClick={() => onPick(s.id)}
-            style={{
-              textAlign: 'left', display: 'flex', alignItems: 'center', gap: 13, padding: '13px 15px', borderRadius: 12, cursor: available ? 'pointer' : 'default',
-              border: `1px solid ${active ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
-              background: active ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)',
-              boxShadow: active ? '0 0 16px rgba(43,227,245,.12)' : undefined,
-              color: 'var(--text)', opacity: busy ? 0.6 : available ? 1 : 0.45,
-            }}
-          >
-            <span style={{ fontSize: 21, minWidth: 34 }}>{s.icon}</span>
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1 }}>
-                {s.name}
-                <span className="mono" style={{ marginLeft: 8, fontSize: 9, letterSpacing: 0.8, color: underBudget ? 'var(--gold)' : 'var(--dim)', fontWeight: 700 }}>min ${min}</span>
-                {s.id === 2 && <span style={{ color: 'var(--dim)', fontWeight: 500 }}> · default</span>}
-                {!STRATEGY_AVAILABLE.includes(s.id) && <span className="mono" style={{ marginLeft: 8, fontSize: 8.5, letterSpacing: 1, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 4, padding: '1px 5px' }}>{inMaintenance(s.id) ? '🔧 UNDER MAINTENANCE' : 'COMING SOON'}</span>}
-              </span>
-              <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>{s.tag} — {s.blurb}</span>
-              {underBudget && <span style={{ fontSize: 10.5, color: 'var(--gold)' }}>needs a ${min}+ deposit — fund more to unlock this profile</span>}
-            </span>
-            {active && <span style={{ marginLeft: 'auto', color: 'var(--cyan)', fontSize: 15 }}>✓</span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+// LE SÉLECTEUR DE STRATÉGIE A ÉTÉ SUPPRIMÉ (11/09/2026), avec STRATEGY_UI, STRATEGY_AVAILABLE et
+// bestStrategyFor. Les membres copient un moteur unique (ALGORIA 2.0) : il n'y a plus de choix à
+// présenter, et un sélecteur dont deux entrées sur trois affichent « UNDER MAINTENANCE » n'est pas un
+// réglage, c'est une liste de portes fermées. Le levier de risque qui reste — la taille de copie — vit
+// dans le Profil, et lui est réel. Source de vérité de la stratégie vivante : lib/member/maintenance.ts.
 
 /** Case à cocher lisible au pouce : toute la ligne est cliquable, pas seulement le carré de 16 px. */
 export function Check({ checked, onToggle, children }: { checked: boolean; onToggle: () => void; children: React.ReactNode }) {

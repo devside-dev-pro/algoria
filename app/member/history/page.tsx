@@ -3,7 +3,7 @@
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMe, UnlockSheet, LoadFailed, STRATEGY_UI, STRATEGY_AVAILABLE } from '../ui';
+import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { RECORD } from '@/lib/backtest/record';
 
@@ -16,27 +16,17 @@ export default function MemberHistory() {
   const [clientLot, setClientLot] = useState(0.01);
   const [paywall, setPaywall] = useState(false);
   const [sharing, setSharing] = useState<string | null>(null);
-  // COMPARER LES TROIS STRATÉGIES (04/08, demande d'un VIP). `view` = celle qu'on regarde, `mine` = la
-  // sienne. Le jour où sa stratégie saigne, voir qu'une autre était verte évite le réflexe de retrait —
-  // et ça aide à choisir avant d'ouvrir un second compte. Consultation seule : rien n'est rebranché ici.
-  const [view, setView] = useState<number | null>(null);
-  const [mine, setMine] = useState<number | null>(null);
-  const [stats, setStats] = useState<Array<{ id: number; trades: number; wins: number; net: number }>>([]);
   const [trackSince, setTrackSince] = useState<string | null>(null); // départ du track record visible (lib/member/trackSince.ts)
+  // Plus de paramètre `strategy` : il servait au comparateur, et il n'y a plus qu'une stratégie à voir.
   useEffect(() => {
-    void fetch(`/api/member/feed${view ? `?strategy=${view}` : ''}`).then(async (r) => {
+    void fetch('/api/member/feed').then(async (r) => {
       if (!r.ok) return;
-      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; strategyStats?: Array<{ id: number; trades: number; wins: number; net: number }>; memberStrategy?: number; viewStrategy?: number; trackSince?: string };
+      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; trackSince?: string };
       setTrades(d.trades);
       if (d.trackSince) setTrackSince(d.trackSince);
       if (d.clientLot) setClientLot(d.clientLot);
-      setStats(d.strategyStats ?? []);
-      if (d.memberStrategy) setMine(d.memberStrategy);
-      // on ne REPOSITIONNE pas `view` depuis la réponse : ça relancerait l'effet pour le même résultat.
-      // Tant qu'il n'a rien choisi, `view` reste null et l'affichage retombe sur `mine`.
     });
-  }, [view]);
-  const shown = view ?? mine; // la stratégie affichée : celle qu'il consulte, sinon la sienne
+  }, []);
   // ÉCHELLE CLIENT : le master (~$70k) trade en lot 1 — le membre copie en lot FIXE (clientLot, ex. 0.01).
   // Montant « pour toi » = pnl × clientLot ÷ lot du master. Leçon churn : « −1291$ » a fait fuir un client
   // à 500$ dont le vrai chiffre était −13$ — on met SON échelle en avant, le master en petit.
@@ -85,43 +75,10 @@ export default function MemberHistory() {
         </button>
       )}
 
-      {/* SÉLECTEUR DE STRATÉGIE — réservé aux accès débloqués : un prospect ne voit que des gains filtrés,
-          un net comparé y serait mensonger. Le net de chaque profil est déjà À SON ÉCHELLE (son lot copieur
-          est FIXE, donc identique sur les trois) : la comparaison est exacte, pas une projection. */}
-      {unlocked && stats.length > 0 && (
-        <section className="panel" style={{ padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
-          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 800 }}>COMPARE THE STRATEGIES · LAST 7 DAYS</span>
-          <div style={{ display: 'flex', gap: 7 }}>
-            {/* stratégies OUVERTES seulement (audit 03/09) : S1 en maintenance s'affichait, cliquable, et le flux
-                retombait en silence sur S2 — la pastille S1 restait allumée au-dessus des trades de S2. */}
-            {STRATEGY_UI.filter((s) => STRATEGY_AVAILABLE.includes(s.id)).map((s) => {
-              const st = stats.find((x) => x.id === s.id);
-              const active = shown === s.id;
-              const green = (st?.net ?? 0) > 0;
-              return (
-                <button key={s.id} onClick={() => setView(s.id)}
-                  style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-                    border: `1px solid ${active ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
-                    background: active ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)', color: 'var(--text)' }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.6, whiteSpace: 'nowrap' }}>
-                    {s.icon} {s.name}
-                  </span>
-                  <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: st && st.trades ? (green ? 'var(--up)' : 'var(--muted)') : 'var(--dim)' }}>
-                    {st && st.trades ? fmtYou(st.net) : '—'}
-                  </span>
-                  <span className="mono" style={{ fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>
-                    {st && st.trades ? `${st.trades} trades · ${Math.round((st.wins / st.trades) * 100)}%` : 'no trades yet'}
-                  </span>
-                  {mine === s.id && <span className="mono" style={{ fontSize: 8, letterSpacing: 1, color: 'var(--gold)', fontWeight: 800 }}>YOURS</span>}
-                </button>
-              );
-            })}
-          </div>
-          <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>
-            All shown <b style={{ color: 'var(--muted)' }}>at your {clientLot} lot</b>, over the same 7 days — your copy size is the same whichever profile you run, so this compares like for like. {mine != null && shown !== mine && <b style={{ color: 'var(--cyan)' }}>You&rsquo;re viewing a profile you don&rsquo;t run.</b>}
-          </p>
-        </section>
-      )}
+      {/* LE COMPARATEUR DE STRATÉGIES A ÉTÉ RETIRÉ (11/09/2026). Il mettait S1/S2/S3 côte à côte avec leur
+          net sur 7 jours — un écran qui n'a de sens que s'il y a un choix à faire. Il n'y en a plus qu'une,
+          et laisser trois pastilles dont deux affichent « no trades yet » ne compare rien : ça donne à un
+          moteur arrêté l'apparence d'un moteur qui n'a simplement pas trouvé de trade. */}
 
       {/* prospect : le serveur n'envoie que les gains → on l'ASSUME (highlight reel) au lieu d'afficher
           un win rate 100% qui sentirait le faux. L'historique complet arrive avec l'accès. */}

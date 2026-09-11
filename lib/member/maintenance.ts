@@ -56,6 +56,12 @@
 // minimum d'entrée annoncé ne bouge pas d'un dollar.
 export const STRATEGIES_IN_MAINTENANCE: number[] = [1, 3];
 
+/** LA stratégie que copient les membres. Une seule depuis le 11/09/2026 — les autres sont en maintenance.
+ *  Existe pour que « la stratégie vivante » soit nommée une fois plutôt qu'écrite en dur un peu partout :
+ *  c'est ce `2` en dur, dispersé dans l'onboarding, le profil et les API, qui avait rendu si difficile de
+ *  répondre à la question « où est branché un nouvel inscrit ? » le jour où la réponse a changé. */
+export const LIVE_STRATEGY = 2;
+
 // Stratégies dont le runner n'ouvre plus aucune position. VIDE depuis le 21/08 : S1 doit trader pour
 // pouvoir prouver sa correction. Remettre un id ici est l'arrêt d'urgence — à réserver aux cas où une
 // stratégie fait activement du mal, pas à ceux où elle est simplement en cours de correction.
