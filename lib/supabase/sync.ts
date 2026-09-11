@@ -611,6 +611,18 @@ export async function latestCandleTime(symbol: string, timeframe = 'M5'): Promis
 }
 
 /** Tickets des trades OUVERTS en base depuis > graceMs qui n'existent plus chez le broker (candidats fantômes). */
+/** Tickets des trades OUVERTS en base pour cette stratégie, TOUS symboles confondus (11/09/2026).
+ *
+ *  Sert à l'observateur de copie : depuis qu'un copieur externe ouvre les positions de S2, personne côté
+ *  Algoria ne sait qu'elles existent. La question n'est plus « quelles positions de MON symbole » mais
+ *  « lesquelles de ce compte me sont inconnues », et la réponse ne peut pas être filtrée par symbole : le
+ *  compte source trade ce qu'il veut. */
+export async function listOpenTickets(): Promise<Set<string>> {
+  const { data, error } = await db.from('trades').select('ticket').eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
+  if (error) { console.error('[sync] listOpenTickets échoué:', error.message); return new Set(); }
+  return new Set((data ?? []).map((t) => String(t.ticket)));
+}
+
 export async function listGhostOpenTrades(symbol: string, liveTickets: string[], graceMs = 120_000): Promise<string[]> {
   // SCOPE STRATÉGIE : sans ce filtre, chaque runner voyait les trades ouverts des AUTRES stratégies,
   // ne trouvait pas leurs tickets chez SON broker → les fermait en « reconcile » (P&L perdu). Bug constaté 20/07.

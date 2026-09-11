@@ -31,6 +31,7 @@ import { adminLink, notifyOwner } from '../lib/member/notifyOwner';
 import { sthReady, sthStatus, sthMoveMaster } from '../lib/member/sth';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
+import { startCopyObserver } from './observer';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
@@ -932,6 +933,21 @@ async function main() {
   if (!engines.length) throw new Error('[algoria] aucun instrument initialisé — arrêt');
   const primary = engines[0];
   console.log(`[algoria] ${engines.length} moteur(s) actif(s) · primaire=${primary.inst.display}`);
+
+  // ===== MODE COPIE (11/09/2026) : ce compte reçoit ses trades d'un copieur externe, pas de nos moteurs.
+  // Rien dans le code d'enregistrement ne le prévoyait — l'ouverture était écrite au moment où le runner
+  // passait l'ordre. Deux manques à combler, et un seul interrupteur pour les deux :
+  //   · l'observateur écrit en base les positions apparues sans nous (sinon : rien dans l'app, et à la
+  //     clôture une ligne sans direction ni prix d'entrée, donc une carte de gain qui dessine l'inverse) ;
+  //   · un recorder ATTRAPE-TOUT capte les clôtures des symboles non configurés (le compte source trade ce
+  //     qu'il veut ; l'or et le BTC gardent leur propre recorder, qui sait calculer le R).
+  // OFF par défaut : sur un compte qui trade ses propres signaux, ces deux-là n'ont rien à faire.
+  if (process.env.ALGORIA_COPY_OBSERVE === '1') {
+    const covered = new Set(engines.map((e) => e.inst.broker));
+    stream.addSynchronizationListener(new DealRecorder(null, '', covered));
+    startCopyObserver({ terminal, label: 'copie' });
+    console.log(`[algoria] mode copie ACTIF · symboles déjà couverts : ${[...covered].join(', ') || 'aucun'}`);
+  }
 
   // ===== CHIEN DE GARDE DU FLUX DE PRIX (06/09/2026) =====
   // Vécu le 06/09 à 16:06 UTC : l'abonnement MetaApi aux cotations s'est éteint en silence sur S2. Le process
