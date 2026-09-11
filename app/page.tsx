@@ -9,6 +9,13 @@ import { WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
 // (vrais gains via /api/public/proof, wins only), vidéo de bienvenue (env), how-it-works, FAQ
 // anti-objections (honnête : on gagne via les brokers partenaires — la transparence close), CTA final.
 // Objectif inchangé : rejoindre le canal Telegram gratuit — le closing humain se fait en DM.
+// ÉTIQUETTE DE MARCHÉ (11/09/2026). Il y avait ici `symbol === 'XAUUSD' ? 'GOLD' : 'BTC'` — donc TOUT
+// symbole autre que l'or s'affichait « BTC » sur la page publique. C'était sans conséquence tant que nos
+// moteurs ne traitaient que ces deux marchés ; depuis qu'un moteur externe alimente le compte et trade ce
+// qu'il veut, un gain sur EURUSD aurait été annoncé au monde entier comme un gain sur Bitcoin. Un symbole
+// inconnu garde donc son vrai nom : mieux vaut « EURUSD » que le nom d'un marché qu'on n'a pas tradé.
+const marketLabel = (symbol: string): string => (symbol === 'XAUUSD' ? 'GOLD' : symbol === 'BTCUSD' ? 'BTC' : symbol);
+
 const TELEGRAM = process.env.NEXT_PUBLIC_TELEGRAM_URL || 'https://t.me/'; // à définir en env Vercel
 const TIKTOK = process.env.NEXT_PUBLIC_TIKTOK_URL || '';
 const VIDEO = process.env.NEXT_PUBLIC_WELCOME_VIDEO_URL || ''; // vidéo de bienvenue (mp4 ou YouTube/Vimeo)
@@ -28,6 +35,13 @@ export default function Funnel() {
     void fetch('/api/public/proof').then((r) => (r.ok ? r.json() : null)).then((d) => d && setProof(d as Proof)).catch(() => {});
   }, []);
   const hasToday = (proof?.today.count ?? 0) > 0;
+  // Les marchés annoncés sont ceux RÉELLEMENT tradés sur la période, pas une liste écrite en dur : le
+  // moteur choisit ses marchés, la vitrine les constate. Repli sur nos deux historiques tant qu'il n'y a
+  // aucun gain à lire — dire « GOLD · BTC » avant la première clôture reste vrai de ce qu'on suit.
+  const markets = (() => {
+    const seen = [...new Set((proof?.wins ?? []).map((w) => marketLabel(w.symbol)))];
+    return seen.length ? seen.slice(0, 3).join(' · ') : 'GOLD · BTC';
+  })();
 
   return (
     <main style={{ minHeight: '100dvh', color: 'var(--text)', position: 'relative', overflowX: 'hidden', background: 'radial-gradient(90% 60% at 50% -10%, #0e1c33 0%, var(--bg,#070b12) 60%)' }}>
@@ -56,7 +70,8 @@ export default function Funnel() {
 
         {/* ===== hero ===== */}
         <h1 style={{ fontSize: 30, lineHeight: 1.15, fontWeight: 700, margin: 0 }}>
-          The AI that trades <span style={{ color: 'var(--gold)' }}>gold</span> &amp; <span style={{ color: '#f7931a' }}>Bitcoin</span>,<br />live.
+          <span style={{ background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>ALGORIA&nbsp;2.0</span><br />
+          trades <span style={{ color: 'var(--gold)' }}>gold</span> &amp; <span style={{ color: '#f7931a' }}>Bitcoin</span> for you, live.
         </h1>
         <p style={{ fontSize: 15, color: 'var(--muted)', margin: 0, maxWidth: 390 }}>
           Real money, real trades, executed autonomously around the clock — streamed with nothing to hide.
@@ -85,7 +100,7 @@ export default function Funnel() {
             ) : (
               <>
                 <Stat label="Banked · 7 days" value={proof && proof.week.total > 0 ? `+$${proof.week.total}` : '—'} accent="var(--gold)" mono />
-                <Stat label="Markets" value="GOLD · BTC" accent="var(--cyan)" />
+                <Stat label="Markets" value={markets} accent="var(--cyan)" />
                 <Stat label="XAU/USD" value={px ? px.mid.toFixed(1) : '—'} accent="var(--gold)" mono />
               </>
             )}
@@ -96,7 +111,7 @@ export default function Funnel() {
                 {[...proof!.wins, ...proof!.wins].map((t, i) => (
                   <span key={i} className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap', fontSize: 12, padding: '6px 12px', borderRadius: 9, border: '1px solid rgba(34,224,166,.35)', background: 'rgba(34,224,166,.06)' }}>
                     <span style={{ color: t.direction === 'long' ? 'var(--up)' : 'var(--down)', fontWeight: 800 }}>{t.direction === 'long' ? '▲' : '▼'}</span>
-                    <span style={{ color: 'var(--muted)' }}>{t.symbol === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
+                    <span style={{ color: 'var(--muted)' }}>{marketLabel(t.symbol)}</span>
                     <span style={{ color: 'var(--up)', fontWeight: 800 }}>+${t.pnl}</span>
                   </span>
                 ))}
