@@ -110,7 +110,7 @@ export function useAdminState() {
   const [tgChats, setTgChats] = useState<Array<{ chat_id: number; title: string | null; type: string | null; username: string | null; last_seen_at: string; role: string | null }>>([]);
   const [chatCopied, setChatCopied] = useState<number | null>(null);
   // audit STH : lignes renvoyees par /api/member/admin (sthAudit) — etat reel de la copie chez STH
-  const [sthAudit, setSthAudit] = useState<{ rows: Array<{ member_no: number | null; name: string; state: string; detail: string }>; summary: Record<string, number> } | null>(null);
+  const [sthAudit, setSthAudit] = useState<{ rows: Array<{ member_no: number | null; name: string; state: string; detail: string }>; master?: string | null; summary: Record<string, number> } | null>(null);
   const [botDrafts, setBotDrafts] = useState<Record<string, string>>({}); // brouillons de réponse via le bot (par ligne du fil)
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
   const [depTg, setDepTg] = useState('');
@@ -380,9 +380,25 @@ export function useAdminState() {
     if (!await ask.confirm('Connect this account to the copier via STH now?\n\nVerify the deposit first — on success the member goes LIVE.')) return;
     const id = a.id;
     setBusy(true);
-    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectSth: id }) })
-      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return void ask.alert(d.error); post({ done: id }, () => { setCreds((c) => { const n = { ...c }; delete n[id]; return n; }); recordDepositAfterConnect(a); }); })
-      .catch(() => setBusy(false));
+    // ÉCHEC SILENCIEUX (13/09/2026). Il y avait ici `.catch(() => setBusy(false))` : toute réponse qui
+    // n'était pas du JSON — un 504, une page d'erreur, une coupure — faisait lever r.json(), le catch
+    // éteignait le spinner, et RIEN ne s'affichait. Constaté en vrai : deux membres bloqués dans la file,
+    // le support cliquant sans le moindre retour, et zéro trace en base pour comprendre.
+    // Un bouton qui échoue doit le dire. On lit donc le corps en TEXTE d'abord : si ce n'est pas du JSON
+    // on montre le code HTTP et le début de la réponse, ce qui suffit à distinguer un timeout d'un refus STH.
+    try {
+      const r = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectSth: id }) });
+      const raw = await r.text();
+      let d: { ok?: boolean; error?: string } | null = null;
+      try { d = JSON.parse(raw) as { ok?: boolean; error?: string }; } catch { d = null; }
+      setBusy(false);
+      if (!d) { await ask.alert(`⚠ STH connect — réponse illisible (HTTP ${r.status})\n\n${raw.slice(0, 300) || '(corps vide)'}`); return; }
+      if (d.error) { await ask.alert(`⚠ STH connect a échoué\n\n${d.error}`); return; }
+      post({ done: id }, () => { setCreds((c) => { const n = { ...c }; delete n[id]; return n; }); recordDepositAfterConnect(a); });
+    } catch (e) {
+      setBusy(false);
+      await ask.alert(`⚠ STH connect — appel impossible\n\n${(e as { message?: string })?.message ?? 'network error'}`);
+    }
   };
   // RE-connexion STH depuis la fiche membre (ex. déconnecté par erreur sur le dashboard STH) : identifiants
   // déjà en base — rien à ressaisir, ne touche pas au statut du membre.

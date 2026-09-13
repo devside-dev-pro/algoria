@@ -57,8 +57,16 @@ export function ToolsTab() {
               </div>
               {sthAudit && (
                 <>
+                  {/* LA CONFIGURATION ELLE-MÊME, affichée en premier. Si cette ligne est vide ou si tout le
+                      monde est « wrong master », le problème n'est pas chez les membres : il est dans
+                      STH_MASTER_ID. C'est l'information qui manquait le 13/09, quand les connexions
+                      échouaient sans que rien ne dise pourquoi. */}
+                  <div className="mono" style={{ fontSize: 11.5, color: sthAudit.master ? 'var(--dim)' : '#ff6b8a' }}>
+                    {sthAudit.master ? <>configured master · <b style={{ color: 'var(--text)' }}>{sthAudit.master}</b></> : <b>⚠ NO MASTER CONFIGURED — set STH_MASTER_ID on Vercel</b>}
+                  </div>
                   <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>
                     {sthAudit.summary.checked} checked · <b style={{ color: 'var(--up)' }}>{sthAudit.summary.ok} ok</b>
+                    {(sthAudit.summary.wrongMaster ?? 0) > 0 && <> · <b style={{ color: '#ff6b8a' }}>{sthAudit.summary.wrongMaster} on the WRONG master</b></>}
                     {sthAudit.summary.orphan > 0 && <> · <b style={{ color: '#ff8a5c' }}>{sthAudit.summary.orphan} copying nothing</b></>}
                     {sthAudit.summary.repaired > 0 && <> · <b style={{ color: 'var(--up)' }}>{sthAudit.summary.repaired} repaired</b></>}
                     {sthAudit.summary.failed > 0 && <> · <b style={{ color: '#ff6b8a' }}>{sthAudit.summary.failed} failed</b></>}

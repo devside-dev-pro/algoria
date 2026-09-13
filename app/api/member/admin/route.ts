@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret, encryptSecret } from '@/lib/member/server';
 import { rejectMessage, rejectReasonOf } from '@/lib/member/rejectReasons';
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
-import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster } from '@/lib/member/sth';
+import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster, sthConfiguredMaster } from '@/lib/member/sth';
 import { BROKERS } from '@/lib/member/brokers';
 import { estimateCommission } from '@/lib/member/commissions';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
@@ -1057,6 +1057,7 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     // jamais à ça, même en réparation de masse.
     if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
     const repair = body.sthAudit === 'repair';
+    const configuredMaster = sthConfiguredMaster();
     // 'pending_copier' inclus depuis le 03/08 : la cliente #7 etait exactement la — connectee chez STH,
     // abonnee a rien, et invisible du premier audit qui ne regardait que les 'live'. Quelqu'un qui essaie
     // de se (re)brancher est precisement celui qu'on doit rattraper. 'paused' reste hors perimetre.
@@ -1068,8 +1069,21 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     for (const m of lives ?? []) {
       const st = await sthStatus(String(m.tg_id));
       if (!st.ok) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'error', detail: st.errorMessage }); continue; }
+      // QUELS masters, pas COMBIEN (13/09/2026). L'audit disait « 2 master(s) » et s'arrêtait là : un membre
+      // resté branché sur l'ancien master s'affichait donc en vert, « ok ». Le jour où le master a changé,
+      // c'est exactement l'information qui manquait pour comprendre pourquoi les connexions échouaient.
       const masters = st.data.masterAccountsList ?? [];
-      if (masters.length > 0) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'ok', detail: `${masters.length} master(s)` }); continue; }
+      if (masters.length > 0) {
+        const ids = masters.map((x) => String(x.id));
+        const onConfigured = !configuredMaster || ids.includes(configuredMaster);
+        rows.push({
+          member_no: m.member_no,
+          name: m.tg_username ? '@' + m.tg_username : m.tg_name,
+          state: onConfigured ? 'ok' : 'wrong-master',
+          detail: onConfigured ? `on ${ids.join(', ')}` : `on ${ids.join(', ')} — expected ${configuredMaster}`,
+        });
+        continue;
+      }
       // MASTERLESS → ORPHELIN, ET ON TENTE LA RÉPARATION (26/08). On triait avant sur
       // tradingAccountConnected pour séparer « connecté mais sans master » (réparable) de « inconnu de
       // STH » (rien à faire) — un drapeau faux pour tout le monde, donc TOUS les masterless tombaient dans
@@ -1090,7 +1104,9 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       }
     }
     const count = (s: string) => rows.filter((r) => r.state === s).length;
-    return NextResponse.json({ rows, summary: { checked: rows.length, ok: count('ok'), orphan: count('orphan'), repaired: count('repaired'), failed: count('failed'), unknown: count('unknown'), error: count('error') } });
+    // `master` remonte la configuration elle-même : si elle est vide, ou si tout le monde est « wrong-master »,
+    // le problème n'est pas chez les membres — il est dans STH_MASTER_ID.
+    return NextResponse.json({ rows, master: configuredMaster || null, summary: { checked: rows.length, ok: count('ok'), orphan: count('orphan'), repaired: count('repaired'), failed: count('failed'), unknown: count('unknown'), error: count('error'), wrongMaster: count('wrong-master') } });
   }
   if (body.sthStatusCheck) {
     // DIAGNOSTIC STH — la vérité directement depuis leur API : compte MT connecté ? abonné à quels masters ?
