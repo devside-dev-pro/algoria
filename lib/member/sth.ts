@@ -15,6 +15,12 @@ const MASTER_ID = process.env.STH_MASTER_ID ?? ''; // id du master Algoria dans 
 
 export const sthReady = (): boolean => Boolean(LICENSE);
 
+/** L'identifiant du master configuré — celui sur lequel TOUT nouveau membre est branché.
+ *  Exposé pour le diagnostic de l'admin : jusqu'ici l'audit disait « 2 master(s) » sans jamais dire
+ *  lesquels, donc un membre resté sur un ancien master s'affichait en vert. Le jour où le master a
+ *  changé, ce trou a coûté des connexions échouées qu'on ne pouvait pas expliquer. */
+export const sthConfiguredMaster = (): string => MASTER_ID;
+
 type SthResult<T = Record<string, unknown>> = { ok: boolean; errorMessage: string; data: T };
 
 async function sthPost<T = Record<string, unknown>>(route: string, payload: Record<string, unknown>): Promise<SthResult<T>> {
