@@ -10,3 +10,10 @@ export function brokerDayStartMs(now: number = Date.now()): number {
   shifted.setUTCHours(0, 0, 0, 0);
   return shifted.getTime() - OFFSET_H * 3_600_000;
 }
+
+/** Date du jour MT5 (AAAA-MM-JJ) auquel appartient cet instant — l'étiquette que porte une séance.
+ *  Une séance qui commence à 21h00 UTC le 14 est la journée broker du 15 : c'est cette date-là qu'un
+ *  humain appelle « la séance d'aujourd'hui », et donc celle qui doit figurer sur la carte partagée. */
+export function brokerDateOf(ms: number): string {
+  return new Date(ms + OFFSET_H * 3_600_000).toISOString().slice(0, 10);
+}

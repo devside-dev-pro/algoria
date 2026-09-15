@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
-import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
+import { brokerDayStartMs, brokerDateOf } from '@/lib/cockpit/brokerDay';
 import { TRACK_SINCE_MS } from '@/lib/member/trackSince';
 
 export const runtime = 'nodejs';
@@ -25,11 +25,29 @@ export async function GET() {
   const dayStart = brokerDayStartMs();
   const today = wins.filter((t) => Date.parse(t.closed_at) >= dayStart);
   const week = wins.filter((t) => Date.parse(t.closed_at) >= Date.now() - 7 * 86_400_000);
+  // ═══ LA SÉANCE À PARTAGER ≠ « AUJOURD'HUI » (15/09/2026) ════════════════════════════════════════
+  // Le serveur MT5 est en UTC+3, donc son minuit tombe à 21h00 UTC — l'heure exacte où l'or ferme.
+  // La journée de trading se termine et le compteur `today` repart à zéro dans la même minute. Résultat
+  // vécu : à 21h56, au moment précis où l'on veut poster le bilan de la séance, la carte DAY RECAP
+  // affichait « no wins yet » alors que la journée venait de faire 42 gains. Par construction elle était
+  // vide chaque fois qu'on en avait besoin.
+  // `today` ne bouge PAS : la landing écrit « Wins today » à côté, et ce chiffre doit rester littéralement
+  // vrai. On ajoute donc la DERNIÈRE SÉANCE QUI A DES GAINS — celle qu'on partage. En pleine séance c'est
+  // la journée en cours ; après la clôture, celle qui vient de finir ; le week-end, celle de vendredi.
+  let sessionStart = dayStart;
+  let session = today;
+  for (let back = 1; back <= 7 && session.length === 0; back++) {
+    sessionStart = dayStart - back * 86_400_000;
+    const end = sessionStart + 86_400_000;
+    session = wins.filter((t) => { const ts = Date.parse(t.closed_at); return ts >= sessionStart && ts < end; });
+  }
   const res = NextResponse.json({
     wins: wins.slice(0, 12),
     today: { count: today.length, total: today.reduce((a, t) => a + t.pnl, 0), best: today.reduce((m, t) => Math.max(m, t.pnl), 0) },
     // count/best aussi : alimente les cartes RÉCAP (jour/semaine) du studio admin
     week: { count: week.length, total: week.reduce((a, t) => a + t.pnl, 0), best: week.reduce((m, t) => Math.max(m, t.pnl), 0) },
+    // la séance partageable + SA date : la carte doit dater ce qu'elle montre, pas le moment du clic
+    session: { count: session.length, total: session.reduce((a, t) => a + t.pnl, 0), best: session.reduce((m, t) => Math.max(m, t.pnl), 0), date: brokerDateOf(sessionStart) },
   });
   // cache CDN 60s : la landing peut encaisser un raid TikTok sans marteler Supabase
   res.headers.set('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
