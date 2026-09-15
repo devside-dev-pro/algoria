@@ -1646,7 +1646,25 @@ async function main() {
               }
             }
             const proof = anyRed ? '\n\n<i>Every trade is posted here as it opens — before anyone knows how it ends.</i>' : '';
-            if (lines.length)
+            // ═══ MODE COPIE : LE WRAP DE LA FLOTTE MENT TROIS FOIS (15/09/2026) ═══════════════════════
+            // Constaté dans le canal, 65 abonnés, le soir du premier vrai jour de 2.0 :
+            //   « ⚖️ S2 BALANCED · 🟢 +$6,885 · 🛡️ daily cap — downside protected »
+            //   « Every strategy green today. This is the fleet working. »
+            // Trois affirmations, trois fausses :
+            //   1. LE CAP N'EXISTE PLUS. Il est coupé depuis le 11/09 (#405) parce qu'il aurait fermé les
+            //      positions de la source. Le drapeau vient de `runner_day.reason`, que la machine d'état
+            //      continue d'écrire : elle se déclenche sur le creux INTRADAY du compte, et comme la source
+            //      empile des positions sans stop, elle passe `done/loss` TOUS LES JOURS — y compris celui
+            //      à +6 885 $. On annonce donc une protection au moment précis où elle n'agit pas.
+            //      C'est le pire mensonge possible : une promesse de sécurité à des gens qui paient.
+            //   2. IL N'Y A PLUS DE FLOTTE. Une seule stratégie depuis le 11/09 ; S1 et S3 sont supprimées.
+            //   3. « Every strategy green » n'a plus de sens avec une seule ligne au tableau.
+            // En mode copie on dit donc la journée, et rien d'autre : des trades, un taux de réussite, un net.
+            // Aucun drapeau, aucune flotte, aucune protection annoncée. Ce qui reste est vérifiable.
+            if (COPY_MODE) {
+              const net = stats.net;
+              void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n<i>master-account scale</i>\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  ${net >= 0 ? '🟢 +' : '🔴 −'}<b>${usd(net)}</b>\n${VIP_RULE}\n<i>Copied to your account at your own size. Wins and losses both — open the app to see yours.</i>`);
+            } else if (lines.length)
               void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · master-account scale</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}${discipline}${proof}`);
             else if (stats.net >= 0) void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  green day 🟢\n\nAll copied to your account. See you tomorrow. 👊`);
             else void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  ${wr}% win\n\nRisk stayed capped and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁`);
