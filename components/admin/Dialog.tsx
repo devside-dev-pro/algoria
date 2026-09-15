@@ -33,7 +33,12 @@ type Req =
 let host: ((r: Req) => void) | null = null;
 
 // ── TOASTS (03/09) — le résultat d'une action (« sauvé », « envoyé », une erreur) ne mérite pas une boîte
-// à fermer : un bandeau en bas d'écran, qui disparaît seul. Une erreur reste plus longtemps et en rouge.
+// à fermer : un bandeau qui disparaît seul. Une erreur reste plus longtemps et en rouge.
+// EN HAUT, PAS EN BAS (16/09). Il était en `bottom: 18` : sur le téléphone — où l'admin vit à 70 % — ça le
+// posait derrière la barre d'outils de Safari et sous la main qui vient de toucher le bouton. Retour de
+// Mathieu : « peu importe où je clique, ça ne fait rien ». Les POST passaient tous (200 dans les logs
+// Vercel) ; c'est la confirmation qu'il ne voyait jamais. En haut, au-dessus du pouce, dans l'axe du
+// regard, et assez longtemps pour être lu : 4 s au lieu de 2,6.
 export type Toast = { id: number; text: string; kind: 'ok' | 'error' | 'info' };
 let toastHost: ((t: Toast) => void) | null = null;
 let toastSeq = 0;
@@ -82,7 +87,7 @@ export function DialogHost() {
     host = (r) => setQueue((q) => [...q, r]);
     toastHost = (t) => {
       setToasts((ts) => [...ts.slice(-3), t]);
-      setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== t.id)), t.kind === 'error' ? 7000 : 2600);
+      setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== t.id)), t.kind === 'error' ? 9000 : 4000);
     };
     return () => { host = null; toastHost = null; };
   }, []);
@@ -96,11 +101,11 @@ export function DialogHost() {
   }, [cur]);
 
   const toastBar = toasts.length > 0 && (
-    <div style={{ position: 'fixed', left: 0, right: 0, bottom: 18, zIndex: 1001, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
+    <div style={{ position: 'fixed', left: 0, right: 0, top: 'calc(env(safe-area-inset-top, 0px) + 10px)', zIndex: 1002, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, pointerEvents: 'none', padding: '0 12px' }}>
       {toasts.map((t) => (
-        <div key={t.id} className="mono" style={{ pointerEvents: 'auto', maxWidth: 'min(92vw, 520px)', padding: '10px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 700, lineHeight: 1.4, whiteSpace: 'pre-wrap', boxShadow: '0 8px 30px rgba(0,0,0,.45)',
-          color: t.kind === 'error' ? '#fff' : 'var(--text, #e8eefc)', background: t.kind === 'error' ? 'linear-gradient(90deg,#e0405f,#b8304a)' : t.kind === 'info' ? 'rgba(43,227,245,.16)' : 'rgba(31,216,176,.16)',
-          border: `1px solid ${t.kind === 'error' ? 'rgba(255,107,138,.6)' : t.kind === 'info' ? 'rgba(43,227,245,.5)' : 'rgba(31,216,176,.5)'}` }} onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}>
+        <div key={t.id} className="mono" style={{ pointerEvents: 'auto', cursor: 'pointer', maxWidth: 'min(94vw, 520px)', padding: '13px 16px', borderRadius: 12, fontSize: 13.5, fontWeight: 800, lineHeight: 1.45, whiteSpace: 'pre-wrap', boxShadow: '0 10px 34px rgba(0,0,0,.6)', backdropFilter: 'blur(8px)',
+          color: t.kind === 'error' ? '#fff' : 'var(--text, #e8eefc)', background: t.kind === 'error' ? 'linear-gradient(90deg,#e0405f,#b8304a)' : t.kind === 'info' ? 'rgba(14,44,62,.96)' : 'rgba(10,48,42,.96)',
+          border: `1px solid ${t.kind === 'error' ? 'rgba(255,107,138,.7)' : t.kind === 'info' ? 'rgba(43,227,245,.6)' : 'rgba(31,216,176,.6)'}` }} onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}>
           {t.text}
         </div>
       ))}
