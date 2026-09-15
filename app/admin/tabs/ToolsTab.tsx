@@ -120,7 +120,7 @@ export function ToolsTab() {
               <h2 style={secH}>🎨 WIN CARDS — STORY 9:16 · WIDE 16:9</h2>
               {/* les RÉCAPS — le post de fin de session et le bilan hebdo, wins only (règle 70/30) */}
               {([
-                ['day', '📅 DAY RECAP', proof?.today] as const,
+                ['day', '📅 SESSION RECAP', proof?.session ?? proof?.today] as const,
                 ['week', '🗓 WEEK RECAP', proof?.week] as const,
               ]).map(([period, label, s]) => (
                 <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(245,194,74,.35)', background: 'rgba(245,194,74,.05)', flexWrap: 'wrap' }}>

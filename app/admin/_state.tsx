@@ -145,7 +145,7 @@ export function useAdminState() {
   const [feedWins, setFeedWins] = useState<{ ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[]>([]);
   const [carding, setCarding] = useState<string | null>(null);
   // stats jour/semaine (wins only, API publique) — alimentent les cartes RÉCAP du studio
-  const [proof, setProof] = useState<{ today: { count: number; total: number; best: number }; week: { count: number; total: number; best: number } } | null>(null);
+  const [proof, setProof] = useState<{ today: { count: number; total: number; best: number }; week: { count: number; total: number; best: number }; session?: { count: number; total: number; best: number; date: string } } | null>(null);
 
   const load = () =>
     void fetch('/api/member/admin').then(async (r) => {
@@ -196,14 +196,18 @@ export function useAdminState() {
   }, []);
   const downloadRecap = async (period: 'day' | 'week', format: 'story' | 'landscape') => {
     if (!proof) return;
-    const s = period === 'day' ? proof.today : proof.week;
+    // LA CARTE DU JOUR MONTRE LA SÉANCE, PAS « AUJOURD'HUI » (15/09/2026). Le jour MT5 bascule à 21h00 UTC,
+    // soit l'heure de clôture de l'or : au moment où l'on veut poster le bilan, `today` est déjà reparti à
+    // zéro et la carte sortait vide. `session` est la dernière séance qui a des gains, et elle porte SA date.
+    const s = period === 'day' ? (proof.session ?? proof.today) : proof.week;
     const fmtD = (t: number) => new Date(t).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const sessionDate = period === 'day' && proof.session?.date ? Date.parse(`${proof.session.date}T12:00:00Z`) : Date.now();
     setCarding(`${period}-${format}`);
     try {
       const blob = await drawRecapCard({
-        periodLabel: period === 'day' ? "TODAY'S SESSION" : 'THIS WEEK', format,
+        periodLabel: period === 'day' ? 'SESSION' : 'THIS WEEK', format,
         count: s.count, total: s.total, best: s.best,
-        dateLabel: period === 'day' ? fmtD(Date.now()) : `${fmtD(Date.now() - 7 * 86_400_000)} – ${fmtD(Date.now())}`,
+        dateLabel: period === 'day' ? fmtD(sessionDate) : `${fmtD(Date.now() - 7 * 86_400_000)} – ${fmtD(Date.now())}`,
         qrUrl: 'https://algoria.tech', qrLabel: 'algoria.tech',
       });
       await shareOrDownloadCard(blob, `algoria-${period}-recap-${format === 'landscape' ? 'wide' : 'story'}.png`);
