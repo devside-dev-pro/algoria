@@ -12,8 +12,30 @@ import { ACTIVATION_LOTS, lotsStateOf } from '@/lib/member/activation';
 import { ask, toast, type FormField } from '@/components/admin/Dialog';
 import { WL, Row, Action, Affiliate, Deposit, Tab, Center, AdminGate } from './_shared';
 
+// ═══ L'ONGLET VIT DANS L'URL (16/09/2026) ════════════════════════════════════════════════════════════
+// Il était en useState pur : rafraîchir la page — le seul geste dont Mathieu disposait pour voir si son
+// clic avait pris — le renvoyait au DASHBOARD, et il devait re-naviguer jusqu'à la file. Dans l'URL, un
+// rafraîchissement reste sur place, le bouton retour d'iOS fait ce qu'on attend, et un onglet se partage.
+// L'état initial reste 'dashboard' : le serveur ne voit pas le hash, le lire au premier rendu casserait
+// l'hydratation. On le corrige dans l'effet, après le montage.
+const TAB_KEYS: Tab[] = ['dashboard', 'queue', 'members', 'deposits', 'affiliate', 'desk', 'tools'];
+const tabFromHash = (): Tab => {
+  const h = typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, '');
+  return (TAB_KEYS as string[]).includes(h) ? (h as Tab) : 'dashboard';
+};
+
 export function useAdminState() {
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [tab, setTabState] = useState<Tab>('dashboard');
+  useEffect(() => {
+    setTabState(tabFromHash());
+    const onHash = () => setTabState(tabFromHash()); // bouton retour du navigateur
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    if (typeof window !== 'undefined' && window.location.hash !== `#${t}`) window.history.replaceState(null, '', `#${t}`);
+  };
   const [wl, setWl] = useState<WL[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
@@ -22,6 +44,9 @@ export function useAdminState() {
   // pseudo Telegram de la session refusée : LE renseignement qui manquait pour sortir de la boucle
   const [deniedAs, setDeniedAs] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // clé de l'action EN COURS (ex. 'done:<id>') — le bouton cliqué affiche « … » au lieu de son libellé.
+  // `busy` grise tout le reste ; sans `pending` rien ne disait lequel des dix boutons de la carte travaille.
+  const [pending, setPending] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   const [creds, setCreds] = useState<Record<string, { login: string; server: string; password: string }>>({});
@@ -225,11 +250,38 @@ export function useAdminState() {
     }
   };
 
-  const post = (body: Record<string, unknown>, cb?: () => void) => {
+  // ═══ post() — LE BOUTON DOIT RÉPONDRE TOUT DE SUITE (16/09/2026) ══════════════════════════════════
+  // Retour de Mathieu depuis son téléphone : « peu importe où je clique, ça ne fait rien, je suis obligé
+  // de rafraîchir pour voir si ça a bougé ». Les logs Vercel disaient l'inverse : TOUS les POST rentraient
+  // en 200. Rien n'était cassé côté serveur — c'était l'écran qui ne disait rien. Trois manques :
+  //   1. la carte ne disparaissait qu'au retour du `load()` complet (membres + dépôts + fil du bot + STH),
+  //      soit plusieurs secondes sur mobile, pendant lesquelles TOUS les boutons sont grisés sans un mot ;
+  //   2. `r.json()` sur une réponse non-JSON (504, page d'erreur) levait, et il n'y avait pas de `.catch` :
+  //      échec parfaitement muet — la même faute que celle corrigée pour connectViaSth le 13/09 ;
+  //   3. rien n'indiquait QUEL bouton travaillait.
+  // Donc : `key` allume l'indicateur du bouton cliqué, `drop` retire la carte de la file IMMÉDIATEMENT
+  // (et la remet si le serveur refuse), et le corps est lu en texte d'abord — un échec se voit toujours.
+  const post = (body: Record<string, unknown>, cb?: () => void, opts?: { key?: string; drop?: string }) => {
     setBusy(true);
+    setPending(opts?.key ?? null);
+    // retrait optimiste : l'écran répond avant le réseau, et on sait exactement quoi remettre en cas d'échec
+    const before = actions;
+    const dropped = opts?.drop != null && before.some((x) => x.id === opts.drop);
+    if (dropped) setActions(before.filter((x) => x.id !== opts!.drop));
+    const restore = () => { if (dropped) setActions(before); };
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(async (r) => { const d = (await r.json()) as { error?: string }; if (d.error) toast(`⚠ ${d.error}`, 'error'); else toast('✓ saved'); cb?.(); load(); })
-      .finally(() => setBusy(false));
+      .then(async (r) => {
+        const raw = await r.text();
+        let d: { error?: string } | null = null;
+        try { d = JSON.parse(raw) as { error?: string }; } catch { d = null; }
+        if (!d) { restore(); return toast(`⚠ HTTP ${r.status} — réponse illisible\n${raw.slice(0, 160) || '(corps vide)'}`, 'error'); }
+        if (d.error) { restore(); return toast(`⚠ ${d.error}`, 'error'); }
+        toast('✓ saved');
+        cb?.();
+        load();
+      })
+      .catch((e) => { restore(); toast(`⚠ ${(e as { message?: string })?.message ?? 'network error'}`, 'error'); })
+      .finally(() => { setBusy(false); setPending(null); });
   };
   const reveal = (id: string) => {
     setBusy(true);
@@ -366,6 +418,7 @@ export function useAdminState() {
     const rawCountry = String(v.country ?? '').trim();
     const country = rawCountry ? (COUNTRIES.find((x) => x.toLowerCase() === rawCountry.toLowerCase()) ?? rawCountry) : '';
     setBusy(true);
+    setPending(`golive:${a.id}`);
     try {
       const r = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goLive: { id: a.id, ...(cleared ? {} : force ? { force } : { lots }), ...(amount > 0 ? { amount } : {}), ...(country ? { country } : {}) } }) });
       const d = (await r.json()) as { ok?: boolean; error?: string; steps?: Array<{ step: string; ok: boolean; error?: string }> };
@@ -376,7 +429,7 @@ export function useAdminState() {
       load();
     } catch (e) {
       toast(`⚠ ${(e as { message?: string })?.message ?? 'network error'}`, 'error');
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setPending(null); }
   };
   // connexion AUTO via STH : branche le compte dans le copieur, puis enchaîne `done` (passage LIVE) si OK,
   // puis propose d'enregistrer le dépôt (un prompt) — les 3 gestes en un seul clic.
@@ -384,6 +437,8 @@ export function useAdminState() {
     if (!await ask.confirm('Connect this account to the copier via STH now?\n\nVerify the deposit first — on success the member goes LIVE.')) return;
     const id = a.id;
     setBusy(true);
+    setPending(`sth:${id}`);
+    const idle = () => { setBusy(false); setPending(null); };
     // ÉCHEC SILENCIEUX (13/09/2026). Il y avait ici `.catch(() => setBusy(false))` : toute réponse qui
     // n'était pas du JSON — un 504, une page d'erreur, une coupure — faisait lever r.json(), le catch
     // éteignait le spinner, et RIEN ne s'affichait. Constaté en vrai : deux membres bloqués dans la file,
@@ -395,12 +450,12 @@ export function useAdminState() {
       const raw = await r.text();
       let d: { ok?: boolean; error?: string } | null = null;
       try { d = JSON.parse(raw) as { ok?: boolean; error?: string }; } catch { d = null; }
-      setBusy(false);
+      idle();
       if (!d) { await ask.alert(`⚠ STH connect — réponse illisible (HTTP ${r.status})\n\n${raw.slice(0, 300) || '(corps vide)'}`); return; }
       if (d.error) { await ask.alert(`⚠ STH connect a échoué\n\n${d.error}`); return; }
       post({ done: id }, () => { setCreds((c) => { const n = { ...c }; delete n[id]; return n; }); recordDepositAfterConnect(a); });
     } catch (e) {
-      setBusy(false);
+      idle();
       await ask.alert(`⚠ STH connect — appel impossible\n\n${(e as { message?: string })?.message ?? 'network error'}`);
     }
   };
@@ -482,9 +537,24 @@ export function useAdminState() {
   const moveViaSth = async (id: string) => {
     if (!await ask.confirm("Move this member to their NEW strategy's master via STH now?\n\nWorks for API-connected members. Manually-added receivers must be moved in the STH dashboard (the card shows their STH id).")) return;
     setBusy(true);
-    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveSth: id }) })
-      .then(async (r) => { const d = (await r.json()) as { ok?: boolean; error?: string }; setBusy(false); if (d.error) return void ask.alert(d.error); post({ done: id }); })
-      .catch(() => setBusy(false));
+    setPending(`move:${id}`);
+    // même faute qu'ailleurs, corrigée ici aussi (16/09) : le `.catch(() => setBusy(false))` avalait tout
+    // — un 504 ou une page d'erreur faisait lever r.json(), le spinner s'éteignait, et le support voyait
+    // un bouton qui ne fait « rien ». On lit le corps en texte d'abord et on montre TOUJOURS l'échec.
+    const idle = () => { setBusy(false); setPending(null); };
+    try {
+      const r = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveSth: id }) });
+      const raw = await r.text();
+      let d: { ok?: boolean; error?: string } | null = null;
+      try { d = JSON.parse(raw) as { ok?: boolean; error?: string }; } catch { d = null; }
+      idle();
+      if (!d) { await ask.alert(`⚠ STH move — réponse illisible (HTTP ${r.status})\n\n${raw.slice(0, 300) || '(corps vide)'}`); return; }
+      if (d.error) { await ask.alert(`⚠ STH move a échoué\n\n${d.error}`); return; }
+      post({ done: id }, undefined, { key: `done:${id}`, drop: id });
+    } catch (e) {
+      idle();
+      await ask.alert(`⚠ STH move — appel impossible\n\n${(e as { message?: string })?.message ?? 'network error'}`);
+    }
   };
   // off-board : le client est parti → paused + déconnexion copieur + note (le kick du canal Telegram reste manuel)
   // OFF-BOARD + RÉCUPÉRATION. Le motif choisi ici décide du TEXTE envoyé au membre (jamais de l'effet
@@ -968,7 +1038,7 @@ export function useAdminState() {
   ];
 
 
-  return { tab, setTab, goLive, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
+  return { tab, setTab, goLive, pending, setPending, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
 }
 
 export type AdminState = ReturnType<typeof useAdminState>;
