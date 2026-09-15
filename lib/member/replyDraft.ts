@@ -17,7 +17,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { PARTNER_BROKERS } from './brokers';
 import { STRATEGY_MIN_DEPOSIT } from './minimums';
-import { inMaintenance } from './maintenance';
+import { LIVE_STRATEGY } from './maintenance';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from './activation';
 import { APP_URL } from './i18n';
 
@@ -28,10 +28,10 @@ const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
  *  ALGORIA_BOT_AUTOREPLY=1 rallume l'autonomie sans redéploiement, si un jour on le veut de nouveau. */
 export const AUTOREPLY_ON = process.env.ALGORIA_BOT_AUTOREPLY === '1';
 
-const STRATEGY_NAMES: Record<number, string> = { 1: 'S1 STEADY', 2: 'S2 BALANCED', 3: 'S3 TURBO' };
+// Un seul moteur depuis le 11/09/2026 — le bot ne doit plus décrire un catalogue de trois stratégies.
 
 function facts(): string {
-  const strategies = [1, 2, 3].map((id) => `${STRATEGY_NAMES[id]}: ${inMaintenance(id) ? 'in maintenance, not available right now' : `minimum deposit $${STRATEGY_MIN_DEPOSIT[id]}`}`).join('; ');
+  const strategies = `ALGORIA 2.0 is the single engine members copy — minimum deposit $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]}. There is no longer a choice of strategy.`;
   const brokers = PARTNER_BROKERS.map((b) => `${b.name}${b.featured ? ' (recommended)' : ''}${b.bonus ? ` — bonus code ${b.bonus.code} = ${b.bonus.pct}% deposit bonus in trading credit (not withdrawable cash)` : ''}`).join(', ');
   const legs = ACTIVATION_LEGS.map((l) => `${l.lots} ${l.side}`).join(' + ');
   return [
@@ -85,7 +85,7 @@ export async function draftReply(i: DraftInput): Promise<Draft | null> {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   const statusLine = (() => {
     const st = i.member?.status ?? 'unknown';
-    if (st === 'live' || st === 'paused') return `${st}, copying ${STRATEGY_NAMES[Number(i.member?.strategy ?? 0)] ?? 'a strategy'} at ${i.member?.broker ?? 'their broker'}`;
+    if (st === 'live' || st === 'paused') return `${st}, copying ALGORIA 2.0 at ${i.member?.broker ?? 'their broker'}`;
     if (st === 'pending_copier') return 'account submitted, the team is verifying it (activation trades may still be missing)';
     if (st === 'onboarding') return i.member?.broker ? `signed up, chose ${i.member.broker}, account not connected yet` : 'signed up, has not chosen a broker yet';
     return st;
