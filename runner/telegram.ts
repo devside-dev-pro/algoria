@@ -20,8 +20,12 @@ export const vipReady = (): boolean => Boolean(TOKEN && VIP);
  *  main (décision Mathieu du 24/08 — voir autoApproveJoins dans runner/index.ts). */
 export const VIP_CHAT: string = VIP;
 
-/** Étiquette de LA stratégie de ce runner — chaque message VIP dit QUI parle (les 3 runners postent). */
-export const VIP_TAG: string = { 1: '🌱 S1 STEADY', 2: '⚖️ S2 BALANCED', 3: '🚀 S3 TURBO' }[ACTIVE_STRATEGY.id] ?? `S${ACTIVE_STRATEGY.id}`;
+/** Étiquette portée par chaque message du canal.
+ *  C'était le nom de la stratégie du runner — utile quand TROIS runners postaient dans le même canal et
+ *  qu'il fallait dire qui parlait. Il n'y a plus qu'un moteur depuis le 11/09/2026, et « S2 BALANCED »
+ *  n'existe plus nulle part ailleurs : ni dans l'app, ni dans l'inscription, ni sur la landing. Un membre
+ *  lisait donc dans le canal le nom d'un produit qu'on ne lui vend plus. */
+export const VIP_TAG: string = '⚡ ALGORIA 2.0';
 
 /** Montant formaté propre : $1,632 (séparateur de milliers) — signe géré par l'appelant. */
 export const usd = (n: number): string => '$' + Math.round(Math.abs(n)).toLocaleString('en-US');

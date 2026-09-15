@@ -14,8 +14,11 @@ export const dynamic = 'force-dynamic';
 // PAS d'emoji ni de symboles ▲▼ sur la carte : Satori ne rend que les glyphes présents dans la police
 // chargée (Space Grotesk) — un caractère absent devient un « ? » (vécu 26/07 : ▲ et 🌱 cassés). Flèche =
 // triangle CSS, tag stratégie = texte + puce colorée.
-const STRAT_NAME: Record<number, string> = { 1: 'S1 STEADY', 2: 'S2 BALANCED', 3: 'S3 TURBO' };
-const STRAT_DOT: Record<number, string> = { 1: '#22e0a6', 2: '#2be3f5', 3: '#f5a623' };
+// UN SEUL MOTEUR (15/09/2026) : la carte portait le nom de la stratégie — pertinent quand il y en avait
+// trois, faux depuis qu'il n'y en a plus qu'une. La carte est l'image la plus transférée du produit :
+// elle doit porter le nom sous lequel on le vend.
+const CARD_NAME = 'ALGORIA 2.0';
+const CARD_DOT = '#2be3f5';
 const symLabel = (s: string) => (s === 'XAUUSD' ? 'GOLD' : s === 'BTCUSD' ? 'BITCOIN' : s);
 const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 
@@ -118,8 +121,8 @@ export async function GET(req: NextRequest) {
         {/* stratégie (clarté multi-stratégies, puce colorée — pas d'emoji) + date de clôture, bas-droite */}
         <div style={{ position: 'absolute', right: 48, bottom: 44, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: STRAT_DOT[strategy] }} />
-            <span style={{ fontSize: 22, fontWeight: 700, color: 'rgba(232,240,255,.85)', letterSpacing: 1, lineHeight: 1, marginLeft: 10 }}>{STRAT_NAME[strategy]}</span>
+            <div style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: CARD_DOT }} />
+            <span style={{ fontSize: 22, fontWeight: 700, color: 'rgba(232,240,255,.85)', letterSpacing: 1, lineHeight: 1, marginLeft: 10 }}>{CARD_NAME}</span>
           </div>
           {t.closed_at && <span style={{ fontSize: 20, color: 'rgba(147,165,196,.7)', lineHeight: 1, marginTop: 12 }}>Closed: {fmtDate(String(t.closed_at))}</span>}
         </div>
