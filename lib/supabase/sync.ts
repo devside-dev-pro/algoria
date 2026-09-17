@@ -117,9 +117,17 @@ export async function recordTradeOpen(t: TradeOpen) {
   if (error) console.error('[sync] recordTradeOpen échoué:', error.message);
 }
 
-/** SL COURANT d'une position ouverte (breakeven/trailing) → le cockpit redessine la zone SL en direct. */
-export async function updateTradeStop(ticket: string, sl: number) {
-  const { error } = await db.from('trades').update({ sl }).eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
+/** SL COURANT d'une position ouverte → le cockpit redessine la zone SL en direct.
+ *
+ *  DEUX APPELANTS, DEUX MONDES. Le moteur (breakeven/trailing) l'appelle pour ses propres positions ; depuis
+ *  le 17/09/2026 l'observateur de copie l'appelle aussi, pour les stops posés À LA MAIN sur le compte master.
+ *
+ *  `null` (ou 0) EFFACE le stop, et c'est voulu : un stop retiré sur le master doit disparaître de l'écran
+ *  plutôt que d'y rester en fantôme. Les lecteurs traitent déjà l'absence (`Number(t.sl ?? NaN)` côté cockpit,
+ *  `|| null` côté live), et la colonne est nullable — écrire la vérité ne casse rien en aval. */
+export async function updateTradeStop(ticket: string, sl: number | null) {
+  const value = sl && sl > 0 ? sl : null;
+  const { error } = await db.from('trades').update({ sl: value }).eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
   if (error) console.error('[sync] updateTradeStop échoué:', error.message);
 }
 
