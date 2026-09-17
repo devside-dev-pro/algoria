@@ -799,11 +799,13 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     let sent = 0, failed = 0;
     for (const m of batch) {
       const tgId = Number(m.tg_id);
-      const body = personalise(String(text), m.tg_name);
+      // `message`, surtout pas `body` : dans ce handler `body` est le corps de la REQUÊTE. Le masquer ici
+      // marcherait aujourd'hui et piégerait la première personne qui ajoutera une ligne dans cette boucle.
+      const message = personalise(String(text), m.tg_name);
       const markup = ctaKeyboard(asLocale(m.locale), '/member/onboarding');
       const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(6000),
-        body: JSON.stringify({ chat_id: tgId, text: body, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: markup }),
+        body: JSON.stringify({ chat_id: tgId, text: message, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: markup }),
       }).catch(() => null);
       const ok = !!(r && ((await r.json().catch(() => ({}))) as { ok?: boolean }).ok);
       if (ok) sent++; else failed++;
@@ -814,7 +816,7 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       await db.from('member_actions').insert({
         tg_id: tgId, member_no: m.member_no ?? null, kind: 'nudge', status: 'done',
         done_by: ok ? 'admin (segment blast)' : 'auto (bot blast failed)',
-        detail: { text: body, segment: seg, dm: ok ? 'ok' : 'no-chat' } as never,
+        detail: { text: message, segment: seg, dm: ok ? 'ok' : 'no-chat' } as never,
       });
       await new Promise((res) => setTimeout(res, 120)); // ~8 envois/s : sous la limite Telegram, et poli
     }
