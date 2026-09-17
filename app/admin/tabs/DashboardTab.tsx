@@ -7,7 +7,7 @@ import { useAdmin } from '../_state';
 import { Kpi, RowLine, SCRIPTS, dimP, goldBtn, inp, miniBtn, okBtn, personalise, secH, td, warnBox } from '../_shared';
 
 export function DashboardTab() {
-  const { KIND_LABEL, STEP_LABEL, actions, aff, blastBody, blastText, blastTitle, botActivity, botBlocked, botDrafts, busy, chatCopied, copiedScript, depPending, depTotals, deposits, input, joinSources, leads, legalOf, live, liveNoDeposit, load, monthLabel, nameOf, nudge, nudges, pendingRev, post, rejectedTgIds, relSeg, rows, sendBlast, sendViaBot, setBlastBody, setBlastText, setBlastTitle, setBotDrafts, setBusy, setChatCopied, setCopiedScript, setRelSeg, setTab, setTgInboxOn, spokeTgIds, tgChats, tgInboxOn, todo } = useAdmin();
+  const { KIND_LABEL, STEP_LABEL, actions, aff, blastBody, blastText, blastTitle, blastProgress, botActivity, botBlocked, botDrafts, busy, chatCopied, copiedScript, depPending, depTotals, deposits, input, joinSources, leads, legalOf, live, liveNoDeposit, load, monthLabel, nameOf, nudge, nudges, pendingRev, post, rejectedTgIds, relSeg, rows, sendBlast, sendSegmentBlast, sendViaBot, setBlastBody, setBlastText, setBlastTitle, setBotDrafts, setBusy, setChatCopied, setCopiedScript, setRelSeg, setTab, setTgInboxOn, spokeTgIds, tgChats, tgInboxOn, todo } = useAdmin();
   return (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
@@ -189,6 +189,9 @@ export function DashboardTab() {
               const counts = Object.fromEntries(SEGS.map((s) => [s.key, all.filter((x) => x.seg === s.key).length])) as Record<Seg, number>;
               const active = SEGS.find((s) => s.key === relSeg && counts[s.key] > 0) ?? SEGS.find((s) => counts[s.key] > 0) ?? SEGS[0];
               const queue = all.filter((x) => x.seg === active.key);
+              // Ceux que Mathieu ne PEUT PAS joindre lui-même : pas de @pseudo, donc pas de lien t.me.
+              // C'est exactement la cible de l'envoi groupé — le reste de la file lui appartient.
+              const botOnlyCount = queue.filter((x) => !x.r.tg_username).length;
               return (
                 <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
                   <h2 style={secH}>📞 RELANCES DU JOUR · {all.length} — oldest first, your personal DM/voice beats any bot</h2>
@@ -208,11 +211,26 @@ export function DashboardTab() {
                       sur le dernier segment — sur les trois autres il tombe à côté, et ça se voit. */}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
                     <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55, whiteSpace: 'pre-wrap', flex: 1 }}>{SCRIPTS[active.key]}</span>
-                    <button onClick={() => { void navigator.clipboard?.writeText(SCRIPTS[active.key]); setCopiedScript(active.key); window.setTimeout(() => setCopiedScript(null), 1800); }}
-                      style={{ ...miniBtn, flex: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>
-                      {copiedScript === active.key ? '✓ copied' : '⧉ copy'}
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 'none' }}>
+                      <button onClick={() => { void navigator.clipboard?.writeText(SCRIPTS[active.key]); setCopiedScript(active.key); window.setTimeout(() => setCopiedScript(null), 1800); }}
+                        style={{ ...miniBtn, color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>
+                        {copiedScript === active.key ? '✓ copied' : '⧉ copy'}
+                      </button>
+                      {/* ENVOI GROUPÉ AUX SANS-@PSEUDO. Eux seuls, et c'est le point : Telegram ne donne aucun
+                          lien direct vers quelqu'un sans pseudo, donc le DM personnel — celui qui convertit —
+                          leur est fermé. Le bot est leur unique porte. Ceux qui ONT un pseudo restent hors de
+                          cet envoi : ils valent mieux qu'un message automatique, et ils sont la file de
+                          Mathieu. Le compte exact est demandé au serveur puis confirmé avant le moindre envoi. */}
+                      {botOnlyCount > 0 && (
+                        <button disabled={busy} onClick={() => void sendSegmentBlast(active.key, SCRIPTS[active.key], true)}
+                          title="envoie ce script par le bot à tous ceux de ce segment qui n'ont pas de @pseudo — ceux que tu ne peux pas joindre toi-même"
+                          style={{ ...miniBtn, color: 'var(--gold)', borderColor: 'rgba(245,194,74,.45)', whiteSpace: 'nowrap' }}>
+                          🤖 BOT × {botOnlyCount}
+                        </button>
+                      )}
+                    </div>
                   </div>
+                  {blastProgress && <p className="mono" style={{ margin: 0, fontSize: 11, color: 'var(--gold)' }}>⏳ {blastProgress}</p>}
                   {queue.slice(0, 15).map(({ r, days, touched, autoTouched }) => (
                     <div key={r.tg_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.5)', flexWrap: 'wrap' }}>
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 36 }}>#{r.member_no}</span>
