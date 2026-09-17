@@ -134,6 +134,21 @@ export const UI: Dict = {
   'ob.pwdHint': { en: 'The password of your TRADING account — the one the broker emailed you when the account was created, the one you type into MetaTrader. NOT the password of the broker\'s website. Not the read-only "investor" one either, or the copy can\'t trade.', it: 'La password del tuo conto DI TRADING — quella che il broker ti ha inviato via email alla creazione del conto, quella che digiti in MetaTrader. NON la password del sito del broker. E nemmeno quella "investor" di sola lettura, altrimenti la copia non può operare.' },
   'ob.pwdLost': { en: 'Lost it? Reset it from your broker\'s client area, on the trading account itself — look for "Change password" / "Trading password" (not the website login).', it: 'Persa? Reimpostala dall\'area clienti del broker, sul conto di trading stesso — cerca "Cambia password" / "Password di trading" (non quella del sito).' },
   'ob.loginHint': { en: 'The account NUMBER shown in MetaTrader — usually 6 to 10 digits. Not your email.', it: 'Il NUMERO di conto mostrato in MetaTrader — di solito 6-10 cifre. Non la tua email.' },
+  // ── « OÙ JE TROUVE ÇA ? » (17/09/2026) ───────────────────────────────────────────────────────────────
+  // `wrong_credentials` est le 1er motif de refus depuis qu'on les code, et la cause est toujours la même :
+  // la personne saisit les identifiants de l'ESPACE CLIENT du broker (email + mot de passe du site) au lieu
+  // de ceux du COMPTE METATRADER. Les avertissements existaient déjà — trois lignes de texte gris que
+  // personne ne lit. On montre donc la fenêtre qu'ils ont sous les yeux plutôt que de la décrire : un
+  // visuel se reconnaît, une phrase se saute. Ces gens-là ont déjà déposé leur argent : ce sont les plus
+  // chers à perdre sur un malentendu de vocabulaire.
+  'ob.creds.help': { en: 'Where do I find these?', it: 'Dove trovo questi dati?' },
+  'ob.creds.hide': { en: 'Close', it: 'Chiudi' },
+  'ob.creds.wrongTitle': { en: 'NOT your broker website login', it: 'NON i dati del sito del broker' },
+  'ob.creds.wrongBody': { en: 'The email address and password you use to sign in on the broker\u2019s website are a different account. They will be refused here.', it: 'L\u2019email e la password che usi per accedere al sito del broker sono un altro account. Qui verranno rifiutati.' },
+  'ob.creds.rightTitle': { en: 'The trading account the broker emailed you', it: 'Il conto di trading che il broker ti ha inviato via email' },
+  'ob.creds.rightBody': { en: 'When your account was created, the broker sent you an email with these three lines. Search your inbox for the broker name — the subject usually mentions your account details.', it: 'Alla creazione del conto, il broker ti ha inviato un\u2019email con queste tre righe. Cerca il nome del broker nella posta — l\u2019oggetto di solito parla dei dati del conto.' },
+  'ob.creds.dialog': { en: 'This is the window you see when you open', it: 'Questa \u00e8 la finestra che vedi quando apri' },
+  'ob.creds.already': { en: 'Already signed in on your phone or desktop? Your account number is shown at the top of the app, next to the account name.', it: 'Hai gi\u00e0 effettuato l\u2019accesso su telefono o computer? Il numero di conto \u00e8 in alto nell\u2019app, accanto al nome del conto.' },
   'ob.loginWarn': { en: 'That looks like your broker website login. Algoria needs the MetaTrader account number — the digits shown at the top of MetaTrader, also in the broker\'s email.', it: 'Sembra il login del sito del broker. Algoria ha bisogno del numero di conto MetaTrader — le cifre mostrate in alto in MetaTrader, presenti anche nell\'email del broker.' },
   // le bouton d'envoi attend une vraie connexion MetaTrader (~30 s) — « encrypting » mentait sur la durée
   'ob.verif': { en: 'FOR VERIFICATION', it: 'PER LA VERIFICA' },

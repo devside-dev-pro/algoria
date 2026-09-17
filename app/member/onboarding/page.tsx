@@ -13,6 +13,7 @@ import { LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/member/activation';
 import { DIRECT_ACCESS_PRICE_USD, DIRECT_ACCESS_URL } from '@/lib/member/directAccess';
+import { WhereAreMyCredentials } from '@/components/member/WhereAreMyCredentials';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
@@ -492,6 +493,9 @@ export default function Onboarding() {
               {prefilled && !password && <span style={{ ...hint, color: 'var(--gold)' }}>{t('ob.pwdAgain')}</span>}
               <span style={hint}>{t('ob.pwdLost')}</span>
             </label>
+            {/* « OÙ JE TROUVE ÇA ? » — placé APRÈS les trois champs, pas avant : c'est en les voyant que le
+                doute se forme. Répondre trop tôt, c'est répondre à une question pas encore posée. */}
+            <WhereAreMyCredentials platform={platform} serverExample={brokerServers[0] ?? null} t={t} />
           </div>
 
           {/* BLOC 2 — vérification (nom + dépôt) : le support recoupe avec le broker avant d'activer la copie. */}
