@@ -5,7 +5,6 @@ import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
-import { relanceDue, leadName } from '@/lib/member/dmLeads';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 25;
@@ -527,73 +526,12 @@ export async function POST(req: Request) {
     }
   }
 
-  // ── 📥 CAPTURE D'UN PROSPECT PAR TRANSFERT (17/09/2026) ─────────────────────────────────────────────
-  // Mathieu transfère au bot le message d'un prospect qui lui a écrit EN PRIVÉ. Un transfert Telegram
-  // porte l'identité de l'expéditeur : un geste, zéro saisie. C'est la seule capture qui tienne à
-  // 50 messages par jour — taper un pseudo pour chacun serait abandonné dès le deuxième soir.
-  //
-  // Le système ne fait QUE se souvenir : qui, de quoi on parlait, et quand relancer (48 h). Il n'écrit
-  // jamais à la personne — l'envoi automatisé depuis un compte personnel est interdit par Telegram, et
-  // @mathieu_algoria est l'identité commerciale, pas un canal d'envoi. Voir lib/member/dmLeads.ts.
-  //
-  // RÉSERVÉ AUX ADMINS : sans ce contrôle, n'importe qui pourrait remplir la file de relance en
-  // transférant des messages au bot.
-  let capturedLead = false;
-  const fwdUser = (msg as { forward_from?: { id?: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean } } | undefined)?.forward_from
-    ?? (msg as { forward_origin?: { type?: string; sender_user?: { id?: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean } } } | undefined)?.forward_origin?.sender_user
-    ?? null;
-  // Vie privée activée côté expéditeur : Telegram ne donne QUE le nom affiché, jamais l'identifiant.
-  // On garde quand même la ligne — savoir qui relancer suffit, on ne comptait pas lui écrire par programme.
-  const fwdHiddenName = (msg as { forward_sender_name?: string } | undefined)?.forward_sender_name
-    ?? (msg as { forward_origin?: { sender_user_name?: string } } | undefined)?.forward_origin?.sender_user_name
-    ?? null;
-  if (db && msg?.from && msg.chat?.type === 'private' && (fwdUser || fwdHiddenName)) {
-    try {
-      const admins = await adminTgIds();
-      if (admins.includes(Number(msg.from.id)) && !fwdUser?.is_bot) {
-        const fwdId = Number(fwdUser?.id) || null;
-        // Il transfère parfois SON PROPRE message (le dernier qu'il a envoyé) — ce n'est pas un prospect.
-        if (!(fwdId && admins.includes(fwdId))) {
-          const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1000) || '[media]';
-          const name = [fwdUser?.first_name, fwdUser?.last_name].filter(Boolean).join(' ') || fwdHiddenName || null;
-          // langue connue seulement si la personne existe déjà côté app — sinon on relancera en anglais
-          let locale: string | null = null;
-          if (fwdId) {
-            const { data: mrow } = await (db as any).from('members').select('locale').eq('tg_id', fwdId).limit(1);
-            locale = (mrow?.[0]?.locale as string | undefined) ?? null;
-          }
-          const row = { tg_id: fwdId, handle: fwdUser?.username ?? null, display_name: name, locale, first_message: text, status: 'waiting', relance_count: 0, next_relance_at: relanceDue(), created_by: msg.from.username ?? String(msg.from.id), updated_at: new Date().toISOString() };
-          // RETRANSFÉRER LA MÊME PERSONNE NE DOIT PAS LA DUPLIQUER : il en arrive plusieurs par jour, et
-          // parfois deux fois la même conversation. Le transfert le plus récent gagne, et le compteur de
-          // 48 h repart de ce moment-là — c'est bien le dernier échange qui fixe la prochaine relance.
-          if (fwdId) await (db as any).from('dm_leads').upsert(row, { onConflict: 'tg_id' });
-          else await (db as any).from('dm_leads').insert(row);
-          capturedLead = true;
-          const token = process.env.TELEGRAM_BOT_TOKEN;
-          if (token) {
-            const due = new Date(Date.now() + 48 * 3_600_000);
-            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
-              body: JSON.stringify({
-                chat_id: msg.from.id,
-                text: `📥 <b>${leadName({ handle: row.handle, display_name: row.display_name, tg_id: row.tg_id })}</b> est dans la file de relance.\n\nÀ relancer le <b>${due.toLocaleString('fr-FR', { weekday: 'long', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</b>${fwdId ? '' : '\n\n⚠️ Sa vie privée masque son identifiant : je n\u2019ai que son nom affiché, et je ne pourrai pas voir s\u2019il crée un compte.'}\n\n<i>Onglet TOOLS de l\u2019admin → RELANCES.</i>`,
-                parse_mode: 'HTML', disable_web_page_preview: true,
-              }),
-            }).catch(() => {});
-          }
-        }
-      }
-    } catch (e) {
-      console.error('[telegram] dm lead capture failed:', (e as { message?: string })?.message ?? e);
-    }
-  }
-
   // 🤖 BOÎTE DE RÉCEPTION DU BOT — tout DM privé qui n'est PAS un /start de login : enregistré
   // (member_actions kind='bot_reply' → fil BOT ACTIVITY de l'admin, réponse via le bot possible)
   // + UN accusé de réception routant vers l'humain, dédupliqué 6 h (anti-spam).
   // `wantsCode` exclu comme les /start : une demande de code est une commande, pas un message pour le
   // support — sans ça chaque /code déclencherait un accusé de réception et une carte dans BOT ACTIVITY.
-  if (db && msg?.from && !msg.from.is_bot && msg.chat?.type === 'private' && !startPayload && !wantsCode && !capturedLead && !(typeof msg.text === 'string' && msg.text.startsWith('/start'))) {
+  if (db && msg?.from && !msg.from.is_bot && msg.chat?.type === 'private' && !startPayload && !wantsCode && !(typeof msg.text === 'string' && msg.text.startsWith('/start'))) {
     try {
       const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1500) || '[media]';
       const tgId = Number(msg.from.id);

@@ -8,52 +8,10 @@ import { useAdmin } from '../_state';
 import { CTA_TEMPLATES, dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 
 export function ToolsTab() {
-  const { STEP_LABEL, dmLeads, leadCopied, copyLeadMessage, leadAction, leadName, bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, daysStuck, downloadCard, downloadRecap, feedWins, input, leads, live, nudge, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
+  const { STEP_LABEL, bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, daysStuck, downloadCard, downloadRecap, feedWins, input, leads, live, nudge, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
   const [leadsShown, setLeadsShown] = useState(30); // 961 cartes d'un coup rendaient l'onglet interminable (03/09)
   return (
           <>
-            {/* 📥 RELANCES — LES PROSPECTS QUI N'ONT ÉCRIT QU'À L'HUMAIN (17/09/2026) ────────────────────
-                50 messages par jour sur le compte perso, 10 créent un compte : les 40 autres n'existaient
-                nulle part. Ils entrent ici quand Mathieu TRANSFÈRE leur message au bot — un geste, zéro
-                saisie, la seule capture qui tienne à cette cadence.
-                Le système n'envoie RIEN : il copie le message, Mathieu l'envoie depuis son vrai compte.
-                Automatiser l'envoi depuis un compte personnel est interdit par Telegram et mettrait en jeu
-                @mathieu_algoria, qui est l'identité commerciale. Ici on supprime l'oubli, pas le geste. */}
-            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
-              <h2 style={secH}>📥 RELANCES — DM PROSPECTS {dmLeads.length > 0 && `· ${dmLeads.length}`}</h2>
-              <p style={dimP}>Forward a prospect&rsquo;s message to the Algoria bot and they land here, due for a follow-up 48 h later. Nothing is ever sent automatically — copy the message, send it yourself, then tick it off.</p>
-              {dmLeads.length === 0 && <p style={dimP}>Nothing to follow up. Forward a DM to the bot to add someone.</p>}
-              {dmLeads.map((l) => {
-                const due = l.next_relance_at ? Date.parse(l.next_relance_at) : null;
-                const overdue = due != null && due <= Date.now();
-                const inH = due != null ? Math.round((due - Date.now()) / 3_600_000) : null;
-                return (
-                  <div key={l.id} style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '10px 12px', borderRadius: 10, border: `1px solid ${overdue ? 'rgba(245,194,74,.5)' : 'var(--border)'}`, background: overdue ? 'rgba(245,194,74,.05)' : 'rgba(10,17,31,.55)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--cyan)' }}>{leadName(l)}</span>
-                      {String(l.locale) === 'it' && <span className="mono" style={{ fontSize: 10 }}>🇮🇹</span>}
-                      {/* le compteur de relances rend l'acharnement visible : à la 4e sans réponse, on arrête */}
-                      {l.relance_count > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{l.relance_count} relance{l.relance_count > 1 ? 's' : ''}</span>}
-                      <span className="mono" style={{ fontSize: 10.5, marginLeft: 'auto', fontWeight: 800, color: overdue ? 'var(--gold)' : 'var(--dim)' }}>
-                        {overdue ? '⏰ À RELANCER' : inH != null ? `dans ${inH} h` : ''}
-                      </span>
-                    </div>
-                    {l.first_message && <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.45, maxHeight: 54, overflow: 'hidden' }}>{l.first_message}</div>}
-                    {/* sans identifiant, on ne saura jamais s'il a fini par créer son compte : le dire ici
-                        évite de le relancer éternellement en croyant à un silence. */}
-                    {l.tg_id == null && <div style={{ fontSize: 10.5, color: '#ff8a5c' }}>⚠ identifiant masqué — impossible de détecter s&rsquo;il crée un compte</div>}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <button onClick={() => copyLeadMessage(l)} style={leadCopied === l.id ? { ...goldBtn, color: 'var(--up)' } : goldBtn}>{leadCopied === l.id ? '✓ COPIÉ' : '📋 COPY MESSAGE'}</button>
-                      {l.handle && <a href={`https://t.me/${l.handle}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>💬 OPEN DM</a>}
-                      <button onClick={() => leadAction(l, 'relanced')} style={okBtn}>✓ RELANCÉ (+48 h)</button>
-                      <button onClick={() => leadAction(l, 'converted')} style={miniBtn}>🎉 A CRÉÉ SON COMPTE</button>
-                      <button onClick={() => leadAction(l, 'dropped')} style={miniBtn}>✕ ABANDON</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </section>
-
             {/* 📣 ANNONCE GROUPÉE — née du basculement S1 → S2 : prévenir 17 membres un par un depuis le
                 fil BOT ACTIVITY, c'est 17 clics et la certitude d'en oublier un. L'audience est résolue
                 CÔTÉ SERVEUR (le navigateur n'envoie qu'un nom de segment), et l'étiquette empêche qu'un

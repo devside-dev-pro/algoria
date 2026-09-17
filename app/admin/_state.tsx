@@ -9,7 +9,6 @@ import { REJECT_REASONS } from '@/lib/member/rejectReasons';
 import { LOT_CHOICES, LOT_MAX } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 import { ACTIVATION_LOTS, lotsStateOf } from '@/lib/member/activation';
-import { leadName, type DmLead } from '@/lib/member/dmLeads';
 import { DIRECT_ACCESS_PRICE_USD } from '@/lib/member/directAccess';
 import { ask, toast, type FormField } from '@/components/admin/Dialog';
 import { WL, Row, Action, Affiliate, Deposit, Tab, Center, AdminGate } from './_shared';
@@ -172,9 +171,6 @@ export function useAdminState() {
   const [selActs, setSelActs] = useState<Action[] | null>(null);
   const [noteText, setNoteText] = useState('');
   // ===== win card studio (TOOLS) : les gains récents du compte maître, à télécharger pour la CM =====
-  // 📥 FILE DE RELANCE DES PROSPECTS DM — les gens qui n'ont écrit qu'à Mathieu, jamais au bot.
-  const [dmLeads, setDmLeads] = useState<DmLead[]>([]);
-  const [leadCopied, setLeadCopied] = useState<string | null>(null);
   const [feedWins, setFeedWins] = useState<{ ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[]>([]);
   const [carding, setCarding] = useState<string | null>(null);
   // stats jour/semaine (wins only, API publique) — alimentent les cartes RÉCAP du studio
@@ -211,7 +207,6 @@ export function useAdminState() {
       setTgInboxOn(!!(d as unknown as { tgInboxOn?: boolean }).tgInboxOn);
       setJoinSources((d as unknown as { joinSources?: Array<{ source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }> }).joinSources ?? []);
       setTgChats(((d as unknown as { tgChats?: typeof tgChats }).tgChats) ?? []);
-      setDmLeads(((d as unknown as { dmLeads?: DmLead[] }).dmLeads) ?? []);
       setState('ok');
     });
   useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -291,27 +286,6 @@ export function useAdminState() {
       })
       .catch((e) => { restore(); toast(`⚠ ${(e as { message?: string })?.message ?? 'network error'}`, 'error'); })
       .finally(() => { setBusy(false); setPending(null); });
-  };
-  // RELANCE D'UN PROSPECT DM — deux gestes distincts, et c'est volontaire : COPIER le message (il l'envoie
-  // lui-même, depuis son vrai compte) puis MARQUER relancé (le système repousse de 48 h). Les fusionner
-  // marquerait « relancé » quelqu'un à qui il n'a finalement rien envoyé, et la file mentirait.
-  const leadMessage = (l: DmLead): string => {
-    const first = String(l.display_name ?? '').trim().split(/\s+/)[0] ?? '';
-    const hi = /^[\p{L}][\p{L}'-]{1,20}$/u.test(first) ? ` ${first}` : '';
-    return String(l.locale) === 'it'
-      ? `Ciao${hi} 👋 Ti scrivo di nuovo — sei ancora interessato ad Algoria ?\n\nSe qualcosa non ti è chiaro, dimmi pure dove sei bloccato, ti rispondo io.\n\n👉 app.algoria.tech`
-      : `Hey${hi} 👋 Just following up — are you still interested in Algoria?\n\nIf anything is unclear, tell me where you're stuck and I'll sort it out myself.\n\n👉 app.algoria.tech`;
-  };
-  const copyLeadMessage = (l: DmLead) => {
-    void navigator.clipboard?.writeText(leadMessage(l)).then(() => {
-      setLeadCopied(l.id);
-      setTimeout(() => setLeadCopied((c) => (c === l.id ? null : c)), 2500);
-    }).catch(() => toast('⚠ copy failed', 'error'));
-  };
-  const leadAction = (l: DmLead, action: 'relanced' | 'dropped' | 'converted') => {
-    // retrait optimiste : la file doit se vider sous le pouce, sinon il reclique
-    setDmLeads((ls) => ls.filter((x) => x.id !== l.id));
-    post({ dmLead: { id: l.id, action } }, undefined, { key: `lead:${l.id}` });
   };
   const reveal = (id: string) => {
     setBusy(true);
@@ -1100,7 +1074,7 @@ export function useAdminState() {
   ];
 
 
-  return { tab, setTab, goLive, pending, setPending, dmLeads, setDmLeads, leadCopied, leadMessage, copyLeadMessage, leadAction, leadName, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depNature, setDepNature, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
+  return { tab, setTab, goLive, pending, setPending, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depNature, setDepNature, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
 }
 
 export type AdminState = ReturnType<typeof useAdminState>;

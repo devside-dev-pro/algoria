@@ -8,7 +8,6 @@ import { estimateCommission } from '@/lib/member/commissions';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
 import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
-import { relanceDue } from '@/lib/member/dmLeads';
 import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, type OffboardReason } from '@/lib/member/winback';
 import { isPermanentTelegramFailure } from '@/lib/member/telegramErrors';
 
@@ -307,28 +306,7 @@ export async function GET(req: NextRequest) {
     .filter(([tg, at]) => (lastReachable.get(tg) ?? 0) < at)
     .map(([tg]) => tg);
   const { count: pendingTotal } = await db.from('member_actions').select('id', { count: 'exact', head: true }).eq('status', 'pending');
-  // ── FILE DE RELANCE DES PROSPECTS DM ──────────────────────────────────────────────────────────────
-  // LA BOUCLE SE FERME TOUTE SEULE : un prospect qui a fini par créer son compte n'a plus rien à faire
-  // dans la file, et compter sur un clic pour l'en sortir, c'est garantir qu'on relancera des clients.
-  // On le détecte ici, à la lecture, en recoupant sur le tg_id — et on l'écrit, pour que le compteur
-  // reste juste au prochain chargement au lieu de se recalculer indéfiniment.
-  const rawDb = db as unknown as { from: (t: string) => any };
-  let dmLeads: Array<Record<string, unknown>> = [];
-  try {
-    const { data: leads } = await rawDb.from('dm_leads').select('*').in('status', ['waiting', 'relanced']).order('next_relance_at', { ascending: true }).limit(300);
-    dmLeads = (leads ?? []) as Array<Record<string, unknown>>;
-    const ids = dmLeads.map((l) => Number(l.tg_id)).filter((n) => Number.isFinite(n) && n > 0);
-    if (ids.length) {
-      const { data: signedUp } = await db.from('members').select('tg_id,status').in('tg_id', ids).in('status', ['pending_copier', 'live', 'paused']);
-      const done = new Set((signedUp ?? []).map((m) => Number(m.tg_id)));
-      if (done.size) {
-        await rawDb.from('dm_leads').update({ status: 'converted', next_relance_at: null, updated_at: new Date().toISOString() }).in('tg_id', [...done]);
-        dmLeads = dmLeads.filter((l) => !done.has(Number(l.tg_id)));
-      }
-    }
-  } catch { /* la table peut ne pas exister sur un environnement pas encore migré — l'admin doit rester utilisable */ }
-
-  return NextResponse.json({ pendingTotal: pendingTotal ?? (actions.data ?? []).length, whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, botBlocked, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats, dmLeads,
+  return NextResponse.json({ pendingTotal: pendingTotal ?? (actions.data ?? []).length, whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, botBlocked, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
     // segmentation de la file du jour : qui a déjà écrit (→ vraie relance) et qui s'est fait refuser (→ rattrapage)
     spokeTgIds: [...new Set((spokeQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
     rejectedTgIds: [...new Set((rejectedQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
@@ -353,7 +331,6 @@ type Body = {
     editMember?: { tg_id: number; field: string; value: string | null };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
     ban?: { tg_id: number; reason?: string; undo?: boolean };
-    dmLead?: { id: string; action: 'relanced' | 'dropped' | 'converted' | 'reopen' };
   goLive?: { id: string; lots?: number; force?: string; amount?: number; country?: string };
 };
 type AdminSession = NonNullable<ReturnType<typeof guard>>;
@@ -1309,26 +1286,6 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
   // ANTI-DOUBLON PAR TAG : chaque envoi porte une étiquette, et quiconque a déjà reçu un message portant
   // cette étiquette est SAUTÉ. Un double clic, un rechargement de page ou une seconde tentative après une
   // erreur réseau ne peuvent pas envoyer deux fois la même annonce à la même personne.
-  // ── FILE DE RELANCE DES PROSPECTS DM (17/09/2026) ────────────────────────────────────────────────
-  // Une seule action : dire ce qu'on vient de faire d'une personne. « relancé » repousse de 48 h et
-  // incrémente le compteur — c'est lui qui rend visible l'acharnement inutile (à la 4e relance sans
-  // réponse, on arrête). Rien ici n'envoie de message : l'envoi se fait à la main, depuis le vrai compte.
-  if (body.dmLead) {
-    const { id, action } = body.dmLead;
-    const raw = db as unknown as { from: (t: string) => any };
-    const { data: cur } = await raw.from('dm_leads').select('relance_count').eq('id', String(id)).limit(1);
-    if (!cur?.length) return NextResponse.json({ error: 'lead not found' }, { status: 404 });
-    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (action === 'relanced') { patch.status = 'relanced'; patch.relance_count = Number(cur[0].relance_count ?? 0) + 1; patch.next_relance_at = relanceDue(); }
-    else if (action === 'dropped') { patch.status = 'dropped'; patch.next_relance_at = null; }
-    else if (action === 'converted') { patch.status = 'converted'; patch.next_relance_at = null; }
-    else if (action === 'reopen') { patch.status = 'waiting'; patch.next_relance_at = new Date().toISOString(); }
-    else return NextResponse.json({ error: 'unknown action' }, { status: 400 });
-    const { error } = await raw.from('dm_leads').update(patch).eq('id', String(id));
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ ok: true });
-  }
-
   if (body.botBroadcast) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured (Vercel)' }, { status: 400 });
