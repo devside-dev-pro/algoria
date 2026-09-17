@@ -15,6 +15,8 @@
 // du contrôle, c'est l'IMPOSSIBILITÉ DE L'OUBLIER : sans validation enregistrée, le copieur ne se branche
 // pas. Toute la valeur est là, et elle ne tient qu'à ça.
 // USDJPY et non l'or : le spread XAUUSD coûte au membre sur 1 lot aller-retour, une paire JPY presque rien (décision 03/09).
+import { isDirectAccess } from './directAccess';
+
 export const ACTIVATION_SYMBOL = 'USDJPY';
 
 /** Les deux jambes demandées au membre. 0.5 à l'achat + 0.5 à la vente = 1 lot de volume, exposition nette
@@ -79,8 +81,18 @@ export function lotsStateOf(detail: Record<string, unknown> | null | undefined):
   };
 }
 
-/** LE VERROU. true = le copieur a le droit de se brancher. Un override motivé passe, un override vide non. */
+/** LE VERROU. true = le copieur a le droit de se brancher. Un override motivé passe, un override vide non.
+ *
+ *  ACCÈS DIRECT : EXEMPTÉ, ET CE N'EST PAS UNE FAVEUR (17/09/2026). Tout ce fichier existe pour une seule
+ *  raison — ne pas perdre la commission que le broker partenaire nous verse, faute de volume tradé. Un
+ *  membre en accès direct a PAYÉ son accès : il n'y a aucune commission en jeu, donc aucun volume à
+ *  valider, et donc rien à verrouiller. Lui demander le lot d'activation serait lui faire payer deux fois,
+ *  en argent puis en friction, pour protéger un revenu qui n'existe pas dans son dossier.
+ *  L'exemption reste VISIBLE — l'admin affiche « 💳 PAID ACCESS » là où il affiche « ✓ LOTS » — parce que
+ *  la règle de ce fichier vaut aussi pour elle : une exception silencieuse redevient le comportement par
+ *  défaut. */
 export const lotsCleared = (detail: Record<string, unknown> | null | undefined): boolean => {
+  if (isDirectAccess(detail)) return true;
   const s = lotsStateOf(detail);
   return s.ok || s.override != null;
 };

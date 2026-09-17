@@ -90,7 +90,7 @@ export function QueueTab() {
                                   // a AUCUN lien qu'il aurait pu emprunter — afficher « ✗ NOT via our link »
                                   // en rouge, c'est afficher une faute là où il n'y en a pas, et c'est ce qui
                                   // poussait à lui faire cocher une case fausse pour passer.
-                                  ? <b style={{ color: 'var(--cyan)' }}>💳 DIRECT ACCESS — paid, keeps own broker (no link expected)</b>
+                                  ? <b style={{ color: 'var(--cyan)' }}>💳 DIRECT ACCESS — keeps own broker (no link expected){a.detail?.ack_paid ? ` · declared paid $${String(a.detail?.direct_price_usd ?? '?')}` : ' · ⚠ payment NOT declared'}</b>
                                   : <b style={{ color: a.detail?.ack_link ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_link ? '✓ opened via our link' : '✗ NOT via our link'}</b>} · <b style={{ color: a.detail?.ack_funded ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_funded ? '✓ funded' : '✗ not funded'}</b></>}
                           </div>
                           {/* IDENTIFIANTS DÉJÀ TESTÉS À L'INSCRIPTION : 'ok' = STH a réellement joint ce
@@ -114,6 +114,11 @@ export function QueueTab() {
                       DONE sont grisés tant que le volume n'est pas validé ; le serveur refuse de toute
                       façon (409), le grisage n'est là que pour éviter le clic inutile. */}
                   {a.kind === 'connect' && (() => {
+                    // ACCÈS DIRECT : rien à pointer sur un dashboard partenaire, il n'y en a pas. Ce qu'il
+                    // faut vérifier ici, c'est le PAIEMENT — l'étiquette doit donc dire ça, pas « ✓ LOTS ».
+                    if (a.detail?.direct_access) {
+                      return <span className="mono" title={a.detail?.ack_paid ? 'the member declared the payment — check it against your records before connecting' : 'the member did NOT tick the payment box'} style={{ fontSize: 10.5, fontWeight: 800, color: a.detail?.ack_paid ? 'var(--cyan)' : '#ff8a5c', alignSelf: 'center' }}>💳 {a.detail?.ack_paid ? `PAID ACCESS $${String(a.detail?.direct_price_usd ?? '?')} — VERIFY` : 'PAYMENT NOT DECLARED'}</span>;
+                    }
                     const L = lotsStateOf(a.detail as Record<string, unknown>);
                     if (L.ok || L.override) {
                       return <span className="mono" title={L.override ? `forcé : ${L.override}` : `validé par ${L.okBy ?? '?'}`} style={{ fontSize: 10.5, fontWeight: 800, color: L.override ? 'var(--gold)' : 'var(--up)', alignSelf: 'center' }}>{L.override ? '⚠ LOTS FORCÉS' : `✓ LOTS${L.lots ? ` ${L.lots}` : ''}`}</span>;
