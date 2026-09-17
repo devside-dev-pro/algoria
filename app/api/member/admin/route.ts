@@ -116,7 +116,12 @@ export async function GET(req: NextRequest) {
   if (!isAdmin(sess.username)) return NextResponse.json({ error: 'forbidden', username: sess.username ?? null }, { status: 403 });
   const s = sess;
   const db = sdb();
-  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ, spokeQ, rejectedQ, connectedQ, failedDmQ] = await Promise.all([
+  // CINQ REQUÊTES QUI S'ENCHAÎNAIENT POUR RIEN (17/09/2026). Elles vivaient après ce bloc, exécutées une
+  // par une alors qu'aucune ne dépend d'une autre : cinq aller-retours Supabase en série à chaque
+  // chargement, répétés toutes les 30 s. Elles rejoignent le tir groupé — même lignes, même résultat, un
+  // seul temps d'attente au lieu de six.
+  const rawq = db as unknown as { from: (t: string) => any };
+  const [wl, members, actions, commsQ, payoutsQ, depositsQ, pushQ, nudgesQ, heartQ, kycQ, spokeQ, rejectedQ, connectedQ, failedDmQ, extraQ, botQ, joinRowsQ, chatRowsQ, joinChatsQ] = await Promise.all([
     db.from('member_whitelist').select('*').order('created_at', { ascending: false }),
     // cast : la colonne country n'est pas dans les types générés (comme edge_health) — le runtime est identique
     allMembers(db),
@@ -156,21 +161,28 @@ export async function GET(req: NextRequest) {
     // plus joindre. On remonte l'erreur ET la date : un blocage n'est PAS éternel (on peut débloquer un
     // bot), donc c'est la chronologie qui tranche, pas la simple existence d'un échec passé.
     db.from('member_actions').select('tg_id,detail,created_at').eq('kind', 'nudge').eq('status', 'failed').limit(2000),
+    // COMPTES SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut)
+    rawq.from('member_accounts')
+      .select('id,tg_id,member_no,account_no,broker,strategy,status,mt5_login,mt5_server,declared_deposit,holder_name,created_at')
+      .order('created_at', { ascending: false }).limit(300),
+    // 🤖 BOT ACTIVITY : fil unifié envoyé (nudge, avec le texte du DM) / reçu (bot_reply), le plus récent d'abord.
+    // `status` remonte : le fil doit distinguer un DM PARTI d'un DM REFUSÉ par Telegram — sans lui, une
+    // ligne « → auto-nudge sent » s'afficherait pour un message que personne n'a jamais reçu.
+    db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by,status')
+      .in('kind', ['nudge', 'bot_reply']).order('created_at', { ascending: false }).limit(120),
+    // 📣 SOURCES DES DEMANDES D'ADHÉSION (30/07) : agrégat par lien d'invitation Telegram — un lien nommé
+    // par campagne relie enfin une pub à ses demandes (les ads pointent vers le canal, pas vers l'app, donc
+    // les ?src= étaient inexploitables). dm = taux de DM automatique délivré (bloqué/privé → 'failed').
+    rawq.from('telegram_joins').select('invite_name,status,dm_status,joined_at').order('joined_at', { ascending: false }).limit(1000),
+    rawq.from('telegram_chats').select('chat_id,title,type,username,last_seen_at').order('last_seen_at', { ascending: false }).limit(30),
+    // LES CANAUX CONNUS PAR LES DEMANDES D'ADHÉSION — on ne veut que les identifiants DISTINCTS, pas
+    // l'historique : `chat_id` seul, dédupliqué juste après. C'est la requête qui grossit le plus vite
+    // (une ligne par clic de pub), donc la colonne unique compte.
+    rawq.from('telegram_joins').select('chat_id').not('chat_id', 'is', null).limit(2000),
   ]);
-  // COMPTES SUPPLÉMENTAIRES (multi-stratégies) — affichés sur la fiche membre (broker + stratégie + statut)
-  const { data: extraAccounts } = await (db as any).from('member_accounts')
-    .select('id,tg_id,member_no,account_no,broker,strategy,status,mt5_login,mt5_server,declared_deposit,holder_name,created_at')
-    .order('created_at', { ascending: false }).limit(300) as { data: Array<Record<string, unknown>> | null };
-  // 🤖 BOT ACTIVITY : fil unifié envoyé (nudge, avec le texte du DM) / reçu (bot_reply) — le plus récent d'abord
-  // `status` remonte : le fil doit distinguer un DM PARTI d'un DM REFUSÉ par Telegram — sans lui,
-  // une ligne « → auto-nudge sent » s'afficherait pour un message que personne n'a jamais reçu.
-  const { data: botActivity } = await db.from('member_actions').select('id,tg_id,member_no,kind,detail,created_at,done_by,status')
-    .in('kind', ['nudge', 'bot_reply']).order('created_at', { ascending: false }).limit(120);
-  // 📣 SOURCES DES DEMANDES D'ADHÉSION (30/07) : agrégat par lien d'invitation Telegram — un lien nommé
-  // par campagne relie enfin une pub à ses demandes (les ads pointent vers le canal, pas vers l'app, donc
-  // les ?src= étaient inexploitables). dm = taux de DM automatique délivré (bloqué/privé → 'failed').
-  const { data: joinRows } = await (db as any).from('telegram_joins')
-    .select('invite_name,status,dm_status,joined_at').order('joined_at', { ascending: false }).limit(1000) as { data: Array<{ invite_name: string | null; status: string | null; dm_status: string | null; joined_at: string }> | null };
+  const extraAccounts = (extraQ as { data: Array<Record<string, unknown>> | null }).data;
+  const botActivity = (botQ as { data: Array<Record<string, unknown>> | null }).data;
+  const joinRows = (joinRowsQ as { data: Array<{ invite_name: string | null; status: string | null; dm_status: string | null; joined_at: string }> | null }).data;
   const joinSources = Object.values(
     (joinRows ?? []).reduce((acc: Record<string, { source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }>, r) => {
       const key = r.invite_name ?? '(lien direct / inconnu)';
@@ -193,14 +205,12 @@ export async function GET(req: NextRequest) {
     const v = (process.env[env] ?? '').trim();
     if (v) roles[v] = role;
   }
-  const { data: chatRows } = await (db as any).from('telegram_chats')
-    .select('chat_id,title,type,username,last_seen_at').order('last_seen_at', { ascending: false }).limit(30) as { data: Array<{ chat_id: number; title: string | null; type: string | null; username: string | null; last_seen_at: string }> | null };
+  const chatRows = (chatRowsQ as { data: Array<{ chat_id: number; title: string | null; type: string | null; username: string | null; last_seen_at: string }> | null }).data;
   // Attendre un post de canal pour découvrir un canal serait absurde : le bot y reçoit DÉJÀ les demandes
   // d'adhésion, donc telegram_joins connaît son ID depuis le premier jour. On complète la liste avec ces
   // canaux-là, et getChat va chercher le titre manquant (le bot y est admin, l'appel passe). Le résultat
   // est mémorisé : ce détour ne coûte qu'un seul chargement, la fois où un canal apparaît.
-  const { data: joinChats } = await (db as any).from('telegram_joins')
-    .select('chat_id').not('chat_id', 'is', null).limit(2000) as { data: Array<{ chat_id: number }> | null };
+  const joinChats = (joinChatsQ as { data: Array<{ chat_id: number }> | null }).data;
   const known = new Map((chatRows ?? []).map((c) => [Number(c.chat_id), c]));
   const missing = [...new Set((joinChats ?? []).map((r) => Number(r.chat_id)).filter(Boolean))]
     .filter((id) => !known.get(id)?.title).slice(0, 8);

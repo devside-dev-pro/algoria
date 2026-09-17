@@ -209,7 +209,24 @@ export function useAdminState() {
       setTgChats(((d as unknown as { tgChats?: typeof tgChats }).tgChats) ?? []);
       setState('ok');
     });
-  useEffect(() => { load(); const iv = setInterval(load, 30_000); return () => clearInterval(iv); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // ═══ NE PAS RECHARGER UN ÉCRAN QUE PERSONNE NE REGARDE (17/09/2026) ════════════════════════════════
+  // Retour de Mathieu : « quand je refresh ou j'ouvre l'admin ça met de plus en plus de temps ». Un
+  // chargement lit ~8 100 lignes (1 349 membres, 2 145 relances sur 15 jours, 3 000 lignes de demandes
+  // d'adhésion…) et les trois plus grosses requêtes grossissent avec l'activité : chaque clic de pub
+  // ajoute une ligne à telegram_joins, chaque DM du bot une ligne aux relances. Ça ne va pas s'arranger.
+  //
+  // Le rafraîchissement tournait toutes les 30 s SANS CONDITION : un onglet laissé ouvert dans un coin
+  // relisait toute la base deux fois par minute pour personne, et venait concurrencer le chargement de
+  // l'onglet réellement utilisé. On suspend quand la page est cachée, et on recharge UNE fois au retour —
+  // ce qui donne aussi ce qu'on veut vraiment : des données fraîches à l'instant où on regarde.
+  useEffect(() => {
+    load();
+    const tick = () => { if (!document.hidden) load(); };
+    const iv = setInterval(tick, 30_000);
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // gains récents pour le WIN CARD STUDIO — le feed membre renvoie tout à une session admin
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => {
