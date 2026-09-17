@@ -288,7 +288,14 @@ export async function POST(req: NextRequest) {
       //
       // ⚠️ Ça reste une DÉCLARATION, jamais une preuve : `lots_ok` n'est écrit que par un humain qui a
       // pointé le dashboard partenaire. Le membre ne peut pas se déverrouiller lui-même.
-      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}), ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true } : {}) } as never,
+      // CE QUE LA CASE VEUT DIRE DÉPEND DU DOSSIER (17/09/2026). Une seule case à l'écran, trois sens :
+      //   • compte préexistant   → il a demandé le RATTACHEMENT (ack_attach), pas ouvert via le lien ;
+      //   • broker hors partenaires → ACCÈS DIRECT : il a payé son accès et garde son broker. Aucun lien
+      //     n'existe pour lui, donc ack_link reste FAUX et on archive `direct_access` à la place. Avant,
+      //     il devait cocher « ouvert via le lien Algoria » pour franchir le formulaire, et le dossier
+      //     gardait un ack_link:true faux (constaté sur #1469) — une déclaration inexploitable à l'examen ;
+      //   • le cas courant       → il a bien ouvert via le lien.
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount || broker === 'other' ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}), ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true, direct_access: true, ack_direct: ackLink } : {}) } as never,
     });
     // SUCCÈS — indispensable, et pas seulement pour la statistique : l'alarme se déclenche sur « aucune
     // acceptée », donc sans cette ligne le dénominateur ne contient QUE des refus et l'alarme sonne au
