@@ -65,6 +65,7 @@ export function useAdminState() {
   const [botBlocked, setBotBlocked] = useState<number[]>([]);
   const [relSeg, setRelSeg] = useState<string | null>(null); // onglet de segment choisi (null = le plus prioritaire non vide)
   const [copiedScript, setCopiedScript] = useState<string | null>(null);
+  const [blastProgress, setBlastProgress] = useState<string | null>(null); // avancement de l'envoi groupé par lots
   // COMPOSEUR DE POST CANAL (avec bouton) — Telegram n'autorise un clavier inline QUE via un bot.
   const [cpText, setCpText] = useState('');
   const [cpBtn, setCpBtn] = useState('🚀 OPEN ALGORIA');
@@ -859,6 +860,44 @@ export function useAdminState() {
   };
   // envoi de la campagne : on DEMANDE d'abord l'audience exacte au serveur (dryRun), puis confirmation
   // chiffrée — un envoi de masse ne se déclenche jamais sur un clic seul.
+  // ENVOI GROUPÉ D'UN SEGMENT, PAR LOTS (17/09/2026). Le serveur choisit les destinataires et n'en traite
+  // qu'une poignée par appel — maxDuration vaut 60 s sur cette route. On reboucle tant qu'il en reste, en
+  // affichant l'avancement : sur 600 personnes, un bouton qui ne dit rien pendant deux minutes fait croire
+  // que ça a planté, et on reclique.
+  const sendSegmentBlast = async (segment: string, text: string, botOnly: boolean) => {
+    setBusy(true);
+    const dry: { audience?: number; alreadySent?: number; error?: string } = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segmentBlast: { segment, botOnly, dryRun: true } }) })
+      .then((r) => r.json()).catch(() => ({ error: 'network error' }));
+    setBusy(false);
+    if (dry.error) return void ask.alert(`⚠ ${dry.error}`);
+    const n = dry.audience ?? 0;
+    if (!n) return void ask.alert('Personne à joindre dans ce segment (tout le monde a déjà été traité dans les 12 dernières heures, ou la file est vide).');
+    const ok = await ask.confirm(
+      `Envoyer ce message par le BOT à ${n} personne(s)${botOnly ? ' SANS @pseudo' : ''} du segment ${segment.toUpperCase()} ?\n\n` +
+      `${text}\n\n[+ boutons : ouvrir l'app · rejoindre le canal · écrire à Mathieu]\n\n` +
+      `Ça part par lots et ça ne s'annule pas. Ceux que le bot ne peut pas joindre restent dans ta file.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    let sent = 0, failed = 0, guard = 0;
+    try {
+      for (;;) {
+        const d = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segmentBlast: { segment, botOnly, text } }) })
+          .then((r) => r.json() as Promise<{ sent?: number; failed?: number; remaining?: number; error?: string }>);
+        if (d.error) { void ask.alert(`⚠ Arrêté après ${sent} envoi(s) : ${d.error}`); break; }
+        sent += d.sent ?? 0; failed += d.failed ?? 0;
+        setBlastProgress(`${sent} envoyé(s)${failed ? ` · ${failed} injoignable(s)` : ''} · ${d.remaining ?? 0} restant(s)`);
+        // Garde-fou : le serveur ne renvoie jamais plus de 60 par lot, donc 40 tours couvrent 2 400 personnes.
+        // Si `remaining` ne descend pas (bug serveur), on s'arrête au lieu de boucler indéfiniment.
+        if (!d.remaining || ++guard > 40) break;
+      }
+      void ask.alert(`✓ Terminé\n\n${sent} message(s) délivré(s)${failed ? `\n${failed} injoignable(s) — ils restent dans ta file` : ''}`);
+    } finally {
+      setBlastProgress(null);
+      setBusy(false);
+      load();
+    }
+  };
   const sendBlast = () => {
     setBusy(true);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offerBlast: { dryRun: true } }) })
@@ -1091,7 +1130,7 @@ export function useAdminState() {
   ];
 
 
-  return { tab, setTab, goLive, pending, setPending, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depNature, setDepNature, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
+  return { tab, setTab, goLive, pending, setPending, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, blastProgress, sendSegmentBlast, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depNature, setDepNature, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
 }
 
 export type AdminState = ReturnType<typeof useAdminState>;

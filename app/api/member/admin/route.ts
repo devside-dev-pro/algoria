@@ -10,6 +10,7 @@ import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
 import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
 import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, type OffboardReason } from '@/lib/member/winback';
 import { isPermanentTelegramFailure } from '@/lib/member/telegramErrors';
+import { personalise } from '@/lib/member/personalise';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -337,6 +338,7 @@ type Body = {
     setCountry?: { tg_id: number; country: string };
     editMember?: { tg_id: number; field: string; value: string | null };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
+    segmentBlast?: { text?: string; segment?: string; botOnly?: boolean; dryRun?: boolean; limit?: number };
     ban?: { tg_id: number; reason?: string; undo?: boolean };
   goLive?: { id: string; lots?: number; force?: string; amount?: number; country?: string };
 };
@@ -724,6 +726,99 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       });
     }
     return NextResponse.json({ audience: targets.length, dmOk, pushOk });
+  }
+  // ===== ENVOI GROUPÉ D'UN SEGMENT DE RELANCE (17/09/2026) ==============================================
+  // Le bouton 🤖 BOT existait ligne par ligne. Sur le segment FIRST CONTACT, 612 personnes n'ont AUCUN
+  // @pseudo : Telegram ne donne pas de lien direct vers elles, donc le DM personnel de Mathieu — celui qui
+  // convertit — leur est structurellement fermé. Le bot est leur seule porte, et 612 clics n'est pas un
+  // plan. Il fait les @pseudo à la main, le bot fait le reste.
+  //
+  // LA SÉLECTION EST REFAITE ICI, pas reçue du navigateur. Une liste d'identifiants envoyée par le client
+  // serait une liste d'envois que le serveur exécute sans la comprendre : un onglet laissé ouvert depuis
+  // une heure enverrait à des gens déjà traités entre-temps. Le serveur applique la même fenêtre que la
+  // file (statut onboarding, 1 à 60 jours, aucun contact HUMAIN depuis 3 jours) et décide lui-même.
+  //
+  // PAR LOTS, ET C'EST OBLIGATOIRE : maxDuration vaut 60 s sur cette route. 612 appels séquentiels à
+  // Telegram ne tiennent pas dedans — la fonction serait coupée en plein envoi, sans rien dire, et
+  // personne ne saurait où ça s'est arrêté. Chaque appel traite un lot et renvoie ce qui reste ; le client
+  // reboucle. Comme chaque envoi laisse une trace, un lot interrompu se reprend tout seul au clic suivant.
+  if (body.segmentBlast) {
+    const { text, segment, botOnly, dryRun } = body.segmentBlast;
+    const limit = Math.min(Math.max(Number(body.segmentBlast.limit ?? 40), 1), 60);
+    if (!dryRun && (!text || text.trim().length < 10)) return NextResponse.json({ error: 'message text required' }, { status: 400 });
+    const seg = String(segment ?? 'first');
+    if (!['first', 'followup', 'rejected', 'deposited'].includes(seg)) return NextResponse.json({ error: 'unknown segment' }, { status: 400 });
+
+    const since12h = new Date(Date.now() - 12 * 3_600_000).toISOString();
+    // `admin_nudge_last` est une vue (migration 0007) absente des types générés — même échappatoire que
+    // dans le GET, ligne 124.
+    const view = db as unknown as { from: (t: string) => { select: (c: string) => { limit: (n: number) => Promise<{ data: Array<{ tg_id: number | null; created_at: string; done_by?: string }> | null }> } } };
+    const [memQ, nudgeQ, spokeB, rejB, depB, doneQ] = await Promise.all([
+      db.from('members').select('tg_id,member_no,tg_username,tg_name,status,locale,created_at').eq('status', 'onboarding'),
+      view.from('admin_nudge_last').select('tg_id,created_at,done_by').limit(5000),
+      db.from('member_actions').select('tg_id').eq('kind', 'bot_reply').limit(5000),
+      db.from('member_actions').select('tg_id').eq('kind', 'connect').eq('status', 'rejected').limit(2000),
+      db.from('member_actions').select('tg_id').eq('kind', 'deposit').limit(2000),
+      // déjà traités par CE flux dans les 12 h — qu'ils aient reçu ou non. C'est ce qui fait terminer la
+      // boucle : sans cette trace, un destinataire que Telegram refuse serait repris à chaque lot.
+      db.from('member_actions').select('tg_id').eq('kind', 'nudge').in('done_by', ['admin (segment blast)', 'auto (bot blast failed)']).gte('created_at', since12h),
+    ]);
+    const ids = (q: { data: Array<{ tg_id: number | null }> | null }) => new Set((q.data ?? []).map((r) => Number(r.tg_id)));
+    const spoke = ids(spokeB);
+    const rejected = ids(rejB);
+    const funded = ids(depB);
+    const already = ids(doneQ);
+    const lastHuman = new Map<number, number>();
+    for (const n of (nudgeQ.data ?? [])) {
+      if (String(n.done_by ?? '') === 'auto') continue; // le passage du bot automatique ne protège personne
+      const t = Number(n.tg_id); const at = Date.parse(n.created_at);
+      if (t && (lastHuman.get(t) ?? 0) < at) lastHuman.set(t, at);
+    }
+    const segOf = (tg: number): string => funded.has(tg) ? 'deposited' : rejected.has(tg) ? 'rejected' : spoke.has(tg) ? 'followup' : 'first';
+    const now = Date.now();
+    const targets = ((memQ.data ?? []) as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; tg_name: string | null; locale?: string; created_at: string }>)
+      .filter((m) => {
+        const tg = Number(m.tg_id);
+        if (!tg || already.has(tg)) return false;
+        const days = (now - Date.parse(m.created_at)) / 86_400_000;
+        if (days < 1 || days > 60) return false;
+        const touched = lastHuman.get(tg);
+        if (touched && now - touched <= 3 * 86_400_000) return false;
+        if (segOf(tg) !== seg) return false;
+        // « bot only » = aucun @pseudo. Ce sont précisément ceux que Mathieu ne peut pas joindre lui-même.
+        if (botOnly && m.tg_username) return false;
+        return true;
+      })
+      .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)); // le plus ancien d'abord, comme la file
+
+    if (dryRun) return NextResponse.json({ audience: targets.length, alreadySent: already.size });
+
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN missing on this deployment' }, { status: 400 });
+    const batch = targets.slice(0, limit);
+    let sent = 0, failed = 0;
+    for (const m of batch) {
+      const tgId = Number(m.tg_id);
+      const body = personalise(String(text), m.tg_name);
+      const markup = ctaKeyboard(asLocale(m.locale), '/member/onboarding');
+      const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(6000),
+        body: JSON.stringify({ chat_id: tgId, text: body, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: markup }),
+      }).catch(() => null);
+      const ok = !!(r && ((await r.json().catch(() => ({}))) as { ok?: boolean }).ok);
+      if (ok) sent++; else failed++;
+      // `done_by` PORTE LA CONSÉQUENCE. Livré → 'admin (…)', un contact humain : la personne sort de la file
+      // pour 3 jours, ce qui est juste, elle vient de recevoir le message. NON livré → 'auto (…)', que la file
+      // ignore délibérément : quelqu'un que le bot n'a pas pu joindre doit RESTER visible, sinon on l'efface
+      // de la seule liste où Mathieu aurait pu le rattraper à la main.
+      await db.from('member_actions').insert({
+        tg_id: tgId, member_no: m.member_no ?? null, kind: 'nudge', status: 'done',
+        done_by: ok ? 'admin (segment blast)' : 'auto (bot blast failed)',
+        detail: { text: body, segment: seg, dm: ok ? 'ok' : 'no-chat' } as never,
+      });
+      await new Promise((res) => setTimeout(res, 120)); // ~8 envois/s : sous la limite Telegram, et poli
+    }
+    return NextResponse.json({ sent, failed, remaining: Math.max(0, targets.length - batch.length) });
   }
   if (body.reveal) {
     // RÉVÉLATION des identifiants MT5 (admin uniquement) : nécessaire pour brancher le compte dans STH.

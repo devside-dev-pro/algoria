@@ -30,10 +30,10 @@ export interface Row {
 // qu'une proposition de le renvoyer relance l'échange.
 /** « Hey! » → « Hey Marc! » quand on connaît le prénom. Un message qui commence par le prénom se lit
  *  comme écrit à la main ; sans prénom on garde le « Hey! » nu plutôt qu'un « Hey undefined ». */
-export const personalise = (text: string, name?: string | null): string => {
-  const first = String(name ?? '').trim().split(/\s+/)[0];
-  return /^[\p{L}][\p{L}'-]{1,20}$/u.test(first) ? text.replace(/^Hey!/, `Hey ${first}!`) : text;
-};
+// Déplacé dans lib/member/personalise.ts (17/09/2026) pour que l'envoi groupé, qui choisit ses
+// destinataires côté serveur, applique EXACTEMENT la même règle. Réexporté ici : les onglets l'importent
+// depuis _shared depuis le découpage du 03/09, rien à changer chez eux.
+export { personalise } from '@/lib/member/personalise';
 
 // ===== MODÈLES DE CTA POUR LES CANAUX (16/08/2026) =====================================================
 // Écrire un bon CTA devant 2 000 personnes à froid, à chaque fois, c'est le genre de tâche qu'on repousse.
