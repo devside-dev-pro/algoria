@@ -11,7 +11,7 @@
 //
 // Ce module ne passe AUCUN ordre. Il regarde les positions du compte et écrit en base celles qu'il ne
 // connaît pas. La clôture, elle, était déjà correctement captée par le DealRecorder.
-import { listOpenTickets, recordTradeOpen } from '../lib/supabase/sync';
+import { listOpenTickets, recordTradeOpen, updateTradeStop } from '../lib/supabase/sync';
 import { INSTRUMENTS } from '../lib/engine/instruments';
 
 const EVERY_MS = 15_000;
@@ -37,6 +37,32 @@ export function startCopyObserver({ terminal, label = 'copie' }: ObserverDeps): 
   // même minute si deux passages se chevauchent.
   const written = new Set<string>();
 
+  // ── LE STOP N'ÉTAIT LU QU'UNE FOIS (17/09/2026) ────────────────────────────────────────────────────
+  // Jusqu'ici une position déjà connue était sautée sèchement (`known.has(ticket) → continue`) : son stop
+  // était figé à la valeur vue 8 secondes après l'ouverture, pour toujours. Tant que le compte suivi n'était
+  // qu'un suiveur de plus, ça n'avait pas d'importance — personne ne touchait à ces positions.
+  //
+  // Ce n'est plus vrai. Le compte master est maintenant piloté à la main : Mathieu y pose des stops et
+  // resserre après coup. Ces stops sont RÉELS pour les membres (le copieur les propage), mais la base ne les
+  // voyait pas : mesuré sur 7 jours avant correction, 95 des 111 trades copiés clôturés n'avaient aucun SL
+  // enregistré, et le R n'était calculable sur AUCUN des 111.
+  //
+  // Une absence de stop à l'écran quand le stop existe est un mensonge par omission ; un stop affiché après
+  // qu'il a été retiré en est un autre, dans l'autre sens. On suit donc la valeur du broker, dans les deux
+  // sens, à chaque passage.
+  //
+  // Mémoire de process, pas de requête supplémentaire : on n'écrit QUE sur changement. Au redémarrage elle
+  // est vide, donc le premier passage réaligne la base sur le broker pour chaque position ouverte — c'est
+  // exactement le rattrapage qu'on veut, et il coûte une écriture par position, une fois.
+  const lastSl = new Map<string, number>();
+  const syncStop = async (ticket: string, sl: number) => {
+    if (lastSl.get(ticket) === sl) return;
+    const had = lastSl.has(ticket);
+    lastSl.set(ticket, sl);
+    await updateTradeStop(ticket, sl > 0 ? sl : null);
+    if (had) console.log(`[algoria] ${label} : stop suivi · ticket ${ticket} → ${sl > 0 ? sl : 'retiré'}`);
+  };
+
   const pass = async () => {
     const positions = (terminal.positions ?? []) as Array<Record<string, unknown>>;
     if (!positions.length) return;
@@ -44,7 +70,9 @@ export function startCopyObserver({ terminal, label = 'copie' }: ObserverDeps): 
     const now = Date.now();
     for (const p of positions) {
       const ticket = String(p.id ?? '');
-      if (!ticket || known.has(ticket) || written.has(ticket)) continue;
+      if (!ticket) continue;
+      // Position déjà en base : rien à insérer, mais son stop a pu bouger depuis.
+      if (known.has(ticket) || written.has(ticket)) { await syncStop(ticket, Number(p.stopLoss ?? 0)); continue; }
       const openedAt = p.time ? new Date(p.time as string).getTime() : now;
       if (now - openedAt < SETTLE_MS) continue; // trop frais : le stop n'est peut-être pas encore posé
       const brokerSymbol = String(p.symbol ?? '');
@@ -54,6 +82,7 @@ export function startCopyObserver({ terminal, label = 'copie' }: ObserverDeps): 
       const direction = String(p.type ?? '').includes('SELL') ? 'short' : 'long';
       const sl = Number(p.stopLoss ?? 0);
       written.add(ticket);
+      lastSl.set(ticket, sl); // point de départ du suivi : on ne réécrira qu'au prochain changement
       await recordTradeOpen({
         ticket,
         // Préfixe « copy- » VOLONTAIRE : les couches swing/tendance/zone reconnaissent LEURS positions par un
@@ -73,6 +102,7 @@ export function startCopyObserver({ terminal, label = 'copie' }: ObserverDeps): 
     // broker après des mois ne serait jamais réenregistré.
     const liveTickets = new Set(positions.map((p) => String(p.id ?? '')));
     for (const t of written) if (!liveTickets.has(t)) written.delete(t);
+    for (const t of lastSl.keys()) if (!liveTickets.has(t)) lastSl.delete(t);
   };
 
   const timer = setInterval(() => { void pass().catch((e) => console.error(`[algoria] ${label} : observation échouée:`, e)); }, EVERY_MS);
