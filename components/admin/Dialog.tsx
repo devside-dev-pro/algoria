@@ -13,6 +13,7 @@
 // menus « tape 1-4 » n'ont plus lieu d'être. `multiline` pour un texte long (message au membre), `type:
 // 'number'` ouvre le pavé numérique sur mobile, `password` masque la saisie.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 
 export type PromptOpts = {
   options?: Array<{ value: string; label: string; hint?: string }>;
@@ -65,7 +66,10 @@ export const ask = {
 };
 
 const overlay: CSSProperties = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(3,7,14,.62)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0 };
-const sheet: CSSProperties = { width: '100%', maxWidth: 560, maxHeight: '88vh', overflowY: 'auto', background: 'var(--panel, #0b1220)', border: '1px solid var(--border, rgba(130,152,190,.25))', borderBottom: 'none', borderRadius: '16px 16px 0 0', padding: '16px 18px 22px', boxShadow: '0 -12px 40px rgba(0,0,0,.45)', display: 'flex', flexDirection: 'column', gap: 12 };
+// padding bas = la barre de navigation de l'app membre (fixed, ~72 px) + l'indicateur d'accueil iOS.
+// Sans lui, le bouton OK de la feuille tombe pile derrière la barre : le message se lit, mais on ne peut
+// pas le fermer — constaté sur l'app de Mathieu (« les pop ups se cachent sous le footer »).
+const sheet: CSSProperties = { width: '100%', maxWidth: 560, maxHeight: '88vh', overflowY: 'auto', background: 'var(--panel, #0b1220)', border: '1px solid var(--border, rgba(130,152,190,.25))', borderBottom: 'none', borderRadius: '16px 16px 0 0', padding: '16px 18px calc(22px + env(safe-area-inset-bottom, 0px))', boxShadow: '0 -12px 40px rgba(0,0,0,.45)', display: 'flex', flexDirection: 'column', gap: 12 };
 const field: CSSProperties = { width: '100%', padding: '11px 12px', borderRadius: 10, border: '1px solid var(--border, rgba(130,152,190,.35))', background: 'rgba(10,17,31,.8)', color: 'var(--text, #e8eefc)', fontSize: 15, lineHeight: 1.4, boxSizing: 'border-box' };
 const btn = (primary: boolean, danger?: boolean): CSSProperties => ({
   flex: primary ? 1 : 'none', padding: '12px 16px', borderRadius: 10, fontSize: 13.5, fontWeight: 800, cursor: 'pointer', letterSpacing: 0.3,
@@ -111,7 +115,17 @@ export function DialogHost() {
       ))}
     </div>
   );
-  if (!cur) return toastBar || null;
+  // ═══ PORTAIL VERS <body> — SINON LA FEUILLE PASSE SOUS LA BARRE DE NAVIGATION (17/09/2026) ═════════
+  // L'app membre enferme son contenu dans `.appShell { overflow: hidden }` + `.appScroll { overflow-y:
+  // auto }` pour obtenir un défilement de type natif. Sur iOS, un `position: fixed` rendu À L'INTÉRIEUR de
+  // ce conteneur de défilement cesse de se comporter comme fixe par rapport à la fenêtre : il se fait
+  // rogner, et la barre de navigation (fixed, z-index 40) repasse par-dessus — alors que la feuille est en
+  // z-index 1000. Vécu : le message d'erreur s'affichait, mais son bouton OK était sous la barre.
+  // Le portail sort le rendu de `.appShell` : plus d'ancêtre qui rogne, plus de contexte d'empilement
+  // parasite. C'est déjà la solution retenue ailleurs dans l'app (UnlockSheet, la feuille du profil) —
+  // DialogHost y avait échappé parce qu'il a été écrit pour l'admin, où ce shell n'existe pas.
+  if (typeof document === 'undefined') return null;
+  if (!cur) return toastBar ? createPortal(toastBar, document.body) : null;
   const close = () => setQueue((q) => q.slice(1));
   const cancel = () => { if (cur.kind === 'prompt' || cur.kind === 'form') cur.resolve(null); else if (cur.kind === 'confirm') cur.resolve(false); else cur.resolve(); close(); };
   const formMissing = cur.kind === 'form' ? cur.fields.filter((f) => !f.optional && !(form[f.key] ?? '').trim()).map((f) => f.label) : [];
@@ -131,7 +145,7 @@ export function DialogHost() {
   const [title, ...rest] = cur.message.split('\n');
   const body = rest.join('\n').trim();
 
-  return (
+  return createPortal((
     <div style={overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) cancel(); }} role="dialog" aria-modal="true" onKeyDown={onKey}>
       <div style={sheet}>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text, #e8eefc)', lineHeight: 1.4 }}>{title}</div>
@@ -172,5 +186,5 @@ export function DialogHost() {
       </div>
       {toastBar}
     </div>
-  );
+  ), document.body);
 }
