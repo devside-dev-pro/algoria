@@ -37,7 +37,7 @@ export function QueueTab() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {a.kind === 'connect' && `MT5 ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(rows.find((r) => Number(r.tg_id) === Number(a.tg_id))?.lot ?? a.detail?.lot ?? '?')}${a.detail?.strategy ? ` · S${String(a.detail.strategy)}` : ''}${a.detail?.add_strategy ? ` · ➕ EXTRA ACCOUNT #${String(a.detail?.account_no ?? '?')} (STH id ${String(a.tg_id)}-${String(a.detail?.account_no ?? '?')})` : ''} · `}
+                      {a.kind === 'connect' && `${a.detail?.platform === 'mt4' ? 'MT4' : 'MT5'} ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(rows.find((r) => Number(r.tg_id) === Number(a.tg_id))?.lot ?? a.detail?.lot ?? '?')}${a.detail?.strategy ? ` · S${String(a.detail.strategy)}` : ''}${a.detail?.add_strategy ? ` · ➕ EXTRA ACCOUNT #${String(a.detail?.account_no ?? '?')} (STH id ${String(a.tg_id)}-${String(a.detail?.account_no ?? '?')})` : ''} · `}
                       {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')}) · `}
                       {a.kind === 'strategy_change' && `→ S${String(a.detail?.to ?? '?')} · `}
                       {/* l'ID que STH affiche pour ce membre (UserID = tg_id) — pour le retrouver dans le dashboard STH */}
@@ -64,6 +64,17 @@ export function QueueTab() {
                               ⚠ NON-PARTNER BROKER{label ? ` · ${label.toUpperCase()}` : ''} — connect by hand in STH, the auto-connect will fail on the server name
                             </div>
                           )}
+                          {/* MT4 EN BANDEAU (17/09/2026). La ligne au-dessus disait « MT5 » en dur, quelle
+                              que soit la plateforme réellement choisie. Vécu : le membre #1469 avait bien
+                              coché MT4 (platform:'mt4', is_mt4:true en base), l'écran affichait MT5, le
+                              support l'a cru et a perdu du temps à le saisir dans STH. La plateforme
+                              décide de la case IsMT4 ET de la liste de serveurs valides (chez Xlence les
+                              deux ne se recouvrent pas du tout) — elle ne peut pas se lire en petit. */}
+                          {a.detail?.platform === 'mt4' && (
+                            <div style={{ fontSize: 10.5, marginTop: 3, color: 'var(--gold)', fontWeight: 800, letterSpacing: 0.4 }}>
+                              ⚠ MT4 ACCOUNT — tick IsMT4 in STH. An MT4 server name does not exist on MT5.
+                            </div>
+                          )}
                           <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             VERIFY → {label ? label.toUpperCase() : broker ? broker.toUpperCase() : '⚠ broker ?'} · {bname ?? '⚠ no name — ask'} · {dep ? `$${dep} declared` : '⚠ no deposit declared — ask'}{uname ? <span style={{ color: 'var(--cyan)' }}> · @{uname}</span> : ''}
                           </div>
@@ -74,7 +85,13 @@ export function QueueTab() {
                           <div style={{ fontSize: 10, marginTop: 2, color: 'var(--dim)' }}>
                             {a.detail?.ack_link == null && a.detail?.ack_funded == null
                               ? 'claims: not asked (request predates the checkboxes)'
-                              : <>claims: <b style={{ color: a.detail?.ack_link ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_link ? '✓ opened via our link' : '✗ NOT via our link'}</b> · <b style={{ color: a.detail?.ack_funded ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_funded ? '✓ funded' : '✗ not funded'}</b></>}
+                              : <>claims: {a.detail?.direct_access
+                                  // ACCÈS DIRECT : il a payé son accès à Mathieu et garde son broker. Il n'y
+                                  // a AUCUN lien qu'il aurait pu emprunter — afficher « ✗ NOT via our link »
+                                  // en rouge, c'est afficher une faute là où il n'y en a pas, et c'est ce qui
+                                  // poussait à lui faire cocher une case fausse pour passer.
+                                  ? <b style={{ color: 'var(--cyan)' }}>💳 DIRECT ACCESS — paid, keeps own broker (no link expected)</b>
+                                  : <b style={{ color: a.detail?.ack_link ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_link ? '✓ opened via our link' : '✗ NOT via our link'}</b>} · <b style={{ color: a.detail?.ack_funded ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_funded ? '✓ funded' : '✗ not funded'}</b></>}
                           </div>
                           {/* IDENTIFIANTS DÉJÀ TESTÉS À L'INSCRIPTION : 'ok' = STH a réellement joint ce
                               compte MetaTrader. Inutile de le refuser pour « invalid account » — s'il y a

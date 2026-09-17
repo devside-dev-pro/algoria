@@ -495,10 +495,17 @@ export default function Onboarding() {
             {/* Un compte préexistant ne peut PAS cocher « je l'ai créé via le lien Algoria » — ce serait
                 lui faire signer un mensonge, et la déclaration archivée deviendrait inexploitable à
                 l'examen. Il confirme donc ce qu'il a RÉELLEMENT fait : demandé le rattachement. */}
+            {/* Le même raisonnement vaut pour l'ACCÈS DIRECT (17/09/2026). Celui qui a payé son accès par
+                carte garde son propre broker : aucun lien partenaire n'existe pour lui, donc la case
+                d'origine était fausse par construction. Il fallait la cocher quand même pour franchir le
+                formulaire — vécu sur le membre #1469, ack_link:true archivé sur un dossier où c'est faux.
+                Il déclare donc ce qu'il a RÉELLEMENT fait : il a payé, et il reste chez son broker. */}
             <Check checked={ackLink} onToggle={() => setAckLink((v) => !v)}>
-              {origin === 'existing'
-                ? <>{t('ob.exist.ackAttach')} — <b style={{ color: 'var(--text)' }}>ID {exAffiliate ?? '—'}</b></>
-                : <>I created this trading account <b style={{ color: 'var(--text)' }}>through the Algoria broker link</b> — not an account I already had.</>}
+              {picked === 'other'
+                ? <>{t('ob.other.ackPaid')}</>
+                : origin === 'existing'
+                  ? <>{t('ob.exist.ackAttach')} — <b style={{ color: 'var(--text)' }}>ID {exAffiliate ?? '—'}</b></>
+                  : <>I created this trading account <b style={{ color: 'var(--text)' }}>through the Algoria broker link</b> — not an account I already had.</>}
             </Check>
             <Check checked={ackFunded} onToggle={() => setAckFunded((v) => !v)}>
               I have <b style={{ color: 'var(--text)' }}>deposited real money</b> into it — it&rsquo;s a live account, not a demo.

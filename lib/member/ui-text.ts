@@ -99,6 +99,10 @@ export const UI: Dict = {
   'ob.other.stopNew': { en: '① Open a new account with a partner broker through the link (10 minutes)', it: '① Apri un nuovo conto con un broker partner tramite il link (10 minuti)' },
   'ob.other.stopAsk': { en: '② Residents of some countries can pay for access directly and keep their broker — ask Mathieu first', it: '② I residenti di alcuni paesi possono pagare l’accesso direttamente e tenere il proprio broker — chiedi prima a Mathieu' },
   'ob.other.ackDirect': { en: 'Mathieu confirmed I can keep this broker (direct access)', it: 'Mathieu ha confermato che posso tenere questo broker (accesso diretto)' },
+  // ACCÈS DIRECT : il a payé son accès par carte et garde son propre broker. Il n'existe AUCUN lien
+  // partenaire qu'il aurait pu emprunter — lui faire cocher « j'ai ouvert via le lien Algoria » était
+  // lui faire signer un faux pour franchir le formulaire, et ça polluait la déclaration archivée.
+  'ob.other.ackPaid': { en: 'I paid for my Algoria access directly — this account is with my own broker, not opened through a partner link', it: "Ho pagato l'accesso ad Algoria direttamente — questo conto è presso il mio broker, non aperto tramite un link partner" },
   'ob.miss.directAccess': { en: 'Mathieu’s confirmation for a non-partner broker', it: 'la conferma di Mathieu per un broker non partner' },
   'ob.othersLabel': { en: 'OTHER PARTNER BROKERS — SAME MINIMUMS', it: 'ALTRI BROKER PARTNER — STESSI MINIMI' },
   'ob.selected': { en: '✓ selected', it: '✓ scelto' },

@@ -82,7 +82,12 @@ export function MembersTab() {
               <span title="legacy label derived from the lot — the lot above is the real copy size">risk <b style={{ color: 'var(--dim)' }}>{sel.risk_tier}</b></span>
               {/* un seul caractère d'écart sur le serveur et la copie ne démarre jamais — c'est LA panne
                   la plus fréquente, et elle était invisible autant qu'incorrigeable depuis ici. */}
-              <span>MT5 {editText(sel.tg_id, 'mt5_login', 'MT account number (login)', sel.mt5_login)} @ {serverPick(sel)}</span>
+              {/* « MT », pas « MT5 » (17/09/2026) : la fiche membre ne PEUT pas connaître la plateforme —
+                  la table `members` n'a pas de colonne `platform`, elle ne vit que dans le détail de la
+                  carte CONNECT (et dans member_accounts pour les comptes 2/3). Écrire « MT5 » ici, c'est
+                  affirmer quelque chose qu'on ne sait pas : c'est exactement ce qui a induit le support
+                  en erreur sur #1469. La file, elle, affiche la vraie plateforme. */}
+              <span title="platform (MT4/MT5) is on the CONNECT card in the QUEUE — not stored on the member row">MT {editText(sel.tg_id, 'mt5_login', 'MT account number (login)', sel.mt5_login)} @ {serverPick(sel)}</span>
               <span>MT pwd <button disabled={busy} onClick={() => editPassword(sel)} className="mono" title="replace the stored MT password (the member changed it at the broker → the copy drops)" style={{ fontSize: 11.5, fontWeight: 700, cursor: 'pointer', background: 'transparent', border: 'none', borderBottom: '1px dashed rgba(130,152,190,.5)', padding: '0 1px', color: 'var(--text)' }}>replace ✎</button></span>
               {/* l'ID que STH affiche pour les receivers connectés via l'API (UserID = tg_id) — la clé pour
                   rapprocher « 7557770646 » vu dans STH ↔ le bon membre ici. Copiable en un clic. */}
@@ -181,7 +186,7 @@ export function MembersTab() {
               <table className="mono" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5, minWidth: 860 }}>
                 <thead>
                   <tr>
-                    {['#', 'MEMBER', 'STATUS', 'BROKER', 'LOT', 'MT5', 'USDT', 'REFERRED BY', 'SINCE'].map((h) => (
+                    {['#', 'MEMBER', 'STATUS', 'BROKER', 'LOT', 'MT LOGIN', 'USDT', 'REFERRED BY', 'SINCE'].map((h) => (
                       <th key={h} style={{ textAlign: 'left', padding: '7px 10px', fontSize: 9.5, letterSpacing: 1.2, color: 'var(--dim)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
