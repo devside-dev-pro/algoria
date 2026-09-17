@@ -10,6 +10,7 @@ import { LOT_CHOICES, LOT_MAX } from '@/lib/member/lots';
 import { estimateCommission, rankBrokersByCommission } from '@/lib/member/commissions';
 import { ACTIVATION_LOTS, lotsStateOf } from '@/lib/member/activation';
 import { leadName, type DmLead } from '@/lib/member/dmLeads';
+import { DIRECT_ACCESS_PRICE_USD } from '@/lib/member/directAccess';
 import { ask, toast, type FormField } from '@/components/admin/Dialog';
 import { WL, Row, Action, Affiliate, Deposit, Tab, Center, AdminGate } from './_shared';
 
@@ -376,6 +377,30 @@ export function useAdminState() {
     const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id));
     const broker = String(a.detail?.broker ?? m?.broker ?? '').trim().toLowerCase() || null;
     const declared = Number(a.detail?.declared_deposit ?? 0) || null;
+    const today = new Date().toISOString().slice(0, 10);
+    // ═══ UN ACCÈS DIRECT NE DEMANDE PAS UN DÉPÔT BROKER (17/09/2026) ═══════════════════════════════════
+    // Ce prompt suit le ✓ DONE. Il proposait le `declared_deposit` de la carte — pour un accès direct,
+    // c'est ce que le membre a mis sur SON compte chez SON broker (500 $ pour #1469), une somme qui ne
+    // nous concerne en rien et sur laquelle personne ne nous doit de commission. La valider aurait créé
+    // un dépôt broker de 500 $ et réintroduit, par ce chemin, exactement la pollution que le sélecteur de
+    // nature venait de supprimer. On demande donc le MONTANT REÇU, et on écrit une ligne `direct`.
+    // Champ laissé VIDE et pas pré-rempli au prix catalogue : les remises sont fréquentes (les deux
+    // premiers ont payé 200 au lieu de 400) et sur un montant d'argent, un OK réflexe sur une valeur
+    // fausse coûte plus cher qu'une saisie.
+    if (a.detail?.direct_access === true) {
+      const v = await ask.prompt(
+        `💳 Log the access payment now? Amount received ($)\n\nWhat the member actually paid you — discounts included (list price $${DIRECT_ACCESS_PRICE_USD}).\nThis is NOT a broker deposit: no commission, nothing to claim.\nCancel = no line (add it later in DEPOSITS → 💳 DIRECT ACCESS).`,
+        '',
+        { type: 'number', ok: 'LOG PAYMENT' },
+      );
+      if (v === null) return;
+      const received = Number(v);
+      if (!Number.isFinite(received) || received <= 0) return void ask.alert('Invalid amount — nothing logged. Add it in DEPOSITS → 💳 DIRECT ACCESS.');
+      const dupD = deposits.some((d) => Number(d.tg_id) === Number(a.tg_id) && String(d.detail?.nature ?? '') === 'direct' && Number(d.detail?.commission_usd ?? 0) === received && String(d.detail?.deposited_at ?? d.created_at).slice(0, 10) === today);
+      if (dupD) return void ask.alert('Already logged today for this member (same amount) — nothing added.');
+      post({ addDeposit: { tg_id: Number(a.tg_id), amount: 0, commission: received, nature: 'direct', note: 'access paid — logged at connect' } });
+      return;
+    }
     const v = await ask.prompt(
       `🏦 Log the deposit now? Validated amount ($)\n\nBroker: ${broker ? broker.toUpperCase() : '?'} — expected com auto from the schedule.\nCancel = no line (it will show up in DEPOSITS → "live, no deposit logged").`,
       declared ? String(declared) : '',
@@ -385,7 +410,6 @@ export function useAdminState() {
     const amount = Number(v);
     if (!Number.isFinite(amount) || amount <= 0) return void ask.alert('Invalid amount — no deposit logged. Add it in DEPOSITS.');
     // garde anti-doublon : même membre, même montant, même jour → la ligne existe déjà (double clic, DONE après CONNECT…)
-    const today = new Date().toISOString().slice(0, 10);
     const dup = deposits.some((d) => Number(d.tg_id) === Number(a.tg_id) && Number(d.detail?.amount_usd ?? 0) === amount && String(d.detail?.deposited_at ?? d.created_at).slice(0, 10) === today);
     if (dup) return void ask.alert('Already logged today for this member (same amount) — nothing added.');
     const commission = estimateCommission(broker, amount);
