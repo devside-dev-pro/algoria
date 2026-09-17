@@ -91,19 +91,24 @@ export const UI: Dict = {
   // ARRÊT AVANT LE FORMULAIRE POUR UN BROKER HORS PARTENAIRES (07/09/2026, décision Mathieu). Sur 41 demandes
   // de connexion en deux semaines, 26 refusées, presque toutes « compte non ouvert via le lien » : des
   // identifiants saisis pour rien, des jours perdus, et l'examen à la main pour Mathieu. On le dit AVANT.
-  'ob.other.stopTitle': { en: 'An account at a non-partner broker is refused at review.', it: 'Un conto presso un broker non partner viene rifiutato alla verifica.' },
-  'ob.other.stopBody': {
-    en: 'Algoria is free for you because the partner broker pays us on your trading volume. An account at another broker brings nothing to the broker, so it is not accepted — 26 of the last 41 requests were refused for exactly this. Two ways in:',
-    it: 'Algoria è gratuita per te perché il broker partner ci paga sul tuo volume di trading. Un conto presso un altro broker non porta nulla al broker, quindi non viene accettato — 26 delle ultime 41 richieste sono state rifiutate proprio per questo. Due strade:',
-  },
-  'ob.other.stopNew': { en: '① Open a new account with a partner broker through the link (10 minutes)', it: '① Apri un nuovo conto con un broker partner tramite il link (10 minuti)' },
-  'ob.other.stopAsk': { en: '② Residents of some countries can pay for access directly and keep their broker — ask Mathieu first', it: '② I residenti di alcuni paesi possono pagare l’accesso direttamente e tenere il proprio broker — chiedi prima a Mathieu' },
-  'ob.other.ackDirect': { en: 'Mathieu confirmed I can keep this broker (direct access)', it: 'Mathieu ha confermato che posso tenere questo broker (accesso diretto)' },
   // ACCÈS DIRECT : il a payé son accès par carte et garde son propre broker. Il n'existe AUCUN lien
   // partenaire qu'il aurait pu emprunter — lui faire cocher « j'ai ouvert via le lien Algoria » était
   // lui faire signer un faux pour franchir le formulaire, et ça polluait la déclaration archivée.
+  // ── ACCÈS DIRECT : DEUX ROUTES, PAS UN MUR (17/09/2026) ─────────────────────────────────────────────
+  // Les anciens textes 'ob.other.stop*' présentaient le broker hors partenaires comme une impasse (« refusé
+  // à l'examen ») avec une porte dérobée (« demande à Mathieu »). Ce n'est plus vrai : c'est une offre.
+  'ob.direct.title': { en: 'Your broker is not one of our partners — you have two ways in.', it: 'Il tuo broker non è tra i nostri partner — hai due strade.' },
+  'ob.direct.freeTitle': { en: '① Open an account with a partner broker — access stays free', it: '① Apri un conto con un broker partner — l’accesso resta gratuito' },
+  'ob.direct.freeBody': { en: 'Takes about 10 minutes. The broker pays us, so you pay nothing, ever.', it: 'Circa 10 minuti. Il broker paga noi, quindi tu non paghi mai nulla.' },
+  'ob.direct.paidTitle': { en: '② Keep the broker you have — one-time payment, lifetime access', it: '② Tieni il broker che hai — pagamento unico, accesso a vita' },
+  'ob.direct.paidBody': { en: 'No subscription, no renewal, no expiry. You keep your account exactly where it is, and we connect it by hand.', it: 'Nessun abbonamento, nessun rinnovo, nessuna scadenza. Tieni il tuo conto dov’è, e lo colleghiamo a mano.' },
+  'ob.direct.payCta': { en: 'Pay and keep my broker', it: 'Paga e tieni il mio broker' },
+  'ob.direct.payAsk': { en: 'Message Mathieu to pay — he sends you the link himself', it: 'Scrivi a Mathieu per pagare — ti manda lui il link' },
+  'ob.direct.ackPaid': { en: 'I have paid for my access — I keep my own broker', it: 'Ho pagato il mio accesso — tengo il mio broker' },
+  'ob.direct.checked': { en: 'Your request goes to the same queue as everyone else. We check the payment there, then connect your account by hand and message you.', it: 'La tua richiesta va nella stessa coda di tutti gli altri. Lì verifichiamo il pagamento, poi colleghiamo il conto a mano e ti scriviamo.' },
+  'ob.direct.noLot': { en: 'No activation trade needed — that step only exists to validate a partner broker’s commission, and you have no partner broker.', it: 'Nessun trade di attivazione richiesto — quel passaggio serve solo a validare la commissione di un broker partner, e tu non ne hai uno.' },
+  'ob.miss.paid': { en: 'confirm you have paid for direct access', it: 'conferma di aver pagato l’accesso diretto' },
   'ob.other.ackPaid': { en: 'I paid for my Algoria access directly — this account is with my own broker, not opened through a partner link', it: "Ho pagato l'accesso ad Algoria direttamente — questo conto è presso il mio broker, non aperto tramite un link partner" },
-  'ob.miss.directAccess': { en: 'Mathieu’s confirmation for a non-partner broker', it: 'la conferma di Mathieu per un broker non partner' },
   'ob.othersLabel': { en: 'OTHER PARTNER BROKERS — SAME MINIMUMS', it: 'ALTRI BROKER PARTNER — STESSI MINIMI' },
   'ob.selected': { en: '✓ selected', it: '✓ scelto' },
   'ob.openAccount': { en: 'open account ↗', it: 'apri conto ↗' },

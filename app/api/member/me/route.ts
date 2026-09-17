@@ -4,6 +4,7 @@ import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, commissionTermsFor, 
 import { minDepositFor, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
 import { inMaintenance } from '@/lib/member/maintenance';
 import { lotsStateOf } from '@/lib/member/activation';
+import { DIRECT_ACCESS_PRICE_USD } from '@/lib/member/directAccess';
 import { OFFBOARDED } from '@/lib/member/winback';
 import { BROKERS } from '@/lib/member/brokers';
 import { notifyOwner } from '@/lib/member/notifyOwner';
@@ -295,7 +296,7 @@ export async function POST(req: NextRequest) {
       //     il devait cocher « ouvert via le lien Algoria » pour franchir le formulaire, et le dossier
       //     gardait un ack_link:true faux (constaté sur #1469) — une déclaration inexploitable à l'examen ;
       //   • le cas courant       → il a bien ouvert via le lien.
-      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount || broker === 'other' ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}), ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true, direct_access: true, ack_direct: ackLink } : {}) } as never,
+      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount || broker === 'other' ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}), ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true, direct_access: true, ack_direct: ackLink, ack_paid: body.ackPaid === true, direct_price_usd: DIRECT_ACCESS_PRICE_USD } : {}) } as never,
     });
     // SUCCÈS — indispensable, et pas seulement pour la statistique : l'alarme se déclenche sur « aucune
     // acceptée », donc sans cette ligne le dénominateur ne contient QUE des refus et l'alarme sonne au

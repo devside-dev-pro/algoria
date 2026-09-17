@@ -12,6 +12,7 @@ import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, minDepositFor } from '@/lib/me
 import { LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/member/activation';
+import { DIRECT_ACCESS_PRICE_USD, DIRECT_ACCESS_URL } from '@/lib/member/directAccess';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
@@ -201,7 +202,7 @@ export default function Onboarding() {
   else if (picked === 'other' && brokerOther.trim().length < 2) mt5Missing.push(t('ob.miss.brokerName'));
   // BROKER HORS PARTENAIRES : refus certain à l'examen sauf accès direct confirmé par Mathieu (07/09/2026).
   // On bloque le formulaire plutôt que de laisser saisir des identifiants pour rien — voir le panneau d'arrêt.
-  if (picked === 'other' && !ackDirect) mt5Missing.push(t('ob.miss.directAccess'));
+  if (picked === 'other' && !ackDirect) mt5Missing.push(t('ob.miss.paid'));
   if (!login) mt5Missing.push(t('ob.miss.login'));
   if (!server) mt5Missing.push(t('ob.miss.server'));
   else if (demoServer) mt5Missing.push(t('ob.miss.demo')); // le bloc rouge dédié le détaille déjà au-dessus
@@ -424,13 +425,35 @@ export default function Onboarding() {
                 semaines, presque tous « compte non ouvert via le lien » : on le dit ici, avant les
                 identifiants, avec les deux seules issues. Le formulaire ne s'ouvre que si Mathieu a
                 confirmé l'accès direct (résidents de certains pays) — sinon c'est un refus certain. */}
+            {/* DEUX ROUTES, PLUS UN MUR (17/09/2026). Ce panneau était rouge et disait « refusé à l'examen »,
+                avec une porte dérobée (« demande à Mathieu ») et une case « Mathieu a confirmé » que
+                n'importe qui pouvait cocher seul. C'est devenu une OFFRE : soit il ouvre chez un partenaire
+                et l'accès reste gratuit, soit il paie une fois et garde son broker. Les deux routes
+                aboutissent à la MÊME file d'attente, où un humain vérifie le dossier — donc rien à
+                verrouiller ici : quelqu'un qui cocherait « j'ai payé » sans avoir payé ne gagne rien. */}
             {picked === 'other' && (
-              <div className="cardIn" style={{ border: '1px solid rgba(255,107,107,.5)', background: 'rgba(255,107,107,.07)', borderRadius: 12, padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}><b>{t('ob.other.stopTitle')}</b></div>
-                <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--muted)' }}>{t('ob.other.stopBody')}</div>
-                <button onClick={() => { setOrigin(null); setStep(0); }} style={{ ...ctaGold, border: 'none', cursor: 'pointer', textAlign: 'left' }}>{t('ob.other.stopNew')}</button>
-                <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--muted)', textDecoration: 'underline' }}>{t('ob.other.stopAsk')}</a>
-                <Check checked={ackDirect} onToggle={() => setAckDirect((v) => !v)}>{t('ob.other.ackDirect')}</Check>
+              <div className="cardIn" style={{ border: '1px solid rgba(43,227,245,.4)', background: 'rgba(43,227,245,.05)', borderRadius: 12, padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}><b>{t('ob.direct.title')}</b></div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <button onClick={() => { setOrigin(null); setStep(0); }} style={{ ...ctaGold, border: 'none', cursor: 'pointer', textAlign: 'left' }}>{t('ob.direct.freeTitle')}</button>
+                  <span style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--dim)' }}>{t('ob.direct.freeBody')}</span>
+                </div>
+
+                <div style={{ height: 1, background: 'var(--border)' }} />
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.5, color: 'var(--text)' }}>{t('ob.direct.paidTitle')}</div>
+                  <div style={{ fontSize: 11.5, lineHeight: 1.55, color: 'var(--dim)' }}>{t('ob.direct.paidBody')}</div>
+                  {/* Lien de paiement absent (variable pas encore renseignée) → on bascule sur Mathieu plutôt
+                      que d'afficher un bouton mort : personne ne doit rester coincé parce qu'une variable
+                      d'environnement manque. */}
+                  {DIRECT_ACCESS_URL
+                    ? <a href={DIRECT_ACCESS_URL} target="_blank" rel="noreferrer" style={{ ...ctaGold, border: 'none', cursor: 'pointer', textAlign: 'center', textDecoration: 'none' }}>{t('ob.direct.payCta')} — ${DIRECT_ACCESS_PRICE_USD}</a>
+                    : <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ ...ctaGold, border: 'none', cursor: 'pointer', textAlign: 'center', textDecoration: 'none' }}>{t('ob.direct.payAsk')} — ${DIRECT_ACCESS_PRICE_USD}</a>}
+                  <Check checked={ackDirect} onToggle={() => setAckDirect((v) => !v)}>{t('ob.direct.ackPaid')}</Check>
+                  {ackDirect && <span style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--muted)' }}>{t('ob.direct.checked')}</span>}
+                </div>
               </div>
             )}
             {picked === 'other' && ackDirect && (
@@ -520,6 +543,14 @@ export default function Onboarding() {
               La case n'est PAS bloquante : refuser l'envoi à quelqu'un qui n'a pas encore tradé le
               renverrait au point de départ avec ses identifiants saisis pour rien. Non cochée, la
               consigne repasse sur l'écran d'attente, comme avant. */}
+          {/* PAS DE LOT D'ACTIVATION EN ACCÈS DIRECT (17/09/2026). Ce lot ne sert qu'à valider la commission
+              du broker partenaire. Celui qui a payé son accès n'en a pas : lui demander ce geste, ce serait
+              lui faire payer deux fois — en argent, puis en friction — pour protéger un revenu qui n'existe
+              pas dans son dossier. Voir lotsCleared() dans lib/member/activation.ts, qui l'exempte aussi
+              côté verrou : les deux doivent dire la même chose, sinon l'écran promet ce que le code refuse. */}
+          {picked === 'other' ? (
+            <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.55, color: 'var(--dim)' }}>✓ {t('ob.direct.noLot')}</p>
+          ) : (
           <div className="panel" style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 9, border: '1px solid rgba(245,194,74,.45)', background: 'rgba(245,194,74,.06)' }}>
             <span className="mono" style={{ fontSize: 10, letterSpacing: 1.4, color: 'var(--gold)' }}>ACTIVATE YOUR ACCOUNT — 30 SECONDS, WHILE YOU&rsquo;RE IN MT5</span>
             <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)' }}>
@@ -537,11 +568,12 @@ export default function Onboarding() {
               </p>
             )}
           </div>
+          )}
           {origin === 'existing' && (
             <p style={{ margin: '-4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--gold)' }}>⏳ {t('ob.exist.pending')}</p>
           )}
 
-          <button disabled={mt5Blocked} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, ackLots, origin: origin ?? undefined }, 2)} style={cta(mt5Blocked)}>
+          <button disabled={mt5Blocked} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, ackLots: picked === 'other' ? false : ackLots, ackPaid: picked === 'other' ? ackDirect : undefined, origin: origin ?? undefined }, 2)} style={cta(mt5Blocked)}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
           {/* remplace l'ancien « Tick both boxes above » : il ne couvrait QUE les cases, alors que huit
