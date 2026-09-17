@@ -7,7 +7,7 @@ import { useAdmin } from '../_state';
 import { Kpi, dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 
 export function DepositsTab() {
-  const { addDeposit, busy, copyBrokerLink, countrySelect, deleteDeposit, depAmount, depBroker, depCom, depComAuto, depDate, depDateOf, depNote, depTg, depTotals, deposits, editDepositAmount, editDepositCom, exportCsv, input, legalOf, liveNoDeposit, monthDeps, monthLabel, nameOf, nextYm, planAmount, planCopied, planExcluded, planRanking, planTg, post, rows, setDepAmount, setDepBroker, setDepCom, setDepDate, setDepNote, setDepTg, setPlanAmount, setPlanTg, shiftMonth, ym } = useAdmin();
+  const { addDeposit, busy, copyBrokerLink, countrySelect, deleteDeposit, depAmount, depBroker, depCom, depComAuto, depDate, depDateOf, depNote, depTg, depNature, setDepNature, depTotals, deposits, editDepositAmount, editDepositCom, exportCsv, input, legalOf, liveNoDeposit, monthDeps, monthLabel, nameOf, nextYm, planAmount, planCopied, planExcluded, planRanking, planTg, post, rows, setDepAmount, setDepBroker, setDepCom, setDepDate, setDepNote, setDepTg, setPlanAmount, setPlanTg, shiftMonth, ym } = useAdmin();
   return (
           <>
             {/* filet de sécurité : LIVE sans ligne de dépôt — cliquer pré-remplit le formulaire ci-dessous */}
@@ -50,16 +50,37 @@ export function DepositsTab() {
                 {/* liste déroulante des 5 brokers partenaires (fini la saisie à la main) — pré-remplie avec le
                     broker principal du membre au choix du membre ; PENSER à la changer pour le dépôt d'un
                     2e compte (multi-stratégies). Valeur legacy hors liste conservée en option pour l'édition. */}
-                <select value={depBroker} onChange={(e) => setDepBroker(e.target.value)} style={{ ...inp, width: 160 }}>
-                  <option value="">broker…</option>
-                  {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
-                  {depBroker && !BROKERS.some((b) => b.key === depBroker) && <option value={depBroker}>{depBroker}</option>}
-                </select>
-                <input value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder="deposit $" inputMode="decimal" style={{ ...inp, width: 110 }} />
-                <input value={depCom} onChange={(e) => { setDepCom(e.target.value); depComAuto.current = e.target.value === ''; }} placeholder="expected com $" title="pré-rempli depuis le barème du broker — modifiable, vider le champ pour réactiver l'auto" inputMode="decimal" style={{ ...inp, width: 140 }} />
+                {/* LA NATURE D'ABORD : elle change ce que les champs suivants VEULENT DIRE, donc elle doit
+                    se choisir avant de les remplir. En accès direct, le dépôt et le broker n'existent pas
+                    — les afficher inviterait à inventer un montant, ce qui était exactement l'ancien
+                    contournement (faux dépôt de 50 $ pour pouvoir noter un paiement de 200 $). */}
+                <div style={{ display: 'inline-flex', gap: 2, padding: 2, borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)' }}>
+                  {([['broker', '💼 BROKER DEPOSIT'], ['direct', '💳 DIRECT ACCESS']] as const).map(([k, label]) => (
+                    <button key={k} type="button" onClick={() => setDepNature(k)} className="mono"
+                      style={{ padding: '7px 10px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
+                        background: depNature === k ? 'rgba(43,227,245,.14)' : 'transparent', color: depNature === k ? 'var(--cyan)' : 'var(--dim)' }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {depNature === 'broker' && (
+                  <select value={depBroker} onChange={(e) => setDepBroker(e.target.value)} style={{ ...inp, width: 160 }}>
+                    <option value="">broker…</option>
+                    {BROKERS.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
+                    {depBroker && !BROKERS.some((b) => b.key === depBroker) && <option value={depBroker}>{depBroker}</option>}
+                  </select>
+                )}
+                {depNature === 'broker' && <input value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder="deposit $" inputMode="decimal" style={{ ...inp, width: 110 }} />}
+                <input value={depCom} onChange={(e) => { setDepCom(e.target.value); depComAuto.current = e.target.value === ''; }}
+                  placeholder={depNature === 'direct' ? 'amount received $' : 'expected com $'}
+                  title={depNature === 'direct' ? 'ce que le client t\u2019a réellement payé (remise comprise) — encaissé, rien à réclamer' : 'pré-rempli depuis le barème du broker — modifiable, vider le champ pour réactiver l\u2019auto'}
+                  inputMode="decimal" style={{ ...inp, width: depNature === 'direct' ? 170 : 140, ...(depNature === 'direct' ? { borderColor: 'rgba(43,227,245,.5)' } : {}) }} />
                 <input type="date" value={depDate} onChange={(e) => setDepDate(e.target.value)} style={{ ...inp, width: 150 }} />
                 <input value={depNote} onChange={(e) => setDepNote(e.target.value)} placeholder="note (optional)" style={{ ...inp, flex: 1, minWidth: 160 }} />
-                <button disabled={busy || !depTg || !Number(depAmount)} onClick={addDeposit} style={{ padding: '10px 18px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: !depTg || !Number(depAmount) ? 0.5 : 1 }}>+ ADD</button>
+                {(() => {
+                  const missing = !depTg || (depNature === 'direct' ? !Number(depCom) : !Number(depAmount));
+                  return <button disabled={busy || missing} onClick={addDeposit} style={{ padding: '10px 18px', borderRadius: 9, border: 'none', fontWeight: 800, cursor: 'pointer', color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', opacity: missing ? 0.5 : 1 }}>+ ADD</button>;
+                })()}
               </div>
             </section>
 
@@ -120,6 +141,8 @@ export function DepositsTab() {
                 <Kpi label="COM RECEIVED" value={`$${Math.floor(depTotals.received)}`} accent="var(--up)" />
                 <Kpi label="COM PENDING" value={`$${Math.floor(depTotals.pending)}`} accent="var(--gold)" hot={depTotals.pending > 0} />
                 <Kpi label="COM LOST" value={`$${Math.floor(depTotals.lost)}`} accent="#ff6b8a" />
+                {/* séparé des commissions broker : encaissé, prix fixe, personne à relancer */}
+                <Kpi label="DIRECT ACCESS" value={`$${Math.floor(depTotals.direct)}`} accent="var(--cyan)" />
               </div>
               {monthDeps.length === 0 && <p style={dimP}>No deposits logged for this month yet — add one above as soon as a member funds his broker account.</p>}
               {monthDeps.map((d) => {

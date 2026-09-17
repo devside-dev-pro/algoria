@@ -139,6 +139,9 @@ export function useAdminState() {
   const [sthAudit, setSthAudit] = useState<{ rows: Array<{ member_no: number | null; name: string; state: string; detail: string }>; master?: string | null; summary: Record<string, number> } | null>(null);
   const [botDrafts, setBotDrafts] = useState<Record<string, string>>({}); // brouillons de réponse via le bot (par ligne du fil)
   const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM' du bilan affiché
+  // NATURE DE LA LIGNE : dépôt chez un broker partenaire (commissionnable) ou paiement d'accès direct
+  // (encaissé par Mathieu, aucune commission broker). Voir l'API : c'est elle qui fait foi.
+  const [depNature, setDepNature] = useState<'broker' | 'direct'>('broker');
   const [depTg, setDepTg] = useState('');
   const [depBroker, setDepBroker] = useState('');
   const [depAmount, setDepAmount] = useState('');
@@ -774,11 +777,16 @@ export function useAdminState() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deposits, ym, market, rows],
   );
+  // DEUX TOTAUX, PAS UN (17/09/2026). `received` ne doit contenir QUE des commissions broker : c'est
+  // l'argent qu'un tiers te doit ou t'a versé pour l'activité d'un client. Un paiement d'accès direct est
+  // ton chiffre à toi, déjà encaissé, à prix fixe — le fondre dans la même ligne rendrait impossible de
+  // savoir, en fin de mois, combien le modèle broker rapporte réellement.
   const depTotals = useMemo(() => {
-    const t = { deposited: 0, received: 0, pending: 0, lost: 0 };
+    const t = { deposited: 0, received: 0, pending: 0, lost: 0, direct: 0, directCount: 0 };
     for (const d of monthDeps) {
-      t.deposited += Number(d.detail?.amount_usd ?? 0);
       const com = Number(d.detail?.commission_usd ?? 0);
+      if (String(d.detail?.nature ?? 'broker') === 'direct') { t.direct += com; t.directCount += 1; continue; }
+      t.deposited += Number(d.detail?.amount_usd ?? 0);
       const st = String(d.detail?.commission_status ?? 'pending');
       if (st === 'received') t.received += com;
       else if (st === 'canceled') t.lost += com;
@@ -827,9 +835,10 @@ export function useAdminState() {
     });
   };
   const addDeposit = () => {
-    if (!depTg || !depAmount) return;
+    // en accès direct le montant reçu vit dans depCom — il n'y a pas de dépôt à saisir
+    if (!depTg || (depNature === 'direct' ? !Number(depCom) : !depAmount)) return;
     post(
-      { addDeposit: { tg_id: Number(depTg), broker: depBroker, amount: Number(depAmount), commission: Number(depCom || 0), date: depDate, note: depNote } },
+      { addDeposit: { tg_id: Number(depTg), broker: depBroker, amount: Number(depAmount || 0), commission: Number(depCom || 0), date: depDate, note: depNote, nature: depNature } },
       () => { setDepAmount(''); setDepCom(''); setDepNote(''); depComAuto.current = true; },
     );
   };
@@ -1012,9 +1021,10 @@ export function useAdminState() {
       return '';
     };
     const lines = [
-      ['date', 'market', 'member', 'username', 'holder_name', 'country', 'broker', 'broker_account', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
+      ['date', 'nature', 'market', 'member', 'username', 'holder_name', 'country', 'broker', 'broker_account', 'deposit_usd', 'commission_usd', 'commission_status', 'note'],
       ...monthDeps.map((d) => [
         depDateOf(d).slice(0, 10),
+        String(d.detail?.nature ?? 'broker') === 'direct' ? 'direct_access' : 'broker_deposit',
         localeOf(d.tg_id).toUpperCase(),
         d.member_no != null ? `#${d.member_no}` : '',
         (() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? ''); })(),
@@ -1034,6 +1044,8 @@ export function useAdminState() {
       ['commission_received_usd', depTotals.received],
       ['commission_pending_usd', depTotals.pending],
       ['commission_lost_usd', depTotals.lost],
+      ['direct_access_usd', depTotals.direct],
+      ['direct_access_count', depTotals.directCount],
     ];
     const csv = '\ufeff' + lines.map((l) => l.map(esc).join(',')).join('\r\n');
     const a = document.createElement('a');
@@ -1064,7 +1076,7 @@ export function useAdminState() {
   ];
 
 
-  return { tab, setTab, goLive, pending, setPending, dmLeads, setDmLeads, leadCopied, leadMessage, copyLeadMessage, leadAction, leadName, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
+  return { tab, setTab, goLive, pending, setPending, dmLeads, setDmLeads, leadCopied, leadMessage, copyLeadMessage, leadAction, leadName, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depNature, setDepNature, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
 }
 
 export type AdminState = ReturnType<typeof useAdminState>;

@@ -341,7 +341,7 @@ type Body = {
     confirmCommission?: string; cancelCommission?: string; payoutPaid?: string; payoutReject?: string; reason?: string; tx?: string;
     rejectConnect?: string; code?: string;
     waitBroker?: string; // carte bloquée chez le broker (rattachement affilié) — bascule, voir plus bas
-    addDeposit?: { tg_id: number; broker?: string; amount: number; commission?: number; date?: string; note?: string };
+    addDeposit?: { tg_id: number; broker?: string; amount: number; commission?: number; date?: string; note?: string; nature?: 'broker' | 'direct' };
     updateDeposit?: { id: string; amount?: number; commission?: number; comStatus?: string; note?: string; broker?: string; date?: string; bookedYm?: string | null };
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
@@ -471,9 +471,21 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
   // Vit dans member_actions (kind='deposit', status='done' → jamais dans la file) — zéro migration.
   if (body.addDeposit) {
     const d = body.addDeposit;
-    const amount = Number(d.amount);
+    // ── DEUX NATURES D'ARGENT DANS LE MÊME REGISTRE (17/09/2026) ──────────────────────────────────────
+    // Jusqu'ici une ligne ne pouvait être qu'un DÉPÔT BROKER : un client qui payait son accès directement
+    // était noté avec un faux dépôt (50 $) et son paiement écrit dans le champ commission — la convention
+    // que Mathieu s'était faite, faute de mieux (vu en base sur #690 : dépôt 50, commission 200).
+    // Ça marchait à une ligne. L'accès direct devenant une offre, sa ligne « commissions reçues »
+    // mélangerait deux choses qui ne se pilotent pas pareil : ce qu'un broker lui DOIT (variable, à
+    // relancer, fonction du volume tradé) et ce qu'un client lui a DÉJÀ PAYÉ (fixe, encaissé, réglé) —
+    // et une fois mélangées, plus rien dans la ligne ne dit laquelle est laquelle.
+    const nature = d.nature === 'direct' ? 'direct' : 'broker';
+    const amount = nature === 'direct' ? 0 : Number(d.amount);
     const commission = Number(d.commission ?? 0);
-    if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: 'deposit amount required' }, { status: 400 });
+    // En accès direct l'argent EST la commission : pas de dépôt à inventer, mais un montant reçu exigé.
+    if (nature === 'direct') {
+      if (!Number.isFinite(commission) || commission <= 0) return NextResponse.json({ error: 'amount received required' }, { status: 400 });
+    } else if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ error: 'deposit amount required' }, { status: 400 });
     const { data: m } = await db.from('members').select('member_no,broker').eq('tg_id', d.tg_id).limit(1);
     if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
     const depositedAt = d.date && !Number.isNaN(Date.parse(String(d.date))) ? new Date(String(d.date)).toISOString() : new Date().toISOString();
@@ -483,14 +495,20 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
         broker: String(d.broker ?? m[0].broker ?? '').trim().toLowerCase() || null,
         amount_usd: amount,
         commission_usd: Number.isFinite(commission) && commission > 0 ? commission : 0,
-        commission_status: 'pending',
+        // Un paiement d'accès est ENCAISSÉ au moment où on le saisit — il n'y a personne à relancer.
+        // Le laisser en 'pending' le ferait apparaître dans la file « commissions à réclamer au broker ».
+        commission_status: nature === 'direct' ? 'received' : 'pending',
+        nature,
         note: String(d.note ?? '').slice(0, 300) || null,
         deposited_at: depositedAt,
       } as never,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    // le montant validé fait foi : si ce membre a un parrain, sa commission s'aligne dessus
-    await syncPendingReferralCommission(db, Number(d.tg_id), amount);
+    // le montant validé fait foi : si ce membre a un parrain, sa commission s'aligne dessus.
+    // PAS pour un accès direct : la commission de parrainage est financée par la commission BROKER, qui
+    // n'existe pas ici. L'aligner sur un paiement d'accès reviendrait à faire payer le parrain par
+    // Mathieu sur ses propres 200 $ — une décision commerciale, pas un effet de bord d'une saisie.
+    if (nature === 'broker') await syncPendingReferralCommission(db, Number(d.tg_id), amount);
     return NextResponse.json({ ok: true });
   }
   if (body.updateDeposit) {
