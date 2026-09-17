@@ -8,8 +8,7 @@ import { useAdmin } from '../_state';
 import { CTA_TEMPLATES, dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 
 export function ToolsTab() {
-  const { STEP_LABEL, bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, daysStuck, downloadCard, downloadRecap, feedWins, input, leads, live, nudge, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
-  const [leadsShown, setLeadsShown] = useState(30); // 961 cartes d'un coup rendaient l'onglet interminable (03/09)
+  const { bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, downloadCard, downloadRecap, feedWins, input, live, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
   return (
           <>
             {/* 📣 ANNONCE GROUPÉE — née du basculement S1 → S2 : prévenir 17 membres un par un depuis le
@@ -17,7 +16,7 @@ export function ToolsTab() {
                 CÔTÉ SERVEUR (le navigateur n'envoie qu'un nom de segment), et l'étiquette empêche qu'un
                 double clic renvoie le même message à quelqu'un qui l'a déjà reçu. */}
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
-              <h2 style={secH}>📣 ANNOUNCE TO A SEGMENT (bot DM)</h2>
+              <h2 style={secH}>💬 TELEGRAM DM — VIA THE BOT</h2>
               <p style={dimP}>One message, sent through the Algoria bot to a whole segment. The tag below is the anti-duplicate lock: anyone who already received it is skipped, so clicking twice is safe.</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <select value={bcAudience} onChange={(e) => setBcAudience(e.target.value as 'pending' | 'live' | 'stalled')} className="mono" style={{ fontSize: 11.5, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)' }}>
@@ -92,7 +91,7 @@ export function ToolsTab() {
 
             {/* PUSH COMPOSER — le canal marketing gratuit : message libre vers un segment, test sur soi d'abord */}
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
-              <h2 style={secH}>📣 PUSH COMPOSER</h2>
+              <h2 style={secH}>🔔 APP NOTIFICATION — PUSH</h2>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {([['self', '🧪 ONLY ME — TEST'], ['prospects', `PROSPECTS · ${rows.filter((r) => ['onboarding', 'pending_copier'].includes(r.status)).length}`], ['live', `LIVE MEMBERS · ${rows.filter((r) => ['live', 'paused'].includes(r.status)).length}`], ['all', `EVERYONE · ${rows.length}`]] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setPushAud(k)} style={{
@@ -156,7 +155,7 @@ export function ToolsTab() {
                 UK et le pont italien transportent maintenant le clavier. Publier sur les trois d'ici
                 créerait des doublons, puisque le fan-out se déclenche sur le post source. */}
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
-              <h2 style={secH}>📣 POST A CTA TO A CHANNEL — with a real button</h2>
+              <h2 style={secH}>📡 CHANNEL POST — PUBLIC, WITH A BUTTON</h2>
               <p style={dimP}>
                 Telegram only lets a <b>bot</b> attach a button, which is why you can&rsquo;t do it by hand. Pick the
                 <b> source channel</b> and this posts to <b>all three</b> in one go: source and UK mirror as written,
@@ -221,27 +220,6 @@ export function ToolsTab() {
                   ))}
                 </div>
               )}
-            </section>
-
-            {/* RELANCE — les leads coincés dans le funnel, du plus ancien au plus récent : ta liste de closing */}
-            <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 680 }}>
-              <h2 style={secH}>🎯 FOLLOW-UP — STUCK IN THE FUNNEL {leads.length > 0 && `· ${leads.length}`}</h2>
-              {leads.length === 0 && <p style={dimP}>Nobody stuck — every signup either finished the wizard or is waiting in the QUEUE.</p>}
-              {leads.length > 0 && <p style={dimP}>Oldest first. The 10:00 UTC auto-nudges already reach everyone here — this list is for the personal touch.</p>}
-              {leads.slice(0, leadsShown).map((r) => (
-                <div key={r.member_no} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
-                  <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12, minWidth: 34 }}>#{r.member_no}</span>
-                  <span style={{ fontSize: 12, color: 'var(--text)', minWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—')}</span>
-                  <span style={{ fontSize: 11, color: 'var(--muted)', flex: 1, minWidth: 150 }}>{STEP_LABEL[r.onboarding_step] ?? STEP_LABEL[0]}</span>
-                  <span className="mono" style={{ fontSize: 10, color: daysStuck(r) >= 3 ? 'var(--gold)' : 'var(--dim)', whiteSpace: 'nowrap' }}>{daysStuck(r) === 0 ? 'today' : `${daysStuck(r)}d stuck`}</span>
-                  {r.tg_username && <a href={`https://t.me/${r.tg_username}`} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--cyan)', borderColor: 'rgba(43,227,245,.4)' }}>💬 DM</a>}
-                  <button disabled={busy} onClick={() => nudge(r)} title="push: 'Need a hand finishing your setup?' → opens the wizard" style={goldBtn}>🔔 NUDGE</button>
-                </div>
-              ))}
-              {leads.length > leadsShown && (
-                <button onClick={() => setLeadsShown((n) => n + 30)} style={{ ...miniBtn, alignSelf: 'flex-start', padding: '8px 14px' }}>SHOW 30 MORE · {leads.length - leadsShown} left</button>
-              )}
-              {pushResult && leads.length > 0 && <p style={{ ...dimP, color: 'var(--up)' }}>✓ {pushResult}</p>}
             </section>
 
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 680 }}>

@@ -1,0 +1,11 @@
+-- ANNULE 0005 (17/09/2026, le même jour). La file de relance par transfert au bot est retirée : le geste
+-- de capture — ouvrir la conversation, appuyer longuement, transférer, choisir le bot — demandait 4 à 5
+-- gestes par personne, et à 40 prospects par jour c'était abandonné dès le deuxième soir. Retour de
+-- Mathieu après essai : « pas très ergonomique et pratique, je ne pense pas l'utiliser ».
+--
+-- La table était VIDE au moment de la suppression (0 ligne, vérifiée) et plus aucun code ne la lit ni ne
+-- l'écrit depuis le retrait complet de la fonction. On ne garde pas une table morte « au cas où » : c'est
+-- exactement l'accumulation qu'on cherche à défaire dans ce projet.
+--
+-- 0005 est conservée telle quelle : une migration appliquée ne se réécrit pas, elle s'annule.
+drop table if exists dm_leads;

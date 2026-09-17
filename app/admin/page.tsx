@@ -58,7 +58,7 @@ export default function AdminCRM() {
               </button>
             ))}
           </div>
-          <button disabled={busy} onClick={liveAlert} style={{ padding: '7px 13px', borderRadius: 9, border: '1px solid rgba(255,90,60,.5)', background: 'rgba(255,90,60,.08)', color: '#ff8a5c', fontWeight: 800, letterSpacing: 0.6, fontSize: 11, cursor: 'pointer' }}>📣 LIVE ALERT</button>
+          <button disabled={busy} onClick={liveAlert} title="notification dans l'app (pas un DM Telegram) : « 🔴 ALGORIA IS LIVE » à tous les abonnés push, sans écran de rédaction" style={{ padding: '7px 13px', borderRadius: 9, border: '1px solid rgba(255,90,60,.5)', background: 'rgba(255,90,60,.08)', color: '#ff8a5c', fontWeight: 800, letterSpacing: 0.6, fontSize: 11, cursor: 'pointer' }}>🔔 PUSH · LIVE</button>
           <form action="/api/member/logout" method="post" style={{ display: 'flex' }}>
             <button style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer' }}>sign out</button>
           </form>
