@@ -50,14 +50,33 @@ function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry
       const caption = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG} · <i>${how}</i>\n${px}<i>Copied to your size automatically.</i>`;
       void postVipPhoto(cardUrl, caption).then((ok) => { if (!ok) void postVip(text); });
     } else void postVip(text);
-  } else if (reason === 'sl' && pnl < 0) {
+  // ── LE CANAL NE MONTRAIT PLUS AUCUNE PERTE (17/09/2026) ──────────────────────────────────────────
+  // Cette branche exigeait `reason === 'sl'`. Or en mode copie les positions sont ouvertes par le moteur
+  // externe : ce process n'a aucun contexte pour elles, et la ligne 124 fixe alors `reason` à 'win' ou
+  // 'loss' — JAMAIS 'sl'. La condition ne pouvait donc plus être vraie, et personne ne s'en est aperçu
+  // parce qu'une absence de message ne se voit pas.
+  // Mesuré en base depuis le passage en copie (14/09) : 79 gains postés avec leur carte, et 23 pertes
+  // totalisant −17 341 $ dont AUCUNE n'est partie. Pendant ce temps le wrap quotidien affirme
+  // « Wins and losses both » — le canal contredisait sa propre promesse, par omission.
+  //
+  // SEUIL SYMÉTRIQUE : un gain part à partir de 150 $, une perte doit partir au même montant. Sans ça on
+  // publierait les gros gains et les petites pertes, ce qui est pire que le silence.
+  // Le plafond d'une note par jour ne bouge pas : c'est un choix délibéré (pas un mur de rouge), et le
+  // changer relève de la ligne éditoriale de Mathieu, pas d'une correction de bug.
+  } else if ((reason === 'sl' || reason === 'loss') && pnl <= -VIP_WIN_MIN) {
     if (SECONDARY) return; // pertes = le primaire (S2) seul → pas de mur de cartes rouges simultanées
     const day = new Date().toISOString().slice(0, 10);
     if (day !== vipSlDay) { vipSlDay = day; vipSlCount = 0; }
-    if (vipSlCount >= VIP_SL_MAX_PER_DAY) return; // au plus 1 note de stop calme par jour
+    if (vipSlCount >= VIP_SL_MAX_PER_DAY) return; // au plus 1 note de perte calme par jour
     vipSlCount++;
-    // Carte STOP — perte bornée, note pédagogique en italique (« le stop a fait son travail »). RARE et posée.
-    void postVip(`🛡️ <b>−${usd(pnl)}</b> · ${VIP_TAG}\n${px}\n<i>${SL_NOTES[vipSlCount % SL_NOTES.length]}</i>`);
+    // LE TEXTE NE PEUT PAS AFFIRMER UN STOP QU'ON N'A PAS VU. Les trois SL_NOTES disent toutes qu'un stop
+    // était posé avant l'entrée — vrai quand CE process a ouvert la position, faux en copie : le 14/09,
+    // 12 des 14 trades du compte source n'avaient aucun stop loss. Réparer l'omission en la remplaçant
+    // par une affirmation fausse serait un recul. En copie, on dit le fait, rien de plus.
+    const note = reason === 'sl'
+      ? SL_NOTES[vipSlCount % SL_NOTES.length]
+      : 'A losing trade — copied to your account exactly like the winners. The day\u2019s real net is in the wrap.';
+    void postVip(`🛡️ <b>−${usd(pnl)}</b> · ${VIP_TAG}\n${px}\n<i>${note}</i>`);
   }
 }
 
