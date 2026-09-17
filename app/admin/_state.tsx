@@ -872,9 +872,18 @@ export function useAdminState() {
     if (dry.error) return void ask.alert(`⚠ ${dry.error}`);
     const n = dry.audience ?? 0;
     if (!n) return void ask.alert('Personne à joindre dans ce segment (tout le monde a déjà été traité dans les 12 dernières heures, ou la file est vide).');
+    // COMBIEN MAINTENANT, et pas « tout ». La dernière campagne de masse sur cette population (semaine du
+    // 31/08, mesurée dans sync.ts) a produit 3 passages live et 136 blocages du bot. Un envoi fractionné
+    // laisse voir le taux de blocage avant d'engager les 500 suivants ; « tout d'un coup » ne le permet pas.
+    // Le défaut est donc 100, pas n : il faut taper le nombre pour tout envoyer.
+    const capIn = await ask.prompt(`${n} personne(s) à joindre. Combien en envoyer maintenant ?`, String(Math.min(100, n)), { type: 'number' });
+    if (capIn === null) return;
+    const cap = Math.min(Math.max(Math.floor(Number(capIn)) || 0, 0), n);
+    if (!cap) return;
     const ok = await ask.confirm(
-      `Envoyer ce message par le BOT à ${n} personne(s)${botOnly ? ' SANS @pseudo' : ''} du segment ${segment.toUpperCase()} ?\n\n` +
+      `Envoyer ce message par le BOT à ${cap} personne(s)${botOnly ? ' SANS @pseudo' : ''} du segment ${segment.toUpperCase()} ?\n\n` +
       `${text}\n\n[+ boutons : ouvrir l'app · rejoindre le canal · écrire à Mathieu]\n\n` +
+      `${cap < n ? `Il en restera ${n - cap} pour plus tard — le bouton reprend où il s'arrête.\n\n` : ''}` +
       `Ça part par lots et ça ne s'annule pas. Ceux que le bot ne peut pas joindre restent dans ta file.`,
     );
     if (!ok) return;
@@ -882,16 +891,21 @@ export function useAdminState() {
     let sent = 0, failed = 0, guard = 0;
     try {
       for (;;) {
-        const d = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segmentBlast: { segment, botOnly, text } }) })
+        // On ne demande jamais plus que ce qu'il reste à faire sur ce plafond : le dernier lot est rogné
+        // pour tomber pile sur `cap`, sinon « 100 » enverrait 120.
+        const ask100 = Math.min(40, cap - (sent + failed));
+        if (ask100 <= 0) break;
+        const d = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segmentBlast: { segment, botOnly, text, limit: ask100 } }) })
           .then((r) => r.json() as Promise<{ sent?: number; failed?: number; remaining?: number; error?: string }>);
         if (d.error) { void ask.alert(`⚠ Arrêté après ${sent} envoi(s) : ${d.error}`); break; }
         sent += d.sent ?? 0; failed += d.failed ?? 0;
-        setBlastProgress(`${sent} envoyé(s)${failed ? ` · ${failed} injoignable(s)` : ''} · ${d.remaining ?? 0} restant(s)`);
-        // Garde-fou : le serveur ne renvoie jamais plus de 60 par lot, donc 40 tours couvrent 2 400 personnes.
-        // Si `remaining` ne descend pas (bug serveur), on s'arrête au lieu de boucler indéfiniment.
-        if (!d.remaining || ++guard > 40) break;
+        setBlastProgress(`${sent} envoyé(s)${failed ? ` · ${failed} injoignable(s)` : ''} · ${Math.max(0, cap - sent - failed)} restant(s) sur ce lot`);
+        // Garde-fou : si le serveur ne traite plus personne (plus de candidats, ou bug), on s'arrête au
+        // lieu de boucler indéfiniment.
+        if (!d.remaining || ((d.sent ?? 0) + (d.failed ?? 0)) === 0 || ++guard > 40) break;
       }
-      void ask.alert(`✓ Terminé\n\n${sent} message(s) délivré(s)${failed ? `\n${failed} injoignable(s) — ils restent dans ta file` : ''}`);
+      const reste = Math.max(0, n - sent - failed);
+      void ask.alert(`✓ Terminé\n\n${sent} message(s) délivré(s)${failed ? `\n${failed} injoignable(s) — ils restent dans ta file` : ''}${reste ? `\n\n${reste} personne(s) pas encore contactée(s) : reclique quand tu veux.` : ''}`);
     } finally {
       setBlastProgress(null);
       setBusy(false);
