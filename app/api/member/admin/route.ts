@@ -138,7 +138,11 @@ export async function GET(req: NextRequest) {
     // n'a pas pu joindre sortirait de la file pendant 3 jours — on masquerait la personne à rattraper.
     // FENÊTRE 15 JOURS, pas « les 500 dernières » (03/09) : depuis que le bot est débridé (~200 envois/jour), 500
     // lignes couvrent moins de trois jours et la mémoire du cooldown (3 à 14 j) devenait fausse sans le dire.
-    db.from('member_actions').select('tg_id,created_at,done_by').eq('kind', 'nudge').eq('status', 'done').gte('created_at', new Date(Date.now() - 15 * 86_400_000).toISOString()).order('created_at', { ascending: false }).limit(5000),
+    // AGRÉGÉ PAR LA BASE (17/09/2026) : on lisait 2 145 lignes pour n'en tirer que DEUX dates par membre
+    // — dernier contact humain, dernier passage de la relance auto. La vue admin_nudge_last rend
+    // directement ces deux dates (862 lignes), fenêtre de 15 jours identique, `done_by` réduit à
+    // 'auto'/'human' — le seul test que fait l'écran. Forme inchangée côté client.
+    rawq.from('admin_nudge_last').select('tg_id,created_at,done_by').limit(5000),
     // HEARTBEAT runner : la dernière bougie écrite (BTC 24/7 → toujours attendue) — bandeau rouge si > 20 min.
     db.from('candles').select('time').order('time', { ascending: false }).limit(1),
     // NOMS LÉGAUX (kyc.broker_name, déclarés au wizard) : LE pont entre les 3 identités d'une personne
@@ -173,28 +177,21 @@ export async function GET(req: NextRequest) {
     // 📣 SOURCES DES DEMANDES D'ADHÉSION (30/07) : agrégat par lien d'invitation Telegram — un lien nommé
     // par campagne relie enfin une pub à ses demandes (les ads pointent vers le canal, pas vers l'app, donc
     // les ?src= étaient inexploitables). dm = taux de DM automatique délivré (bloqué/privé → 'failed').
-    rawq.from('telegram_joins').select('invite_name,status,dm_status,joined_at').order('joined_at', { ascending: false }).limit(1000),
+    rawq.from('admin_join_sources').select('source,n,accepted,dm_sent,dm_failed,last'),
     rawq.from('telegram_chats').select('chat_id,title,type,username,last_seen_at').order('last_seen_at', { ascending: false }).limit(30),
-    // LES CANAUX CONNUS PAR LES DEMANDES D'ADHÉSION — on ne veut que les identifiants DISTINCTS, pas
-    // l'historique : `chat_id` seul, dédupliqué juste après. C'est la requête qui grossit le plus vite
-    // (une ligne par clic de pub), donc la colonne unique compte.
-    rawq.from('telegram_joins').select('chat_id').not('chat_id', 'is', null).limit(2000),
+    // LES CANAUX CONNUS PAR LES DEMANDES D'ADHÉSION — la vue rend les identifiants DISTINCTS (4 lignes)
+    // au lieu des 2 000 lignes d'historique qu'il fallait dédupliquer ici. C'était la requête qui
+    // grossissait le plus vite : une ligne par clic de pub.
+    rawq.from('admin_join_chats').select('chat_id'),
   ]);
   const extraAccounts = (extraQ as { data: Array<Record<string, unknown>> | null }).data;
   const botActivity = (botQ as { data: Array<Record<string, unknown>> | null }).data;
-  const joinRows = (joinRowsQ as { data: Array<{ invite_name: string | null; status: string | null; dm_status: string | null; joined_at: string }> | null }).data;
-  const joinSources = Object.values(
-    (joinRows ?? []).reduce((acc: Record<string, { source: string; n: number; accepted: number; dmSent: number; dmFailed: number; last: string }>, r) => {
-      const key = r.invite_name ?? '(lien direct / inconnu)';
-      const cur = (acc[key] ??= { source: key, n: 0, accepted: 0, dmSent: 0, dmFailed: 0, last: r.joined_at });
-      cur.n++;
-      if (r.status === 'accepted') cur.accepted++;
-      if (r.dm_status === 'sent') cur.dmSent++;
-      if (r.dm_status === 'failed') cur.dmFailed++;
-      if (r.joined_at > cur.last) cur.last = r.joined_at;
-      return acc;
-    }, {}),
-  ).sort((a, b) => b.n - a.n);
+  // La vue rend déjà le décompte par campagne ; il ne reste qu'à renommer deux colonnes pour la forme
+  // attendue côté écran, et à trier. Le reduce de vingt lignes qui vivait ici a disparu avec la matière
+  // première qu'il consommait.
+  const joinSources = ((joinRowsQ as { data: Array<{ source: string; n: number; accepted: number; dm_sent: number; dm_failed: number; last: string }> | null }).data ?? [])
+    .map((r) => ({ source: r.source, n: r.n, accepted: r.accepted, dmSent: r.dm_sent, dmFailed: r.dm_failed, last: r.last }))
+    .sort((a, b) => b.n - a.n);
   // 📡 CANAUX VUS PAR LE BOT — l'ID numérique (-100…) qu'aucune interface Telegram n'affiche, à copier
   // dans les variables Vercel. On calcule ici le RÔLE de chacun : source du fan-out, miroir UK, canal IT.
   // Un canal listé « — » n'est branché sur rien : c'est le signe qu'une variable manque.
