@@ -4,6 +4,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { openTelegram } from '@/lib/telegram';
 import { ask } from '@/components/admin/Dialog';
+// UN SEUL ENDROIT POUR LES LIENS. Le lien d'invitation est révocable côté Telegram : s'il cesse de
+// fonctionner, il se remplace dans i18n.ts et tout suit, y compris ces scripts. Le recopier ici en dur
+// aurait créé une seconde vérité qui se périmerait en silence.
+import { APP_URL, CHANNEL_INVITE_URL, SUPPORT_TG_URL } from '@/lib/member/i18n';
 
 
 export interface WL { username: string; added_by: string | null; created_at: string }
@@ -102,8 +106,20 @@ export const SCRIPTS: Record<string, string> = {
     "Hey! Mathieu here, from Algoria. I can see your deposit came through — thank you, and sorry you had to wait.\n\nYour account just isn't connected to the copier yet, so the AI isn't trading for you. That's on us to finish and it takes 2 minutes. Can you confirm the broker and account number you funded, and I'll switch it on right now?",
   rejected:
     "Hey! Mathieu from Algoria. Your account connection didn't go through — and I want to be clear it's not you being refused, it's almost always one detail that doesn't match.\n\nMost of the time it's the password: MetaTrader needs your TRADING password (the one the broker emailed you when the account was created), not the one you use on the broker's website. Send me your account number and I'll check what's blocking it on my side.",
+  // LES LIENS SONT DANS LE TEXTE, PAS « EN DESSOUS » (17/09/2026). Ce script se termine par « everything
+  // you need is right below » — une phrase écrite pour l'envoi par le BOT, où i18n.ts pose réellement des
+  // boutons sous le message. Copié-collé dans un DM manuel, les boutons ne suivent pas : il ne restait que
+  // la promesse. Constaté par Mathieu en s'écrivant à lui-même, au milieu d'un envoi de 939 premiers
+  // contacts — ni lien de canal, ni @, alors que la majorité de ces gens ont QUITTÉ le canal et n'ont
+  // aucun moyen d'y revenir seuls.
   first:
-    "Hey! Mathieu here — I'm the founder of Algoria, the AI that trades gold and Bitcoin live. You created an account on our app a few days ago (that's how I have your name), but never finished setting it up.\n\nNo pressure at all — I'm just going through the list one by one. Are you still interested?\n\nEverything you need is right below: pick up where you left off, get back into the channel if you left it, or just message me.",
+    "Hey! Mathieu here — I'm the founder of Algoria, the AI that trades gold and Bitcoin live. You created an account on our app a few days ago (that's how I have your name), but never finished setting it up.\n\n" +
+    "No pressure at all — I'm going through the list one by one, and I answer everyone myself.\n\n" +
+    "Here's everything, so you don't have to ask for it:\n\n" +
+    `📱 Your account, where you left off — ${APP_URL}\n` +
+    `📡 The channel, in case you left it — ${CHANNEL_INVITE_URL}\n` +
+    `💬 Me, for anything else — ${SUPPORT_TG_URL}\n\n` +
+    "What stopped you? If it was picking a broker, tell me which country you're in and I'll tell you which one to choose — the whole setup takes about ten minutes.",
   followup:
     "Hey! Following up on our conversation — where are you at with your setup?\n\nIf something's blocking you, tell me what it is and I'll sort it out. Algoria's been trading every day in the meantime.",
 };
