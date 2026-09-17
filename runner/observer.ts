@@ -57,10 +57,16 @@ export function startCopyObserver({ terminal, label = 'copie' }: ObserverDeps): 
   const lastSl = new Map<string, number>();
   const syncStop = async (ticket: string, sl: number) => {
     if (lastSl.get(ticket) === sl) return;
-    const had = lastSl.has(ticket);
+    const first = !lastSl.has(ticket);
     lastSl.set(ticket, sl);
     await updateTradeStop(ticket, sl > 0 ? sl : null);
-    if (had) console.log(`[algoria] ${label} : stop suivi · ticket ${ticket} → ${sl > 0 ? sl : 'retiré'}`);
+    // ON DIT AUSSI LE PREMIER ALIGNEMENT (17/09/2026, même soirée que le correctif ci-dessus). Il était
+    // silencieux : au redémarrage suivant, la base montrait un SL nul sur la position ouverte et RIEN dans
+    // les logs ne permettait de distinguer « le broker n'a pas de stop » (juste, on écrit null) de « la
+    // synchro n'a pas tourné » (faux, à corriger). Une correction dont on ne peut pas vérifier l'effet est
+    // à moitié faite — c'est exactement le défaut qu'on vient de réparer, reproduit dans l'outillage.
+    // Coût : une ligne par position ouverte, une fois par démarrage.
+    console.log(`[algoria] ${label} : stop ${first ? 'aligné au démarrage' : 'suivi'} · ticket ${ticket} → ${sl > 0 ? sl : 'aucun stop côté broker'}`);
   };
 
   const pass = async () => {
