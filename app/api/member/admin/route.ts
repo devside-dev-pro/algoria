@@ -437,8 +437,15 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     else if (p.audience === 'user') {
       if (!Number(p.tg_id)) return NextResponse.json({ error: 'tg_id required' }, { status: 400 });
       sent = await push.pushToUser(Number(p.tg_id), payload);
-    } else if (p.audience === 'prospects' || p.audience === 'live') {
-      const statuses = p.audience === 'live' ? ['live', 'paused'] : ['onboarding', 'pending_copier'];
+    } else if (p.audience === 'prospects' || p.audience === 'live' || p.audience === 'paused') {
+      // « LIVE » NE VEUT PLUS DIRE « LIVE + PAUSED » (21/09/2026). Le bouton annonçait « LIVE MEMBERS · 70 »
+      // et visait 49 actifs PLUS 21 membres qui ont délibérément arrêté de copier : 30 % de l'audience ne
+      // faisait pas ce que le libellé affirmait. Repéré par Mathieu, en se demandant pourquoi l'audit STH
+      // ne comptait que 54 personnes quand ce bouton en annonçait 70.
+      //
+      // Les deux groupes n'attendent pas le même message : un membre en pause est le plus proche d'un
+      // retour, et lui envoyer l'annonce destinée aux actifs est une occasion perdue à chaque envoi.
+      const statuses = p.audience === 'live' ? ['live'] : p.audience === 'paused' ? ['paused'] : ['onboarding', 'pending_copier'];
       const { data: seg } = await db.from('members').select('tg_id').in('status', statuses);
       sent = await push.pushToUsers((seg ?? []).map((m) => Number(m.tg_id)), payload);
     } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });

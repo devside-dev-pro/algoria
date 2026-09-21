@@ -93,7 +93,10 @@ export function ToolsTab() {
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
               <h2 style={secH}>🔔 APP NOTIFICATION — PUSH</h2>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {([['self', '🧪 ONLY ME — TEST'], ['prospects', `PROSPECTS · ${rows.filter((r) => ['onboarding', 'pending_copier'].includes(r.status)).length}`], ['live', `LIVE MEMBERS · ${rows.filter((r) => ['live', 'paused'].includes(r.status)).length}`], ['all', `EVERYONE · ${rows.length}`]] as const).map(([k, label]) => (
+                {/* LIVE ET PAUSED SÉPARÉS (21/09/2026) — ce bouton comptait les deux ensemble sous le libellé
+                    « LIVE MEMBERS », donc 21 personnes en pause recevaient les annonces destinées aux actifs.
+                    Chaque compteur correspond maintenant exactement à ce que le serveur enverra. */}
+                {([['self', '🧪 ONLY ME — TEST'], ['prospects', `PROSPECTS · ${rows.filter((r) => ['onboarding', 'pending_copier'].includes(r.status)).length}`], ['live', `LIVE · ${rows.filter((r) => r.status === 'live').length}`], ['paused', `PAUSED · ${rows.filter((r) => r.status === 'paused').length}`], ['all', `EVERYONE · ${rows.length}`]] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setPushAud(k)} style={{
                     padding: '7px 12px', borderRadius: 9, cursor: 'pointer', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8,
                     border: `1px solid ${pushAud === k ? 'rgba(43,227,245,.5)' : 'var(--border)'}`,
