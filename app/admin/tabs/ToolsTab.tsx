@@ -19,7 +19,11 @@ export function ToolsTab() {
               <h2 style={secH}>💬 TELEGRAM DM — VIA THE BOT</h2>
               <p style={dimP}>One message, sent through the Algoria bot to a whole segment. The tag below is the anti-duplicate lock: anyone who already received it is skipped, so clicking twice is safe.</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <select value={bcAudience} onChange={(e) => setBcAudience(e.target.value as 'pending' | 'live' | 'stalled')} className="mono" style={{ fontSize: 11.5, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)' }}>
+                {/* LARGEUR BORNÉE (21/09/2026) — un <select> sans contrainte prend la largeur de son option
+                    la plus longue, ici « picked a broker, never sent their MT details… ». Sur mobile il
+                    débordait de sa carte : `flexWrap` ne sert à rien tant qu'un élément flex refuse de
+                    rétrécir, et il refuse par défaut (`min-width: auto`). C'est `minWidth: 0` qui l'autorise. */}
+                <select value={bcAudience} onChange={(e) => setBcAudience(e.target.value as 'pending' | 'live' | 'stalled')} className="mono" style={{ fontSize: 11.5, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', flex: '1 1 240px', minWidth: 0, maxWidth: '100%' }}>
                   <option value="pending">members waiting in the queue (pending)</option>
                   <option value="live">all live + paused members</option>
                   <option value="stalled">picked a broker, never sent their MT details (the big drop-off)</option>
