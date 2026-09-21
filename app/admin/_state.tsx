@@ -165,7 +165,7 @@ export function useAdminState() {
   const [pushTitle, setPushTitle] = useState('');
   const [pushBody, setPushBody] = useState('');
   const [pushUrl, setPushUrl] = useState('/member');
-  const [pushAud, setPushAud] = useState<'self' | 'prospects' | 'live' | 'all'>('self');
+  const [pushAud, setPushAud] = useState<'self' | 'prospects' | 'live' | 'paused' | 'all'>('self');
   const [pushResult, setPushResult] = useState<string | null>(null);
   // ===== fiche membre (MEMBERS) : timeline complète + notes privées =====
   const [sel, setSel] = useState<Row | null>(null);
