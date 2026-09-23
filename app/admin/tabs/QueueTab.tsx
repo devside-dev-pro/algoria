@@ -34,14 +34,29 @@ export function QueueTab() {
                     <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--cyan)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>{nameOf(a.tg_id)}</span>
                     {legalOf(a.tg_id) && <span style={{ fontSize: 9.5, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }} title="name on the broker account">🏦 {legalOf(a.tg_id)}</span>}
                   </button>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* BASE DE 220px, PAS `flex: 1` (23/09/2026) — `flex: 1` vaut `1 1 0%` : la colonne
+                      accepte de descendre à zéro, donc sur un écran de 360px les boutons se servent les
+                      premiers et il restait ~50px au texte. Résultat vécu : « ⚖ RISK CHANGE » débordait
+                      SOUS le bouton ✓ DONE et la seule information de la carte (le nouveau lot) était
+                      coupée à « → … ». Avec une base de 220px la ligne ne rentre plus, et c'est alors le
+                      `flexWrap` du parent qui agit : les boutons passent à la ligne, le texte garde
+                      toute la largeur. `minWidth: 0` reste nécessaire pour autoriser la compression
+                      sous 220px sur les écrans vraiment étroits. */}
+                  <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6 }}>{KIND_LABEL[a.kind] ?? a.kind.toUpperCase()}</div>
-                    <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {/* ELLIPSE RETIRÉE (23/09/2026) — `whiteSpace: nowrap` + `textOverflow: ellipsis`
+                        rendait « MT5 12345 @ PUPrime-Live » en « MT5… » sur mobile. Sur une carte dont
+                        cette ligne EST le contenu, tronquer revient à ne rien afficher : mieux vaut
+                        deux lignes qu'un « … ». */}
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', wordBreak: 'break-word' }}>
                       {a.kind === 'connect' && `${a.detail?.platform === 'mt4' ? 'MT4' : 'MT5'} ${String(a.detail?.login ?? '?')} @ ${String(a.detail?.server ?? '?')} · lot ${String(rows.find((r) => Number(r.tg_id) === Number(a.tg_id))?.lot ?? a.detail?.lot ?? '?')}${a.detail?.strategy ? ` · S${String(a.detail.strategy)}` : ''}${a.detail?.add_strategy ? ` · ➕ EXTRA ACCOUNT #${String(a.detail?.account_no ?? '?')} (STH id ${String(a.tg_id)}-${String(a.detail?.account_no ?? '?')})` : ''} · `}
-                      {a.kind === 'risk_change' && `→ ${String(a.detail?.to ?? '?')} (lot ${String(a.detail?.lot ?? '?')}) · `}
+                      {/* Le lot est TOUT ce que le support a à appliquer : il se lit en premier, en or.
+                          `to` vaut déjà « lot 0.04 » et `lot` vaut « 0.04 » — les afficher tous les deux
+                          donnait « → lot 0.04 (lot 0.04) », le même chiffre deux fois. */}
+                      {a.kind === 'risk_change' && <>→ <b style={{ fontSize: 13, color: 'var(--gold)' }}>lot {String(a.detail?.lot ?? '').trim() || String(a.detail?.to ?? '?').replace(/^lot\s*/i, '')}</b>{' · '}</>}
                       {a.kind === 'strategy_change' && `→ S${String(a.detail?.to ?? '?')} · `}
                       {/* l'ID que STH affiche pour ce membre (UserID = tg_id) — pour le retrouver dans le dashboard STH */}
-                      {['strategy_change', 'pause', 'resume', 'disconnect'].includes(a.kind) && `STH id ${String(a.tg_id)} · `}
+                      {['risk_change', 'strategy_change', 'pause', 'resume', 'disconnect'].includes(a.kind) && `STH id ${String(a.tg_id)} · `}
                       {new Date(a.created_at).toLocaleString('en-GB')}
                       {(() => { const h = Math.floor((Date.now() - Date.parse(a.created_at)) / 3_600_000); return <b style={{ marginLeft: 6, color: h >= 72 ? '#ff8a5c' : h >= 24 ? 'var(--gold)' : 'var(--dim)' }}>⏱ {h >= 48 ? `${Math.floor(h / 24)} d` : `${h} h`}</b>; })()}
                     </div>
@@ -75,7 +90,7 @@ export function QueueTab() {
                               ⚠ MT4 ACCOUNT — tick IsMT4 in STH. An MT4 server name does not exist on MT5.
                             </div>
                           )}
-                          <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--gold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--gold)', wordBreak: 'break-word' }}>
                             VERIFY → {label ? label.toUpperCase() : broker ? broker.toUpperCase() : '⚠ broker ?'} · {bname ?? '⚠ no name — ask'} · {dep ? `$${dep} declared` : '⚠ no deposit declared — ask'}{uname ? <span style={{ color: 'var(--cyan)' }}> · @{uname}</span> : ''}
                           </div>
                           {/* CE QUE LE MEMBRE A JURÉ (14/08) : compte né du lien Algoria + compte financé.

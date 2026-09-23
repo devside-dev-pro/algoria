@@ -1048,7 +1048,8 @@ export function useAdminState() {
       return `MT5 ${String(d.login ?? '?')} @ ${String(d.server ?? '?')} · lot ${String(d.lot ?? '?')}${d.reject_reason ? ` · ✗ ${String(d.reject_reason)}` : ''}${wait}`;
     }
     if (a.kind === 'kyc') return `${String(d.broker_name ?? '?')} · declared $${String(d.declared_deposit ?? '?')}`;
-    if (a.kind === 'risk_change') return `→ ${String(d.to ?? '?')} (lot ${String(d.lot ?? '?')})`;
+    // même chiffre deux fois (`to` = « lot 0.04 », `lot` = « 0.04 ») — voir QueueTab (23/09/2026)
+    if (a.kind === 'risk_change') return `→ lot ${String(d.lot ?? '').trim() || String(d.to ?? '?').replace(/^lot\s*/i, '')}`;
     if (a.kind === 'deposit') return `$${Number(d.amount_usd ?? 0)} deposited · com $${Number(d.commission_usd ?? 0)} (${String(d.commission_status ?? 'pending')})`;
     if (a.kind === 'note') return String(d.text ?? '');
     return '';
