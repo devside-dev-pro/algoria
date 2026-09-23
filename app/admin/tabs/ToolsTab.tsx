@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { ask } from '@/components/admin/Dialog';
 import { useAdmin } from '../_state';
 import { CTA_TEMPLATES, dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
+import { OFFBOARD_REASONS, type OffboardReason } from '@/lib/member/winback';
 
 export function ToolsTab() {
   const { bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, downloadCard, downloadRecap, feedWins, input, live, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
@@ -50,6 +51,7 @@ export function ToolsTab() {
                 pour un copieur : le membre croit trader, regarde un ecran qui ne bouge plus, et c'est lui
                 qui finit par nous prevenir. Ce bouton pose la question a STH pour chaque membre live.
                 Les membres EN PAUSE ne sont jamais touches : leur absence de master est volontaire. */}
+            <BulkOffboard />
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
               <h2 style={secH}>🩺 STH AUDIT — who is actually copying?</h2>
               <p style={dimP}>Asks STH, member by member, whether each LIVE account is really subscribed to a master. Paused members are never touched — their empty subscription is deliberate.</p>
@@ -249,5 +251,99 @@ export function ToolsTab() {
             {wl.length === 0 && <p style={dimP}>Empty — add your CM&rsquo;s @ to give her the full member view.</p>}
             </section>
           </>
+  );
+}
+
+// ⛔ OFF-BOARD GROUPÉ (23/09/2026) — neuf receivers vides repérés d'un coup dans STH, et le bouton
+// individuel coûte deux boîtes de dialogue par membre. On colle une liste « #numéro motif », on relit
+// l'aperçu (qui est qui, quel motif, quel message il recevra), et un seul tap lance le même chemin
+// serveur que le bouton de la fiche : statut offboarded, débranchement STH, message de récupération.
+//
+// LE MOTIF N'EST PAS UN DÉTAIL : il choisit le texte envoyé au membre. « Capital retiré » écrit à
+// quelqu'un que le copieur a vidé serait faux, et c'est exactement le mauvais moment pour l'être.
+const REASON_ALIASES: Record<string, OffboardReason> = { '1': 'withdrawal', '2': 'inactive', '3': 'broker_detached', '4': 'other' };
+const REASON_KEYS = Object.keys(OFFBOARD_REASONS) as OffboardReason[];
+
+function BulkOffboard() {
+  const { busy, load, rows, setBusy } = useAdmin();
+  const [text, setText] = useState('');
+  const [notify, setNotify] = useState(true);
+  const [report, setReport] = useState<Array<{ label: string; ok: boolean; detail: string }> | null>(null);
+
+  // une ligne = « #60 withdrawal », « 60 2 » ou « 60 » (motif par défaut : withdrawal)
+  type Row = (typeof rows)[number];
+  type Item = { line: string; error: string } | { line: string; error: null; no: number; row: Row; reason: OffboardReason };
+  const parsed: Item[] = text.split(/\n+/).map((l) => l.trim()).filter(Boolean).map((line): Item => {
+    const m = line.match(/^#?(\d+)\s*([a-z_]+|[1-4])?/i);
+    if (!m) return { line, error: 'ligne illisible' };
+    const no = Number(m[1]);
+    const raw = String(m[2] ?? '').toLowerCase();
+    const reason: OffboardReason | null = !raw ? 'withdrawal' : (REASON_ALIASES[raw] ?? (REASON_KEYS.includes(raw as OffboardReason) ? (raw as OffboardReason) : null));
+    const row = rows.find((r) => r.member_no === no);
+    if (!row) return { line, error: 'membre introuvable' };
+    if (!reason) return { line, error: `motif inconnu « ${raw} »` };
+    if (row.status === 'offboarded') return { line, error: 'déjà off-boardé' };
+    return { line, error: null, no, row, reason };
+  });
+  const ready = parsed.filter((p): p is Extract<Item, { error: null }> => p.error === null);
+  const nameOf = (r: Row) => (r.tg_username ? '@' + r.tg_username : (r.tg_name ?? '—'));
+
+  const run = async () => {
+    if (!ready.length) return;
+    const lines = ready.map((p) => `#${p.no} ${nameOf(p.row)} — ${OFFBOARD_REASONS[p.reason].admin}`).join('\n');
+    if (!(await ask.confirm(`Off-board ${ready.length} member${ready.length > 1 ? 's' : ''}?\n\n${lines}\n\n• status → offboarded (they can NOT reconnect alone)\n• copier disconnect via STH\n• ${notify ? 'each member gets the message of their reason, with a recovery link' : 'NO message to the members'}\n• remove them from the VIP Telegram channel yourself (manual)`, { danger: true, ok: `OFF-BOARD ${ready.length}` }))) return;
+    setBusy(true);
+    setReport(null);
+    try {
+      const r = await fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offboardBatch: ready.map((p) => ({ tg_id: Number(p.row.tg_id), reason: p.reason })), notify }) });
+      const d = (await r.json().catch(() => ({}))) as { error?: string; results?: Array<{ tg_id: number; ok: boolean; notified?: string; error?: string }> };
+      if (d.error || !d.results) setReport([{ label: 'batch', ok: false, detail: d.error ?? `HTTP ${r.status}` }]);
+      else {
+        setReport(d.results.map((x) => {
+          const p = ready.find((q) => Number(q.row.tg_id) === Number(x.tg_id));
+          return { label: p ? `#${p.no} ${nameOf(p.row)}` : String(x.tg_id), ok: x.ok, detail: x.ok ? (x.notified ?? 'done') : (x.error ?? 'failed') };
+        }));
+        setText('');
+      }
+      load();
+    } catch (e) {
+      setReport([{ label: 'batch', ok: false, detail: (e as { message?: string })?.message ?? 'network error' }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 680 }}>
+      <h2 style={secH}>⛔ BULK OFF-BOARD</h2>
+      <p style={dimP}>One member per line: <span className="mono">#60 withdrawal</span>. Reasons: <span className="mono">withdrawal</span> (1) · <span className="mono">inactive</span> (2) · <span className="mono">broker_detached</span> (3) · <span className="mono">other</span> (4) — the reason picks the message the member receives. Same path as the button on a member card, up to 15 at a time.</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} placeholder={'#60 withdrawal\n#1474 inactive'} className="mono" style={{ ...inp, fontSize: 12, resize: 'vertical' }} />
+      {parsed.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {parsed.map((p, i) => (
+            <div key={i} className="mono" style={{ fontSize: 11.5, color: p.error ? '#ff8a5c' : 'var(--text)', wordBreak: 'break-word' }}>
+              {p.error !== null
+                ? `⚠ ${p.line} — ${p.error}`
+                : `✓ #${p.no} ${nameOf(p.row)} · ${String(p.row.status)} → ${OFFBOARD_REASONS[p.reason].admin}`}
+            </div>
+          ))}
+        </div>
+      )}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--muted)' }}>
+        <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+        send each member the message for their reason, with a recovery link
+      </label>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button disabled={busy || ready.length === 0} onClick={() => void run()} style={{ ...dangerBtn, opacity: ready.length === 0 ? 0.5 : 1 }}>{busy ? '⏳ …' : `⛔ OFF-BOARD ${ready.length || ''}`.trim()}</button>
+        {text && <button disabled={busy} onClick={() => { setText(''); setReport(null); }} style={miniBtn}>clear</button>}
+      </div>
+      {report && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {report.map((x, i) => (
+            <div key={i} className="mono" style={{ fontSize: 11.5, color: x.ok ? 'var(--up)' : '#ff8a5c', wordBreak: 'break-word' }}>{x.ok ? '✓' : '⚠'} {x.label} — {x.detail}</div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

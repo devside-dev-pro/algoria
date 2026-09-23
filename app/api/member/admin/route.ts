@@ -332,7 +332,7 @@ type Body = {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; offboardBatch?: Array<{ tg_id: number; reason?: string }>; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
     botBroadcast?: { audience: 'pending' | 'live' | 'stalled'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
@@ -893,26 +893,13 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     });
     return NextResponse.json({ ok: true, banned: true });
   }
-  if (body.offboard) {
-    // OFF-BOARD : le client est parti (retrait). Statut → 'offboarded', déconnexion copieur (via STH si
-    // configuré, sinon empilée dans la file support), note timeline, ET un message au membre avec sa porte
-    // de retour.
-    //
-    // ── 'offboarded' ET NON PLUS 'paused' (25/08/2026) ────────────────────────────────────────────────
-    // 'paused' est le statut d'un membre qui a mis SA copie en pause lui-même, et c'est exactement celui
-    // qui affiche « ▶ RESUME COPYING » dans son app. Un membre off-boardé y voyait donc un bouton capable
-    // de le rebrancher au copieur en un geste, sans redéposer un dollar. Le statut dédié sort de tous les
-    // tests `['live','paused']` de l'app et de l'API : le verrou vient de la structure, pas d'une garde.
-    //
-    // ── ET ON LUI ÉCRIT ──────────────────────────────────────────────────────────────────────────────
-    // Avant, off-boarder c'était perdre quelqu'un en silence : la personne découvrait son accès mort sans
-    // savoir pourquoi et sans chemin de retour. Sur 15 off-boards, un seul membre est revenu — de sa
-    // propre initiative. Le message ne reproche rien (retirer son argent est un droit), il explique la
-    // mécanique et il ouvre la porte.
-    const { data: m } = await db.from('members').select('member_no,tg_id,tg_name,locale').eq('tg_id', body.offboard).limit(1);
-    if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
-    const reason: OffboardReason = isOffboardReason(body.reason) ? body.reason : 'withdrawal';
-    await db.from('members').update({ status: OFFBOARDED, updated_at: new Date().toISOString() }).eq('tg_id', body.offboard);
+  // Le cœur de l'off-board, partagé par le bouton individuel et le lot. Voir le commentaire de
+  // `body.offboard` ci-dessous pour le pourquoi de chaque étape.
+  const offboardOne = async (tgId: number, reasonIn: unknown, notify: boolean): Promise<{ ok: boolean; notified?: string; error?: string }> => {
+    const { data: m } = await db.from('members').select('member_no,tg_id,tg_name,locale').eq('tg_id', tgId).limit(1);
+    if (!m?.length) return { ok: false, error: 'member not found' };
+    const reason: OffboardReason = isOffboardReason(reasonIn) ? reasonIn : 'withdrawal';
+    await db.from('members').update({ status: OFFBOARDED, updated_at: new Date().toISOString() }).eq('tg_id', tgId);
     let discLine = 'copier disconnect queued for STH';
     if (sthReady()) {
       const d = await sthDisconnect(String(m[0].tg_id));
@@ -930,7 +917,7 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     // trace ce qui s'est passé dans les deux cas, pour que « prévenu ou pas » soit une question à laquelle
     // la fiche répond.
     let dmLine = 'member not notified (notify off)';
-    if (body.notify !== false) {
+    if (notify) {
       const token = process.env.TELEGRAM_BOT_TOKEN;
       if (!token) dmLine = 'member NOT notified — TELEGRAM_BOT_TOKEN missing';
       else {
@@ -957,7 +944,45 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       }
     }
     await db.from('member_actions').insert({ tg_id: m[0].tg_id, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `⛔ off-boarded — ${OFFBOARD_REASONS[reason].admin} · ${discLine} · ${dmLine}. Also remove them from the VIP Telegram channel.` } as never });
-    return NextResponse.json({ ok: true, notified: dmLine });
+    return { ok: true, notified: dmLine };
+  };
+  if (body.offboard) {
+    // OFF-BOARD : le client est parti (retrait). Statut → 'offboarded', déconnexion copieur (via STH si
+    // configuré, sinon empilée dans la file support), note timeline, ET un message au membre avec sa porte
+    // de retour.
+    //
+    // ── 'offboarded' ET NON PLUS 'paused' (25/08/2026) ────────────────────────────────────────────────
+    // 'paused' est le statut d'un membre qui a mis SA copie en pause lui-même, et c'est exactement celui
+    // qui affiche « ▶ RESUME COPYING » dans son app. Un membre off-boardé y voyait donc un bouton capable
+    // de le rebrancher au copieur en un geste, sans redéposer un dollar. Le statut dédié sort de tous les
+    // tests `['live','paused']` de l'app et de l'API : le verrou vient de la structure, pas d'une garde.
+    //
+    // ── ET ON LUI ÉCRIT ──────────────────────────────────────────────────────────────────────────────
+    // Avant, off-boarder c'était perdre quelqu'un en silence : la personne découvrait son accès mort sans
+    // savoir pourquoi et sans chemin de retour. Sur 15 off-boards, un seul membre est revenu — de sa
+    // propre initiative. Le message ne reproche rien (retirer son argent est un droit), il explique la
+    // mécanique et il ouvre la porte.
+    const r = await offboardOne(Number(body.offboard), body.reason, body.notify !== false);
+    if (!r.ok) return NextResponse.json({ error: r.error }, { status: 404 });
+    return NextResponse.json({ ok: true, notified: r.notified });
+  }
+  if (body.offboardBatch) {
+    // OFF-BOARD GROUPÉ (23/09/2026) — neuf comptes vidés en une semaine, et deux boîtes de dialogue par
+    // membre dans l'admin. Même chemin que le bouton individuel, membre par membre : c'est `offboardOne`
+    // qui fait le travail, ce bloc ne fait que l'appeler en boucle. Un échec n'arrête pas le lot — chaque
+    // ligne revient avec son propre résultat, pour qu'on sache exactement qui est passé et qui non.
+    //
+    // PLAFOND DE 15, et ce n'est pas arbitraire : maxDuration vaut 60 s sur cette route, et chaque membre
+    // coûte un appel STH (~1-2 s) plus un envoi Telegram. 15 tient large ; au-delà, on relance un 2e lot.
+    const list = (Array.isArray(body.offboardBatch) ? body.offboardBatch : []).slice(0, 15);
+    if (!list.length) return NextResponse.json({ error: 'empty batch' }, { status: 400 });
+    const results: Array<{ tg_id: number; ok: boolean; notified?: string; error?: string }> = [];
+    for (const it of list) {
+      const r = await offboardOne(Number(it.tg_id), it.reason, body.notify !== false);
+      results.push({ tg_id: Number(it.tg_id), ...r });
+      await new Promise((res) => setTimeout(res, 120)); // Telegram : ~30 messages/s max par bot
+    }
+    return NextResponse.json({ ok: true, results });
   }
   if (body.connectSth) {
     // CONNEXION AUTO via STH (option B) : le support clique « connect » sur la demande → on branche le compte
