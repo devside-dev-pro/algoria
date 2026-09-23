@@ -161,6 +161,14 @@ export function DepositsTab() {
                         </span>
                       )}
                       <span className="mono goldText" style={{ fontWeight: 800, fontSize: 12 }}>#{d.member_no ?? '—'}</span>
+                      {/* re-dépôt chez un broker qui a déjà payé sa commission pour ce membre : l'argent
+                          compte comme déposé, la com vaut 0 et il n'y a rien à réclamer */}
+                      {d.detail?.redeposit === true && (
+                        <span className="mono" title="same member, same broker as an earlier deposit — the broker pays its commission once, so this line carries $0 commission"
+                          style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, color: 'var(--cyan)', border: '1px solid rgba(43,227,245,.4)', borderRadius: 6, padding: '2px 6px' }}>
+                          ↻ RE-DEPOSIT
+                        </span>
+                      )}
                       {/* pas nameOf : sans @username il renvoie #no, déjà affiché juste avant → doublon */}
                       <span style={{ fontSize: 12, color: 'var(--text)' }}>{(() => { const m = rows.find((r) => Number(r.tg_id) === Number(d.tg_id)); return m?.tg_username ? '@' + m.tg_username : (m?.tg_name ?? '—'); })()}</span>
                       {legalOf(d.tg_id) && <span className="mono" style={{ fontSize: 10.5, color: 'var(--gold)' }} title="name on the broker account">🏦 {legalOf(d.tg_id)}</span>}

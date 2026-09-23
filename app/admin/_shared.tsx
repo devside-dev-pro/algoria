@@ -134,7 +134,7 @@ export interface Deposit {
   // booked_ym : mois COMPTABLE quand il diffère de celui du dépôt (report d'une com pas encore validée)
   // `nature` : 'broker' (dépôt chez un partenaire, commissionnable) | 'direct' (paiement d'accès, encaissé).
   // Absent sur toutes les lignes antérieures au 17/09/2026 — lues comme 'broker', ce qu'elles sont.
-  detail: { broker?: string | null; amount_usd?: number; commission_usd?: number; commission_status?: string; note?: string | null; deposited_at?: string; booked_ym?: string | null; nature?: string } | null;
+  detail: { broker?: string | null; amount_usd?: number; commission_usd?: number; commission_status?: string; note?: string | null; deposited_at?: string; booked_ym?: string | null; nature?: string; redeposit?: boolean } | null;
 }
 
 export type Tab = 'dashboard' | 'queue' | 'members' | 'deposits' | 'affiliate' | 'desk' | 'tools';

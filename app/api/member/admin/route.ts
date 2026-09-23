@@ -482,21 +482,44 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     const { data: m } = await db.from('members').select('member_no,broker').eq('tg_id', d.tg_id).limit(1);
     if (!m?.length) return NextResponse.json({ error: 'member not found' }, { status: 404 });
     const depositedAt = d.date && !Number.isNaN(Date.parse(String(d.date))) ? new Date(String(d.date)).toISOString() : new Date().toISOString();
+    const broker = String(d.broker ?? m[0].broker ?? '').trim().toLowerCase() || null;
+    // ── RE-DÉPÔT : PAS DE NOUVELLE COMMISSION (23/09/2026) ─────────────────────────────────────────────
+    // Le broker paie sa commission UNE fois par client. Un membre off-boardé qui refinance le même compte
+    // (HH, #672, 200 $ remis après un off-board) repasse par GO LIVE, qui redemande le montant et
+    // appliquait le barème : 400 $ « pending » que personne ne paiera jamais. Mettre 0 dans le champ ne
+    // marchait pas non plus — aucune ligne n'était écrite, et le membre réapparaissait dans « LIVE, NO
+    // DEPOSIT LOGGED ». Règle : ce membre a déjà une ligne de dépôt broker chez CE broker → l'argent est
+    // bien compté comme déposé, mais la commission vaut 0 et la ligne est close ('received' : rien à
+    // réclamer, comme l'accès direct). Un AUTRE broker reste une nouvelle commission — c'est tout le
+    // principe des comptes multi-stratégies.
+    let redeposit = false;
+    if (nature === 'broker' && broker) {
+      const { data: prior } = await db.from('member_actions').select('id,detail').eq('tg_id', d.tg_id).eq('kind', 'deposit').limit(200);
+      redeposit = (prior ?? []).some((x) => {
+        const det = (x.detail as Record<string, unknown>) ?? {};
+        return String(det.nature ?? 'broker') === 'broker' && String(det.broker ?? '').toLowerCase() === broker;
+      });
+    }
+    const note = String(d.note ?? '').slice(0, 300) || null;
     const { error } = await db.from('member_actions').insert({
       tg_id: d.tg_id, member_no: m[0].member_no, kind: 'deposit', status: 'done', done_by: who,
       detail: {
-        broker: String(d.broker ?? m[0].broker ?? '').trim().toLowerCase() || null,
+        broker,
         amount_usd: amount,
-        commission_usd: Number.isFinite(commission) && commission > 0 ? commission : 0,
+        commission_usd: redeposit ? 0 : Number.isFinite(commission) && commission > 0 ? commission : 0,
         // Un paiement d'accès est ENCAISSÉ au moment où on le saisit — il n'y a personne à relancer.
         // Le laisser en 'pending' le ferait apparaître dans la file « commissions à réclamer au broker ».
-        commission_status: nature === 'direct' ? 'received' : 'pending',
+        // Même raisonnement pour un re-dépôt : il n'y a rien à réclamer.
+        commission_status: nature === 'direct' || redeposit ? 'received' : 'pending',
         nature,
-        note: String(d.note ?? '').slice(0, 300) || null,
+        ...(redeposit ? { redeposit: true } : {}),
+        note: redeposit ? `re-deposit — no new commission (already paid once at this broker)${note ? ` · ${note}` : ''}` : note,
         deposited_at: depositedAt,
       } as never,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // re-dépôt : la commission de parrainage est née sur le PREMIER dépôt, elle ne se réaligne pas
+    if (redeposit) return NextResponse.json({ ok: true, redeposit: true });
     // le montant validé fait foi : si ce membre a un parrain, sa commission s'aligne dessus.
     // PAS pour un accès direct : la commission de parrainage est financée par la commission BROKER, qui
     // n'existe pas ici. L'aligner sur un paiement d'accès reviendrait à faire payer le parrain par
