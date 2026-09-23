@@ -365,6 +365,17 @@ export function useAdminState() {
   // je me perds entre valider, connecter, vérifier ») : un seul prompt, pré-rempli avec le montant
   // DÉCLARÉ — corriger si CellXpert dit autre chose. La com attendue vient du barème (estimateCommission).
   // Annuler = pas de ligne (le filet « LIVE sans dépôt » du registre DEPOSITS la rattrapera).
+  // RE-DÉPÔT (23/09/2026) — ce membre a-t-il déjà une ligne de dépôt broker chez CE broker ? Si oui, le
+  // broker ne paiera pas une deuxième commission : le serveur écrit la ligne à 0 $ de com, close. Côté
+  // écran, on le DIT avant la saisie, pour que personne ne se demande s'il faut taper 0 (ce qui, avant,
+  // n'écrivait aucune ligne du tout). Même règle que `addDeposit` dans l'API, qui reste le seul juge.
+  const priorDepositAt = (tgId: number | string | null | undefined, broker: string | null | undefined) => {
+    const b = String(broker ?? '').trim().toLowerCase();
+    if (!b || tgId == null) return null;
+    return deposits
+      .filter((d) => Number(d.tg_id) === Number(tgId) && String(d.detail?.nature ?? 'broker') === 'broker' && String(d.detail?.broker ?? '').toLowerCase() === b)
+      .sort((x, y) => String(x.detail?.deposited_at ?? x.created_at).localeCompare(String(y.detail?.deposited_at ?? y.created_at)))[0] ?? null;
+  };
   const recordDepositAfterConnect = async (a: Action) => {
     const m = rows.find((r) => Number(r.tg_id) === Number(a.tg_id));
     const broker = String(a.detail?.broker ?? m?.broker ?? '').trim().toLowerCase() || null;
@@ -393,8 +404,9 @@ export function useAdminState() {
       post({ addDeposit: { tg_id: Number(a.tg_id), amount: 0, commission: received, nature: 'direct', note: 'access paid — logged at connect' } });
       return;
     }
+    const prior = priorDepositAt(a.tg_id, broker);
     const v = await ask.prompt(
-      `🏦 Log the deposit now? Validated amount ($)\n\nBroker: ${broker ? broker.toUpperCase() : '?'} — expected com auto from the schedule.\nCancel = no line (it will show up in DEPOSITS → "live, no deposit logged").`,
+      `🏦 Log the deposit now? Validated amount ($)\n\nBroker: ${broker ? broker.toUpperCase() : '?'} — ${prior ? `↻ RE-DEPOSIT (first deposit here on ${String(prior.detail?.deposited_at ?? prior.created_at).slice(0, 10)}): enter the real amount, it is logged with NO new commission.` : 'expected com auto from the schedule.'}\nCancel = no line (it will show up in DEPOSITS → "live, no deposit logged").`,
       declared ? String(declared) : '',
       { type: 'number', ok: 'LOG DEPOSIT' },
     );
@@ -445,7 +457,10 @@ export function useAdminState() {
       fields.push({ key: 'lots', label: 'Activation volume seen on the partner dashboard (lots)', value: String(ACTIVATION_LOTS), type: 'number', optional: true, hint: `Expected ${ACTIVATION_LOTS} lot. Not there? Empty this field and write a reason below to force.` });
       fields.push({ key: 'force', label: 'Force without volume — reason', optional: true, placeholder: 'only if the volume is not there', hint: 'Stays on the card and in the month report.' });
     }
-    fields.push({ key: 'amount', label: 'Validated deposit ($)', value: declared ? String(declared) : '', type: 'number', optional: true, hint: `Broker ${broker ? broker.toUpperCase() : '?'} — commission from the schedule. Empty = log it later in DEPOSITS.` });
+    const prior = priorDepositAt(a.tg_id, broker);
+    fields.push({ key: 'amount', label: 'Validated deposit ($)', value: declared ? String(declared) : '', type: 'number', optional: true, hint: prior
+      ? `↻ RE-DEPOSIT at ${broker ? broker.toUpperCase() : '?'} (first deposit here on ${String(prior.detail?.deposited_at ?? prior.created_at).slice(0, 10)}) — enter the real amount: it counts as deposited, with NO new commission.`
+      : `Broker ${broker ? broker.toUpperCase() : '?'} — commission from the schedule. Empty = log it later in DEPOSITS.` });
     if (!m?.country) fields.push({ key: 'country', label: 'Country', value: guess ?? '', optional: true, placeholder: 'country', hint: guess ? 'Detected at signup.' : 'Not detected — type it, or leave empty.' });
     const v = await ask.form(`⚡ Go live — ${who}\nValidates the activation lot, connects the copier via STH, switches the member LIVE and logs the deposit. One tap, stops at the first failing step.`, fields, { ok: 'GO LIVE' });
     if (!v) return;
@@ -829,9 +844,12 @@ export function useAdminState() {
   // à la main. Barème vide ou palier non atteint → champ vidé (pas de reliquat d'un autre broker).
   useEffect(() => {
     if (!depComAuto.current) return;
+    // re-dépôt chez le même broker : le serveur écrira 0 de toute façon, le champ doit le montrer
+    if (depTg && priorDepositAt(depTg, depBroker)) { setDepCom('0'); return; }
     const est = estimateCommission(depBroker, Number(depAmount));
     setDepCom(est != null ? String(est) : '');
-  }, [depBroker, depAmount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depBroker, depAmount, depTg, deposits]);
   // classement des brokers pour le budget annoncé — brokers déjà utilisés par le prospect exclus
   // (compte principal + comptes multi-stratégies) : on ne renvoie jamais quelqu'un là où il est déjà
   const planExcluded = useMemo(() => {
@@ -1145,7 +1163,7 @@ export function useAdminState() {
   ];
 
 
-  return { tab, setTab, goLive, pending, setPending, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, blastProgress, sendSegmentBlast, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depNature, setDepNature, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
+  return { tab, setTab, priorDepositAt, goLive, pending, setPending, wl, setWl, rows, setRows, actions, setActions, aff, setAff, state, setState, deniedAs, setDeniedAs, busy, setBusy, input, setInput, search, setSearch, creds, setCreds, selCreds, setSelCreds, deposits, setDeposits, pushTgIds, setPushTgIds, pendingTotal, setPendingTotal, nudges, setNudges, spokeTgIds, setSpokeTgIds, rejectedTgIds, setRejectedTgIds, botBlocked, setBotBlocked, relSeg, setRelSeg, copiedScript, setCopiedScript, blastProgress, sendSegmentBlast, cpText, setCpText, cpBtn, setCpBtn, cpUrl, setCpUrl, cpChat, setCpChat, cpReport, setCpReport, bcText, setBcText, bcTag, setBcTag, bcAudience, setBcAudience, bcReport, setBcReport, sendBroadcast, runnerLastSeen, setRunnerLastSeen, legalNames, setLegalNames, extraAccounts, setExtraAccounts, botActivity, setBotActivity, tgInboxOn, setTgInboxOn, brokerLogins, setBrokerLogins, market, setMarket, localeOf, blastText, setBlastText, blastTitle, setBlastTitle, blastBody, setBlastBody, joinSources, setJoinSources, tgChats, setTgChats, chatCopied, setChatCopied, sthAudit, setSthAudit, botDrafts, setBotDrafts, ym, setYm, depTg, setDepTg, depNature, setDepNature, depBroker, setDepBroker, depAmount, setDepAmount, depCom, setDepCom, depComAuto, depDate, setDepDate, depNote, setDepNote, planAmount, setPlanAmount, planTg, setPlanTg, planCopied, setPlanCopied, depInfoCopied, setDepInfoCopied, pushTitle, setPushTitle, pushBody, setPushBody, pushUrl, setPushUrl, pushAud, setPushAud, pushResult, setPushResult, sel, setSel, selActs, setSelActs, noteText, setNoteText, feedWins, setFeedWins, carding, setCarding, proof, setProof, load, downloadRecap, downloadCard, post, reveal, cancelCommission, payPayout, rejectPayout, validateLots, rejectConnect, waitBroker, liveAlert, showCreds, recordDepositAfterConnect, connectViaSth, reconnectSth, sthCheck, COUNTRIES, GEO_LABEL, geoCountryOf, setCountry, countrySelect, moveViaSth, OFFBOARD_MENU, offboard, banMember, nameOf, legalOf, editLegalName, editMember, editText, editPick, serverPick, lotPick, editPassword, copyDepositInfo, filtered, pushSet, alertsOff, alertsOn, depDateOf, depMonthOf, nextYm, monthDeps, depTotals, liveNoDeposit, shiftMonth, monthLabel, planExcluded, planRanking, copyBrokerLink, addDeposit, sendBlast, editDepositCom, editDepositAmount, deleteDeposit, sendCustomPush, composerSend, sendViaBot, sendChannelPost, nudge, openMember, addNote, delNote, actSummary, leads, STEP_LABEL, daysStuck, exportCsv, gate, live, pendingRev, depPending, todo, KIND_LABEL, TABS };
 }
 
 export type AdminState = ReturnType<typeof useAdminState>;
