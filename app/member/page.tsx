@@ -4,7 +4,7 @@
 // « Algoria trade en ce moment, toi tu regardes de dehors » + UNLOCK (paywall broker) + support Telegram.
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
-import { atRef, REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
+import { atRef, REF_LABEL } from '@/lib/display/scale';
 import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount } from './ui';
 import { tgHref } from '@/lib/telegram';
@@ -92,7 +92,7 @@ export default function MemberHome() {
               </div>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
                 You&rsquo;re watching from the outside — members&rsquo; accounts copy every one of these trades <b style={{ color: 'var(--text)' }}>automatically</b>.
-                {winTotal > 0 && <> The wins below alone made <b className="goldText">+{winTotal.toFixed(0)}$</b> at {REF_LABEL} (a {REF_ACCOUNT_LABEL}).</>}
+                {winTotal > 0 && <> The wins below alone made <b className="goldText">+{winTotal.toFixed(0)}$</b> at {REF_LABEL}.</>}
               </p>
               <button onClick={() => setPaywall(true)} style={ctaGold}>⚡ UNLOCK MY ACCESS</button>
               {/* l'appel = l'arme de closing : 10 min au téléphone avec Mathieu et c'est signé */}
@@ -162,7 +162,7 @@ export default function MemberHome() {
           );
         })}
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
-          {unlocked ? `Shown at your copy size (${clientLot} lot) — at ${REF_LABEL} in brackets.` : `ALGORIA 2.0’s recent wins, shown at ${REF_LABEL} (a ${REF_ACCOUNT_LABEL}) — members’ accounts copied every one of them automatically. Losses, live positions and the full history unlock with your access.`}
+          {unlocked ? `Shown at your copy size (${clientLot} lot) — at ${REF_LABEL} in brackets.` : `ALGORIA 2.0’s recent wins, shown at ${REF_LABEL} — members’ accounts copied every one of them automatically. Losses, live positions and the full history unlock with your access.`}
         </p>
       </section>
 

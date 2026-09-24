@@ -4,11 +4,11 @@
 // Deux usages : le membre partage SES gains (QR = SON lien de parrainage → il gagne 50$),
 // la CM télécharge les gains du compte maître pour le canal (QR = algoria.tech).
 import QRCode from 'qrcode';
-import { REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
+import { REF_LABEL } from '@/lib/display/scale';
 
 // ÉCHELLE (24/09/2026) — la carte dit la taille à laquelle son chiffre est montré : sans ça, un « +$186 »
 // relu par quelqu'un à 0.01 lot recrée exactement le malentendu du « +$1 860 » à 1 lot. Voir lib/display/scale.ts.
-const CARD_SCALE_LINE = `PROFIT BANKED · ${REF_LABEL.toUpperCase()} · ${REF_ACCOUNT_LABEL.toUpperCase()}`;
+const CARD_SCALE_LINE = `PROFIT BANKED AUTOMATICALLY · ${REF_LABEL.toUpperCase()}`;
 
 export type CardFormat = 'story' | 'landscape';
 

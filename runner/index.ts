@@ -38,7 +38,7 @@ import { startCopyObserver } from './observer';
 // l'annonce de fin de journée plus bas, qui affirmerait une chose fausse.
 const COPY_MODE = process.env.ALGORIA_COPY_OBSERVE === '1';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
-import { REF_LABEL, REF_LOT, REF_TAG } from '../lib/display/scale';
+import { REF_LABEL, REF_LOT } from '../lib/display/scale';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
@@ -1665,9 +1665,9 @@ async function main() {
             if (COPY_MODE) {
               const net = stats.net;
               // À 0.10 LOT (24/09/2026) — voir lib/display/scale.ts. `stats.net` est déjà converti trade par trade.
-              void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n<i>shown at ${REF_TAG}</i>\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  ${net >= 0 ? '🟢 +' : '🔴 −'}<b>${usd(net)}</b>\n${VIP_RULE}\n<i>At 0.01 lot, divide by 10. Wins and losses both — open the app to see yours.</i>`);
+              void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n<i>shown at ${REF_LABEL}</i>\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  ${net >= 0 ? '🟢 +' : '🔴 −'}<b>${usd(net)}</b>\n${VIP_RULE}\n<i>At 0.01 lot, divide by 10. Wins and losses both — open the app to see yours.</i>`);
             } else if (lines.length)
-              void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · shown at ${REF_TAG}</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}${discipline}${proof}`);
+              void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · shown at ${REF_LABEL}</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}${discipline}${proof}`);
             else if (stats.net >= 0) void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  green day 🟢\n\nAll copied to your account. See you tomorrow. 👊`);
             else void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  ${wr}% win\n\nRisk stayed capped and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁`);
 

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
+import { REF_LABEL } from '@/lib/display/scale';
 import { usePrice, useFeedHealth } from '@/lib/cockpit/useRealtime';
 import { tgHref } from '@/lib/telegram';
 import { WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
@@ -121,7 +121,7 @@ export default function Funnel() {
                   </span>
                 ))}
               </div>
-              <p style={{ margin: '8px 0 0', fontSize: 10, letterSpacing: 1, color: 'var(--dim)' }}>LATEST WINS — CLOSED ON A REAL ACCOUNT · SHOWN AT {REF_LABEL.toUpperCase()} ({REF_ACCOUNT_LABEL.toUpperCase()})</p>
+              <p style={{ margin: '8px 0 0', fontSize: 10, letterSpacing: 1, color: 'var(--dim)' }}>LATEST WINS — CLOSED ON A REAL ACCOUNT · SHOWN AT {REF_LABEL.toUpperCase()}</p>
             </div>
           )}
         </section>

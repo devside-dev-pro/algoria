@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { atOneLot, atRef, REF_ACCOUNT_LABEL, REF_LABEL, REF_LOT } from '@/lib/display/scale';
+import { atOneLot, atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
 import { sdb } from '@/lib/member/server';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { brokerDayStartMs, brokerDateOf } from '@/lib/cockpit/brokerDay';
@@ -48,7 +48,7 @@ export async function GET() {
   const r2 = (x: number) => Math.round(x * 100) / 100; // une somme de flottants traîne des 0,000001
   const res = NextResponse.json({
     // l'échelle voyage AVEC les chiffres : un consommateur qui l'ignore affiche quand même le bon libellé
-    scale: { lot: REF_LOT, label: REF_LABEL, account: REF_ACCOUNT_LABEL },
+    scale: { lot: REF_LOT, label: REF_LABEL },
     wins: wins.slice(0, 12),
     today: { count: today.length, total: r2(today.reduce((a, t) => a + t.pnl, 0)), best: today.reduce((m, t) => Math.max(m, t.pnl), 0) },
     // count/best aussi : alimente les cartes RÉCAP (jour/semaine) du studio admin

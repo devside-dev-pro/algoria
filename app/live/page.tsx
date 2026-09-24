@@ -12,7 +12,7 @@
 //     le canal et le contact humain AVANT l'app : choix produit)
 // Ouvrir dans le navigateur du stream (session opérateur connectée) et cropper la source en portrait.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { atOneLot, atRef, REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
+import { atOneLot, atRef, REF_LABEL } from '@/lib/display/scale';
 import { Chart } from '@/components/Chart';
 import { AlgoriaOrb } from '@/components/Orb';
 import { Telemetry } from '@/components/Telemetry';
@@ -221,7 +221,7 @@ export default function LiveStage() {
           <div style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'radial-gradient(60% 50% at 50% 50%, rgba(34,224,166,.16), rgba(7,12,24,.82))', animation: 'winZoom 5s ease-out forwards', pointerEvents: 'none' }}>
             <div style={{ fontSize: 15, letterSpacing: 2.5, color: 'var(--up)', fontWeight: 800 }}>✓ TRADE CLOSED · {flash.sym}</div>
             <div className="mono goldText" style={{ fontSize: 74, fontWeight: 800, lineHeight: 1 }}>+{flash.pnl >= 100 ? flash.pnl.toFixed(0) : flash.pnl.toFixed(2)}$</div>
-            <div className="mono" style={{ fontSize: 12, letterSpacing: 1.4, color: 'var(--dim)' }}>AT {REF_LABEL.toUpperCase()} · {REF_ACCOUNT_LABEL.toUpperCase()}</div>
+            <div className="mono" style={{ fontSize: 12, letterSpacing: 1.4, color: 'var(--dim)' }}>AT {REF_LABEL.toUpperCase()}</div>
             <div style={{ fontSize: 13, letterSpacing: 1.2, color: 'var(--muted)' }}>BANKED BY THE AI — MEMBERS GOT IT AUTOMATICALLY</div>
           </div>
         )}
