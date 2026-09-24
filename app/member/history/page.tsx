@@ -186,7 +186,7 @@ export default function MemberHistory() {
       </section>
 
       {/* « tu veux voir plus loin ? » → le track record RÉEL du compte copié (depuis juillet 2026), en natif.
-          Visible par tous : mêmes données que la page publique /backtest, excellent pour la conversion. */}
+          Visible par tous : mêmes données que la page publique /track-record, excellent pour la conversion. */}
       <button
         onClick={() => router.push('/member/track-record')}
         className="panel"

@@ -1,7 +1,7 @@
 'use client';
 // TRACK RECORD (in-app) — le VRAI historique du compte qu'Algoria copie, depuis le lancement (juillet 2026).
 // Remplace la simulation du 24/09/2026 ; tout le rendu vit dans components/TrackRecord.tsx, partagé avec la
-// page publique /backtest pour qu'il n'y ait jamais deux versions des mêmes chiffres.
+// page publique /track-record pour qu'il n'y ait jamais deux versions des mêmes chiffres.
 import { useRouter } from 'next/navigation';
 import { TrackRecord } from '@/components/TrackRecord';
 
