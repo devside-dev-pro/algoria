@@ -1,6 +1,7 @@
-// algoria.tech/backtest — page PUBLIQUE partageable aux prospects. Depuis le 24/09/2026 elle montre le VRAI
-// historique du compte qu'Algoria copie (depuis le lancement, juillet 2026), plus la simulation d'avant.
-// L'URL reste /backtest parce qu'elle a déjà circulé ; le titre et l'aperçu de partage disent « real account ».
+// algoria.tech/track-record — page PUBLIQUE partageable aux prospects. Depuis le 24/09/2026 elle montre le
+// VRAI historique du compte qu'Algoria copie (depuis le lancement, juillet 2026), plus la simulation d'avant.
+// L'ancienne URL /backtest a circulé : next.config.mjs la redirige ici (308, permanente), aucun lien ne casse.
+// Sur app.algoria.tech, le middleware réécrit /track-record vers l'écran in-app — même lien, bonne page.
 // Le rendu vit dans components/TrackRecord.tsx, partagé avec l'écran in-app : une seule version des chiffres.
 import type { Metadata } from 'next';
 import { TrackRecord } from '@/components/TrackRecord';
@@ -13,14 +14,14 @@ export const metadata: Metadata = {
     title: 'Algoria — Track Record',
     description: 'The real account Algoria copies, since July 2026 — every trade, red months included. See it in % or in $ at your lot size.',
     type: 'website',
-    url: 'https://algoria.tech/backtest',
+    url: 'https://algoria.tech/track-record',
     siteName: 'Algoria AI',
     images: [{ url: '/brand/og.png', width: 1200, height: 630, alt: 'Algoria AI — track record' }],
   },
   twitter: { card: 'summary_large_image', title: 'Algoria — Track Record', description: 'The real account Algoria copies, since July 2026 — red months included.', images: ['/brand/og.png'] },
 };
 
-export default function BacktestPage() {
+export default function TrackRecordPage() {
   return (
     <main style={{ minHeight: '100dvh', background: 'radial-gradient(120% 60% at 50% -8%, #10223e 0%, transparent 55%), #070b12', color: 'var(--text)' }}>
       <div style={{ maxWidth: 720, margin: '0 auto', padding: '28px 16px 56px', display: 'flex', flexDirection: 'column', gap: 14 }}>

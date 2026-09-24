@@ -1,6 +1,6 @@
 'use client';
 // TRACK RECORD RÉEL (24/09/2026) — l'historique du compte qu'Algoria 2.0 copie, façon Myfxbook.
-// Remplace la simulation (ex-lib/backtest/record.ts, retirée) sur l'écran in-app ET sur la page publique /backtest.
+// Remplace la simulation (ex-lib/backtest/record.ts, retirée) sur l'écran in-app ET sur la page publique /track-record (ex-/backtest).
 //
 // DEUX LECTURES, UN SEUL JEU DE DONNÉES (/api/public/track) :
 //   · % (défaut) — le rendement RÉEL du compte, chaîné jour par jour (méthode « time-weighted », celle de
