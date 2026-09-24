@@ -3,7 +3,7 @@ import { recordTradeClose, SECONDARY, STRAT_ID } from '../../lib/supabase/sync';
 import { pushToAll } from '../../lib/push/send';
 import { postVip, postVipPhoto, VIP_TAG, usd } from '../telegram';
 import type { Signal } from '../../lib/engine/types';
-import { atOneLot, atRef, REF_LABEL, REF_TAG } from '../../lib/display/scale';
+import { atOneLot, atRef, REF_LABEL } from '../../lib/display/scale';
 
 // Base publique de l'app membre — héberge /api/card/win (la carte de gain servie à Telegram).
 const APP_BASE = process.env.MEMBER_APP_URL ?? 'https://app.algoria.tech';
@@ -51,10 +51,10 @@ function vipTradeClose(displaySymbol: string, pnlRaw: number, reason: string, en
     // Carte GAIN — VISUELLE : la win card (style Binance, QR algoria.tech) rendue par l'app, postée en
     // photo — « forwardable » telle quelle vers le public. Repli TEXTE si le rendu/le post échoue : un TP
     // ne se perd jamais. La carte lit le trade en BASE (anti-falsification) → il est déjà enregistré ici.
-    const text = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nShown at ${REF_TAG} — copied to your size automatically.`;
+    const text = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nShown at ${REF_LABEL} — copied to your size automatically.`;
     if (ticket) {
       const cardUrl = `${APP_BASE}/api/card/win?ticket=${encodeURIComponent(ticket)}&strategy=${STRAT_ID}`;
-      const caption = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG} · <i>${how}</i>\n${px}<i>Shown at ${REF_TAG} — copied to your size automatically.</i>`;
+      const caption = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG} · <i>${how}</i>\n${px}<i>Shown at ${REF_LABEL} — copied to your size automatically.</i>`;
       void postVipPhoto(cardUrl, caption).then((ok) => { if (!ok) void postVip(text); });
     } else void postVip(text);
   // ── LE CANAL NE MONTRAIT PLUS AUCUNE PERTE (17/09/2026) ──────────────────────────────────────────

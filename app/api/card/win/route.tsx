@@ -4,7 +4,7 @@
 // l'URL — on charge le trade RÉEL en base par (ticket, strategy) et on ne rend que les gains clôturés.
 // Une URL bricolée avec un faux montant est donc impossible : pas de trade → 404.
 import { ImageResponse } from 'next/og';
-import { atRef, REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
+import { atRef, REF_LABEL } from '@/lib/display/scale';
 import { type NextRequest } from 'next/server';
 import QRCode from 'qrcode';
 import { sdb } from '@/lib/member/server';
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
             </span>
           </div>
           <span style={{ fontSize: 138, fontWeight: 700, color: '#22e0a6', lineHeight: 1, marginTop: 18, textShadow: '0 0 45px rgba(34,224,166,.5)' }}>+${pnl.toLocaleString('en-US')}</span>
-          <span style={{ fontSize: 24, color: '#f5c24a', letterSpacing: 3, lineHeight: 1, marginTop: 20 }}>{`PROFIT BANKED · ${REF_LABEL.toUpperCase()} · ${REF_ACCOUNT_LABEL.toUpperCase()}`}</span>
+          <span style={{ fontSize: 24, color: '#f5c24a', letterSpacing: 3, lineHeight: 1, marginTop: 20 }}>{`PROFIT BANKED AUTOMATICALLY · ${REF_LABEL.toUpperCase()}`}</span>
         </div>
 
         {/* QR + pitch (bloc « parrainage » Binance) */}

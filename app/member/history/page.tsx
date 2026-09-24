@@ -2,7 +2,7 @@
 // HISTORY — les trades clôturés d'Algoria (compte maître). L'historique PERSONNEL (son compte, son lot)
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
-import { atRef, REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
+import { atRef, REF_LABEL } from '@/lib/display/scale';
 import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
@@ -71,7 +71,7 @@ export default function MemberHistory() {
         >
           <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>⚡ YOU WATCHED FROM THE SIDELINES</span>
           <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.25 }}>
-            <span className="goldText" style={{ fontSize: 27 }}>+{winSum.toFixed(0)}$</span> you&rsquo;d have banked following Algoria <span style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600 }}>on a {REF_ACCOUNT_LABEL} ({REF_LABEL})</span>
+            <span className="goldText" style={{ fontSize: 27 }}>+{winSum.toFixed(0)}$</span> you&rsquo;d have banked following Algoria <span style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600 }}>at {REF_LABEL}</span>
           </span>
           <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
             Every trade below copied straight to members&rsquo; accounts, hands-free — you just watched. Unlock and the next ones land on <b style={{ color: 'var(--text)' }}>yours</b>. <b style={{ color: 'var(--gold)' }}>Unlock my access →</b>
@@ -110,7 +110,7 @@ export default function MemberHistory() {
             <Stat label="NET (YOUR SIZE)" value={trades.length ? fmtYou(trades.reduce((a, t) => a + you(t), 0)) : '—'} gold={trades.reduce((a, t) => a + you(t), 0) > 0} color={trades.reduce((a, t) => a + you(t), 0) > 0 ? undefined : 'var(--muted)'} />
           </div>
           <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
-            Algoria trades a <b style={{ color: 'var(--muted)' }}>master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b> (at {REF_LABEL}, a {REF_ACCOUNT_LABEL}, in small).
+            Algoria trades a <b style={{ color: 'var(--muted)' }}>master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b> (at {REF_LABEL} in small).
           </p>
         </section>
       ) : (

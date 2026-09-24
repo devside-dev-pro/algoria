@@ -10,9 +10,11 @@
 //
 // ── POURQUOI 0.10 ET PAS 0.01 ────────────────────────────────────────────────────────────────────────
 // 0.01 est le lot de la majorité, mais des gains à 20 $ ne se lisent plus. 0.10 garde des chiffres
-// lisibles, se ramène à la taille de chacun d'une virgule, et c'est EXACTEMENT le lot recommandé pour un
-// compte de 5 000 $ (règle 0.01 lot par 500 $) : on peut dire « compte de 5 000 $ », que tout le monde
-// comprend, au lieu d'une taille de lot que la plupart ne savent pas lire.
+// lisibles et se ramène à la taille de chacun d'une virgule.
+//
+// ON NE PARLE PAS DE TAILLE DE COMPTE (décision Mathieu, 24/09) : chacun gère son money management à sa
+// façon, et « compte de 5 000 $ » laisserait croire qu'il existe UNE bonne taille de compte pour 0.10.
+// On dit la taille de lot, et rien d'autre.
 //
 // ── LA RÈGLE DE CALCUL : PAR TRADE, JAMAIS « ÷ 10 » ─────────────────────────────────────────────────
 // Le maître n'a pas toujours tradé 1 lot : ~250 trades sur ~1 580 sont à 0.05, 0.25, 0.5, 0.75 ou 10
@@ -28,13 +30,9 @@
 
 /** Taille de référence de toute la communication d'Algoria. */
 export const REF_LOT = 0.1;
-/** Le compte pour lequel REF_LOT est la taille recommandée (0.01 lot par 500 $). */
-export const REF_ACCOUNT_USD = 5_000;
 
-/** Libellés à coller à côté d'un montant — sans eux, on recrée le malentendu, juste 10 fois plus petit. */
+/** Libellé à coller à côté d'un montant — sans lui, on recrée le malentendu, juste 10 fois plus petit. */
 export const REF_LABEL = '0.10 lot';
-export const REF_ACCOUNT_LABEL = '$5k account';
-export const REF_TAG = `${REF_LABEL} · ${REF_ACCOUNT_LABEL}`;
 
 const lotOf = (lot: unknown): number => (Number(lot) > 0 ? Number(lot) : 1);
 
