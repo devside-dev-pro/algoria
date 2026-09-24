@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { atOneLot, atRef, REF_ACCOUNT_LABEL, REF_LABEL, REF_LOT } from '@/lib/display/scale';
 import { sdb } from '@/lib/member/server';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { brokerDayStartMs, brokerDateOf } from '@/lib/cockpit/brokerDay';
@@ -20,8 +21,11 @@ export async function GET() {
   ]);
   const rafale = new Set((signalsQ.data ?? []).filter((x) => JSON.stringify(x.rationale ?? '').includes('RAFALE') || JSON.stringify(x.rationale ?? '').includes('ACTION mode')).map((x) => String(x.ticket)));
   const wins = (tradesQ.data ?? [])
-    .filter((t) => Number(t.pnl) >= 5 && String(t.symbol) !== 'NAS100' && !isShowTrade(t, rafale) && Date.parse(String(t.closed_at)) >= TRACK_SINCE_MS)
-    .map((t) => ({ symbol: String(t.symbol), direction: String(t.direction), pnl: Math.round(Number(t.pnl)), closed_at: t.closed_at as string }));
+    // filtre anti-bruit inchangé (5 $ À 1 LOT) ; montants publiés À 0.10 LOT, ramenés avec le lot de chaque
+    // trade (24/09/2026, lib/display/scale.ts). Deux décimales : à cette échelle un gain de 7 $ à 1 lot vaut
+    // 0,70 $, l'arrondir à 1 $ grossirait les petits gains de 40 %. Les totaux se somment sur ces valeurs.
+    .filter((t) => atOneLot(t.pnl, t.lot) >= 5 && String(t.symbol) !== 'NAS100' && !isShowTrade(t, rafale) && Date.parse(String(t.closed_at)) >= TRACK_SINCE_MS)
+    .map((t) => ({ symbol: String(t.symbol), direction: String(t.direction), pnl: Math.round(atRef(t.pnl, t.lot) * 100) / 100, closed_at: t.closed_at as string }));
   const dayStart = brokerDayStartMs();
   const today = wins.filter((t) => Date.parse(t.closed_at) >= dayStart);
   const week = wins.filter((t) => Date.parse(t.closed_at) >= Date.now() - 7 * 86_400_000);
@@ -41,13 +45,16 @@ export async function GET() {
     const end = sessionStart + 86_400_000;
     session = wins.filter((t) => { const ts = Date.parse(t.closed_at); return ts >= sessionStart && ts < end; });
   }
+  const r2 = (x: number) => Math.round(x * 100) / 100; // une somme de flottants traîne des 0,000001
   const res = NextResponse.json({
+    // l'échelle voyage AVEC les chiffres : un consommateur qui l'ignore affiche quand même le bon libellé
+    scale: { lot: REF_LOT, label: REF_LABEL, account: REF_ACCOUNT_LABEL },
     wins: wins.slice(0, 12),
-    today: { count: today.length, total: today.reduce((a, t) => a + t.pnl, 0), best: today.reduce((m, t) => Math.max(m, t.pnl), 0) },
+    today: { count: today.length, total: r2(today.reduce((a, t) => a + t.pnl, 0)), best: today.reduce((m, t) => Math.max(m, t.pnl), 0) },
     // count/best aussi : alimente les cartes RÉCAP (jour/semaine) du studio admin
-    week: { count: week.length, total: week.reduce((a, t) => a + t.pnl, 0), best: week.reduce((m, t) => Math.max(m, t.pnl), 0) },
+    week: { count: week.length, total: r2(week.reduce((a, t) => a + t.pnl, 0)), best: week.reduce((m, t) => Math.max(m, t.pnl), 0) },
     // la séance partageable + SA date : la carte doit dater ce qu'elle montre, pas le moment du clic
-    session: { count: session.length, total: session.reduce((a, t) => a + t.pnl, 0), best: session.reduce((m, t) => Math.max(m, t.pnl), 0), date: brokerDateOf(sessionStart) },
+    session: { count: session.length, total: r2(session.reduce((a, t) => a + t.pnl, 0)), best: session.reduce((m, t) => Math.max(m, t.pnl), 0), date: brokerDateOf(sessionStart) },
   });
   // cache CDN 60s : la landing peut encaisser un raid TikTok sans marteler Supabase
   res.headers.set('Cache-Control', 's-maxage=60, stale-while-revalidate=300');

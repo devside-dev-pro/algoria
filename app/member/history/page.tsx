@@ -2,6 +2,7 @@
 // HISTORY — les trades clôturés d'Algoria (compte maître). L'historique PERSONNEL (son compte, son lot)
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
+import { atRef, REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
 import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
@@ -31,6 +32,9 @@ export default function MemberHistory() {
   // Montant « pour toi » = pnl × clientLot ÷ lot du master. Leçon churn : « −1291$ » a fait fuir un client
   // à 500$ dont le vrai chiffre était −13$ — on met SON échelle en avant, le master en petit.
   const you = (t: FeedTrade) => Number(t.pnl) * clientLot / (Number(t.lot) > 0 ? Number(t.lot) : 1);
+  // RÉFÉRENCE COMMUNE (24/09/2026) : tout ce qui n'est pas « à ta taille » est montré à 0.10 lot, jamais
+  // au lot du maître — voir lib/display/scale.ts.
+  const ref = (t: FeedTrade) => atRef(t.pnl, t.lot);
   const fmtYou = (v: number) => `${v > 0 ? '+' : ''}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)}$`;
   // WIN CARD — le flex viral : la carte façon Binance avec le QR du lien de PARRAINAGE du membre.
   // Il frime avec son gain → ses viewers scannent → il touche 50$ par activation. Tout le monde gagne.
@@ -40,7 +44,7 @@ export default function MemberHistory() {
     try {
       const code = referral?.code;
       const blob = await drawWinCard({
-        symbol: t.symbol, direction: t.direction, pnl: Number(t.pnl), closedAt: t.closed_at, format,
+        symbol: t.symbol, direction: t.direction, pnl: ref(t), closedAt: t.closed_at, format,
         qrUrl: code ? `https://app.algoria.tech/r/${code}` : 'https://algoria.tech',
         qrLabel: code ? `app.algoria.tech/r/${code}` : 'algoria.tech',
       });
@@ -52,9 +56,9 @@ export default function MemberHistory() {
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   const wins = trades.filter((t) => Number(t.pnl) > 0).length;
-  const net = trades.reduce((a, t) => a + Number(t.pnl), 0);
-  const winSum = trades.filter((t) => Number(t.pnl) > 0).reduce((a, t) => a + Number(t.pnl), 0);
-  const best = trades.reduce((m, t) => Math.max(m, Number(t.pnl) || 0), 0);
+  const net = trades.reduce((a, t) => a + ref(t), 0);
+  const winSum = trades.filter((t) => Number(t.pnl) > 0).reduce((a, t) => a + ref(t), 0);
+  const best = trades.reduce((m, t) => Math.max(m, ref(t)), 0);
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
       {/* CLOSING EN HAUT (prospects) — la 1re chose qu'un non-membre voit : le manque à gagner + le CTA.
@@ -67,7 +71,7 @@ export default function MemberHistory() {
         >
           <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>⚡ YOU WATCHED FROM THE SIDELINES</span>
           <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.25 }}>
-            <span className="goldText" style={{ fontSize: 27 }}>+{winSum.toFixed(0)}$</span> you&rsquo;d have banked following Algoria
+            <span className="goldText" style={{ fontSize: 27 }}>+{winSum.toFixed(0)}$</span> you&rsquo;d have banked following Algoria <span style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600 }}>on a {REF_ACCOUNT_LABEL} ({REF_LABEL})</span>
           </span>
           <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
             Every trade below copied straight to members&rsquo; accounts, hands-free — you just watched. Unlock and the next ones land on <b style={{ color: 'var(--text)' }}>yours</b>. <b style={{ color: 'var(--gold)' }}>Unlock my access →</b>
@@ -106,12 +110,12 @@ export default function MemberHistory() {
             <Stat label="NET (YOUR SIZE)" value={trades.length ? fmtYou(trades.reduce((a, t) => a + you(t), 0)) : '—'} gold={trades.reduce((a, t) => a + you(t), 0) > 0} color={trades.reduce((a, t) => a + you(t), 0) > 0 ? undefined : 'var(--muted)'} />
           </div>
           <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
-            Algoria trades a <b style={{ color: 'var(--muted)' }}>master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b> (master in small).
+            Algoria trades a <b style={{ color: 'var(--muted)' }}>master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b> (at {REF_LABEL}, a {REF_ACCOUNT_LABEL}, in small).
           </p>
         </section>
       ) : (
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, borderColor: 'rgba(245,194,74,.3)' }}>
-          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>✨ HIGHLIGHT REEL — HER BEST RECENT TRADES</span>
+          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>✨ HIGHLIGHT REEL — HER BEST RECENT TRADES · {REF_LABEL.toUpperCase()}</span>
           <div style={{ display: 'flex', gap: 18 }}>
             <Stat label="WINS" value={String(wins)} color="var(--up)" />
             <Stat label="BANKED" value={winSum > 0 ? `+${winSum.toFixed(0)}$` : '—'} gold={winSum > 0} />
@@ -160,10 +164,10 @@ export default function MemberHistory() {
                       {unlocked ? (
                         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 74 }}>
                           <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
-                          <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>master {Number(t.pnl) > 0 ? '+' : ''}{Number(t.pnl).toFixed(0)}$</span>
+                          <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>{REF_LABEL} {ref(t) > 0 ? '+' : ''}{ref(t).toFixed(0)}$</span>
                         </span>
                       ) : (
-                        <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
+                        <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{ref(t).toFixed(0)}$</span>
                       )}
                       {/* UN SEUL bouton, texte explicite. Carte paysage ; QR = SON lien de parrainage */}
                       {win && (

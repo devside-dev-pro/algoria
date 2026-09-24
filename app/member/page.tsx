@@ -4,6 +4,7 @@
 // « Algoria trade en ce moment, toi tu regardes de dehors » + UNLOCK (paywall broker) + support Telegram.
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
+import { atRef, REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
 import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount } from './ui';
 import { tgHref } from '@/lib/telegram';
@@ -35,6 +36,8 @@ export default function MemberHome() {
   // afficher le chiffre du master en premier fait fuir ; on montre le SIEN, master en note.
   const you = (t: FeedTrade) => Number(t.pnl) * clientLot / (Number(t.lot) > 0 ? Number(t.lot) : 1);
   const fmtYou = (v: number) => `${v > 0 ? '+' : ''}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)}$`;
+  // hors « ta taille », la référence est 0.10 lot (24/09/2026, lib/display/scale.ts) — plus le lot du maître
+  const ref = (t: FeedTrade) => atRef(t.pnl, t.lot);
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   // OFF-BOARDÉ → écran de récupération, jamais le dashboard verrouillé. Un membre dont l'accès vient d'être
@@ -43,7 +46,7 @@ export default function MemberHome() {
   if (member.status === 'offboarded') { router.replace('/member/recover'); return null; }
 
   const wins = trades.filter((t) => Number(t.pnl) > 0);
-  const winTotal = wins.reduce((a, t) => a + Number(t.pnl), 0);
+  const winTotal = wins.reduce((a, t) => a + ref(t), 0);
   const pendingReview = member.status === 'pending_copier';
 
   return (
@@ -89,7 +92,7 @@ export default function MemberHome() {
               </div>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
                 You&rsquo;re watching from the outside — members&rsquo; accounts copy every one of these trades <b style={{ color: 'var(--text)' }}>automatically</b>.
-                {winTotal > 0 && <> The wins below alone made members <b className="goldText">+{winTotal.toFixed(0)}$</b>.</>}
+                {winTotal > 0 && <> The wins below alone made <b className="goldText">+{winTotal.toFixed(0)}$</b> at {REF_LABEL} (a {REF_ACCOUNT_LABEL}).</>}
               </p>
               <button onClick={() => setPaywall(true)} style={ctaGold}>⚡ UNLOCK MY ACCESS</button>
               {/* l'appel = l'arme de closing : 10 min au téléphone avec Mathieu et c'est signé */}
@@ -150,16 +153,16 @@ export default function MemberHome() {
               {unlocked ? (
                 <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                   <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
-                  <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>({Number(t.pnl) > 0 ? '+' : ''}{Number(t.pnl).toFixed(0)}$)</span>
+                  <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>({ref(t) > 0 ? '+' : ''}{ref(t).toFixed(0)}$)</span>
                 </span>
               ) : (
-                <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ +' : ''}{Number(t.pnl).toFixed(0)}$</span>
+                <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ +' : ''}{ref(t).toFixed(0)}$</span>
               )}
             </div>
           );
         })}
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
-          {unlocked ? `Shown at your copy size (${clientLot} lot) — master account in brackets.` : 'ALGORIA 2.0’s recent wins — members’ accounts copied every one of them automatically. Losses, live positions and the full history unlock with your access.'}
+          {unlocked ? `Shown at your copy size (${clientLot} lot) — at ${REF_LABEL} in brackets.` : `ALGORIA 2.0’s recent wins, shown at ${REF_LABEL} (a ${REF_ACCOUNT_LABEL}) — members’ accounts copied every one of them automatically. Losses, live positions and the full history unlock with your access.`}
         </p>
       </section>
 

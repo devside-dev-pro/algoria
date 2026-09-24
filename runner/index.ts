@@ -38,6 +38,7 @@ import { startCopyObserver } from './observer';
 // l'annonce de fin de journée plus bas, qui affirmerait une chose fausse.
 const COPY_MODE = process.env.ALGORIA_COPY_OBSERVE === '1';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
+import { REF_LABEL, REF_LOT, REF_TAG } from '../lib/display/scale';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
@@ -1663,9 +1664,10 @@ async function main() {
             // Aucun drapeau, aucune flotte, aucune protection annoncée. Ce qui reste est vérifiable.
             if (COPY_MODE) {
               const net = stats.net;
-              void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n<i>master-account scale</i>\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  ${net >= 0 ? '🟢 +' : '🔴 −'}<b>${usd(net)}</b>\n${VIP_RULE}\n<i>Copied to your account at your own size. Wins and losses both — open the app to see yours.</i>`);
+              // À 0.10 LOT (24/09/2026) — voir lib/display/scale.ts. `stats.net` est déjà converti trade par trade.
+              void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n<i>shown at ${REF_TAG}</i>\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  ${net >= 0 ? '🟢 +' : '🔴 −'}<b>${usd(net)}</b>\n${VIP_RULE}\n<i>At 0.01 lot, divide by 10. Wins and losses both — open the app to see yours.</i>`);
             } else if (lines.length)
-              void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · master-account scale</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}${discipline}${proof}`);
+              void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · shown at ${REF_TAG}</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}${discipline}${proof}`);
             else if (stats.net >= 0) void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  green day 🟢\n\nAll copied to your account. See you tomorrow. 👊`);
             else void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  ${wr}% win\n\nRisk stayed capped and the desk stays disciplined — it's all in our public track record. We go again tomorrow. 🔁`);
 
@@ -1677,13 +1679,13 @@ async function main() {
             if (!COPY_MODE) {
             // 🏆 TRADE DU JOUR (le meilleur gagnant flotte, ≥ $200) — LE forward parfait vers le public.
             const top = await fetchTopTrade(dayStartIso).catch(() => null);
-            if (top && top.pnl >= 200)
-              void postVip(`🏆 <b>TRADE OF THE DAY</b>\n${VIP_RULE}\n${VIP_TAGS[top.strategy] ?? `S${top.strategy}`}\n<b>+${usd(top.pnl)}</b> on ${top.symbol}\n${VIP_RULE}\n<i>Cleanly executed and copied to every account on this strategy.</i>`);
+            if (top && top.pnl >= 200 * REF_LOT) // seuil historique 200 $ à 1 lot, `top.pnl` est à 0.10 lot
+              void postVip(`🏆 <b>TRADE OF THE DAY</b>\n${VIP_RULE}\n${VIP_TAGS[top.strategy] ?? `S${top.strategy}`}\n<b>+${usd(top.pnl)}</b> on ${top.symbol} · <i>${REF_LABEL}</i>\n${VIP_RULE}\n<i>Cleanly executed and copied to every account on this strategy.</i>`);
             // dimanche : 🏆 TRADE DE LA SEMAINE
             if (new Date().getUTCDay() === 0) {
               const wtop = await fetchTopTrade(new Date(Date.now() - 7 * 86_400_000).toISOString()).catch(() => null);
-              if (wtop && wtop.pnl >= 300)
-                void postVip(`🏆 <b>TRADE OF THE WEEK</b>\n${VIP_RULE}\n${VIP_TAGS[wtop.strategy] ?? `S${wtop.strategy}`}\n<b>+${usd(wtop.pnl)}</b> on ${wtop.symbol}\n${VIP_RULE}\n<i>Seven days, one standout — and everyone on this strategy caught it.</i>`);
+              if (wtop && wtop.pnl >= 300 * REF_LOT)
+                void postVip(`🏆 <b>TRADE OF THE WEEK</b>\n${VIP_RULE}\n${VIP_TAGS[wtop.strategy] ?? `S${wtop.strategy}`}\n<b>+${usd(wtop.pnl)}</b> on ${wtop.symbol} · <i>${REF_LABEL}</i>\n${VIP_RULE}\n<i>Seven days, one standout — and everyone on this strategy caught it.</i>`);
             }
 
             // 🔥 SÉRIES & RECORDS — preuve sociale « forwardable ». Net flotte par jour → série de jours verts + record.
@@ -1696,7 +1698,7 @@ async function main() {
               const badges: string[] = [];
               if (allGreen && active.length >= 2) badges.push(`🟢 <b>FLEET ALL-GREEN</b> — ${active.length}/${active.length} strategies green today`);
               if (streak >= 3) badges.push(`🔥 <b>${streak} green days in a row</b> across the fleet`);
-              if (isRecord) badges.push(`⚡ <b>New record day</b> — +${usd(today.net)}, our best since launch`);
+              if (isRecord) badges.push(`⚡ <b>New record day</b> — +${usd(today.net)} at ${REF_LABEL}, our best since launch`);
               if (badges.length) void postVip(`${badges.join('\n')}\n\n<i>This is the track record building in real time. 👊</i>`);
             }
             } // fin du bloc trophées — coupé en mode copie
@@ -1717,8 +1719,8 @@ async function main() {
           void pushToAll(
             stats.net > 0
               ? {
-                  title: `Algoria today: +$${Math.round(stats.net)}`,
-                  body: `${stats.trades} trades · ${wrPct}% win rate — copied to your account.`,
+                  title: `Algoria today: +$${Math.round(stats.net)} at ${REF_LABEL}`,
+                  body: `${stats.trades} trades · ${wrPct}% win rate — copied to your account at your own size.`,
                   url: '/member/history',
                   tag: 'algoria-recap',
                 }
