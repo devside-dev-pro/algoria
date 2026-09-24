@@ -4,6 +4,7 @@
 // l'URL — on charge le trade RÉEL en base par (ticket, strategy) et on ne rend que les gains clôturés.
 // Une URL bricolée avec un faux montant est donc impossible : pas de trade → 404.
 import { ImageResponse } from 'next/og';
+import { atRef, REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
 import { type NextRequest } from 'next/server';
 import QRCode from 'qrcode';
 import { sdb } from '@/lib/member/server';
@@ -54,13 +55,14 @@ export async function GET(req: NextRequest) {
 
   // le trade RÉEL — uniquement des gains clôturés (la carte n'existe pas pour autre chose)
   const { data } = await sdb().from('trades')
-    .select('symbol,direction,pnl,closed_at')
+    .select('symbol,direction,pnl,closed_at,lot')
     .eq('ticket', ticket).eq('strategy' as never, strategy as never)
     .not('closed_at', 'is', null).gt('pnl', 0).limit(1);
   const t = data?.[0];
   if (!t) return new Response('not found', { status: 404 });
 
-  const pnl = Math.round(Number(t.pnl));
+  // à 0.10 lot, ramené avec le lot de CE trade (lib/display/scale.ts) — la base garde le chiffre du maître
+  const pnl = Math.round(atRef(t.pnl, (t as { lot?: number | null }).lot));
   const isLong = String(t.direction) === 'long';
   const qrSvg = await QRCode.toString('https://algoria.tech', { type: 'svg', margin: 1, color: { dark: '#0b0e14', light: '#ffffff' } });
   const qrUri = `data:image/svg+xml;base64,${Buffer.from(qrSvg).toString('base64')}`;
@@ -103,7 +105,7 @@ export async function GET(req: NextRequest) {
             </span>
           </div>
           <span style={{ fontSize: 138, fontWeight: 700, color: '#22e0a6', lineHeight: 1, marginTop: 18, textShadow: '0 0 45px rgba(34,224,166,.5)' }}>+${pnl.toLocaleString('en-US')}</span>
-          <span style={{ fontSize: 24, color: '#f5c24a', letterSpacing: 3, lineHeight: 1, marginTop: 20 }}>PROFIT BANKED AUTOMATICALLY</span>
+          <span style={{ fontSize: 24, color: '#f5c24a', letterSpacing: 3, lineHeight: 1, marginTop: 20 }}>{`PROFIT BANKED · ${REF_LABEL.toUpperCase()} · ${REF_ACCOUNT_LABEL.toUpperCase()}`}</span>
         </div>
 
         {/* QR + pitch (bloc « parrainage » Binance) */}

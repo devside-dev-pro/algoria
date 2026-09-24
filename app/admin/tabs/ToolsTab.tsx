@@ -7,6 +7,7 @@ import { ask } from '@/components/admin/Dialog';
 import { useAdmin } from '../_state';
 import { CTA_TEMPLATES, dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 import { OFFBOARD_REASONS, type OffboardReason } from '@/lib/member/winback';
+import { atRef, REF_LABEL } from '@/lib/display/scale';
 
 export function ToolsTab() {
   const { bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, downloadCard, downloadRecap, feedWins, input, live, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
@@ -147,7 +148,7 @@ export function ToolsTab() {
                 <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 11, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
                   <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
-                  <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--up)' }}>+${Number(t.pnl).toFixed(0)}</span>
+                  <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--up)' }}>+${atRef(t.pnl, t.lot).toFixed(0)} <span style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600 }}>{REF_LABEL}</span></span>
                   <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{new Date(t.closed_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                   <span style={{ flex: 1 }} />
                   <button disabled={carding === `${t.ticket}-story`} onClick={() => void downloadCard(t, 'story')} style={goldBtn}>{carding === `${t.ticket}-story` ? '…' : '⬇ STORY'}</button>

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
 import { usePrice, useFeedHealth } from '@/lib/cockpit/useRealtime';
 import { tgHref } from '@/lib/telegram';
 import { WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
@@ -19,6 +20,10 @@ const marketLabel = (symbol: string): string => (symbol === 'XAUUSD' ? 'GOLD' : 
 const TELEGRAM = process.env.NEXT_PUBLIC_TELEGRAM_URL || 'https://t.me/'; // à définir en env Vercel
 const TIKTOK = process.env.NEXT_PUBLIC_TIKTOK_URL || '';
 const VIDEO = process.env.NEXT_PUBLIC_WELCOME_VIDEO_URL || ''; // vidéo de bienvenue (mp4 ou YouTube/Vimeo)
+
+// montants de /api/public/proof, à 0.10 lot (24/09/2026) : à cette échelle un gain vaut souvent moins de
+// 10 $, et l'arrondir au dollar le déformerait — deux décimales sous 100 $, entier au-delà.
+const money = (n: number) => `$${Math.abs(n) >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)}`;
 
 interface Proof {
   wins: { symbol: string; direction: string; pnl: number; closed_at: string }[];
@@ -94,12 +99,12 @@ export default function Funnel() {
             {hasToday ? (
               <>
                 <Stat label="Wins today" value={`✓ ${proof!.today.count}`} accent="var(--up)" />
-                <Stat label="Banked today" value={`+$${proof!.today.total}`} accent="var(--gold)" mono />
-                <Stat label="Best trade" value={`+$${proof!.today.best}`} accent="var(--up)" mono />
+                <Stat label="Banked today" value={`+${money(proof!.today.total)}`} accent="var(--gold)" mono />
+                <Stat label="Best trade" value={`+${money(proof!.today.best)}`} accent="var(--up)" mono />
               </>
             ) : (
               <>
-                <Stat label="Banked · 7 days" value={proof && proof.week.total > 0 ? `+$${proof.week.total}` : '—'} accent="var(--gold)" mono />
+                <Stat label="Banked · 7 days" value={proof && proof.week.total > 0 ? `+${money(proof.week.total)}` : '—'} accent="var(--gold)" mono />
                 <Stat label="Markets" value={markets} accent="var(--cyan)" />
                 <Stat label="XAU/USD" value={px ? px.mid.toFixed(1) : '—'} accent="var(--gold)" mono />
               </>
@@ -112,11 +117,11 @@ export default function Funnel() {
                   <span key={i} className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap', fontSize: 12, padding: '6px 12px', borderRadius: 9, border: '1px solid rgba(34,224,166,.35)', background: 'rgba(34,224,166,.06)' }}>
                     <span style={{ color: t.direction === 'long' ? 'var(--up)' : 'var(--down)', fontWeight: 800 }}>{t.direction === 'long' ? '▲' : '▼'}</span>
                     <span style={{ color: 'var(--muted)' }}>{marketLabel(t.symbol)}</span>
-                    <span style={{ color: 'var(--up)', fontWeight: 800 }}>+${t.pnl}</span>
+                    <span style={{ color: 'var(--up)', fontWeight: 800 }}>+{money(t.pnl)}</span>
                   </span>
                 ))}
               </div>
-              <p style={{ margin: '8px 0 0', fontSize: 10, letterSpacing: 1, color: 'var(--dim)' }}>LATEST WINS — CLOSED ON A REAL ACCOUNT</p>
+              <p style={{ margin: '8px 0 0', fontSize: 10, letterSpacing: 1, color: 'var(--dim)' }}>LATEST WINS — CLOSED ON A REAL ACCOUNT · SHOWN AT {REF_LABEL.toUpperCase()} ({REF_ACCOUNT_LABEL.toUpperCase()})</p>
             </div>
           )}
         </section>

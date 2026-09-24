@@ -6,6 +6,7 @@
 // Règle broadcast 70/30 : QUE du positif — wins uniquement, jamais une perte à l'antenne.
 // Ouvrir dans le navigateur du stream (session opérateur déjà connectée sur /app).
 import { useEffect, useMemo, useState } from 'react';
+import { atOneLot, atRef, REF_LABEL } from '@/lib/display/scale';
 import { useTrades, usePrice } from '@/lib/cockpit/useRealtime';
 import { brokerDayStartMs } from '@/lib/cockpit/brokerDay';
 import { isShowTrade } from '@/lib/cockpit/showTrades';
@@ -49,12 +50,13 @@ export default function StreamStrip() {
   const wins = useMemo(
     () =>
       (trades as any[])
-        .filter((t) => t.closed_at && Number(t.pnl) >= 5 && t.symbol !== 'NAS100' && !isShowTrade(t) && Date.parse(t.closed_at) >= dayStartMs)
+        .filter((t) => t.closed_at && atOneLot(t.pnl, t.lot) >= 5 && t.symbol !== 'NAS100' && !isShowTrade(t) && Date.parse(t.closed_at) >= dayStartMs)
         .slice(0, 20),
     [trades, dayStartMs],
   );
-  const winTotal = wins.reduce((a, t) => a + Number(t.pnl), 0);
-  const best = wins.reduce((m, t) => Math.max(m, Number(t.pnl)), 0);
+  // à 0.10 lot (24/09/2026, lib/display/scale.ts) — le filtre anti-bruit ci-dessus reste à 5 $ à 1 lot
+  const winTotal = wins.reduce((a, t) => a + atRef(t.pnl, t.lot), 0);
+  const best = wins.reduce((m, t) => Math.max(m, atRef(t.pnl, t.lot)), 0);
   // marquee : liste doublée + translation -50% en boucle = défilement infini sans couture
   const reel = wins.length ? [...wins, ...wins] : [];
 
@@ -79,8 +81,8 @@ export default function StreamStrip() {
         {wins.length > 0 && (
           <div style={{ display: 'flex', gap: 20 }}>
             <Tile label="WINS TODAY" value={`✓ ${wins.length}`} color="var(--up)" />
-            <Tile label="BANKED TODAY" value={`+${winTotal.toFixed(0)}$`} gold />
-            <Tile label="BEST TRADE" value={`+${best.toFixed(0)}$`} color="var(--up)" />
+            <Tile label={`BANKED TODAY · ${REF_LABEL.toUpperCase()}`} value={`+${winTotal.toFixed(0)}$`} gold />
+            <Tile label="BEST TRADE" value={`+${best >= 100 ? best.toFixed(0) : best.toFixed(2)}$`} color="var(--up)" />
           </div>
         )}
         <div key={ctaIdx} className="cardIn" style={{
@@ -110,7 +112,7 @@ export default function StreamStrip() {
               }}>
                 <span style={{ fontSize: 12, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
                 <span className="mono" style={{ fontSize: 13, color: 'var(--muted)' }}>{String(t.symbol) === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
-                <span className="mono" style={{ fontSize: 16, fontWeight: 800, color: 'var(--up)' }}>✓ +{Number(t.pnl).toFixed(0)}$</span>
+                <span className="mono" style={{ fontSize: 16, fontWeight: 800, color: 'var(--up)' }}>✓ +{atRef(t.pnl, t.lot).toFixed(atRef(t.pnl, t.lot) >= 100 ? 0 : 2)}$</span>
                 <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
             ))}

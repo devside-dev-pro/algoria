@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { atRef, sumAtRef } from '../display/scale';
 import ws from 'ws';
 import type { Database } from './database.types';
 import type { Bar, EngineEvent, EngineState, MarketContext, Mode, Signal } from '../engine/types';
@@ -388,17 +389,18 @@ export async function saveDayAnchor(a: DayAnchor) {
 }
 
 /** SCOREBOARD du jour : P&L par stratégie (toutes) + drapeaux runner_day — le wrap VIP montre LA FLOTTE,
- *  pas une seule stratégie (un client S2 rouge voit S1/S3 vertes → « c'est le portefeuille qui compte »). */
+ *  pas une seule stratégie (un client S2 rouge voit S1/S3 vertes → « c'est le portefeuille qui compte »).
+ *  Montants À 0.10 LOT, chaque trade ramené avec son propre lot (lib/display/scale.ts). */
 export async function fetchDayScoreboard(): Promise<Array<{ strategy: number; net: number; trades: number; done: boolean; reason: string | null }>> {
   const today = new Date().toISOString().slice(0, 10);
   const raw = db as unknown as { from: (t: string) => any };
-  const { data: rows } = await raw.from('trades').select('strategy,pnl').gte('closed_at', today).not('pnl', 'is', null);
+  const { data: rows } = await raw.from('trades').select('strategy,pnl,lot').gte('closed_at', today).not('pnl', 'is', null);
   const { data: anchors } = await raw.from('runner_day').select('strategy,day_done,reason').eq('day', today);
   const by = new Map<number, { net: number; trades: number }>();
-  for (const r of (rows ?? []) as Array<{ strategy: number | null; pnl: number }>) {
+  for (const r of (rows ?? []) as Array<{ strategy: number | null; pnl: number; lot: number | null }>) {
     const s = Number(r.strategy ?? 2);
     const cur = by.get(s) ?? { net: 0, trades: 0 };
-    cur.net += Number(r.pnl);
+    cur.net += atRef(r.pnl, r.lot);
     cur.trades++;
     by.set(s, cur);
   }
@@ -407,22 +409,26 @@ export async function fetchDayScoreboard(): Promise<Array<{ strategy: number; ne
   return [1, 2, 3].map((s) => ({ strategy: s, net: by.get(s)?.net ?? 0, trades: by.get(s)?.trades ?? 0, done: flags.get(s)?.done ?? false, reason: flags.get(s)?.reason ?? null }));
 }
 
-/** MEILLEUR trade gagnant depuis `sinceIso` (toutes stratégies) — pour « Trade du jour / de la semaine ». */
+/** MEILLEUR trade gagnant depuis `sinceIso` (toutes stratégies) — pour « Trade du jour / de la semaine ».
+ *  `pnl` est À 0.10 LOT. Le classement se fait APRÈS conversion : un trade à 0.5 lot qui a rapporté 600 $
+ *  vaut 120 $ à 0.10 lot, moins qu'un trade à 1 lot à 1 500 $ (150 $) — trier sur le brut les inverserait.
+ *  On prend donc les 50 plus gros bruts et on reclasse. */
 export async function fetchTopTrade(sinceIso: string): Promise<{ symbol: string; pnl: number; strategy: number } | null> {
-  const { data } = await db.from('trades').select('symbol,pnl,strategy' as never).gte('closed_at', sinceIso).not('pnl', 'is', null).order('pnl', { ascending: false }).limit(1);
-  const t = data?.[0] as { symbol?: string; pnl?: number; strategy?: number } | undefined;
-  if (!t || Number(t.pnl) <= 0) return null;
-  return { symbol: String(t.symbol ?? 'XAUUSD'), pnl: Number(t.pnl), strategy: Number(t.strategy ?? 2) };
+  const { data } = await db.from('trades').select('symbol,pnl,strategy,lot' as never).gte('closed_at', sinceIso).not('pnl', 'is', null).order('pnl', { ascending: false }).limit(50);
+  const best = ((data ?? []) as Array<{ symbol?: string; pnl?: number; strategy?: number; lot?: number | null }>)
+    .map((t) => ({ symbol: String(t.symbol ?? 'XAUUSD'), pnl: atRef(t.pnl, t.lot), strategy: Number(t.strategy ?? 2) }))
+    .sort((a, b) => b.pnl - a.pnl)[0];
+  return best && best.pnl > 0 ? best : null;
 }
 
-/** Net FLOTTE (toutes stratégies) par jour UTC sur N jours — pour séries de jours verts + records. */
+/** Net FLOTTE (toutes stratégies) par jour UTC sur N jours — pour séries de jours verts + records. À 0.10 lot. */
 export async function fetchFleetDailyNets(days = 14): Promise<Array<{ day: string; net: number }>> {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const { data } = await db.from('trades').select('closed_at,pnl').gte('closed_at', since).not('pnl', 'is', null).not('closed_at', 'is', null);
+  const { data } = await db.from('trades').select('closed_at,pnl,lot').gte('closed_at', since).not('pnl', 'is', null).not('closed_at', 'is', null);
   const by = new Map<string, number>();
-  for (const r of (data ?? []) as Array<{ closed_at: string; pnl: number }>) {
+  for (const r of (data ?? []) as Array<{ closed_at: string; pnl: number; lot: number | null }>) {
     const day = new Date(r.closed_at).toISOString().slice(0, 10);
-    by.set(day, (by.get(day) ?? 0) + Number(r.pnl));
+    by.set(day, (by.get(day) ?? 0) + atRef(r.pnl, r.lot));
   }
   return [...by.entries()].map(([day, net]) => ({ day, net })).sort((a, b) => a.day.localeCompare(b.day));
 }
@@ -675,20 +681,21 @@ export async function reconcileOpenTrades(symbol: string, liveTickets: string[],
   return ghosts.length;
 }
 
-/** Stats des trades CLÔTURÉS aujourd'hui (UTC), hors micro-scalps RAFALE (spam show) — pour le RECAP horaire du desk. */
+/** Stats des trades CLÔTURÉS aujourd'hui (UTC), hors micro-scalps RAFALE (spam show) — pour le RECAP horaire du desk.
+ *  `net` est À 0.10 LOT : il part tel quel dans le daily wrap, le push du soir et la narration. */
 export async function fetchDayTradeStats(): Promise<{ trades: number; wins: number; net: number } | null> {
   const dayStart = new Date();
   dayStart.setUTCHours(0, 0, 0, 0);
   const iso = dayStart.toISOString();
   const [tr, sg] = await Promise.all([
-    db.from('trades').select('ticket,pnl').gte('closed_at', iso).not('pnl', 'is', null).eq('strategy' as never, STRAT_ID as never),
+    db.from('trades').select('ticket,pnl,lot').gte('closed_at', iso).not('pnl', 'is', null).eq('strategy' as never, STRAT_ID as never),
     db.from('signals').select('ticket,rationale').gte('created_at', iso),
   ]);
   if (tr.error || !tr.data) return null;
   const rafale = new Set((sg.data ?? []).filter((s) => JSON.stringify(s.rationale ?? '').includes('RAFALE')).map((s) => String(s.ticket)));
   const rows = tr.data.filter((t) => !rafale.has(String(t.ticket)));
   const wins = rows.filter((t) => Number(t.pnl) > 0).length;
-  const net = rows.reduce((a, t) => a + Number(t.pnl), 0);
+  const net = sumAtRef(rows as Array<{ pnl: unknown; lot?: unknown }>);
   return { trades: rows.length, wins, net };
 }
 

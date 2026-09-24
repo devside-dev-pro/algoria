@@ -12,6 +12,7 @@
 //     le canal et le contact humain AVANT l'app : choix produit)
 // Ouvrir dans le navigateur du stream (session opérateur connectée) et cropper la source en portrait.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { atOneLot, atRef, REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
 import { Chart } from '@/components/Chart';
 import { AlgoriaOrb } from '@/components/Orb';
 import { Telemetry } from '@/components/Telemetry';
@@ -116,7 +117,7 @@ export default function LiveStage() {
       if (!k || !t.closed_at || t.pnl == null || seenClosed.current.has(k)) continue;
       seenClosed.current.add(k);
       if (Date.parse(t.closed_at) < mountedAt.current - 5000 || isShowTrade(t, rafale)) continue;
-      const pnl = Number(t.pnl);
+      const pnl = atRef(t.pnl, t.lot); // à 0.10 lot (lib/display/scale.ts) — plus le lot du maître
       setFlash({ kind: pnl > 0 ? 'win' : 'loss', pnl, sym: String(t.symbol) === 'XAUUSD' ? 'GOLD' : 'BTC' });
       window.setTimeout(() => setFlash(null), pnl > 0 ? 5000 : 4000);
       break;
@@ -124,13 +125,13 @@ export default function LiveStage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trades]);
 
-  // wins du jour (≥5$, hors BEAST) — footer + pastilles chart
+  // wins du jour (≥5$ À 1 LOT, hors BEAST) — footer + pastilles chart. Montants affichés à 0.10 lot.
   const dayStartMs = brokerDayStartMs(); // jour METATRADER — le bilan à l'antenne colle au terminal
-  const wins = (trades as any[]).filter((t) => t.closed_at && Number(t.pnl) >= 5 && !isShowTrade(t, rafale) && Date.parse(t.closed_at) >= dayStartMs);
-  const winTotal = wins.reduce((a, t) => a + Number(t.pnl), 0);
+  const wins = (trades as any[]).filter((t) => t.closed_at && atOneLot(t.pnl, t.lot) >= 5 && !isShowTrade(t, rafale) && Date.parse(t.closed_at) >= dayStartMs);
+  const winTotal = wins.reduce((a, t) => a + atRef(t.pnl, t.lot), 0);
   const reel = wins.length ? [...wins, ...wins, ...wins] : [];
   const chartSigs = (signals as any[]).filter((s) => s.symbol === hero);
-  const winsForChart = wins.filter((t) => t.symbol === hero).slice(0, 24).map((t) => ({ time: Date.parse(t.closed_at), pnl: Number(t.pnl) }));
+  const winsForChart = wins.filter((t) => t.symbol === hero).slice(0, 24).map((t) => ({ time: Date.parse(t.closed_at), pnl: atRef(t.pnl, t.lot) }));
   const lastRead = (deskItems as any[]).find((e) => e?.msg);
   const state: 'position' | 'scanning' = openTrade ? 'position' : 'scanning';
 
@@ -219,7 +220,8 @@ export default function LiveStage() {
         {flash && flash.kind === 'win' && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'radial-gradient(60% 50% at 50% 50%, rgba(34,224,166,.16), rgba(7,12,24,.82))', animation: 'winZoom 5s ease-out forwards', pointerEvents: 'none' }}>
             <div style={{ fontSize: 15, letterSpacing: 2.5, color: 'var(--up)', fontWeight: 800 }}>✓ TRADE CLOSED · {flash.sym}</div>
-            <div className="mono goldText" style={{ fontSize: 74, fontWeight: 800, lineHeight: 1 }}>+{flash.pnl.toFixed(0)}$</div>
+            <div className="mono goldText" style={{ fontSize: 74, fontWeight: 800, lineHeight: 1 }}>+{flash.pnl >= 100 ? flash.pnl.toFixed(0) : flash.pnl.toFixed(2)}$</div>
+            <div className="mono" style={{ fontSize: 12, letterSpacing: 1.4, color: 'var(--dim)' }}>AT {REF_LABEL.toUpperCase()} · {REF_ACCOUNT_LABEL.toUpperCase()}</div>
             <div style={{ fontSize: 13, letterSpacing: 1.2, color: 'var(--muted)' }}>BANKED BY THE AI — MEMBERS GOT IT AUTOMATICALLY</div>
           </div>
         )}
@@ -263,7 +265,7 @@ export default function LiveStage() {
             <div style={{ display: 'flex', gap: 10, animation: `liveScroll ${Math.max(20, reel.length * 2.4)}s linear infinite`, width: 'max-content' }}>
               {reel.map((t: any, i) => (
                 <span key={`${t.ticket}-${i}`} className="mono" style={{ whiteSpace: 'nowrap', fontSize: 13, fontWeight: 800, color: 'var(--up)', padding: '5px 13px', borderRadius: 8, border: '1px solid rgba(34,224,166,.35)', background: 'rgba(34,224,166,.06)' }}>
-                  ✓ +{Number(t.pnl).toFixed(0)}$ <span style={{ color: 'var(--dim)', fontWeight: 500 }}>{String(t.symbol) === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
+                  ✓ +{atRef(t.pnl, t.lot).toFixed(atRef(t.pnl, t.lot) >= 100 ? 0 : 2)}$ <span style={{ color: 'var(--dim)', fontWeight: 500 }}>{String(t.symbol) === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
                 </span>
               ))}
             </div>
@@ -276,7 +278,7 @@ export default function LiveStage() {
           <span key={ctaIdx} className="cardIn" style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.4, color: 'var(--text)', textAlign: 'center', lineHeight: 1.35, maxWidth: '94%', padding: '8px 18px', borderRadius: 18, border: '1px solid rgba(245,194,74,.45)', background: 'linear-gradient(90deg, rgba(245,194,74,.13), rgba(43,227,245,.08))' }}>
             {CTAS[ctaIdx]}
           </span>
-          {winTotal > 0 && <span className="mono goldText" style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap' }}>+{winTotal.toFixed(0)}$ today</span>}
+          {winTotal > 0 && <span className="mono goldText" style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap' }}>+{winTotal.toFixed(0)}$ today <span style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600 }}>· {REF_LABEL}</span></span>}
         </div>
       </footer>
     </main>

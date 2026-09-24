@@ -3,6 +3,7 @@
 // découpée en un fichier par onglet. Un seul hook tient tout (états, chargement, actions API) ; les onglets
 // le lisent par contexte (useAdmin). Rien n’a changé de comportement : c’est un déplacement, pas une réécriture.
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { atRef } from '@/lib/display/scale';
 import { drawWinCard, drawRecapCard, shareOrDownloadCard } from '@/lib/cards/winCard';
 import { BROKERS } from '@/lib/member/brokers';
 import { REJECT_REASONS } from '@/lib/member/rejectReasons';
@@ -172,7 +173,7 @@ export function useAdminState() {
   const [selActs, setSelActs] = useState<Action[] | null>(null);
   const [noteText, setNoteText] = useState('');
   // ===== win card studio (TOOLS) : les gains récents du compte maître, à télécharger pour la CM =====
-  const [feedWins, setFeedWins] = useState<{ ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[]>([]);
+  const [feedWins, setFeedWins] = useState<{ ticket: string; symbol: string; direction: string; pnl: number; closed_at: string; lot?: number | null }[]>([]);
   const [carding, setCarding] = useState<string | null>(null);
   // stats jour/semaine (wins only, API publique) — alimentent les cartes RÉCAP du studio
   const [proof, setProof] = useState<{ today: { count: number; total: number; best: number }; week: { count: number; total: number; best: number }; session?: { count: number; total: number; best: number; date: string } } | null>(null);
@@ -232,7 +233,7 @@ export function useAdminState() {
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => {
       if (!r.ok) return;
-      const d = (await r.json()) as { trades?: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }[] };
+      const d = (await r.json()) as { trades?: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string; lot?: number | null }[] };
       setFeedWins((d.trades ?? []).filter((t) => Number(t.pnl) > 0).slice(0, 8));
     });
     void fetch('/api/public/proof').then(async (r) => {
@@ -262,10 +263,10 @@ export function useAdminState() {
       setCarding(null);
     }
   };
-  const downloadCard = async (t: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string }, format: 'story' | 'landscape') => {
+  const downloadCard = async (t: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string; lot?: number | null }, format: 'story' | 'landscape') => {
     setCarding(`${t.ticket}-${format}`);
     try {
-      const blob = await drawWinCard({ symbol: t.symbol, direction: t.direction, pnl: Number(t.pnl), closedAt: t.closed_at, format, qrUrl: 'https://algoria.tech', qrLabel: 'algoria.tech' });
+      const blob = await drawWinCard({ symbol: t.symbol, direction: t.direction, pnl: atRef(t.pnl, t.lot), closedAt: t.closed_at, format, qrUrl: 'https://algoria.tech', qrLabel: 'algoria.tech' });
       await shareOrDownloadCard(blob, `algoria-win-${t.ticket}-${format === 'landscape' ? 'wide' : 'story'}.png`);
     } finally {
       setCarding(null);

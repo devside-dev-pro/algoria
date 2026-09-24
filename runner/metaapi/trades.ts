@@ -3,6 +3,7 @@ import { recordTradeClose, SECONDARY, STRAT_ID } from '../../lib/supabase/sync';
 import { pushToAll } from '../../lib/push/send';
 import { postVip, postVipPhoto, VIP_TAG, usd } from '../telegram';
 import type { Signal } from '../../lib/engine/types';
+import { atOneLot, atRef, REF_LABEL, REF_TAG } from '../../lib/display/scale';
 
 // Base publique de l'app membre — héberge /api/card/win (la carte de gain servie à Telegram).
 const APP_BASE = process.env.MEMBER_APP_URL ?? 'https://app.algoria.tech';
@@ -13,15 +14,18 @@ const px2 = (x: number): string => (Math.round(Number(x) * 100) / 100).toString(
 const WIN_PUSH_MIN = Number(process.env.PUSH_WIN_MIN_USD ?? 100); // en dessous, pas de notif (sinon ~20/jour)
 const WIN_PUSH_COOLDOWN_MS = 20 * 60_000;
 let lastWinPush = 0;
-function maybePushWin(displaySymbol: string, pnl: number) {
-  if (pnl < WIN_PUSH_MIN || Date.now() - lastWinPush < WIN_PUSH_COOLDOWN_MS) return;
+// À 0.10 LOT (24/09/2026, lib/display/scale.ts) : le SEUIL reste en dollars à 1 lot — il décide QUAND on
+// notifie, et ce choix ne change pas — mais le MONTANT affiché est ramené à 0.10 lot, avec son libellé.
+function maybePushWin(displaySymbol: string, pnl: number, lot: number | null) {
+  if (atOneLot(pnl, lot) < WIN_PUSH_MIN || Date.now() - lastWinPush < WIN_PUSH_COOLDOWN_MS) return;
   lastWinPush = Date.now();
+  const shown = Math.round(atRef(pnl, lot));
   void pushToAll({
-    title: `✓ +$${Math.round(pnl)} on ${displaySymbol}`,
-    body: 'Algoria just cashed a win — copied to your account.',
+    title: `✓ +$${shown} on ${displaySymbol} · ${REF_LABEL}`,
+    body: 'Algoria just cashed a win — copied to your account at your own size.',
     url: '/member',
     tag: 'algoria-win',
-  }).then((n) => n && console.log(`[algoria] push win +$${Math.round(pnl)} → ${n} appareil(s)`)).catch(() => {});
+  }).then((n) => n && console.log(`[algoria] push win +$${shown} (${REF_LABEL}) → ${n} appareil(s)`)).catch(() => {});
 }
 
 // ===== ANNONCES VIP PAR TRADE — le canal VIT : chaque runner poste SES GAINS (3 verts d'un coup = rassurant).
@@ -37,17 +41,20 @@ const SL_NOTES = [
   'Defined risk did its job: one controlled loss, capital protected, on to the next setup.',
   'No stop-loss would mean unlimited risk. This is the cost of doing business — bounded and planned.',
 ];
-function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry?: number, exit?: number, ticket?: string) {
+function vipTradeClose(displaySymbol: string, pnlRaw: number, reason: string, entry?: number, exit?: number, ticket?: string, lot: number | null = null) {
   const px = entry != null && exit ? `<i>${displaySymbol} · ${px2(entry)} → ${px2(exit)}</i>\n` : `<i>${displaySymbol}</i>\n`;
-  if (pnl >= VIP_WIN_MIN) {
+  // seuils en dollars À 1 LOT (inchangés) ; montant affiché À 0.10 LOT
+  const at1 = atOneLot(pnlRaw, lot);
+  const pnl = atRef(pnlRaw, lot);
+  if (at1 >= VIP_WIN_MIN) {
     const how = reason === 'tp' ? 'target hit' : reason === 'trail' ? 'profit locked by trailing stop' : 'banked';
     // Carte GAIN — VISUELLE : la win card (style Binance, QR algoria.tech) rendue par l'app, postée en
     // photo — « forwardable » telle quelle vers le public. Repli TEXTE si le rendu/le post échoue : un TP
     // ne se perd jamais. La carte lit le trade en BASE (anti-falsification) → il est déjà enregistré ici.
-    const text = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nMaster-account scale — copied to your size automatically.`;
+    const text = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nShown at ${REF_TAG} — copied to your size automatically.`;
     if (ticket) {
       const cardUrl = `${APP_BASE}/api/card/win?ticket=${encodeURIComponent(ticket)}&strategy=${STRAT_ID}`;
-      const caption = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG} · <i>${how}</i>\n${px}<i>Copied to your size automatically.</i>`;
+      const caption = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG} · <i>${how}</i>\n${px}<i>Shown at ${REF_TAG} — copied to your size automatically.</i>`;
       void postVipPhoto(cardUrl, caption).then((ok) => { if (!ok) void postVip(text); });
     } else void postVip(text);
   // ── LE CANAL NE MONTRAIT PLUS AUCUNE PERTE (17/09/2026) ──────────────────────────────────────────
@@ -63,7 +70,7 @@ function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry
   // publierait les gros gains et les petites pertes, ce qui est pire que le silence.
   // Le plafond d'une note par jour ne bouge pas : c'est un choix délibéré (pas un mur de rouge), et le
   // changer relève de la ligne éditoriale de Mathieu, pas d'une correction de bug.
-  } else if ((reason === 'sl' || reason === 'loss') && pnl <= -VIP_WIN_MIN) {
+  } else if ((reason === 'sl' || reason === 'loss') && at1 <= -VIP_WIN_MIN) {
     if (SECONDARY) return; // pertes = le primaire (S2) seul → pas de mur de cartes rouges simultanées
     const day = new Date().toISOString().slice(0, 10);
     if (day !== vipSlDay) { vipSlDay = day; vipSlCount = 0; }
@@ -76,7 +83,7 @@ function vipTradeClose(displaySymbol: string, pnl: number, reason: string, entry
     const note = reason === 'sl'
       ? SL_NOTES[vipSlCount % SL_NOTES.length]
       : 'A losing trade — copied to your account exactly like the winners. The day\u2019s real net is in the wrap.';
-    void postVip(`🛡️ <b>−${usd(pnl)}</b> · ${VIP_TAG}\n${px}\n<i>${note}</i>`);
+    void postVip(`🛡️ <b>−${usd(pnl)}</b> · ${VIP_TAG} · <i>${REF_LABEL}</i>\n${px}\n<i>${note}</i>`);
   }
 }
 
@@ -127,6 +134,8 @@ export class DealRecorder extends Base {
     const ticket = deal.positionId ? String(deal.positionId) : String(deal.id);
     const exit = typeof deal.price === 'number' ? deal.price : 0;
     const pnl = typeof deal.profit === 'number' ? deal.profit : 0;
+    // volume DE CE DEAL — c'est lui qui a produit ce P&L (une clôture partielle ne porte que sa part)
+    const lot = typeof deal.volume === 'number' && deal.volume > 0 ? deal.volume : null;
     const when = deal.time ? new Date(deal.time).getTime() : Date.now();
     if (Date.now() - when > 5 * 60_000) return; // deal ancien → historique rejoué, on ignore (recordTradeClose reste idempotent)
 
@@ -148,8 +157,8 @@ export class DealRecorder extends Base {
     // (Cause du bug 24/07 : mêmes gains postés 2× dans le VIP — onDealAdded se déclenchait plusieurs fois.)
     const fresh = await recordTradeClose(ticket, display, { exit, pnl, r, reason, closedAt: when });
     if (!fresh) return;
-    if (pnl > 0) maybePushWin(display, pnl);
-    vipTradeClose(display, pnl, reason, c?.entry, exit, ticket);
+    if (pnl > 0) maybePushWin(display, pnl, lot);
+    vipTradeClose(display, pnl, reason, c?.entry, exit, ticket, lot);
   }
 
   /** Raison de sortie par proximité : TP, SL, breakeven — ou TRAIL (stop verrouillé NET au-dessus de l'entrée,

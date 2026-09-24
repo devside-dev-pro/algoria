@@ -4,13 +4,18 @@
 // Deux usages : le membre partage SES gains (QR = SON lien de parrainage → il gagne 50$),
 // la CM télécharge les gains du compte maître pour le canal (QR = algoria.tech).
 import QRCode from 'qrcode';
+import { REF_ACCOUNT_LABEL, REF_LABEL } from '@/lib/display/scale';
+
+// ÉCHELLE (24/09/2026) — la carte dit la taille à laquelle son chiffre est montré : sans ça, un « +$186 »
+// relu par quelqu'un à 0.01 lot recrée exactement le malentendu du « +$1 860 » à 1 lot. Voir lib/display/scale.ts.
+const CARD_SCALE_LINE = `PROFIT BANKED · ${REF_LABEL.toUpperCase()} · ${REF_ACCOUNT_LABEL.toUpperCase()}`;
 
 export type CardFormat = 'story' | 'landscape';
 
 export interface WinCardOpts {
   symbol: string; // 'XAUUSD' | 'BTCUSD'
   direction: string; // 'long' | 'short'
-  pnl: number; // gain en $ (positif)
+  pnl: number; // gain en $ (positif), DÉJÀ ramené à 0.10 lot par l'appelant (atRef) — la carte l'annonce
   closedAt?: string | null; // ISO — affiché en date lisible
   qrUrl: string; // destination du QR (lien de parrainage du membre, ou algoria.tech)
   qrLabel: string; // texte sous le QR (ex. 'algoria.tech' ou 'app.algoria.tech/r/ab12cd')
@@ -106,7 +111,7 @@ function drawStory(d: DrawCtx, o: WinCardOpts): void {
 
   ctx.font = `500 34px ${mono}`;
   ctx.fillStyle = '#f5c24a';
-  ctx.fillText('PROFIT BANKED AUTOMATICALLY', W / 2, 1030);
+  ctx.fillText(CARD_SCALE_LINE, W / 2, 1030);
 
   if (o.closedAt) {
     ctx.font = `400 30px ${mono}`;
@@ -182,7 +187,7 @@ function drawLandscape(d: DrawCtx, o: WinCardOpts): void {
 
   ctx.font = `500 24px ${mono}`;
   ctx.fillStyle = '#f5c24a';
-  ctx.fillText('PROFIT BANKED AUTOMATICALLY', 60, 434);
+  ctx.fillText(CARD_SCALE_LINE, 60, 434);
 
   // QR bas-gauche + pitch à sa droite (le bloc « code de parrainage » Binance)
   const qs = 150;
@@ -235,7 +240,7 @@ function drawRecapStory(d: DrawCtx, o: RecapCardOpts): void {
 
   ctx.font = `500 30px ${mono}`;
   ctx.fillStyle = 'rgba(147,165,196,.9)';
-  ctx.fillText(`${o.periodLabel} · REAL ACCOUNT`, W / 2, 320);
+  ctx.fillText(`${o.periodLabel} · REAL ACCOUNT · AT ${REF_LABEL.toUpperCase()}`, W / 2, 320);
 
   ctx.font = `800 78px ${display}`;
   ctx.fillStyle = '#22e0a6';
@@ -302,7 +307,7 @@ function drawRecapLandscape(d: DrawCtx, o: RecapCardOpts): void {
   ctx.fillText('ALGORIA', 128, 90);
   ctx.font = `500 20px ${mono}`;
   ctx.fillStyle = 'rgba(147,165,196,.9)';
-  ctx.fillText(`${o.periodLabel} · REAL ACCOUNT`, 132, 122);
+  ctx.fillText(`${o.periodLabel} · REAL ACCOUNT · AT ${REF_LABEL.toUpperCase()}`, 132, 122);
 
   ctx.font = `800 46px ${display}`;
   ctx.fillStyle = '#22e0a6';
