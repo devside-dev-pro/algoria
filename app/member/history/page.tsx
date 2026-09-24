@@ -6,7 +6,6 @@ import { atRef, REF_LABEL } from '@/lib/display/scale';
 import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
-import { RECORD } from '@/lib/backtest/record';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; closed_at: string; lot?: number }
 
@@ -186,8 +185,8 @@ export default function MemberHistory() {
         {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>No closed trades on this profile over the last 7 days.</p>}
       </section>
 
-      {/* « tu veux voir plus loin ? » → le track record COMPLET (16 mois, simulé), en natif. Visible par tous :
-          c'est du contenu public-équivalent (même données que la page /backtest), excellent pour la conversion. */}
+      {/* « tu veux voir plus loin ? » → le track record RÉEL du compte copié (depuis juillet 2026), en natif.
+          Visible par tous : mêmes données que la page publique /backtest, excellent pour la conversion. */}
       <button
         onClick={() => router.push('/member/track-record')}
         className="panel"
@@ -197,7 +196,7 @@ export default function MemberHistory() {
         <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
           <span style={{ fontSize: 13.5, fontWeight: 800 }}>See Algoria&rsquo;s full track record</span>
           <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45 }}>
-            {RECORD.window.months} months, every strategy combined — <b style={{ color: 'var(--cyan)' }}>+{RECORD.returnPct}%</b> simulated <span style={{ color: 'var(--dim)' }}>· drawdowns shown</span>
+            The <b style={{ color: 'var(--cyan)' }}>real account</b> Algoria copies, since July 2026 — in % or $ at your lot <span style={{ color: 'var(--dim)' }}>· red months shown</span>
           </span>
         </span>
         <span style={{ color: 'var(--cyan)', fontSize: 18 }}>›</span>
