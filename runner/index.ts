@@ -32,6 +32,7 @@ import { sthReady, sthStatus, sthMoveMaster } from '../lib/member/sth';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { startCopyObserver } from './observer';
+import { startSourceHistorySync } from './sourceHistory';
 
 // MODE COPIE : ce compte reçoit ses trades d'un copieur externe, nos moteurs ne décident plus rien ici.
 // Lu une fois, au chargement, parce que plusieurs endroits doivent se taire quand il est actif — voir
@@ -969,6 +970,10 @@ async function main() {
     startCopyObserver({ terminal, label: 'copie' });
     console.log(`[algoria] mode copie ACTIF · symboles déjà couverts : ${[...covered].join(', ') || 'aucun'}`);
   }
+
+  // ===== HISTORIQUE RÉEL DU COMPTE SOURCE (24/09/2026) — runner/sourceHistory.ts. Primaire seulement :
+  // un seul process lit le compte source, sinon deux runners le liraient en double. Ne bloque rien.
+  if (!SECONDARY) startSourceHistorySync();
 
   // ===== CHIEN DE GARDE DU FLUX DE PRIX (06/09/2026) =====
   // Vécu le 06/09 à 16:06 UTC : l'abonnement MetaApi aux cotations s'est éteint en silence sur S2. Le process
