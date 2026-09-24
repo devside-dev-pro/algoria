@@ -774,3 +774,46 @@ export function watchCommands(onCommand: (cmd: { type: string; payload: unknown 
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'commands' }, (p) => onCommand(p.new as never))
     .subscribe();
 }
+
+// ═══ HISTORIQUE DU COMPTE SOURCE (24/09/2026) — voir runner/sourceHistory.ts et la migration 0008 ═══════
+export interface SourceDealRow {
+  id: string; time: string; type: string; entry_type: string | null; position_id: string | null;
+  symbol: string | null; volume: number | null; price: number | null;
+  profit: number | null; commission: number | null; swap: number | null; reason: string | null;
+}
+
+/** Upsert idempotent des deals bruts (clé = id du deal) — un deal relu deux fois ne crée jamais de doublon. */
+export async function upsertSourceDeals(rows: SourceDealRow[]): Promise<number> {
+  const raw = db as unknown as { from: (t: string) => any };
+  let n = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await raw.from('source_deals').upsert(chunk, { onConflict: 'id' });
+    if (error) { console.error('[sync] upsertSourceDeals échoué:', error.message); break; }
+    n += chunk.length;
+  }
+  return n;
+}
+
+/** Date du dernier deal connu — la synchro suivante repart de là (moins une marge) au lieu de tout relire. */
+export async function lastSourceDealTime(): Promise<Date | null> {
+  const raw = db as unknown as { from: (t: string) => any };
+  const { data } = await raw.from('source_deals').select('time').order('time', { ascending: false }).limit(1);
+  const t = (data as Array<{ time: string }> | null)?.[0]?.time;
+  return t ? new Date(t) : null;
+}
+
+export async function saveSourceAccount(row: Record<string, unknown>): Promise<void> {
+  const raw = db as unknown as { from: (t: string) => any };
+  const { data: agg } = await raw.from('source_deals').select('time').order('time', { ascending: true }).limit(1);
+  const { count } = await raw.from('source_deals').select('id', { count: 'exact', head: true });
+  const { data: last } = await raw.from('source_deals').select('time').order('time', { ascending: false }).limit(1);
+  const { error } = await raw.from('source_account').upsert({
+    ...row,
+    deals: count ?? null,
+    first_deal_at: (agg as Array<{ time: string }> | null)?.[0]?.time ?? null,
+    last_deal_at: (last as Array<{ time: string }> | null)?.[0]?.time ?? null,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' });
+  if (error) console.error('[sync] saveSourceAccount échoué:', error.message);
+}
