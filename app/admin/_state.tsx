@@ -1071,6 +1071,7 @@ export function useAdminState() {
     if (a.kind === 'risk_change') return `→ lot ${String(d.lot ?? '').trim() || String(d.to ?? '?').replace(/^lot\s*/i, '')}`;
     if (a.kind === 'deposit') return `$${Number(d.amount_usd ?? 0)} deposited · com $${Number(d.commission_usd ?? 0)} (${String(d.commission_status ?? 'pending')})`;
     if (a.kind === 'note') return String(d.text ?? '');
+    if (a.kind === 'account_baseline') return `start $${Number(d.balance ?? 0)} on ${String(d.since ?? '?')} · lot ${String(d.lot ?? '?')} (member's own estimate, Home)`;
     return '';
   };
 
@@ -1151,7 +1152,7 @@ export function useAdminState() {
   // les coms de dépôt EN ATTENTE comptent dans le travail à faire : confirmer quand le broker a payé
   const depPending = deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending');
   const todo = actions.length + (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) + depPending.length + liveNoDeposit.length;
-  const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', strategy_change: '🎯 STRATEGY CHANGE (move master in STH)', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', disconnect: '⛔ DISCONNECT (remove from copier)', referral_reward: '💰 PAY REFERRAL REWARD (legacy)', kyc: '🪪 BROKER DETAILS', deposit: '🏦 DEPOSIT', note: '📝 NOTE' };
+  const KIND_LABEL: Record<string, string> = { connect: '🔌 CONNECT ACCOUNT', risk_change: '⚖ RISK CHANGE', strategy_change: '🎯 STRATEGY CHANGE (move master in STH)', pause: '⏸ PAUSE COPY', resume: '▶ RESUME COPY', disconnect: '⛔ DISCONNECT (remove from copier)', referral_reward: '💰 PAY REFERRAL REWARD (legacy)', kyc: '🪪 BROKER DETAILS', deposit: '🏦 DEPOSIT', note: '📝 NOTE', account_baseline: '📈 ACCOUNT START (member)' };
   const TABS: { key: Tab; label: string; badge?: number }[] = [
     { key: 'dashboard', label: 'DASHBOARD' },
     { key: 'queue', label: 'QUEUE', badge: actions.length },

@@ -4,7 +4,8 @@
 // « Algoria trade en ce moment, toi tu regardes de dehors » + UNLOCK (paywall broker) + support Telegram.
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
-import { atRef, REF_LABEL } from '@/lib/display/scale';
+import { atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
+import { AccountCard } from './AccountCard';
 import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount } from './ui';
 import { tgHref } from '@/lib/telegram';
@@ -38,6 +39,7 @@ export default function MemberHome() {
   const fmtYou = (v: number) => `${v > 0 ? '+' : ''}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)}$`;
   // hors « ta taille », la référence est 0.10 lot (24/09/2026, lib/display/scale.ts) — plus le lot du maître
   const ref = (t: FeedTrade) => atRef(t.pnl, t.lot);
+  const sameAsRef = Math.abs(clientLot - REF_LOT) < 1e-9; // copie à 0.10 : la parenthèse répéterait le même chiffre
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   // OFF-BOARDÉ → écran de récupération, jamais le dashboard verrouillé. Un membre dont l'accès vient d'être
@@ -68,6 +70,9 @@ export default function MemberHome() {
           </div>
         )}
       </section>
+
+      {/* MON COMPTE (estimation) — « à combien est mon compte ? » sans ouvrir MetaTrader */}
+      {unlocked && <AccountCard member={member} />}
 
       {/* HERO PROSPECT — pas de mur : l'app entière est visible, ce bloc vend le déblocage */}
       {!unlocked && (
@@ -153,7 +158,7 @@ export default function MemberHome() {
               {unlocked ? (
                 <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                   <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
-                  <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>({ref(t) > 0 ? '+' : ''}{ref(t).toFixed(0)}$)</span>
+                  {!sameAsRef && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>({ref(t) > 0 ? '+' : ''}{ref(t).toFixed(0)}$)</span>}
                 </span>
               ) : (
                 <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ +' : ''}{ref(t).toFixed(0)}$</span>
@@ -162,7 +167,7 @@ export default function MemberHome() {
           );
         })}
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
-          {unlocked ? `Shown at your copy size (${clientLot} lot) — at ${REF_LABEL} in brackets.` : `ALGORIA 2.0’s recent wins, shown at ${REF_LABEL} — members’ accounts copied every one of them automatically. Losses, live positions and the full history unlock with your access.`}
+          {unlocked ? (sameAsRef ? `Shown at your copy size (${clientLot} lot).` : `Shown at your copy size (${clientLot} lot) — at ${REF_LABEL} in brackets.`) : `ALGORIA 2.0’s recent wins, shown at ${REF_LABEL} — members’ accounts copied every one of them automatically. Losses, live positions and the full history unlock with your access.`}
         </p>
       </section>
 
