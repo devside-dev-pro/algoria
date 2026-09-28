@@ -156,3 +156,9 @@ html:has(.appShell) body {
 .deskscroll::-webkit-scrollbar-thumb { background: rgba(43, 227, 245, 0.22); border-radius: 4px; }
 .deskscroll::-webkit-scrollbar-thumb:hover { background: rgba(43, 227, 245, 0.4); }
 .deskscroll::-webkit-scrollbar-track { background: transparent; }
+
+/* MY ACCOUNT — le champ date iOS a une largeur intrinsèque qui ignore width:100% et déborde du panneau
+   (vécu 29/09 sur iPhone) ; sans apparence native il respecte la grille, et sa valeur s'aligne à gauche
+   comme le champ montant voisin. */
+.acct-date { -webkit-appearance: none; appearance: none; min-width: 0; max-width: 100%; }
+.acct-date::-webkit-date-and-time-value { text-align: left; margin: 0; }

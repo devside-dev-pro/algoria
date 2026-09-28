@@ -109,7 +109,7 @@ export function AccountCard({ member }: { member: Member }) {
             </label>
             <label style={field}>
               <span style={fieldLabel}>{exact && exact.slice(0, 10) === since && !data.baseline && dayLabel(exact).includes(' · ') ? `COPY STARTED · ${dayLabel(exact).split(' · ')[1]}` : 'COPY STARTED ON'}</span>
-              <input type="date" value={since} max={today()} min="2026-06-01" onChange={(ev) => setSince(ev.target.value)} style={input} />
+              <input type="date" className="acct-date" value={since} max={today()} min="2026-06-01" onChange={(ev) => setSince(ev.target.value)} style={input} />
             </label>
           </div>
           {!data.baseline && data.suggestion?.balance && (
@@ -171,4 +171,5 @@ const fieldLabel = { fontSize: 9.5, letterSpacing: 1.2, color: 'var(--dim)', fon
 const input = {
   padding: '10px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)',
   color: 'var(--text)', fontSize: 14, fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
+  height: 42, display: 'block', minWidth: 0, // même hauteur que le champ date iOS, jamais plus large que sa colonne
 } as const;

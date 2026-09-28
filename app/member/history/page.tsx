@@ -2,7 +2,7 @@
 // HISTORY — les trades clôturés d'Algoria (compte maître). L'historique PERSONNEL (son compte, son lot)
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
-import { atRef, REF_LABEL } from '@/lib/display/scale';
+import { atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
 import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
@@ -41,6 +41,7 @@ export default function MemberHistory() {
   // RÉFÉRENCE COMMUNE (24/09/2026) : tout ce qui n'est pas « à ta taille » est montré à 0.10 lot, jamais
   // au lot du maître — voir lib/display/scale.ts.
   const ref = (t: FeedTrade) => atRef(t.pnl, t.lot);
+  const sameAsRef = Math.abs(clientLot - REF_LOT) < 1e-9; // copie à 0.10 : la ligne « 0.10 lot » répéterait le même chiffre
   const fmtYou = (v: number) => `${v > 0 ? '+' : ''}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)}$`;
   // WIN CARD — le flex viral : la carte façon Binance avec le QR du lien de PARRAINAGE du membre.
   // Il frime avec son gain → ses viewers scannent → il touche 50$ par activation. Tout le monde gagne.
@@ -94,17 +95,8 @@ export default function MemberHistory() {
 
       {/* prospect : le serveur n'envoie que les gains → on l'ASSUME (highlight reel) au lieu d'afficher
           un win rate 100% qui sentirait le faux. L'historique complet arrive avec l'accès. */}
-      {/* PAGE BLANCHE DATÉE (09/09/2026, bloc A) : tant que le départ du track record visible a moins de 30 jours,
-          on dit pourquoi l'historique est court ou vide — un moteur qui repart, une date, pas un trou. */}
-      {trackSince && Date.now() - Date.parse(trackSince) < 30 * 86_400_000 && (
-        <section className="panel" style={{ padding: '13px 15px', border: '1px solid rgba(245,194,74,.45)', background: 'rgba(245,194,74,.06)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>NEW CHAPTER · SINCE {new Date(trackSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase()}</span>
-          <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)' }}>
-            A new chapter starts here: the track record restarts from this date. Members who were copying before can ask Mathieu for their own statement anytime.
-          </p>
-        </section>
-      )}
-
+      {/* BANNIÈRE « NEW CHAPTER » RETIRÉE (29/09/2026, Mathieu) : avec 3 mois de track record réel
+          (/member/track-record), annoncer un « nouveau départ » n'apporte rien et fait du bruit. */}
       {unlocked ? (
         <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* MÊME FENÊTRE QUE LE SÉLECTEUR — 7 jours, écrit noir sur blanc. Ces trois chiffres reprennent
@@ -128,7 +120,7 @@ export default function MemberHistory() {
             <Stat label="NET (YOUR SIZE)" value={trades.length ? fmtYou(trades.reduce((a, t) => a + you(t), 0)) : '—'} gold={trades.reduce((a, t) => a + you(t), 0) > 0} color={trades.reduce((a, t) => a + you(t), 0) > 0 ? undefined : 'var(--muted)'} />
           </div>
           <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
-            Algoria trades a <b style={{ color: 'var(--muted)' }}>master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b> (at {REF_LABEL} in small).
+            Algoria trades a <b style={{ color: 'var(--muted)' }}>master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b>{sameAsRef ? '.' : ` (at ${REF_LABEL} in small).`}
           </p>
         </section>
       ) : (
@@ -190,7 +182,7 @@ export default function MemberHistory() {
                       {unlocked ? (
                         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 74 }}>
                           <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
-                          <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>{REF_LABEL} {ref(t) > 0 ? '+' : ''}{ref(t).toFixed(0)}$</span>
+                          {!sameAsRef && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>{REF_LABEL} {ref(t) > 0 ? '+' : ''}{ref(t).toFixed(0)}$</span>}
                         </span>
                       ) : (
                         <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{ref(t).toFixed(0)}$</span>
