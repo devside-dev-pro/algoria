@@ -578,9 +578,15 @@ export async function POST(req: Request) {
           await (db as any).from('member_actions').insert({ tg_id: tgId, member_no: member?.member_no ?? null, kind: 'nudge', status: 'done', done_by: 'bot', detail: { via: 'auto-reply', note: 'AI auto-reply (simple question)', text: draft.text } });
         } else autoOk = false; // Telegram a refusé → on retombe sur le brouillon à valider
       }
-      if (!autoOk && token && !recent?.length) {
+      if (!autoOk && token && !recent?.length && !draft?.spam) {
         // ACCUSÉ DE RÉCEPTION (route vers l'humain) — seulement quand la réponse n'est pas partie seule
         await tgSend({ text: INBOX_ACK[loc], reply_markup: { inline_keyboard: [[{ text: INBOX_ACK_BTN[loc], url: SUPPORT_TG_URL }]] } });
+      }
+      if (draft?.spam) {
+        // SPAM (29/09/2026, décision Mathieu : « on ignore ») : ni accusé de réception, ni notification ; la ligne
+        // reste en base, marquée, pour que Mathieu puisse vérifier qu'aucun vrai message n'y est tombé.
+        if (rowId) await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft_intent: 'spam' } }).eq('id', rowId);
+        return NextResponse.json({ ok: true });
       }
       if (draft && rowId) {
         await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft: draft.text, draft_model: process.env.ALGORIA_REPLY_MODEL ?? 'haiku', draft_intent: draft.auto ? 'simple' : 'human', ...(autoOk && autoMessageId ? { auto_sent_at: new Date().toISOString(), auto_message_id: autoMessageId } : {}) } }).eq('id', rowId);
