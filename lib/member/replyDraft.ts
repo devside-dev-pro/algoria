@@ -20,6 +20,7 @@ import { STRATEGY_MIN_DEPOSIT } from './minimums';
 import { LIVE_STRATEGY } from './maintenance';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from './activation';
 import { APP_URL } from './i18n';
+import { getAgentDoc } from './agentDocs';
 
 const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
 /** Mode autonome : OFF par défaut depuis le 09/09/2026 (bloc B, décision Mathieu : « le bot parle trop, les gens
@@ -65,13 +66,32 @@ function facts(): string {
   ].join('\n');
 }
 
-function system(locale: string): string {
+/** Les faits qui VIVENT dans l'app (brokers, minimum, activation, 30 jours) : toujours injectés depuis le code,
+ *  pour que le knowledge écrit par Mathieu ne soit jamais en retard sur l'app. */
+function liveFacts(): string {
+  const brokers = PARTNER_BROKERS.map((b) => `${b.name}${b.featured ? ' (recommended)' : ''}${b.bonus ? ` — bonus code ${b.bonus.code} = ${b.bonus.pct}% deposit bonus in trading credit (not withdrawable cash)` : ''}`).join(', ');
+  const legs = ACTIVATION_LEGS.map((l) => `${l.lots} ${l.side}`).join(' + ');
+  return [
+    `Minimum deposit: $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]} (ALGORIA 2.0, the single engine members copy).`,
+    `Partner brokers: ${brokers}. A REAL MetaTrader account.`,
+    `Connecting: in the app (${APP_URL}/member/onboarding) the member enters MT login, server and the TRADER password (not the investor one). The team then verifies and switches the copy on.`,
+    `Activation: after connecting, the member places ${legs} on ${ACTIVATION_SYMBOL} in their MT terminal and closes both — a buy and a sell of the same size cancel out, no market risk, only the spread. That volume registers the account with the broker. Then they tap "I've placed both trades" in the app.`,
+    `Funds stay ${WITHDRAW_LOCK_DAYS} days after the deposit: withdrawing earlier cancels the broker registration and the Algoria access. After that, the money is theirs to withdraw anytime.`,
+  ].join('\n');
+}
+
+function system(locale: string, knowledge: string | null): string {
+  // LE CERVEAU (29/09/2026) : quand Mathieu a écrit son knowledge dans l'admin, c'est LUI la source — plus les
+  // faits intégrés ci-dessus, qui restent le filet si la base est vide ou injoignable.
+  const factsBlock = knowledge
+    ? `${liveFacts()}\n\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth; it wins over anything else):\n${knowledge}`
+    : facts();
   return `You write Telegram replies for the Algoria bot, the support channel of Algoria, an AI copy-trading service on gold (XAU/USD) and Bitcoin run by Mathieu. A prospect or member just wrote to the bot.
 
 You are Algoria AI, Algoria's AI support (you may say "we" for Algoria). Do NOT sign and do NOT add a way to reach Mathieu at the end: the signature "Algoria AI" and Mathieu's contact are added automatically under your reply. Warm, direct, no hype. Reply in the language of the incoming message (English or Italian). If the language is unclear, use ${locale === 'it' ? 'Italian' : 'English'}.
 
 FACTS — use only these, never invent anything else:
-${facts()}
+${factsBlock}
 
 RULES
 - THINK before you write: what exactly is this person asking or worried about, where are they (their status), what was already said in the recent exchange? Then answer THAT, like a person who knows Algoria inside out — not like a keyword bot.
@@ -113,7 +133,7 @@ export async function draftReply(i: DraftInput): Promise<Draft | null> {
   const user = `Member: ${i.member?.member_no != null ? `#${i.member.member_no}` : 'unknown'} ${i.member?.tg_username ? '@' + i.member.tg_username : (i.member?.tg_name ?? '')}\nStatus: ${statusLine}\nApp language: ${i.locale ?? 'en'}\n\nRecent exchange:\n${history}\n\nNew message from the member:\n"""${i.text.slice(0, 1200)}"""\n\nReturn the JSON.`;
   try {
     const client = new Anthropic({ timeout: 8000, maxRetries: 0 });
-    const res = await client.messages.create({ model: MODEL, max_tokens: 350, system: system(i.locale ?? 'en'), messages: [{ role: 'user', content: user }] });
+    const res = await client.messages.create({ model: MODEL, max_tokens: 350, system: system(i.locale ?? 'en', await getAgentDoc('knowledge')), messages: [{ role: 'user', content: user }] });
     const raw = res.content.map((c) => (c.type === 'text' ? c.text : '')).join('').trim();
     // JSON ou rien : une sortie qui n'en est pas (préambule, refus) devient un brouillon à valider, jamais un envoi.
     const m = /\{[\s\S]*\}/.exec(raw);
