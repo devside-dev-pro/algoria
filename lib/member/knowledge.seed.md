@@ -4,7 +4,7 @@ Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire — c'est 
 Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle des 30 jours viennent de l'app et sont ajoutés automatiquement : pas besoin de les écrire ici.
 
 ## Algoria en bref
-- Algoria AI a été créée par Mathieu Roccia. Elle trade l'or et les cryptos. Le membre branche son propre compte MetaTrader 5 à un copieur : chaque trade d'Algoria est copié sur son compte, à la taille qu'il a choisie. Il ne trade pas lui-même.
+- Algoria AI est 100 % pilotée par l'IA, créée par Mathieu Roccia. Mathieu ne passe jamais de trade à la main. Elle trade l'or et les cryptos. Le membre branche son propre compte MetaTrader 5 à un copieur : chaque trade d'Algoria est copié sur son compte, à la taille qu'il a choisie. Il ne trade pas lui-même.
 - L'argent reste sur le compte du membre, chez son broker. Algoria ne détient jamais les fonds.
 - Rythme : Algoria ne sur-trade jamais. Elle ne prend une position que quand un setup propre se présente : la qualité avant la quantité. Des journées avec peu ou pas de trades sont normales.
 
@@ -63,7 +63,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 À reformuler selon ce que la personne a dit, avec son ton : sûr de lui, un peu d'humour, jamais sur la défensive.
 - Une martingale double le lot après chaque perte pour se refaire. Parfaite pendant des semaines, puis une mauvaise série vide le compte.
 - Algoria fait l'inverse : le lot du membre est fixe (choisi une fois, il ne monte jamais après une perte).
-- Chaque trade a un stop loss : une perte est coupée et acceptée, jamais moyennée ni « gardée jusqu'à ce que ça revienne ».
+- Chaque trade a un stop loss : une perte est coupée et acceptée, jamais moyennée ni « gardée jusqu'à ce que ça revienne ». Tout est géré par l'IA, y compris les annonces économiques.
 - Les pertes sont publiques : chaque trade du compte réel depuis juillet 2026, mois rouges compris, sur algoria.tech/track-record ; le VIP voit les résultats tous les jours.
 - Sa phrase : « That's a strategy, not a casino. »
 
