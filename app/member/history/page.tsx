@@ -17,16 +17,23 @@ export default function MemberHistory() {
   const [paywall, setPaywall] = useState(false);
   const [sharing, setSharing] = useState<string | null>(null);
   const [trackSince, setTrackSince] = useState<string | null>(null); // départ du track record visible (lib/member/trackSince.ts)
+  // PÉRIODE (28/09/2026) : « depuis Algoria 2.0 » par défaut. Sur 7 jours seuls, une mauvaise séance rendait
+  // tout l'historique rouge alors que le membre est vert depuis le départ. Le prospect garde le flux court.
+  type Range = 'all' | '30d' | '7d';
+  const [range, setRange] = useState<Range>('all');
+  const [openDays, setOpenDays] = useState<Set<string> | null>(null); // null = seule la journée la plus récente est dépliée
   // Plus de paramètre `strategy` : il servait au comparateur, et il n'y a plus qu'une stratégie à voir.
   useEffect(() => {
-    void fetch('/api/member/feed').then(async (r) => {
+    if (loading) return;
+    setOpenDays(null);
+    void fetch(unlocked ? `/api/member/feed?range=${range}` : '/api/member/feed').then(async (r) => {
       if (!r.ok) return;
       const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; trackSince?: string };
       setTrades(d.trades);
       if (d.trackSince) setTrackSince(d.trackSince);
       if (d.clientLot) setClientLot(d.clientLot);
     });
-  }, []);
+  }, [loading, unlocked, range]);
   // ÉCHELLE CLIENT : le master (~$70k) trade en lot 1 — le membre copie en lot FIXE (clientLot, ex. 0.01).
   // Montant « pour toi » = pnl × clientLot ÷ lot du master. Leçon churn : « −1291$ » a fait fuir un client
   // à 500$ dont le vrai chiffre était −13$ — on met SON échelle en avant, le master en petit.
@@ -58,6 +65,8 @@ export default function MemberHistory() {
   const net = trades.reduce((a, t) => a + ref(t), 0);
   const winSum = trades.filter((t) => Number(t.pnl) > 0).reduce((a, t) => a + ref(t), 0);
   const best = trades.reduce((m, t) => Math.max(m, ref(t)), 0);
+  const sinceLabel = trackSince ? new Date(trackSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase() : '';
+  const rangeTitle = range === 'all' ? `SINCE ALGORIA 2.0${sinceLabel ? ` · ${sinceLabel}` : ''}` : range === '30d' ? 'LAST 30 DAYS' : 'LAST 7 DAYS';
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
       {/* CLOSING EN HAUT (prospects) — la 1re chose qu'un non-membre voit : le manque à gagner + le CTA.
@@ -101,7 +110,17 @@ export default function MemberHistory() {
           {/* MÊME FENÊTRE QUE LE SÉLECTEUR — 7 jours, écrit noir sur blanc. Ces trois chiffres reprennent
               exactement ceux de la pastille du profil consulté juste au-dessus ; l'étiquette évite qu'on
               se demande lequel des deux blocs dit vrai. */}
-          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 800 }}>LAST 7 DAYS</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 800 }}>{rangeTitle}</span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {(['all', '30d', '7d'] as const).map((k) => (
+                <button key={k} onClick={() => setRange(k)} className="mono"
+                  style={{ padding: '4px 9px', borderRadius: 7, fontSize: 10, fontWeight: 800, letterSpacing: 0.6, cursor: 'pointer', border: `1px solid ${range === k ? 'rgba(43,227,245,.55)' : 'var(--border)'}`, background: range === k ? 'rgba(43,227,245,.1)' : 'transparent', color: range === k ? 'var(--cyan)' : 'var(--dim)' }}>
+                  {k === 'all' ? 'SINCE 2.0' : k.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 18 }}>
             <Stat label="TRADES" value={String(trades.length)} />
             <Stat label="WINS" value={trades.length ? `${Math.round((wins / trades.length) * 100)}%` : '—'} color="var(--up)" />
@@ -137,21 +156,29 @@ export default function MemberHistory() {
           // COULEURS (03/09, décision Mathieu) : les pertes sont en gris, pas en rose-rouge, et une journée négative
           // n'a plus de fond rouge. Après une semaine rouge, tout l'historique l'était — « ça ne donne pas envie de
           // rester », et c'est le moment où les retraits arrivent. Le vert reste réservé aux gains.
-          return groups.map((g) => {
+          return groups.map((g, gi) => {
+            // repliées par défaut sauf la plus récente : « depuis 2.0 » = des centaines de lignes, on raconte
+            // d'abord les journées (leur bilan), le détail s'ouvre d'un tap
+            const open = !unlocked || (openDays ? openDays.has(g.day) : gi === 0);
+            const toggle = () => setOpenDays((cur) => {
+              const next = new Set(cur ?? (groups[0] ? [groups[0].day] : []));
+              if (next.has(g.day)) next.delete(g.day); else next.add(g.day);
+              return next;
+            });
             const dayYou = g.items.reduce((a, t) => a + you(t), 0);
             const dayWins = g.items.filter((t) => Number(t.pnl) > 0).length;
             const dayGreen = dayYou > 0;
             return (
               <div key={g.day} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {unlocked && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: dayGreen ? 'rgba(38,224,166,.07)' : 'rgba(130,152,190,.06)', border: `1px solid ${dayGreen ? 'rgba(38,224,166,.25)' : 'rgba(130,152,190,.18)'}` }}>
-                    <span className="mono" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: 'var(--muted)' }}>{g.day.toUpperCase()}</span>
+                  <div onClick={toggle} role="button" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: dayGreen ? 'rgba(38,224,166,.07)' : 'rgba(130,152,190,.06)', border: `1px solid ${dayGreen ? 'rgba(38,224,166,.25)' : 'rgba(130,152,190,.18)'}` }}>
+                    <span className="mono" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: 'var(--muted)' }}>{open ? '▾' : '▸'} {g.day.toUpperCase()}</span>
                     <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{g.items.length} trades · {Math.round((dayWins / g.items.length) * 100)}% wins</span>
                     <span style={{ flex: 1 }} />
                     <span className="mono" style={{ fontSize: 13.5, fontWeight: 800, color: dayGreen ? 'var(--up)' : 'var(--muted)' }}>{fmtYou(dayYou)}</span>
                   </div>
                 )}
-                {g.items.map((t) => {
+                {open && g.items.map((t) => {
                   const win = Number(t.pnl) > 0;
                   return (
                     <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 0 7px 10px', borderBottom: '1px solid rgba(130,152,190,.1)', opacity: win ? 1 : 0.55 }}>
@@ -182,7 +209,7 @@ export default function MemberHistory() {
             );
           });
         })()}
-        {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>No closed trades on this profile over the last 7 days.</p>}
+        {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>No closed trades over this period yet.</p>}
       </section>
 
       {/* « tu veux voir plus loin ? » → le track record RÉEL du compte copié (depuis juillet 2026), en natif.
@@ -206,7 +233,7 @@ export default function MemberHistory() {
           si aucun gain n'est encore chargé (winSum 0) — sinon on ne duplique pas le CTA. Membre : la note. */}
       {unlocked ? (
         <p style={{ margin: 0, fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.55 }}>
-          Master account results. Your personal history — your account, your lot size — lands here once your copier link is live.
+          Algoria&rsquo;s trades, shown at your lot. For your own balance, see <b style={{ color: 'var(--muted)' }}>MY ACCOUNT</b> on the Home tab.
         </p>
       ) : winSum === 0 ? (
         <button

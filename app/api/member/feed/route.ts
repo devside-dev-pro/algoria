@@ -17,6 +17,8 @@ export async function GET(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
   if (!s) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
+  const range = req.nextUrl.searchParams.get('range');
+  const rangeFrom = range === 'all' ? 0 : Date.now() - (range === '30d' ? 30 : 7) * 86_400_000;
   const [memberQ, desk, tradesQ, signalsQ] = await Promise.all([
     (db as any).from('members').select('status,risk_tier,strategy,lot').eq('tg_id', s.tgId).limit(1) as Promise<{ data: Array<{ status: string; risk_tier: string; strategy: number | null; lot: number | null }> | null }>,
     db.from('events').select('id,ts,msg,data').eq('level', 'ai').order('ts', { ascending: false }).limit(24),
@@ -26,7 +28,20 @@ export async function GET(req: NextRequest) {
     // nombre de lignes est ce qui rend les trois colonnes comparables : à « les N derniers trades », celle
     // qui trade le plus écrasait les autres dans le lot et couvrait une période bien plus courte qu'elles.
     // borne basse : les 7 derniers jours, jamais avant le départ du track record visible (lib/member/trackSince.ts)
-    db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot,strategy').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', new Date(Math.max(Date.now() - 7 * 86_400_000, TRACK_SINCE_MS)).toISOString()).order('closed_at', { ascending: false }).limit(500),
+    // PÉRIODE (28/09/2026) : `?range=7d|30d|all` — 7 jours par défaut (Home). L'History propose « depuis
+    // Algoria 2.0 » : 7 jours seuls pouvaient afficher un net rouge alors que le membre est vert depuis le
+    // départ — une fenêtre trop courte raconte la dernière mauvaise séance, pas la trajectoire.
+    // Paginé par 1000 (plafond PostgREST) : « depuis 2.0 » dépasse vite le millier de lignes.
+    (async () => {
+      const out: Array<Record<string, unknown>> = [];
+      const from = new Date(Math.max(rangeFrom, TRACK_SINCE_MS)).toISOString();
+      for (let i = 0; i < 10_000; i += 1000) {
+        const { data } = await db.from('trades').select('ticket,symbol,direction,entry,exit,pnl,r,reason,opened_at,closed_at,lot,strategy').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', from).order('closed_at', { ascending: false }).range(i, i + 999);
+        out.push(...(data ?? []));
+        if (!data || data.length < 1000) break;
+      }
+      return { data: out as Array<{ ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; opened_at: string; closed_at: string; lot: number | null; strategy: number | null }> };
+    })(),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
   ]);
   // même règle que /api/member/me : admin OU copie activée OU whitelist VIP/équipe (CM…)
@@ -90,5 +105,5 @@ export async function GET(req: NextRequest) {
     lastLiveNo: lastLive && lastLiveHours != null && lastLiveHours < 72 ? Number(lastLive.member_no) : null,
     lastLiveHours: lastLive && lastLiveHours != null && lastLiveHours < 72 ? lastLiveHours : null,
   };
-  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, trackSince: TRACK_SINCE });
+  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, trackSince: TRACK_SINCE, range: range === 'all' || range === '30d' ? range : '7d' });
 }
