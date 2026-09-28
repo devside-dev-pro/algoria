@@ -13,7 +13,10 @@ export const dynamic = 'force-dynamic';
 //
 // Point de départ = une ligne member_actions kind='account_baseline' (status 'done', la plus récente gagne) :
 // pas de colonne à migrer, et l'admin la voit dans la chronologie du membre. Tant qu'il n'en a pas posé,
-// on lui SUGGÈRE son dépôt enregistré par le staff (montant + date) — il n'a qu'à confirmer.
+// on lui SUGGÈRE : l'HEURE EXACTE du GO LIVE (le clic CRM branche le copieur — la copie démarre à cette
+// seconde, pas à minuit) et le montant du dépôt enregistré à ce moment-là. Un dépôt ancien (membre
+// reconnecté des semaines plus tard, vécu #106 : dépôt 28/07, GO LIVE 23/09) ne dit rien de sa balance
+// du jour : on ne pré-remplit alors que l'heure, jamais deux mois de trades qu'il n'a pas copiés.
 //
 // C'est une ESTIMATION et l'UI le dit : spread, commission du broker, trades manqués pendant une pause,
 // dépôts/retraits en cours de route l'écartent du vrai chiffre. Le lot est figé au moment du point de départ :
@@ -49,17 +52,19 @@ export async function GET(req: NextRequest) {
     : null;
 
   if (!baseline) {
-    // SUGGESTION : le dernier dépôt enregistré par le staff (un re-dépôt après un compte brûlé repart de là),
-    // sinon la date d'activation de la copie, sans montant.
+    // SUGGESTION : départ = dernier GO LIVE (connect validé) à la seconde ; balance = le dépôt enregistré
+    // dans les 48 h autour de ce GO LIVE (GO LIVE le logge dans la foulée), sinon vide.
     const [depQ, conQ] = await Promise.all([
       db.from('member_actions').select('detail,created_at').eq('tg_id', s.tgId).eq('kind', 'deposit').order('created_at', { ascending: false }).limit(1),
-      db.from('member_actions').select('done_at,created_at').eq('tg_id', s.tgId).eq('kind', 'connect').eq('status', 'done').order('created_at', { ascending: false }).limit(1),
+      db.from('member_actions').select('done_at').eq('tg_id', s.tgId).eq('kind', 'connect').eq('status', 'done').not('done_at', 'is', null).order('done_at', { ascending: false }).limit(1),
     ]);
     const dep = depQ.data?.[0] as { detail?: { amount_usd?: number; deposited_at?: string }; created_at?: string } | undefined;
-    const con = conQ.data?.[0] as { done_at?: string | null; created_at?: string } | undefined;
+    const goLive = (conQ.data?.[0] as { done_at?: string | null } | undefined)?.done_at ?? null;
+    const depAt = dep?.created_at ?? null;
     const amount = Number(dep?.detail?.amount_usd ?? 0);
-    const since = dep?.detail?.deposited_at ?? dep?.created_at ?? con?.done_at ?? con?.created_at ?? null;
-    return NextResponse.json({ baseline: null, lot, suggestion: { balance: amount > 0 ? Math.round(amount) : null, since: since ? since.slice(0, 10) : null } });
+    const depMatches = amount > 0 && (!goLive || (depAt != null && Math.abs(Date.parse(depAt) - Date.parse(goLive)) < 48 * 3_600_000));
+    const since = goLive ?? dep?.detail?.deposited_at ?? depAt;
+    return NextResponse.json({ baseline: null, lot, suggestion: { balance: depMatches ? Math.round(amount) : null, since: since ? new Date(since).toISOString() : null } });
   }
 
   // Trades COPIÉS depuis le point de départ : mêmes exclusions que le flux membre (show BEAST/RAFALE,
@@ -117,7 +122,9 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(balance) || balance < 10 || balance > 10_000_000) return NextResponse.json({ error: 'enter your starting balance in $ (10 or more)' }, { status: 400 });
   const sinceMs = Date.parse(String(body.since ?? ''));
   if (!Number.isFinite(sinceMs) || sinceMs < MIN_SINCE || sinceMs > Date.now() + 86_400_000) return NextResponse.json({ error: 'pick the date your copy started' }, { status: 400 });
-  const detail: Baseline = { balance, since: new Date(sinceMs).toISOString().slice(0, 10), lot, set_at: new Date().toISOString() };
+  // horodatage COMPLET : « depuis le GO LIVE de 19:35 », pas « depuis minuit » (les trades du matin
+  // n'étaient pas copiés). Une date seule (saisie à la main) vaut minuit UTC.
+  const detail: Baseline = { balance, since: new Date(sinceMs).toISOString(), lot, set_at: new Date().toISOString() };
   const { error } = await db.from('member_actions').insert({ tg_id: s.tgId, member_no: memberNo, kind: KIND, status: 'done', done_by: 'member', done_at: detail.set_at, detail: detail as never });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
