@@ -44,7 +44,9 @@ function facts(): string {
     `Activation: after connecting, the member places ${legs} on ${ACTIVATION_SYMBOL} in their MT terminal and closes both — a buy and a sell of the same size cancel out, no market risk, only the spread. That volume registers the account with the broker. Then they tap "I've placed both trades" in the app.`,
     `Funds stay ${WITHDRAW_LOCK_DAYS} days after the deposit: withdrawing earlier cancels the broker registration and the Algoria access. After that, the money is theirs to withdraw anytime. Algoria never holds member funds; the money stays on the member's own broker account.`,
     `Copy size: default 0.01 lot per ~$500 of balance, adjustable in the app profile. Members can pause or stop the copy themselves in the app.`,
-    `Results: real closed trades are in the app History. The public track record page is a historical SIMULATION and is labelled as such. Trading involves risk; past results do not predict future results.`,
+    // 29/09/2026 : la page n'est PLUS une simulation — c'est l'historique réel du compte copié (MetaApi,
+    // lecture seule). Le bot l'écrivait encore « historical SIMULATION » aux prospects.
+    `Results: real closed trades are in the app History. The track record page (https://algoria.tech/track-record, also the central button of the app) shows the REAL account Algoria copies, trade by trade since July 2026 — in % or in $ at any lot size, losing months included. It is real history, NOT a simulation or a backtest. Never quote a return, an average or any figure from it yourself: send the link and let them look. Trading involves risk; past results do not predict future results.`,
     `Support: Mathieu answers personally on Telegram (@mathieu_algoria).`,
   ].join('\n');
 }
