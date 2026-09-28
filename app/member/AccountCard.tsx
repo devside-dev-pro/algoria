@@ -12,7 +12,12 @@ interface AccountResp { baseline: Baseline | null; lot: number; lotChanged?: boo
 
 const money = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const signed = (v: number) => `${v >= 0 ? '+' : '−'}${money(Math.abs(v))}`;
-const dayLabel = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+// « 28 Sept · 19:35 » quand le départ est une heure précise (GO LIVE), « 28 Sept » pour une date saisie
+const dayLabel = (iso: string) => {
+  const d = new Date(iso.length <= 10 ? `${iso}T00:00:00Z` : iso);
+  const day = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return iso.length > 10 && d.toISOString().slice(11, 16) !== '00:00' ? `${day} · ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : day;
+};
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function AccountCard({ member }: { member: Member }) {
@@ -20,6 +25,9 @@ export function AccountCard({ member }: { member: Member }) {
   const [editing, setEditing] = useState(false);
   const [bal, setBal] = useState('');
   const [since, setSince] = useState(today());
+  // heure EXACTE derrière la date affichée (GO LIVE, ou « maintenant » pour une mise à jour) : envoyée telle
+  // quelle tant que le membre ne change pas la date — sinon minuit du jour choisi
+  const [exact, setExact] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [guide, setGuide] = useState(false);
@@ -32,7 +40,7 @@ export function AccountCard({ member }: { member: Member }) {
       if (!d.baseline) {
         setEditing(true);
         if (d.suggestion?.balance) setBal(String(d.suggestion.balance));
-        if (d.suggestion?.since) setSince(d.suggestion.since);
+        if (d.suggestion?.since) { setSince(d.suggestion.since.slice(0, 10)); setExact(d.suggestion.since); }
       }
     });
   useEffect(() => { void load(); }, []);
@@ -41,7 +49,7 @@ export function AccountCard({ member }: { member: Member }) {
     setErr(null);
     setSaving(true);
     try {
-      const r = await fetch('/api/member/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ balance: Number(bal.replace(/[^0-9.]/g, '')), since }) });
+      const r = await fetch('/api/member/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ balance: Number(bal.replace(/[^0-9.]/g, '')), since: exact && exact.slice(0, 10) === since ? exact : since }) });
       const d = (await r.json().catch(() => ({}))) as { error?: string };
       if (!r.ok) { setErr(d.error ?? 'could not save — try again'); return; }
       setEditing(false);
@@ -81,7 +89,7 @@ export function AccountCard({ member }: { member: Member }) {
               Your lot changed to {data.lot} since this starting point — update it with your current balance so the estimate follows your new size.
             </p>
           )}
-          <button onClick={() => { setBal(String(Math.round(e.balance))); setSince(today()); setEditing(true); }} style={ghost}>
+          <button onClick={() => { setBal(String(Math.round(e.balance))); setSince(today()); setExact(new Date().toISOString()); setEditing(true); }} style={ghost}>
             ✎ UPDATE STARTING POINT <span style={{ fontWeight: 500, color: 'var(--dim)' }}>· after a deposit or withdrawal</span>
           </button>
         </>
@@ -100,12 +108,12 @@ export function AccountCard({ member }: { member: Member }) {
               <input inputMode="decimal" value={bal} onChange={(ev) => setBal(ev.target.value)} placeholder="500" style={input} />
             </label>
             <label style={field}>
-              <span style={fieldLabel}>COPY STARTED ON</span>
+              <span style={fieldLabel}>{exact && exact.slice(0, 10) === since && !data.baseline && dayLabel(exact).includes(' · ') ? `COPY STARTED · ${dayLabel(exact).split(' · ')[1]}` : 'COPY STARTED ON'}</span>
               <input type="date" value={since} max={today()} min="2026-06-01" onChange={(ev) => setSince(ev.target.value)} style={input} />
             </label>
           </div>
           {!data.baseline && data.suggestion?.balance && (
-            <span style={{ fontSize: 11, color: 'var(--dim)' }}>Prefilled from the deposit the team recorded — change it if it&rsquo;s not right.</span>
+            <span style={{ fontSize: 11, color: 'var(--dim)' }}>Prefilled from your activation and the deposit the team recorded — change it if it&rsquo;s not right.</span>
           )}
           {err && <span style={{ fontSize: 12, color: 'var(--gold)' }}>{err}</span>}
           <div style={{ display: 'flex', gap: 8 }}>
