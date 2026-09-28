@@ -699,7 +699,7 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
   if (body.liveAlert) {
     // 📣 ALERTE LIVE : push à tous les membres abonnés — renvoie l'audience vers le stream.
     const { pushToAll } = await import('@/lib/push/send');
-    const url = process.env.NEXT_PUBLIC_TIKTOK_URL ?? process.env.NEXT_PUBLIC_TELEGRAM_URL ?? '/member/live';
+    const url = process.env.NEXT_PUBLIC_TIKTOK_URL ?? process.env.NEXT_PUBLIC_TELEGRAM_URL ?? '/member';
     const sent = await pushToAll({ title: '🔴 ALGORIA IS LIVE', body: 'The AI is trading live right now — come watch.', url, tag: 'algoria-live' });
     return NextResponse.json({ sent });
   }

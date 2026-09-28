@@ -137,7 +137,7 @@ export interface Deposit {
   detail: { broker?: string | null; amount_usd?: number; commission_usd?: number; commission_status?: string; note?: string | null; deposited_at?: string; booked_ym?: string | null; nature?: string; redeposit?: boolean } | null;
 }
 
-export type Tab = 'dashboard' | 'queue' | 'members' | 'deposits' | 'affiliate' | 'desk' | 'tools';
+export type Tab = 'dashboard' | 'queue' | 'members' | 'deposits' | 'affiliate' | 'tools';
 
 
 // ===== briques UI du CRM =====

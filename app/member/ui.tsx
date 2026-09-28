@@ -419,7 +419,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
       </button>
     );
   };
-  const liveActive = path?.startsWith('/member/live');
+  const liveActive = path?.startsWith('/member/track-record');
   // le prompt d'installation vit sur les pages connectées (y compris l'attente d'approbation — le bon moment pour installer)
   const preAuth = ['/login', '/denied', '/invite'].some((p) => path?.includes(p));
   return (
@@ -436,13 +436,15 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
             background: 'rgba(8,16,31,.94)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border)',
           }}
         >
-          {/* 5 onglets — ALGORIA AI parfaitement centré : Home·History | AI | Academy·Profile */}
+          {/* 5 onglets — le bouton central parfaitement centré : Home·History | Results | Academy·Profile */}
           <Tab href="/member" label="Home" icon={ICONS.home} />
           <Tab href="/member/history" label="History" icon={ICONS.history} />
-          {/* ALGORIA AI — le bouton PRINCIPAL : central, surélevé, la marque au centre (le flux live de l'IA) */}
+          {/* RESULTS — le bouton PRINCIPAL : central, surélevé, la marque au centre. Il ouvrait le Desk d'analystes IA,
+              retiré le 29/09/2026 (coût Anthropic quotidien, « HOLD » tous les jours) : il ouvre désormais le track
+              record RÉEL du compte copié — la preuve, en % ou en $ au lot du membre. */}
           <button
-            onClick={() => router.push('/member/live')}
-            aria-label="Desk — the AI analysts' desk"
+            onClick={() => router.push('/member/track-record')}
+            aria-label="Results — Algoria's real track record"
             style={{ flex: 1, maxWidth: 118, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, border: 'none', background: 'transparent', cursor: 'pointer', marginTop: -22 }}
           >
             <span
@@ -456,7 +458,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
             >
               <img src="/brand/algoria-mark.png" alt="" width={32} height={32} style={{ objectFit: 'contain' }} />
             </span>
-            <span style={{ fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800, color: liveActive ? 'var(--cyan)' : 'var(--muted)' }}>Desk</span>
+            <span style={{ fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800, color: liveActive ? 'var(--cyan)' : 'var(--muted)' }}>Results</span>
           </button>
           <Tab href="/member/academy" label="Academy" icon={ICONS.academy} />
           <Tab href="/member/profile" label="Profile" icon={ICONS.profile} />
