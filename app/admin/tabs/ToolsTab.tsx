@@ -16,6 +16,7 @@ export function ToolsTab() {
           <>
             {/* 🧠 le cerveau d'Algoria AI — en tête des outils : c'est lui que Mathieu nourrit le plus souvent */}
             <AgentBrain />
+            <AgentBrain docKey="memory" />
             {/* 📣 ANNONCE GROUPÉE — née du basculement S1 → S2 : prévenir 17 membres un par un depuis le
                 fil BOT ACTIVITY, c'est 17 clics et la certitude d'en oublier un. L'audience est résolue
                 CÔTÉ SERVEUR (le navigateur n'envoie qu'un nom de segment), et l'étiquette empêche qu'un
