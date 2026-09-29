@@ -1,6 +1,6 @@
 # Algoria AI — knowledge
 
-Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire — c'est lui qui le complète et le corrige. C'est ce que sait Algoria AI : il s'en sert pour réfléchir, il ne recopie jamais une phrase telle quelle.
+Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire (v7 : comptes existants, 2e compte impossible chez le même broker, CPA pour VT et PU Prime) — c'est lui qui le complète et le corrige. C'est ce que sait Algoria AI : il s'en sert pour réfléchir, il ne recopie jamais une phrase telle quelle.
 Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle des 30 jours viennent de l'app et sont ajoutés automatiquement : pas besoin de les écrire ici.
 
 ## Algoria en bref
@@ -29,7 +29,10 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 ## Choisir un broker partenaire
 - En premier : RaiseFX. Sinon, proposer un partenaire chez qui la personne n'a pas déjà un compte.
 - Avis négatifs en ligne : c'est courant pour les brokers, parce que beaucoup de gens tradent seuls, perdent et notent mal le broker. Algoria travaille avec ces partenaires depuis longtemps et Mathieu est en contact direct avec leurs managers : au moindre souci, il intervient.
-- Compte existant chez un partenaire : le transfert sous l'IB d'Algoria est accepté ; il suffit d'expliquer la procédure au support du broker et de donner le numéro de partenaire d'Algoria pour ce broker (Mathieu le fournit si besoin).
+- Compte existant chez un partenaire : impossible d'ouvrir un 2e compte chez le MÊME broker (le KYC bloque : même identité, même numéro de téléphone). Deux options seulement :
+  1. rattacher son compte existant au numéro de partenaire d'Algoria chez ce broker, en le demandant au support du broker ;
+  2. ou ouvrir un nouveau compte chez un AUTRE broker partenaire, via le lien.
+- VT Markets et PU Prime : le rattachement se demande en CPA (pas en IB), avec le numéro de partenaire d'Algoria.
 
 ## Comment Algoria est payée
 - Algoria est payée par le broker partenaire, jamais sur les profits du membre. Ne jamais parler d'un pourcentage sur les gains ni d'un montant par lot.
@@ -37,7 +40,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 ## Accès gratuit (broker partenaire)
 - Le compte doit être ouvert via le lien partenaire de l'app, ou, s'il existe déjà chez un broker partenaire, rattaché à l'ID d'affiliation d'Algoria en le demandant au support du broker (l'app donne le message exact à envoyer).
 - Un compte ouvert directement sur le site du broker sans le lien n'est pas gratuit tant qu'il n'est pas rattaché.
-- Un compte broker qui a déjà généré une commission en 2025 (pour quelqu'un d'autre) ne peut pas avoir l'accès gratuit : ouvrir un nouveau compte via le lien, ou prendre la licence.
+- Un compte broker qui a déjà généré une commission en 2025 (pour quelqu'un d'autre) ne peut pas avoir l'accès gratuit : ouvrir un nouveau compte chez un AUTRE broker partenaire via le lien (pas chez le même : le KYC bloque), ou prendre la licence.
 - VT Markets : ouvrir un compte Standard STP (pas ECN). Pour rattacher un compte existant, la demande de transfert se fait avec le code CPA 35824 (pas en IB) ; VT peut demander un peu de volume de trading avant d'accepter.
 - RaiseFX : le KYC niveau 2 doit être validé avant que le trading soit activé sur le compte.
 

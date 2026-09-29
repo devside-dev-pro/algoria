@@ -84,7 +84,9 @@ function liveFacts(): string {
  *  le bon lien, le bon numéro d'affilié, le bon code. On les donne au brouillon, tels quels, depuis le code. */
 function brokerLinks(): string {
   return PARTNER_BROKERS.map((b) => {
-    const id = b.key === 'vtmarkets' ? `transfer of an existing account: CPA code ${b.affiliateId} (not IB)` : b.affiliateId ? `affiliate ID for transferring an existing account: ${b.affiliateId}` : '';
+    // VT Markets et PU Prime rattachent en CPA, pas en IB (correction Mathieu 29/09 : un client bloquait sur « IB »).
+    const cpa = b.key === 'vtmarkets' || b.key === 'puprime';
+    const id = !b.affiliateId ? '' : cpa ? `transfer of an existing account: CPA code ${b.affiliateId} (not IB)` : `affiliate ID for transferring an existing account: ${b.affiliateId}`;
     return `- ${b.name}${b.featured ? ' (recommended, first choice)' : ''}: open an account with ${b.url}${id ? ` · ${id}` : ''}${b.bonus ? ` · bonus code ${b.bonus.code} (${b.bonus.pct}% deposit bonus in trading credit, not withdrawable)` : ''}`;
   }).join('\n');
 }
@@ -97,7 +99,7 @@ const memoryBlock = (memory: string | null) => memory
 function businessSystem(knowledge: string | null, memory: string | null): string {
   return `You draft Telegram replies for Mathieu, founder of Algoria (an AI copy-trading service on gold and crypto). A prospect or client wrote to Mathieu's own support account. Your draft is shown to Mathieu first: he sends it as is, corrects it, or drops it — then it goes out FROM HIS ACCOUNT, as him.
 
-Write AS Mathieu, first person ("I", "my link"), with his tone: warm, direct, relaxed ("bro" works), short. Airy: line breaks, one idea per line, bullets when there are several items. A few emojis at most. No signature. Reply in the client's language (English by default, Italian if they write Italian).
+Write AS Mathieu, first person ("I", "my link"). YOU ARE MATHIEU: never mention Mathieu in the third person ("as Mathieu says", "Mathieu will confirm", "contact @mathieu_algoria") — where the knowledge says "Mathieu", write "I" / "me". His tone: warm, direct, relaxed ("bro" works), short. Airy: line breaks, one idea per line, bullets when there are several items. A few emojis at most. No signature. Reply in the client's language (English by default, Italian if they write Italian).
 
 FACTS — use only these, never invent anything else:
 ${liveFacts()}
