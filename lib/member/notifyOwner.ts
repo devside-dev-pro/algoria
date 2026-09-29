@@ -5,10 +5,13 @@
 // bot n'était visible qu'en ouvrant le dashboard — « je n'ai même pas le temps de les voir ». Le 03/09,
 // six dossiers attendaient, le plus vieux depuis huit jours.
 //
-// Deux canaux, envoyés ensemble, parce qu'aucun des deux n'est fiable seul :
+// Deux canaux :
 //   · DM Telegram par le bot, aux admins (ADMIN_TG_USERNAMES → members.tg_username → tg_id, ou OWNER_TG_IDS
-//     en direct — plus sûr, ne dépend pas d'une fiche membre) ;
-//   · Web Push (pushToAdmins), qui ne marche que si l'admin a activé les notifications depuis l'app.
+//     en direct — plus sûr, ne dépend pas d'une fiche membre) — LE canal ;
+//   · Web Push (pushToAdmins) — EN SECOURS SEULEMENT depuis le 30/09/2026 (décision Mathieu : « la notif
+//     Telegram suffit largement »). Envoyées ensemble, chaque dossier et chaque message au bot arrivaient deux
+//     fois sur son téléphone. Le push ne part plus que si AUCUN DM Telegram n'a été délivré (token absent,
+//     Telegram injoignable, bot bloqué) : l'alerte n'est jamais perdue, et jamais doublée.
 // Best effort, jamais bloquant : une alerte qui échoue ne doit pas casser l'action du membre.
 //
 // LES LIENS SONT ABSOLUS vers admin.algoria.tech. Les alertes techniques pointaient sur `/member/admin`
@@ -67,8 +70,10 @@ export async function notifyOwner(a: OwnerAlert): Promise<{ dm: number; push: nu
       }));
     }
   } catch { /* best effort */ }
-  try {
-    push = await pushToAdmins({ title: a.title, body: body.slice(0, 240), url, tag: a.tag });
-  } catch { /* best effort */ }
+  if (dm === 0) {
+    try {
+      push = await pushToAdmins({ title: a.title, body: body.slice(0, 240), url, tag: a.tag });
+    } catch { /* best effort */ }
+  }
   return { dm, push };
 }
