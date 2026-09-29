@@ -5,6 +5,7 @@ import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
+import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 25;
@@ -262,6 +263,17 @@ export async function POST(req: Request) {
   const db = url && service ? createClient(url, service, { auth: { persistSession: false } }) : null;
   if (!db) console.error('[telegram] SUPABASE_SERVICE_KEY / NEXT_PUBLIC_SUPABASE_URL manquants');
 
+  // 💼 TELEGRAM BUSINESS (29/09/2026) — le compte support de Mathieu : brouillons à valider, envoyés en son nom.
+  // Tout vit dans lib/member/businessInbox.ts ; rien ne part sans un geste de Mathieu.
+  if (update?.business_connection) {
+    await handleBusinessConnection(update.business_connection).catch((e) => console.error('[telegram] business connection failed:', (e as { message?: string })?.message ?? e));
+    return NextResponse.json({ ok: true });
+  }
+  if (update?.business_message) {
+    if (db) await handleBusinessMessage(db, update.business_message).catch((e) => console.error('[telegram] business message failed:', (e as { message?: string })?.message ?? e));
+    return NextResponse.json({ ok: true });
+  }
+
   // CARNET D'ADRESSES DES CANAUX (01/08) : un canal Telegram n'a pas de « lien » exploitable côté API,
   // il a un ID numérique (-100…) invisible dans l'interface. Dès que le bot est admin quelque part
   // (ajout = my_chat_member, ou premier post = channel_post), on note l'ID et le titre : l'admin lit la
@@ -377,6 +389,7 @@ export async function POST(req: Request) {
       if (cq.message?.chat?.id && cq.message?.message_id) await tg('editMessageText', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, text: `${orig}\n\n${line}`.slice(0, 4000), disable_web_page_preview: true });
     };
     try {
+      if (await handleBusinessCallback(db, cq)) return NextResponse.json({ ok: true });
       const m = /^r([dxu]):([0-9a-f-]{36})$/i.exec(String(cq.data ?? ''));
       if (!m) { await answer(''); return NextResponse.json({ ok: true }); }
       const admins = await adminTgIds();
@@ -429,6 +442,8 @@ export async function POST(req: Request) {
   }
 
   const msg = update?.message;
+  // ✏️ Mathieu répond à une carte de brouillon business avec sa version → elle part depuis son compte.
+  if (db && msg?.reply_to_message && (await handleBusinessCorrection(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   const startPayload = typeof msg?.text === 'string' ? msg.text.match(/^\/start\s+lg_([A-Za-z0-9]{16,64})$/) : null;
   if (db && startPayload && msg?.from?.id) {
     const code = startPayload[1];
