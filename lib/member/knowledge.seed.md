@@ -14,6 +14,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - Pour une prop firm : 400 $.
 - Avec son propre broker (hors partenaires) : 400 $.
 - On ne refuse personne : quelqu'un qui ne veut pas de broker partenaire peut prendre la licence.
+- Prix unique de 400 $ : pas de réduction, pas d'abonnement mensuel, pas de paiement en plusieurs fois. Une licence couvre jusqu'à 3 comptes.
 - Paiement de la licence : par carte bancaire ou en crypto, directement dans l'onboarding de l'app. Pour toute question sur l'achat : Mathieu sur Telegram (@mathieu_algoria). Ne jamais inventer un lien ou un délai.
 - Prop firms : la plupart acceptent, mais chacune a son règlement : le membre doit vérifier les règles de sa prop firm.
 
@@ -21,7 +22,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - Le mot de passe demandé (mot de passe trader) sert uniquement à brancher le compte au copieur d'Algoria. Il permet de copier les trades ; il ne donne aucun accès à l'espace client du broker, aux dépôts ni aux retraits.
 
 ## Démarrer
-- Compte : MetaTrader 5, compte standard.
+- Compte : MetaTrader 5, compte standard, levier 1:500.
 - Dépôt minimum 200 $, dans n'importe quelle devise tant que le montant vaut au moins 200 $ une fois converti en dollars.
 - « Ce n'est pas gratuit, il faut déposer 200 $ » : l'accès est gratuit ; les 200 $ restent l'argent du membre, sur son propre compte. L'IA ne peut pas trader un compte à 0 $.
 
@@ -29,6 +30,9 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - En premier : RaiseFX. Sinon, proposer un partenaire chez qui la personne n'a pas déjà un compte.
 - Avis négatifs en ligne : c'est courant pour les brokers, parce que beaucoup de gens tradent seuls, perdent et notent mal le broker. Algoria travaille avec ces partenaires depuis longtemps et Mathieu est en contact direct avec leurs managers : au moindre souci, il intervient.
 - Compte existant chez un partenaire : le transfert sous l'IB d'Algoria est accepté ; il suffit d'expliquer la procédure au support du broker et de donner le numéro de partenaire d'Algoria pour ce broker (Mathieu le fournit si besoin).
+
+## Comment Algoria est payée
+- Algoria est payée par le broker partenaire, jamais sur les profits du membre. Ne jamais parler d'un pourcentage sur les gains ni d'un montant par lot.
 
 ## Accès gratuit (broker partenaire)
 - Le compte doit être ouvert via le lien partenaire de l'app, ou, s'il existe déjà chez un broker partenaire, rattaché à l'ID d'affiliation d'Algoria en le demandant au support du broker (l'app donne le message exact à envoyer).
@@ -47,7 +51,9 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - Le membre peut mettre en pause ou arrêter la copie lui-même dans l'app.
 
 ## Retraits
-- Ne pas retirer pendant les 30 premiers jours : un premier retrait avant 30 jours peut créer un blocage et déconnecter le compte d'Algoria. Après ce premier retrait, le membre retire quand il veut.
+- Ne pas retirer pendant les 30 premiers jours : un retrait avant 30 jours coupe l'accès (le compte est déconnecté d'Algoria). Après 30 jours, le membre retire quand il veut.
+- Un retrait se fait par le même moyen que le dépôt.
+- Le bonus de dépôt du broker est du crédit de trading : il ne se retire pas.
 
 ## Pertes, drawdown et rendements
 - On est transparent : c'est du trading, il y a des jours gagnants et des jours perdants. Mathieu a nettement réduit la taille des stop loss et la stratégie s'améliore en continu.
