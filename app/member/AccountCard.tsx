@@ -169,7 +169,7 @@ const cta = {
 const field = { display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 130px', minWidth: 0 } as const;
 const fieldLabel = { fontSize: 9.5, letterSpacing: 1.2, color: 'var(--dim)', fontWeight: 700 } as const;
 const input = {
-  padding: '10px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)',
+  padding: '10px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)',
   color: 'var(--text)', fontSize: 14, fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
   height: 42, display: 'block', minWidth: 0, // même hauteur que le champ date iOS, jamais plus large que sa colonne
 } as const;

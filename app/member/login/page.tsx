@@ -168,7 +168,7 @@ function CodeEntry({ t }: { t: (k: string) => string }) {
           // directement depuis la notification Telegram sans avoir à basculer d'app.
           inputMode="numeric" autoComplete="one-time-code" placeholder="123456" maxLength={6} aria-label="6-digit code"
           className="mono"
-          style={{ width: 130, textAlign: 'center', letterSpacing: 4, fontSize: 17, fontWeight: 800, padding: '11px 10px', borderRadius: 11, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)' }}
+          style={{ width: 130, textAlign: 'center', letterSpacing: 4, fontSize: 17, fontWeight: 800, padding: '11px 10px', borderRadius: 11, border: '1px solid var(--border)', background: 'var(--surface-strong)', color: 'var(--text)' }}
         />
         <button
           onClick={() => void submit()} disabled={busy || code.length !== 6}
