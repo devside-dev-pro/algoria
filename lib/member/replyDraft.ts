@@ -16,7 +16,7 @@
 // fait inventé : tout ce qu'on veut qu'il dise doit être écrit ici.
 import Anthropic from '@anthropic-ai/sdk';
 import { PARTNER_BROKERS } from './brokers';
-import { STRATEGY_MIN_DEPOSIT } from './minimums';
+import { STRATEGY_MIN_DEPOSIT, RECOMMENDED_DEPOSIT } from './minimums';
 import { LIVE_STRATEGY } from './maintenance';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from './activation';
 import { APP_URL } from './i18n';
@@ -38,7 +38,7 @@ const SIGNATURE = {
 // Un seul moteur depuis le 11/09/2026 — le bot ne doit plus décrire un catalogue de trois stratégies.
 
 function facts(): string {
-  const strategies = `ALGORIA 2.0 is the single engine members copy — minimum deposit $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]}. There is no longer a choice of strategy.`;
+  const strategies = `ALGORIA 2.0 is the single engine members copy — recommended deposit $${RECOMMENDED_DEPOSIT}, strict minimum $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]}. There is no longer a choice of strategy.`;
   const brokers = PARTNER_BROKERS.map((b) => `${b.name}${b.featured ? ' (recommended)' : ''}${b.bonus ? ` — bonus code ${b.bonus.code} = ${b.bonus.pct}% deposit bonus in trading credit (not withdrawable cash)` : ''}`).join(', ');
   const legs = ACTIVATION_LEGS.map((l) => `${l.lots} ${l.side}`).join(' + ');
   return [
@@ -47,6 +47,7 @@ function facts(): string {
     // 29/09/2026, décision Mathieu : on ne dit plus « non » à un autre broker ou à une prop firm — on propose la licence.
     `Algoria AI lifetime license (one payment, for life): with a partner broker = FREE; for a prop firm account = $400; with your own broker (any non-partner broker) = $400. Someone who does not want a partner broker is NOT refused: offer the license. Mathieu handles license purchases personally on Telegram (@mathieu_algoria) — never state a payment method, a link or a delay yourself.`,
     `Strategies: ${strategies}.`,
+    `DEPOSIT (marketing decision, 30/09/2026): the RECOMMENDED deposit is $${RECOMMENDED_DEPOSIT} (the 0.01 lot per ~$500 rule is built on it) — always lead with $${RECOMMENDED_DEPOSIT}. The strict minimum is $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]}: mention it ONLY if they ask for the minimum or say their budget is below $${RECOMMENDED_DEPOSIT}. Never open with "from $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]}": people who have the budget then deposit less.`,
     `Partner brokers: ${brokers}. The account must be a REAL (not demo) MetaTrader account opened through the Algoria partner link from the app; an existing account can be attached by asking the broker's support to link it to Algoria's affiliate ID.`,
     `FREE ACCESS RULE (say it plainly whenever a broker comes up): the free access only works for an account the partner broker counts as Algoria's — open a new account through the partner link in the app, or, for an existing account at a partner broker, ask that broker's support to attach it to Algoria's affiliate ID (the app shows the exact message to send). An account opened directly on the partner broker's website without that link is not free: attach it as above. An account at a broker that is not a partner, or at a prop firm, is possible with the $400 lifetime license.`,
     `Connecting: in the app (${APP_URL}/member/onboarding) the member enters MT login, server and the TRADER password (not the investor one). The team then verifies and switches the copy on.`,
@@ -72,7 +73,7 @@ function liveFacts(): string {
   const brokers = PARTNER_BROKERS.map((b) => `${b.name}${b.featured ? ' (recommended)' : ''}${b.bonus ? ` — bonus code ${b.bonus.code} = ${b.bonus.pct}% deposit bonus in trading credit (not withdrawable cash)` : ''}`).join(', ');
   const legs = ACTIVATION_LEGS.map((l) => `${l.lots} ${l.side}`).join(' + ');
   return [
-    `Minimum deposit: $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]} (ALGORIA 2.0, the single engine members copy).`,
+    `DEPOSIT (marketing decision, 30/09/2026): the RECOMMENDED deposit is $${RECOMMENDED_DEPOSIT} (the 0.01 lot per ~$500 rule is built on it) — always lead with $${RECOMMENDED_DEPOSIT}. The strict minimum is $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]}: mention it ONLY if they ask for the minimum or say their budget is below $${RECOMMENDED_DEPOSIT}. Never open with "from $${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY]}": people who have the budget then deposit less.`,
     `Partner brokers: ${brokers}. A REAL MetaTrader account.`,
     `Connecting: in the app (${APP_URL}/member/onboarding) the member enters MT login, server and the TRADER password (not the investor one). The team then verifies and switches the copy on.`,
     `Activation: after connecting, the member places ${legs} on ${ACTIVATION_SYMBOL} in their MT terminal and closes both — a buy and a sell of the same size cancel out, no market risk, only the spread. That volume registers the account with the broker. Then they tap "I've placed both trades" in the app.`,
@@ -121,7 +122,7 @@ Track record: https://algoria.tech/track-record · App: ${APP_URL}
 
 MATHIEU'S PROCESS
 1. First contact: Mathieu sends his own welcome video and 3 questions (country, budget, broker) himself.
-2. Once they answered: a short pitch fitted to their answers, the next step (the right broker link, the minimum, the 30 days), and end with a question.
+2. Once they answered: a short pitch fitted to their answers, the next step (the right broker link, the recommended $500 deposit, the 30 days), and end with a question.
 3. Setup: the exact link or procedure for their broker, then "text me as soon as your account is open".
 4. Connected / live: reassure, the lot rule, the 30 days.
 

@@ -121,7 +121,7 @@ export function useAdminState() {
       '⏳ <b>Valid until midnight tonight.</b>',
       '',
       'Remember:',
-      '• Start from $200 (STEADY strategy)',
+      '• We recommend starting with $500 (minimum $200)',
       '• YOUR money stays in YOUR broker account — withdraw anytime',
       '• Risk is capped every single day',
       '• Algoria itself stays <b>completely free</b>',

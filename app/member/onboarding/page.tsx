@@ -8,7 +8,7 @@ import { useMe, LoadFailed, useUILocale, SUPPORT_TG, Check } from '../ui';
 import { tgHref } from '@/lib/telegram';
 import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/member/brokers';
 import { brokerAttachMessage } from '@/lib/member/ui-text';
-import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, minDepositFor } from '@/lib/member/minimums';
+import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, minDepositFor, RECOMMENDED_DEPOSIT } from '@/lib/member/minimums';
 import { LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/member/activation';
@@ -282,7 +282,7 @@ export default function Onboarding() {
                 — alors que minimums.ts disait $200 : le même tunnel annonçait deux minimums différents.
                 C'était une énumération par stratégie ; il n'y en a plus qu'une, donc un seul chiffre. */}
             <p className="mono" style={{ margin: 0, fontSize: 11, color: 'var(--muted)', letterSpacing: 0.3 }}>
-              ⚡ ALGORIA 2.0 <b style={{ color: 'var(--text)' }}>${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY].toLocaleString('en-US')}</b> minimum
+              ⚡ ALGORIA 2.0 · recommended <b style={{ color: 'var(--gold)' }}>${RECOMMENDED_DEPOSIT.toLocaleString('en-US')}</b> · minimum <b style={{ color: 'var(--text)' }}>${STRATEGY_MIN_DEPOSIT[LIVE_STRATEGY].toLocaleString('en-US')}</b>
             </p>
             <p style={{ ...pMuted, margin: 0, fontSize: 11.5, color: 'var(--dim)' }}>{t('ob.min.warn')}</p>
           </div>

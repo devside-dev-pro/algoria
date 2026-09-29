@@ -1,6 +1,6 @@
 # Algoria AI — knowledge
 
-Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire (v8 : style réel de Mathieu ; v7 : comptes existants, 2e compte impossible chez le même broker, CPA pour VT et PU Prime) — c'est lui qui le complète et le corrige. C'est ce que sait Algoria AI : il s'en sert pour réfléchir, il ne recopie jamais une phrase telle quelle.
+Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire (v9 : 500 $ recommandés ; v8 : style réel de Mathieu ; v7 : comptes existants, 2e compte impossible chez le même broker, CPA pour VT et PU Prime) — c'est lui qui le complète et le corrige. C'est ce que sait Algoria AI : il s'en sert pour réfléchir, il ne recopie jamais une phrase telle quelle.
 Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle des 30 jours viennent de l'app et sont ajoutés automatiquement : pas besoin de les écrire ici.
 
 ## Algoria en bref
@@ -23,8 +23,9 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 
 ## Démarrer
 - Compte : MetaTrader 5, compte standard, levier 1:500.
-- Dépôt minimum 200 $, dans n'importe quelle devise tant que le montant vaut au moins 200 $ une fois converti en dollars.
-- « Ce n'est pas gratuit, il faut déposer 200 $ » : l'accès est gratuit ; les 200 $ restent l'argent du membre, sur son propre compte. L'IA ne peut pas trader un compte à 0 $.
+- Dépôt RECOMMANDÉ : 500 $ (décision marketing du 30/09 : c'est le chiffre qu'on met en avant, la règle 0.01 lot par tranche de ~500 $ repose dessus). Toujours parler de 500 $ d'abord. En juillet, avec 500 $ affichés, beaucoup plus de prospects déposaient ; en parlant de 200 $, ceux qui ont le budget déposent moins.
+- Le minimum absolu reste 200 $ (n'importe quelle devise, au moins 200 $ une fois converti) : on le donne seulement si la personne demande le minimum ou dit que son budget est sous 500 $.
+- « Ce n'est pas gratuit, il faut déposer » : l'accès est gratuit ; le dépôt reste l'argent du membre, sur son propre compte. L'IA ne peut pas trader un compte à 0 $.
 
 ## Choisir un broker partenaire
 - En premier : RaiseFX. Sinon, proposer un partenaire chez qui la personne n'a pas déjà un compte.
@@ -47,7 +48,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 ## Démo
 - Pas de démo avec l'accès gratuit, qui demande un compte RÉEL. Un compte démo n'est possible qu'avec la licence payante.
 - Pour se faire une idée avant de déposer : le track record réel et l'historique de l'app.
-- Pour commencer petit : dépôt minimum, en 0.01 lot. C'est de l'argent réel, donc à risque.
+- Pour commencer petit : 500 $ recommandés, 200 $ au minimum, en 0.01 lot. C'est de l'argent réel, donc à risque.
 
 ## Taille de copie
 - Par défaut 0.01 lot par tranche d'environ 500 $ de solde, modifiable dans le profil de l'app.

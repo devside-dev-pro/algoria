@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { tgHref } from '@/lib/telegram';
 import { pushState, enablePush } from '@/lib/push/client';
-import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
+import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, RECOMMENDED_DEPOSIT } from '@/lib/member/minimums';
 import { asLocale, type Locale } from '@/lib/member/i18n';
 import { tr, guessLocale, rememberLocale } from '@/lib/member/ui-text';
 import { inMaintenance } from '@/lib/member/maintenance';
@@ -249,7 +249,7 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
-                ['1', 'Open your account with the partner broker (from $200 deposit)'],
+                ['1', `Open your account with the partner broker (we recommend $${RECOMMENDED_DEPOSIT}, minimum $${MIN_ENTRY_DEPOSIT})`],
                 ['2', 'Connect it — encrypted, takes 2 minutes'],
                 ['3', 'Algoria copies every trade to your account, hands-free'],
               ].map(([n, t]) => (
