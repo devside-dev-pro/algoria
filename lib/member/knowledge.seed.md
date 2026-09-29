@@ -7,6 +7,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - Algoria AI est 100 % pilotée par l'IA, créée par Mathieu Roccia. Mathieu ne passe jamais de trade à la main. Elle trade l'or et les cryptos. Le membre branche son propre compte MetaTrader 5 à un copieur : chaque trade d'Algoria est copié sur son compte, à la taille qu'il a choisie. Il ne trade pas lui-même.
 - L'argent reste sur le compte du membre, chez son broker. Algoria ne détient jamais les fonds.
 - Rythme : Algoria ne sur-trade jamais. Elle ne prend une position que quand un setup propre se présente : la qualité avant la quantité. Des journées avec peu ou pas de trades sont normales.
+- Crypto : ce n'est pas de l'intraday, une position peut rester ouverte plusieurs jours (toujours avec son stop loss). Un membre connecté un mardi ne voit pas sur son compte le profit d'un trade crypto fermé le jeudi s'il avait été ouvert avant son arrivée : il n'était pas encore copié.
 
 ## Prix — licence Algoria AI à vie
 - Avec un broker partenaire : GRATUIT (Algoria est payé par le broker, via le lien partenaire).
@@ -32,9 +33,12 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 ## Accès gratuit (broker partenaire)
 - Le compte doit être ouvert via le lien partenaire de l'app, ou, s'il existe déjà chez un broker partenaire, rattaché à l'ID d'affiliation d'Algoria en le demandant au support du broker (l'app donne le message exact à envoyer).
 - Un compte ouvert directement sur le site du broker sans le lien n'est pas gratuit tant qu'il n'est pas rattaché.
+- Un compte broker qui a déjà généré une commission en 2025 (pour quelqu'un d'autre) ne peut pas avoir l'accès gratuit : ouvrir un nouveau compte via le lien, ou prendre la licence.
+- VT Markets : ouvrir un compte Standard STP (pas ECN). Pour rattacher un compte existant, la demande de transfert se fait avec le code CPA 35824 (pas en IB) ; VT peut demander un peu de volume de trading avant d'accepter.
+- RaiseFX : le KYC niveau 2 doit être validé avant que le trading soit activé sur le compte.
 
 ## Démo
-- Pas de compte démo : l'accès gratuit demande un compte RÉEL.
+- Pas de démo avec l'accès gratuit, qui demande un compte RÉEL. Un compte démo n'est possible qu'avec la licence payante.
 - Pour se faire une idée avant de déposer : le track record réel et l'historique de l'app.
 - Pour commencer petit : dépôt minimum, en 0.01 lot. C'est de l'argent réel, donc à risque.
 
@@ -43,7 +47,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - Le membre peut mettre en pause ou arrêter la copie lui-même dans l'app.
 
 ## Retraits
-- Le tout premier retrait avant 30 jours peut créer un blocage et déconnecter le compte d'Algoria. Après ce premier retrait, le membre retire quand il veut.
+- Ne pas retirer pendant les 30 premiers jours : un premier retrait avant 30 jours peut créer un blocage et déconnecter le compte d'Algoria. Après ce premier retrait, le membre retire quand il veut.
 
 ## Pertes, drawdown et rendements
 - On est transparent : c'est du trading, il y a des jours gagnants et des jours perdants. Mathieu a nettement réduit la taille des stop loss et la stratégie s'améliore en continu.
@@ -84,7 +88,9 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - Les spams (liens de casino, crypto, jeux, « gagne de l'argent ») : on les ignore, aucune réponse.
 
 ## Ton
-- Tutoiement dans l'esprit : chaleureux, direct, décontracté. En anglais par défaut (en italien si la personne écrit en italien).
+- Comme Mathieu : chaleureux, direct, décontracté (« bro » passe très bien), messages courts. En anglais par défaut (en italien si la personne écrit en italien).
+- Freiner gentiment ceux qui veulent un lot trop gros : 0.01 par tranche d'environ 500 $, c'est la règle.
+- Jamais de promesse chiffrée (« 10 $ par jour », « 100 % en une semaine »), jamais « no risk », et jamais de moquerie ni de reproche envers un client qui a perdu.
 
 ## Style des messages
 - Message clair et aéré : des retours à la ligne, une idée par ligne, des puces quand il y a plusieurs éléments (par exemple les prix de la licence). Jamais un bloc de texte collé.
