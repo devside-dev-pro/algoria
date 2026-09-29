@@ -41,6 +41,14 @@ import { inMaintenance } from './maintenance';
 // membres vers la stratégie faite pour eux, pas une expulsion.
 export const STRATEGY_MIN_DEPOSIT: Record<number, number> = { 1: 200, 2: 200, 3: 1000 };
 
+// ── DÉPÔT RECOMMANDÉ : 500 $ (30/09/2026, décision Mathieu) ─────────────────────────────────────────────
+// Le minimum reste 200 $ (verrou technique : ci-dessus). Mais tout le discours tournait autour de « from $200 »,
+// et des prospects qui avaient le budget déposaient 200 $ parce que c'est le chiffre qu'on leur montrait. En
+// juillet, quand 500 $ était le minimum affiché, ~19 % des conversations support finissaient en dépôt, contre
+// ~10 % en septembre. Le marketing met donc 500 $ en avant (c'est aussi le solde sur lequel repose la règle
+// 0.01 lot / ~500 $) ; 200 $ n'apparaît plus que comme plancher, en second.
+export const RECOMMENDED_DEPOSIT = 500;
+
 /** Le plus petit dépôt qui débloque QUELQUE CHOSE aujourd'hui — le « from $X » du marketing.
  *
  *  ⚠️ LES STRATÉGIES EN MAINTENANCE SONT EXCLUES, et ce n'est pas cosmétique. La version naïve prenait

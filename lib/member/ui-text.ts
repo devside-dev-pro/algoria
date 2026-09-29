@@ -81,8 +81,8 @@ export const UI: Dict = {
   'ob.broker.genericNote': { en: 'Open your account with one of our partner brokers.', it: 'Apri il tuo conto con uno dei nostri broker partner.' },
   'ob.broker.createCta': { en: '▲ CREATE MY', it: '▲ APRI IL MIO CONTO' },
   'ob.broker.createCtaEnd': { en: 'ACCOUNT', it: '' },
-  'ob.min.title': { en: 'Minimum deposit: from $200', it: 'Deposito minimo: da 200 $' },
-  'ob.min.body': { en: '— it depends on the strategy you\'ll pick at the last step. Fund for the one you want:', it: '— dipende dalla strategia che sceglierai all\'ultimo passaggio. Deposita per quella che vuoi:' },
+  'ob.min.title': { en: 'Recommended deposit: $500', it: 'Deposito consigliato: 500 $' },
+  'ob.min.body': { en: '— it’s the balance the 0.01 lot rule is built on, so the AI trades your account at its normal size.', it: '— è il saldo su cui si basa la regola dei 0.01 lotti, così l’AI opera sul tuo conto alla sua size normale.' },
   'ob.min.warn': { en: 'Below the minimum, position sizing doesn\'t work — trades simply won\'t run.', it: 'Sotto il minimo il dimensionamento delle posizioni non funziona — le operazioni non partono.' },
 
 

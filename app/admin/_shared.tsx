@@ -61,7 +61,7 @@ export const CTA_TEMPLATES: Array<{ id: string; label: string; target: 'app' | '
   },
   {
     id: 'start', label: '⚡ Commencer à copier → wizard', target: 'app',
-    text: "⚡ <b>The AI trades, your account copies. That's the whole thing.</b>\n\nYou keep your money in <i>your own</i> broker account — we never touch it. Withdraw whenever you want. Start from $200.\n\nSetup takes about 5 minutes 👇",
+    text: "⚡ <b>The AI trades, your account copies. That's the whole thing.</b>\n\nYou keep your money in <i>your own</i> broker account — we never touch it. Withdraw whenever you want. We recommend starting with $500.\n\nSetup takes about 5 minutes 👇",
     btn: '⚡ START COPYING', url: 'https://app.algoria.tech/member/onboarding',
   },
   {
