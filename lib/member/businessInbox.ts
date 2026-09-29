@@ -13,8 +13,9 @@
 //   4. Mathieu colle, ajuste, envoie LUI-MÊME. Sa réponse réelle nous revient (business_message sortant) : la carte
 //      passe à « ✅ Tu as répondu » et le couple brouillon → réponse envoyée est gardé (owner_reply), matière de la
 //      future mémoire de l'agent.
-// Pourquoi pas d'envoi par le bot (v1 du 29/09 : bouton ✅ Envoyer) : Telegram étiquette ces messages
-// « ALGORIA AI BOT 🤖 » — Mathieu veut que ses réponses restent les siennes.
+// ✅ Envoyer existe aussi (le bot envoie au nom de Mathieu, sendMessage + business_connection_id) : Telegram étiquette
+// ces messages « ALGORIA AI BOT 🤖 » chez Mathieu — on a remis le bouton le 29/09 pour vérifier avec un compte test si
+// le CLIENT voit aussi l'étiquette. S'il la voit, on retire ✅ Envoyer et on reste en copier-coller.
 // Le premier « hello » d'un prospect n'a pas de brouillon : sa vidéo d'accueil et ses 3 questions restent à la main.
 //
 // SÉCURITÉ : n'importe quel compte Premium peut brancher n'importe quel bot à son compte. On n'accepte QUE les
@@ -100,9 +101,10 @@ export async function handleBusinessConnection(bc: any): Promise<void> {
         '',
         'Quand un client t’écrit, je te propose ici une réponse, prête à copier :',
         '📋 touche le bloc (ou le bouton Copier), colle-la dans la conversation, ajuste si besoin, envoie',
+        '✅ Envoyer : je l’envoie depuis ton compte',
         '❌ Écarter : je range la proposition',
         '',
-        'Je n’envoie jamais rien moi-même : c’est toujours toi qui envoies. Le premier « hello » d’un prospect, c’est toi (vidéo + 3 questions).',
+        'Rien ne part sans toi. Le premier « hello » d’un prospect, c’est toi (vidéo + 3 questions).',
       ].join('\n')
     : '⏸ Algoria AI est débranché de ton compte support : plus aucune proposition.';
   await tg('sendMessage', { chat_id: conn.userChatId, text });
@@ -176,7 +178,7 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
     parse_mode: 'HTML',
     text: notice,
     disable_web_page_preview: true,
-    reply_markup: { inline_keyboard: [[...(draft.text.length <= 256 ? [{ text: '📋 Copier', copy_text: { text: draft.text } }] : []), { text: '❌ Écarter', callback_data: `bx:${rowId}` }]] },
+    reply_markup: { inline_keyboard: [[...(draft.text.length <= 256 ? [{ text: '📋 Copier', copy_text: { text: draft.text } }] : []), { text: '✅ Envoyer', callback_data: `bs:${rowId}` }, { text: '❌ Écarter', callback_data: `bx:${rowId}` }]] },
   });
   await db.from('member_actions').update({ detail: { ...base, draft: draft.text, draft_intent: 'draft', draft_notice: notice, draft_chat_id: conn.userChatId, draft_msg_id: card.result?.message_id ?? null } }).eq('id', rowId);
 }
@@ -186,19 +188,39 @@ async function loadRow(db: Db, id: string) {
   return (data?.[0] ?? null) as { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> } | null;
 }
 
-// ===== Bouton ❌ sous une proposition. Renvoie false si le bouton n'est pas le nôtre.
-// (bs: = l'ancien bouton ✅ Envoyer de la v1, retiré : les cartes déjà affichées répondent qu'il faut copier.)
+// ===== Boutons ✅ / ❌ sous une proposition. Renvoie false si le bouton n'est pas le nôtre.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleBusinessCallback(db: Db, cq: any): Promise<boolean> {
   const m = /^b([sx]):([0-9a-f-]{36})$/i.exec(String(cq?.data ?? ''));
   if (!m) return false;
   const answer = (text: string) => tg('answerCallbackQuery', { callback_query_id: cq.id, text: text.slice(0, 190) });
   if (!(await adminTgIds()).includes(Number(cq.from?.id))) { await answer('Réservé aux admins.'); return true; }
-  if (m[1].toLowerCase() === 's') { await answer('Envoi par le bot désactivé : copie le texte et envoie-le toi-même.'); return true; }
   const row = await loadRow(db, m[2]);
   if (!row) { await answer('Message introuvable.'); return true; }
   const d = row.detail ?? {};
   const by = cq.from?.username ? `@${cq.from.username}` : String(cq.from?.id ?? 'admin');
+  if (d.draft_sent_at || d.answered_at) { await answer('Déjà répondu.'); return true; }
+  if (m[1].toLowerCase() === 's') {
+    if (d.draft_superseded_at) { await answer('Il a réécrit : utilise la proposition plus récente.'); return true; }
+    const draft = String(d.draft ?? '').trim();
+    if (!draft) { await answer('Pas de proposition sur ce message.'); return true; }
+    const r = await tg('sendMessage', { business_connection_id: d.conn, chat_id: row.tg_id, text: draft, disable_web_page_preview: true });
+    if (!r.ok) {
+      // Telegram ne laisse un bot répondre au nom du compte que dans les conversations actives depuis moins de 24 h,
+      // et seulement si « Reply to Messages » est coché dans Chat Automation.
+      const why = r.description ?? 'refusé';
+      await answer(`Échec : ${why}`);
+      await stamp(d, `⨯ Telegram a refusé : ${why} — copie le texte et envoie-le toi-même.`);
+      return true;
+    }
+    const now = new Date().toISOString();
+    // l'écho de ce message (sender_business_bot) est ignoré à la réception : on l'enregistre ici
+    await db.from('member_actions').insert({ tg_id: row.tg_id, member_no: row.member_no, kind: BIZ_KIND, status: 'done', done_by: by, detail: { from: 'owner', via: 'draft', text: draft, conn: d.conn } });
+    await db.from('member_actions').update({ detail: { ...d, draft_sent_at: now, draft_sent_by: by, answered_at: now, owner_reply: draft } }).eq('id', row.id);
+    await stamp(d, '✅ Envoyée depuis ton compte.');
+    await answer('Envoyée ✓');
+    return true;
+  }
   await db.from('member_actions').update({ detail: { ...d, draft_dismissed_at: new Date().toISOString(), draft_dismissed_by: by } }).eq('id', row.id);
   await stamp(d, '❌ Écartée.');
   await answer('Écartée.');
