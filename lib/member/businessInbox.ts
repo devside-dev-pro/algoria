@@ -18,10 +18,16 @@
 // le CLIENT voit aussi l'étiquette. S'il la voit, on retire ✅ Envoyer et on reste en copier-coller.
 // Le premier « hello » d'un prospect n'a pas de brouillon : sa vidéo d'accueil et ses 3 questions restent à la main.
 //
+// FORMER L'AGENT — Mathieu RÉPOND à une carte (ou écrit au bot) :
+//   · avec sa version → elle part depuis son compte, et la paire question → bonne réponse entre dans la mémoire ;
+//   · avec « # » + une remarque → rien ne part, la remarque entre dans la mémoire (agent_docs key='memory',
+//     relue à chaque brouillon, modifiable dans l'admin). Sans carte : « # … » seul = leçon générale.
+//
 // SÉCURITÉ : n'importe quel compte Premium peut brancher n'importe quel bot à son compte. On n'accepte QUE les
 // connexions dont le propriétaire est un admin (adminTgIds) — sinon on ignore tout, sans rédiger ni rien envoyer.
 import { adminTgIds } from './notifyOwner';
 import { draftReply } from './replyDraft';
+import { appendAgentMemory } from './agentDocs';
 
 export const BIZ_KIND = 'biz_msg';
 
@@ -104,6 +110,10 @@ export async function handleBusinessConnection(bc: any): Promise<void> {
         '✅ Envoyer : je l’envoie depuis ton compte',
         '❌ Écarter : je range la proposition',
         '',
+        'Pour me former : réponds à ma proposition',
+        '✏️ avec ta version → elle part depuis ton compte et je retiens la bonne réponse',
+        '🧠 avec # + une remarque (ex. « # la démo, c’est seulement avec la licence ») → rien ne part, je retiens',
+        '',
         'Rien ne part sans toi. Le premier « hello » d’un prospect, c’est toi (vidéo + 3 questions).',
       ].join('\n')
     : '⏸ Algoria AI est débranché de ton compte support : plus aucune proposition.';
@@ -176,16 +186,31 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
   const card = await tg('sendMessage', {
     chat_id: conn.userChatId,
     parse_mode: 'HTML',
-    text: notice,
+    text: `${notice}\n\n<i>✏️ Réponds à ce message avec ta version pour l’envoyer, ou avec # + une remarque pour me corriger.</i>`,
     disable_web_page_preview: true,
     reply_markup: { inline_keyboard: [[...(draft.text.length <= 256 ? [{ text: '📋 Copier', copy_text: { text: draft.text } }] : []), { text: '✅ Envoyer', callback_data: `bs:${rowId}` }, { text: '❌ Écarter', callback_data: `bx:${rowId}` }]] },
   });
   await db.from('member_actions').update({ detail: { ...base, draft: draft.text, draft_intent: 'draft', draft_notice: notice, draft_chat_id: conn.userChatId, draft_msg_id: card.result?.message_id ?? null } }).eq('id', rowId);
 }
 
+type Row = { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> };
+
+/** Envoie `text` au client DEPUIS le compte de Mathieu (Telegram n'étiquette le bot que chez lui). null = parti. */
+async function sendAsOwner(db: Db, row: Row, text: string, via: 'draft' | 'corrected', by: string): Promise<string | null> {
+  const d = row.detail ?? {};
+  const r = await tg('sendMessage', { business_connection_id: d.conn, chat_id: row.tg_id, text, disable_web_page_preview: true });
+  // Refus typiques : conversation inactive depuis plus de 24 h, ou « Reply to Messages » décoché dans Chat Automation.
+  if (!r.ok) return r.description ?? 'refusé';
+  const now = new Date().toISOString();
+  // l'écho de ce message (sender_business_bot) est ignoré à la réception : on l'enregistre ici
+  await db.from('member_actions').insert({ tg_id: row.tg_id, member_no: row.member_no, kind: BIZ_KIND, status: 'done', done_by: by, detail: { from: 'owner', via, text, conn: d.conn } });
+  await db.from('member_actions').update({ detail: { ...d, draft_sent_at: now, draft_sent_by: by, answered_at: now, owner_reply: text, ...(via === 'corrected' ? { draft_corrected: text } : {}) } }).eq('id', row.id);
+  return null;
+}
+
 async function loadRow(db: Db, id: string) {
   const { data } = await db.from('member_actions').select('id,tg_id,member_no,detail').eq('kind', BIZ_KIND).eq('id', id).limit(1);
-  return (data?.[0] ?? null) as { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> } | null;
+  return (data?.[0] ?? null) as Row | null;
 }
 
 // ===== Boutons ✅ / ❌ sous une proposition. Renvoie false si le bouton n'est pas le nôtre.
@@ -204,19 +229,12 @@ export async function handleBusinessCallback(db: Db, cq: any): Promise<boolean> 
     if (d.draft_superseded_at) { await answer('Il a réécrit : utilise la proposition plus récente.'); return true; }
     const draft = String(d.draft ?? '').trim();
     if (!draft) { await answer('Pas de proposition sur ce message.'); return true; }
-    const r = await tg('sendMessage', { business_connection_id: d.conn, chat_id: row.tg_id, text: draft, disable_web_page_preview: true });
-    if (!r.ok) {
-      // Telegram ne laisse un bot répondre au nom du compte que dans les conversations actives depuis moins de 24 h,
-      // et seulement si « Reply to Messages » est coché dans Chat Automation.
-      const why = r.description ?? 'refusé';
+    const why = await sendAsOwner(db, row, draft, 'draft', by);
+    if (why) {
       await answer(`Échec : ${why}`);
       await stamp(d, `⨯ Telegram a refusé : ${why} — copie le texte et envoie-le toi-même.`);
       return true;
     }
-    const now = new Date().toISOString();
-    // l'écho de ce message (sender_business_bot) est ignoré à la réception : on l'enregistre ici
-    await db.from('member_actions').insert({ tg_id: row.tg_id, member_no: row.member_no, kind: BIZ_KIND, status: 'done', done_by: by, detail: { from: 'owner', via: 'draft', text: draft, conn: d.conn } });
-    await db.from('member_actions').update({ detail: { ...d, draft_sent_at: now, draft_sent_by: by, answered_at: now, owner_reply: draft } }).eq('id', row.id);
     await stamp(d, '✅ Envoyée depuis ton compte.');
     await answer('Envoyée ✓');
     return true;
@@ -224,5 +242,61 @@ export async function handleBusinessCallback(db: Db, cq: any): Promise<boolean> 
   await db.from('member_actions').update({ detail: { ...d, draft_dismissed_at: new Date().toISOString(), draft_dismissed_by: by } }).eq('id', row.id);
   await stamp(d, '❌ Écartée.');
   await answer('Écartée.');
+  return true;
+}
+
+const short = (t: unknown, n: number) => { const x = String(t ?? '').replace(/\s+/g, ' ').trim(); return x.length > n ? `${x.slice(0, n)}…` : x; };
+const today = () => new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Paris' });
+
+// ===== FORMER L'AGENT : Mathieu répond à une carte (ou écrit « # … » au bot). Renvoie false si ce n'est pas pour nous
+// (le webhook poursuit alors son traitement normal).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function handleBusinessCorrection(db: Db, msg: any): Promise<boolean> {
+  const text = typeof msg?.text === 'string' ? msg.text.trim() : '';
+  if (!text || msg?.chat?.type !== 'private' || msg?.business_connection_id) return false;
+  const replyTo = Number(msg.reply_to_message?.message_id) || 0;
+  const isNote = text.startsWith('#');
+  if (!replyTo && !isNote) return false;
+  if (!(await adminTgIds()).includes(Number(msg.from?.id))) return false;
+  const by = msg.from?.username ? `@${msg.from.username}` : String(msg.from?.id ?? 'admin');
+  const reply = (t: string) => tg('sendMessage', { chat_id: msg.chat.id, text: t, reply_to_message_id: msg.message_id });
+  const note = text.replace(/^#+\s*/, '');
+
+  const row = replyTo
+    ? ((await db.from('member_actions').select('id,tg_id,member_no,detail').eq('kind', BIZ_KIND).eq('detail->>draft_msg_id', String(replyTo)).eq('detail->>draft_chat_id', String(msg.chat.id))
+        .gte('created_at', new Date(Date.now() - 7 * 86_400_000).toISOString()).limit(1)).data?.[0] ?? null) as Row | null
+    : null;
+  if (!row) {
+    if (!isNote) return false; // une réponse à autre chose qu'une carte : pas pour nous
+    if (!note) return true;
+    const ok = await appendAgentMemory(db, `${today()} · ${note}`, by);
+    await reply(ok ? '🧠 Noté, je m’en souviendrai pour toutes mes réponses.' : '⨯ Pas pu l’enregistrer, réessaie.');
+    return true;
+  }
+
+  const d = row.detail ?? {};
+  const context = `Client : « ${short(d.text, 160)} » · proposé : « ${short(d.draft, 160)} »`;
+  if (isNote) {
+    if (!note) return true;
+    const ok = await appendAgentMemory(db, `${today()} · ${context} → Mathieu : ${note}`, by);
+    await reply(ok ? '🧠 Noté. Rien n’est parti chez le client.' : '⨯ Pas pu l’enregistrer, réessaie.');
+    return true;
+  }
+  // Sa version : elle part depuis son compte (sauf s'il a déjà répondu), et la bonne réponse entre en mémoire.
+  const lesson = `${today()} · Client : « ${short(d.text, 160)} » → la bonne réponse de Mathieu : « ${short(text, 400)} »`;
+  if (d.draft_sent_at || d.answered_at) {
+    await appendAgentMemory(db, lesson, by);
+    await reply('Déjà répondu à ce client : rien n’est parti, mais je retiens ta version 🧠');
+    return true;
+  }
+  const why = await sendAsOwner(db, row, text.slice(0, 4000), 'corrected', by);
+  if (why) {
+    await appendAgentMemory(db, lesson, by);
+    await reply(`⨯ Telegram a refusé l’envoi (${why}) : copie ton texte et envoie-le toi-même. Je retiens quand même ta version 🧠`);
+    return true;
+  }
+  await appendAgentMemory(db, lesson, by);
+  await stamp(d, `✏️ Ta version est partie :\n${text.slice(0, 1500)}`);
+  await reply('✅ Partie depuis ton compte · 🧠 je retiens ta version.');
   return true;
 }

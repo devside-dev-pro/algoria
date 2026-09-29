@@ -5,7 +5,7 @@ import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
-import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback } from '@/lib/member/businessInbox';
+import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 25;
@@ -442,6 +442,9 @@ export async function POST(req: Request) {
   }
 
   const msg = update?.message;
+  // 🧠 Mathieu forme l'agent : réponse à une carte de proposition (sa version ou « # remarque »), ou « # leçon » seule.
+  if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (msg.reply_to_message || msg.text.trim().startsWith('#'))
+    && (await handleBusinessCorrection(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   const startPayload = typeof msg?.text === 'string' ? msg.text.match(/^\/start\s+lg_([A-Za-z0-9]{16,64})$/) : null;
   if (db && startPayload && msg?.from?.id) {
     const code = startPayload[1];

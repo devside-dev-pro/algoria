@@ -89,14 +89,19 @@ function brokerLinks(): string {
   }).join('\n');
 }
 
-function businessSystem(knowledge: string | null): string {
+/** Les leçons apprises des corrections de Mathieu : elles priment sur tout le reste. */
+const memoryBlock = (memory: string | null) => memory
+  ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS (in French — they win over the knowledge and the facts; if two lessons disagree, the later one wins):\n${memory}`
+  : '';
+
+function businessSystem(knowledge: string | null, memory: string | null): string {
   return `You draft Telegram replies for Mathieu, founder of Algoria (an AI copy-trading service on gold and crypto). A prospect or client wrote to Mathieu's own support account. Your draft is shown to Mathieu first: he sends it as is, corrects it, or drops it — then it goes out FROM HIS ACCOUNT, as him.
 
 Write AS Mathieu, first person ("I", "my link"), with his tone: warm, direct, relaxed ("bro" works), short. Airy: line breaks, one idea per line, bullets when there are several items. A few emojis at most. No signature. Reply in the client's language (English by default, Italian if they write Italian).
 
 FACTS — use only these, never invent anything else:
 ${liveFacts()}
-${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth; it wins over anything else):\n${knowledge}` : `\n${facts()}`}
+${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${knowledge}` : `\n${facts()}`}${memoryBlock(memory)}
 
 BROKER LINKS AND IDS — copy them EXACTLY, character for character:
 ${brokerLinks()}
@@ -120,12 +125,12 @@ RULES
   · "draft" = everything else.`;
 }
 
-function system(locale: string, knowledge: string | null): string {
+function system(locale: string, knowledge: string | null, memory: string | null): string {
   // LE CERVEAU (29/09/2026) : quand Mathieu a écrit son knowledge dans l'admin, c'est LUI la source — plus les
   // faits intégrés ci-dessus, qui restent le filet si la base est vide ou injoignable.
   const factsBlock = knowledge
-    ? `${liveFacts()}\n\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth; it wins over anything else):\n${knowledge}`
-    : facts();
+    ? `${liveFacts()}\n\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${knowledge}${memoryBlock(memory)}`
+    : `${facts()}${memoryBlock(memory)}`;
   return `You write Telegram replies for the Algoria bot, the support channel of Algoria, an AI copy-trading service on gold (XAU/USD) and Bitcoin run by Mathieu. A prospect or member just wrote to the bot.
 
 You are Algoria AI, Algoria's AI support (you may say "we" for Algoria). Do NOT sign and do NOT add a way to reach Mathieu at the end: the signature "Algoria AI" and Mathieu's contact are added automatically under your reply. Warm, direct, no hype. Reply in the language of the incoming message (English or Italian). If the language is unclear, use ${locale === 'it' ? 'Italian' : 'English'}.
@@ -183,8 +188,8 @@ export async function draftReply(i: DraftInput): Promise<Draft | null> {
   const user = `${them}: ${i.member?.member_no != null ? `member #${i.member.member_no}` : biz ? 'not an Algoria member yet' : 'unknown'} ${i.member?.tg_username ? '@' + i.member.tg_username : (i.member?.tg_name ?? '')}\nStatus: ${statusLine}\nApp language: ${i.locale ?? 'en'}\n\nRecent exchange:\n${history}\n\nNew message from the ${them.toLowerCase()}:\n"""${i.text.slice(0, 1200)}"""\n\nReturn the JSON.`;
   try {
     const client = new Anthropic({ timeout: 8000, maxRetries: 0 });
-    const knowledge = await getAgentDoc('knowledge');
-    const res = await client.messages.create({ model: MODEL, max_tokens: biz ? 600 : 350, system: biz ? businessSystem(knowledge) : system(i.locale ?? 'en', knowledge), messages: [{ role: 'user', content: user }] });
+    const [knowledge, memory] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('memory')]);
+    const res = await client.messages.create({ model: MODEL, max_tokens: biz ? 600 : 350, system: biz ? businessSystem(knowledge, memory) : system(i.locale ?? 'en', knowledge, memory), messages: [{ role: 'user', content: user }] });
     const raw = res.content.map((c) => (c.type === 'text' ? c.text : '')).join('').trim();
     // JSON ou rien : une sortie qui n'en est pas (préambule, refus) devient un brouillon à valider, jamais un envoi.
     const m = /\{[\s\S]*\}/.exec(raw);
