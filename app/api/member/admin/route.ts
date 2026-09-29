@@ -11,6 +11,7 @@ import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
 import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, type OffboardReason } from '@/lib/member/winback';
 import { isPermanentTelegramFailure } from '@/lib/member/telegramErrors';
 import { personalise } from '@/lib/member/personalise';
+import { TG_ALLOWED_UPDATES } from '@/lib/member/tgWebhook';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,8 +32,6 @@ function guard(req: NextRequest) {
 let lastChatLookup = 0;
 let tgInboxCache: { at: number; on: boolean } | null = null; // état du webhook Telegram, rafraîchi au plus toutes les 10 min
 
-/** Les updates que le webhook unique doit recevoir. callback_query (03/09) : boutons « Envoyer la réponse ». */
-const TG_ALLOWED_UPDATES = ['chat_join_request', 'chat_member', 'message', 'channel_post', 'my_chat_member', 'callback_query'];
 /** (Ré)applique la config COMPLÈTE du webhook — même fonction pour le bouton ENABLE INBOX et pour la
  *  remise à niveau automatique du GET (une liste d'updates qui change dans le code ne doit dépendre d'aucun clic). */
 async function applyTelegramWebhook(token: string): Promise<{ ok: boolean; description?: string }> {

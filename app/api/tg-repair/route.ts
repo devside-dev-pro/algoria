@@ -4,6 +4,7 @@
 // Né de l'incident du 26/07 (webhook écrasé → login mort) : permet à l'assistant/au support de réparer
 // à distance sans identifiants admin ni accès à l'ordi. Throttle 30 s pour ménager l'API Telegram.
 import { NextResponse } from 'next/server';
+import { TG_ALLOWED_UPDATES } from '@/lib/member/tgWebhook';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,9 +23,8 @@ export async function GET() {
     body: JSON.stringify({
       url: 'https://www.algoria.tech/api/telegram',
       ...(secret ? { secret_token: secret } : {}),
-      // channel_post : indispensable au pont de traduction EN → IT (le bot doit VOIR les posts du canal)
-      // my_chat_member : le bot est ajouté admin d'un canal → son ID s'inscrit tout seul dans l'admin
-      allowed_updates: ['chat_join_request', 'chat_member', 'message', 'channel_post', 'my_chat_member'],
+      // la liste canonique (channel_post, my_chat_member, callback_query, business_*…) : voir lib/member/tgWebhook.ts
+      allowed_updates: TG_ALLOWED_UPDATES,
     }),
   });
   const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
