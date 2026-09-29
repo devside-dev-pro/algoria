@@ -547,6 +547,23 @@ export async function POST(req: Request) {
   // + UN accusé de réception routant vers l'humain, dédupliqué 6 h (anti-spam).
   // `wantsCode` exclu comme les /start : une demande de code est une commande, pas un message pour le
   // support — sans ça chaque /code déclencherait un accusé de réception et une carte dans BOT ACTIVITY.
+  // UN ADMIN QUI ÉCRIT AU BOT n'est pas un client (30/09/2026, vécu : Mathieu a tapé sa réponse à un prospect dans
+  // la conversation du bot sans « Répondre » sur la carte → le bot lui a renvoyé « this bot doesn't answer
+  // questions » et s'est créé une carte à lui-même, et le prospect n'a rien reçu). Les gestes d'admin reconnus
+  // (réponse à une carte, « # … ») sont traités plus haut ; ici on rappelle juste le mode d'emploi.
+  const adminSender = db && msg?.from && msg.chat?.type === 'private' && !startPayload && !wantsCode && !(typeof msg.text === 'string' && msg.text.startsWith('/'))
+    ? (await adminTgIds()).includes(Number(msg.from.id)) : false;
+  if (adminSender) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (token) {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
+        body: JSON.stringify({ chat_id: msg.chat.id, reply_to_message_id: msg.message_id, text: 'ℹ️ Ce message n’est parti chez personne.\n\nPour l’envoyer à un client : appui long sur SA carte → Répondre, puis ta version.\nPour m’apprendre une règle : commence par #.' }),
+      }).catch(() => {});
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   if (db && msg?.from && !msg.from.is_bot && msg.chat?.type === 'private' && !startPayload && !wantsCode && !(typeof msg.text === 'string' && msg.text.startsWith('/start'))) {
     try {
       const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1500) || '[media]';
