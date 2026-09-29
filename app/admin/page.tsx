@@ -12,6 +12,7 @@ import { DashboardTab } from './tabs/DashboardTab';
 import { QueueTab } from './tabs/QueueTab';
 import { MembersTab } from './tabs/MembersTab';
 import { DepositsTab } from './tabs/DepositsTab';
+import { ComptaTab } from './tabs/ComptaTab';
 import { AffiliateTab } from './tabs/AffiliateTab';
 import { ToolsTab } from './tabs/ToolsTab';
 
@@ -87,6 +88,9 @@ export default function AdminCRM() {
 
           {/* ===== DEPOSITS — le registre des dépôts broker : la source du bilan de fin de mois ===== */}
           {tab === 'deposits' && <DepositsTab />}
+
+          {/* ===== COMPTA — jour, semaine, mois, pays, broker, source, coûts, net (30/09/2026) ===== */}
+          {tab === 'compta' && <ComptaTab />}
 
           {/* ===== AFFILIATE — l'argent des parrains ===== */}
           {tab === 'affiliate' && <AffiliateTab />}
