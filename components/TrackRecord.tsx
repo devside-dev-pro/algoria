@@ -80,7 +80,7 @@ function Kpi({ label, value, color, sub }: { label: string; value: string; color
 
 function Seg<T extends string | number>({ value, options, onChange, label }: { value: T; options: Array<{ v: T; t: string }>; onChange: (v: T) => void; label: string }) {
   return (
-    <div role="group" aria-label={label} style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 2, padding: 2, borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)' }}>
+    <div role="group" aria-label={label} style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 2, padding: 2, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)' }}>
       {options.map((o) => {
         const on = o.v === value;
         return (

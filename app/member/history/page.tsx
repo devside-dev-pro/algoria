@@ -76,7 +76,7 @@ export default function MemberHistory() {
         <button
           onClick={() => setPaywall(true)}
           className="panel"
-          style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', textAlign: 'left', color: 'var(--text)', borderColor: 'rgba(245,194,74,.5)', background: 'linear-gradient(180deg, rgba(245,194,74,.08), rgba(10,17,31,.45))' }}
+          style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', textAlign: 'left', color: 'var(--text)', borderColor: 'rgba(245,194,74,.5)', background: 'linear-gradient(180deg, rgba(245,194,74,.08), var(--surface))' }}
         >
           <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>⚡ YOU WATCHED FROM THE SIDELINES</span>
           <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.25 }}>

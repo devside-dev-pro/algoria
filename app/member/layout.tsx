@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { MemberChrome } from './ui';
+import { THEME_BOOT } from '@/lib/member/theme';
 
 // Espace MEMBRE (PWA app.algoria.tech) — back-office des membres : statut de copie, risque, flux IA, académie.
 // Rien ici ne touche au cockpit opérateur (/app) : frontière structurelle, les membres n'y ont pas accès.
@@ -13,5 +14,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { themeColor: '#08101f', width: 'device-width', initialScale: 1, maximumScale: 1, userScalable: false };
 
 export default function MemberLayout({ children }: { children: React.ReactNode }) {
-  return <MemberChrome>{children}</MemberChrome>;
+  return (
+    <>
+      {/* thème clair/sombre posé avant le premier affichage (lib/member/theme.ts) */}
+      <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+      <MemberChrome>{children}</MemberChrome>
+    </>
+  );
 }

@@ -261,7 +261,7 @@ export default function Onboarding() {
                 <button key={b.key} type="button" onClick={() => setBudget(budget === b.key ? null : b.key)}
                   style={{ flex: '1 1 100px', padding: '9px 6px', borderRadius: 10, cursor: 'pointer', fontWeight: 750, fontSize: 12, letterSpacing: 0.2,
                     border: `1px solid ${budget === b.key ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
-                    background: budget === b.key ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)',
+                    background: budget === b.key ? 'rgba(43,227,245,.08)' : 'var(--surface)',
                     color: budget === b.key ? 'var(--cyan)' : 'var(--muted)' }}>
                   {b.label}
                 </button>
@@ -293,7 +293,7 @@ export default function Onboarding() {
               <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>{t('ob.othersLabel')}</span>
               {rest.map((b) => (
                 <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(b.key)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${picked === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: picked === b.key ? 'rgba(43,227,245,.07)' : 'rgba(10,17,31,.55)' }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${picked === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: picked === b.key ? 'rgba(43,227,245,.07)' : 'var(--surface)' }}>
                   <span style={{ fontWeight: 750, fontSize: 13.5 }}>{b.name}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: picked === b.key ? 'var(--cyan)' : 'var(--dim)' }}>{picked === b.key ? t('ob.selected') : t('ob.openAccount')}</span>
                 </a>
@@ -327,7 +327,7 @@ export default function Onboarding() {
                 <button key={k} type="button" onClick={() => setOrigin(k)}
                   style={{ flex: '1 1 150px', padding: '12px 13px', borderRadius: 11, cursor: 'pointer', textAlign: 'left', fontSize: 12.5, fontWeight: 700, lineHeight: 1.4,
                     border: `1px solid ${origin === k ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
-                    background: origin === k ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)',
+                    background: origin === k ? 'rgba(43,227,245,.08)' : 'var(--surface)',
                     color: origin === k ? 'var(--cyan)' : 'var(--muted)' }}>
                   {label}
                 </button>
@@ -366,7 +366,7 @@ export default function Onboarding() {
                     inputMode="numeric" placeholder={t('ob.exist.accPh')} style={inp} />
                 </label>
                 <div style={{ fontSize: 11, letterSpacing: 1, color: 'var(--dim)', textTransform: 'uppercase' }}>{t('ob.exist.send')}</div>
-                <pre style={{ margin: 0, padding: '11px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{exMessage}</pre>
+                <pre style={{ margin: 0, padding: '11px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-strong)', color: 'var(--text)', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{exMessage}</pre>
                 <button
                   onClick={() => { void navigator.clipboard.writeText(exMessage).then(() => setExCopied(true)).catch(() => setExCopied(false)); }}
                   style={{ ...ctaGold, border: 'none', cursor: 'pointer', ...(exCopied ? { background: 'linear-gradient(90deg,#22e0a6,#12b98a)' } : {}) }}>
@@ -412,7 +412,7 @@ export default function Onboarding() {
                   {(['mt5', 'mt4'] as const).map((p) => (
                     <button key={p} type="button" onClick={() => setPlatform(p)}
                       style={{ flex: 1, padding: '10px 6px', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 12.5, letterSpacing: 0.3,
-                        border: `1px solid ${platform === p ? 'rgba(43,227,245,.55)' : 'var(--border)'}`, background: platform === p ? 'rgba(43,227,245,.08)' : 'rgba(10,17,31,.55)', color: platform === p ? 'var(--cyan)' : 'var(--muted)' }}>
+                        border: `1px solid ${platform === p ? 'rgba(43,227,245,.55)' : 'var(--border)'}`, background: platform === p ? 'rgba(43,227,245,.08)' : 'var(--surface)', color: platform === p ? 'var(--cyan)' : 'var(--muted)' }}>
                       {p === 'mt5' ? 'MT5' : 'MT4'}
                     </button>
                   ))}
@@ -666,7 +666,7 @@ function Center({ children }: { children: React.ReactNode }) {
 }
 const pMuted = { color: 'var(--muted)', fontSize: 13.5, lineHeight: 1.6, margin: 0 } as const;
 const lbl = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, letterSpacing: 1, color: 'var(--dim)', textTransform: 'uppercase' } as const;
-const inp = { padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', fontSize: 15, outline: 'none' } as const;
+const inp = { padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-strong)', color: 'var(--text)', fontSize: 15, outline: 'none' } as const;
 const ctaMain = { padding: '13px 16px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' } as const;
 // UN BOUTON DÉSACTIVÉ DOIT SE VOIR (02/09/2026). `ctaMain` gardait `cursor: pointer` et son dégradé plein
 // même sous `disabled` : le bouton inerte était PIXEL POUR PIXEL le bouton actif. Le membre cliquait sur ce
@@ -675,6 +675,6 @@ const cta = (off: boolean) => (off ? { ...ctaMain, opacity: 0.42, cursor: 'not-a
 const ctaGold = { padding: '13px 16px', borderRadius: 12, textAlign: 'center', textDecoration: 'none', fontWeight: 800, letterSpacing: 0.6, fontSize: 13.5, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)', boxShadow: '0 0 20px rgba(245,194,74,.25)' } as const;
 const linkBtn = { padding: 6, border: 'none', background: 'transparent', color: 'var(--dim)', fontSize: 12.5, cursor: 'pointer', textDecoration: 'underline' } as const;
 // blocs visuels du wizard de connexion (regroupent les champs → moins « mur de formulaire »)
-const grp = { display: 'flex', flexDirection: 'column', gap: 11, padding: '13px 13px 15px', borderRadius: 13, border: '1px solid var(--border)', background: 'rgba(10,17,31,.35)' } as const;
+const grp = { display: 'flex', flexDirection: 'column', gap: 11, padding: '13px 13px 15px', borderRadius: 13, border: '1px solid var(--border)', background: 'var(--surface)' } as const;
 const grpLbl = { fontSize: 9.5, letterSpacing: 1.8, color: 'var(--dim)', fontWeight: 800 } as const;
 const hint = { fontSize: 10.5, color: 'var(--dim)', marginTop: 4, lineHeight: 1.4 } as const;

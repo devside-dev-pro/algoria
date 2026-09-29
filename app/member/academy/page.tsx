@@ -41,7 +41,7 @@ export default function Academy() {
       <section className="panel" style={{ padding: 0, overflow: 'hidden', maxWidth: !locked && current.url && isFile(current.url) ? 430 : undefined, margin: !locked && current.url && isFile(current.url) ? '0 auto' : undefined, width: '100%' }}>
         {locked ? (
           // ÉCRAN VERROUILLÉ — le prospect anonyme touche à une vidéo membre : connexion Telegram pour débloquer.
-          <div style={{ aspectRatio: '16/9', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 20, textAlign: 'center', background: 'radial-gradient(80% 90% at 50% 20%, #12213e 0%, #0a1425 100%)' }}>
+          <div style={{ aspectRatio: '16/9', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 20, textAlign: 'center', background: 'radial-gradient(80% 90% at 50% 20%, var(--panel-top) 0%, var(--panel-bottom) 100%)' }}>
             <span style={{ width: 46, height: 46, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--cyan)', background: 'rgba(43,227,245,.08)', border: '1px solid rgba(43,227,245,.3)' }}>{lockIcon}</span>
             <div style={{ fontWeight: 800, letterSpacing: 0.4, fontSize: 15 }}>Members only — {current.title}</div>
             <div style={{ fontSize: 12.5, color: 'var(--muted)', maxWidth: 320, lineHeight: 1.5 }}>Connect with Telegram (2 minutes) to unlock this and everything else inside.</div>
@@ -50,14 +50,14 @@ export default function Academy() {
         ) : current.url ? (
           isFile(current.url) ? (
             // Tournage PORTRAIT : la carte ÉPOUSE la vidéo (largeur = vidéo, ratio 9:16, cover) → zéro bande latérale.
-            <video key={current.key} src={current.url} controls playsInline preload="metadata" style={{ width: '100%', aspectRatio: '9 / 16', maxHeight: '76vh', objectFit: 'cover', display: 'block', background: '#0a1425', borderRadius: 'inherit' }} />
+            <video key={current.key} src={current.url} controls playsInline preload="metadata" style={{ width: '100%', aspectRatio: '9 / 16', maxHeight: '76vh', objectFit: 'cover', display: 'block', background: 'var(--panel-2)', borderRadius: 'inherit' }} />
           ) : (
             <div style={{ position: 'relative', paddingTop: '56.25%' }}>
               <iframe key={current.key} src={current.url} title={current.title} allowFullScreen style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }} />
             </div>
           )
         ) : (
-          <div style={{ aspectRatio: '16/9', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'radial-gradient(80% 90% at 50% 20%, #12213e 0%, #0a1425 100%)' }}>
+          <div style={{ aspectRatio: '16/9', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'radial-gradient(80% 90% at 50% 20%, var(--panel-top) 0%, var(--panel-bottom) 100%)' }}>
             <img src="/brand/algoria-mark.png" alt="Algoria" width={48} height={48} style={{ objectFit: 'contain', filter: 'drop-shadow(0 0 9px rgba(43,227,245,.45))' }} />
             <span style={{ fontWeight: 800, letterSpacing: 0.6 }}>WELCOME VIDEO — DROPPING SOON</span>
             <span style={{ fontSize: 12, color: 'var(--dim)' }}>your founder is filming it right now</span>

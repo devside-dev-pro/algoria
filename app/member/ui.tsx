@@ -198,7 +198,7 @@ export function Locked({ unlocked, onUnlock, children, label = 'MEMBERS ONLY' }:
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 999,
           fontSize: 11, fontWeight: 800, letterSpacing: 1.2, color: 'var(--gold)',
-          background: 'rgba(7,12,24,.92)', border: '1px solid rgba(245,194,74,.5)', boxShadow: '0 6px 24px rgba(2,6,16,.6), 0 0 18px rgba(245,194,74,.15)',
+          background: 'rgba(7,12,24,.92)', border: '1px solid rgba(245,194,74,.5)', boxShadow: '0 6px 24px var(--drop), 0 0 18px rgba(245,194,74,.15)',
         }}>
           🔒 {label}
         </span>
@@ -224,8 +224,8 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
         onClick={(e) => e.stopPropagation()}
         style={{
           width: '100%', maxWidth: 560, borderRadius: '22px 22px 0 0', borderBottom: 'none',
-          border: '1px solid rgba(245,194,74,.42)', background: 'linear-gradient(180deg, #132342 0%, #0a1425 100%)',
-          boxShadow: '0 -18px 60px rgba(2,6,16,.8), 0 0 34px rgba(245,194,74,.1)',
+          border: '1px solid rgba(245,194,74,.42)', background: 'linear-gradient(180deg, var(--panel-top) 0%, var(--panel-bottom) 100%)',
+          boxShadow: '0 -18px 60px var(--drop), 0 0 34px rgba(245,194,74,.1)',
           padding: '20px 20px max(24px, env(safe-area-inset-bottom))', display: 'flex', flexDirection: 'column', gap: 13,
           maxHeight: '86dvh', overflowY: 'auto',
         }}
@@ -253,7 +253,7 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
                 ['2', 'Connect it — encrypted, takes 2 minutes'],
                 ['3', 'Algoria copies every trade to your account, hands-free'],
               ].map(([n, t]) => (
-                <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 11, background: 'rgba(10,17,31,.6)', border: '1px solid var(--border)', borderRadius: 11, padding: '10px 13px' }}>
+                <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 11, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 11, padding: '10px 13px' }}>
                   <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--gold)' }}>{n}</span>
                   <span style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.45 }}>{t}</span>
                 </div>
@@ -333,7 +333,7 @@ function InstallPrompt() {
   const dismiss = () => { sessionStorage.setItem(alerts ? 'alg_alerts_hide' : 'alg_install_hide', '1'); setMode('hidden'); };
   return (
     <div style={{ position: 'fixed', left: 10, right: 10, bottom: 88, zIndex: 45, maxWidth: 540, margin: '0 auto' }}>
-      <div className="panel cardIn" style={{ padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'rgba(43,227,245,.4)', boxShadow: '0 10px 34px rgba(2,6,16,.7), 0 0 24px rgba(43,227,245,.12)' }}>
+      <div className="panel cardIn" style={{ padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'rgba(43,227,245,.4)', boxShadow: '0 10px 34px var(--drop), 0 0 24px rgba(43,227,245,.12)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
           <span style={{ fontSize: 24, width: 34, textAlign: 'center' }}>{alerts ? '🔔' : <img src="/brand/algoria-mark.png" alt="" width={34} height={34} style={{ objectFit: 'contain' }} />}</span>
           <div style={{ flex: 1 }}>
@@ -433,7 +433,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
             position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
             display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 2,
             padding: '6px 10px max(10px, env(safe-area-inset-bottom))',
-            background: 'rgba(8,16,31,.94)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border)',
+            background: 'var(--nav-bg)', backdropFilter: 'blur(10px)', borderTop: '1px solid var(--border)',
           }}
         >
           {/* 5 onglets — le bouton central parfaitement centré : Home·History | Results | Academy·Profile */}
@@ -451,9 +451,9 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
               className={liveActive ? undefined : 'liveGlow'}
               style={{
                 width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'linear-gradient(160deg, #12213e 0%, #0a1425 100%)',
+                background: 'linear-gradient(160deg, var(--panel-top) 0%, var(--panel-bottom) 100%)',
                 border: `1.5px solid ${liveActive ? 'rgba(43,227,245,.8)' : 'rgba(43,227,245,.4)'}`,
-                boxShadow: liveActive ? '0 0 22px rgba(43,227,245,.4)' : '0 4px 16px rgba(2,6,16,.6)',
+                boxShadow: liveActive ? '0 0 22px rgba(43,227,245,.4)' : '0 4px 16px var(--drop)',
               }}
             >
               <img src="/brand/algoria-mark.png" alt="" width={32} height={32} style={{ objectFit: 'contain' }} />
@@ -498,7 +498,7 @@ export function Check({ checked, onToggle, children }: { checked: boolean; onTog
   return (
     <button type="button" onClick={onToggle} aria-pressed={checked}
       style={{ display: 'flex', gap: 11, alignItems: 'flex-start', textAlign: 'left', padding: '11px 13px', borderRadius: 11, cursor: 'pointer',
-        border: `1px solid ${checked ? 'rgba(31,216,176,.45)' : 'var(--border)'}`, background: checked ? 'rgba(31,216,176,.07)' : 'rgba(10,17,31,.55)' }}>
+        border: `1px solid ${checked ? 'rgba(31,216,176,.45)' : 'var(--border)'}`, background: checked ? 'rgba(31,216,176,.07)' : 'var(--surface)' }}>
       <span style={{ flex: 'none', width: 19, height: 19, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, marginTop: 1,
         border: `1.5px solid ${checked ? 'var(--up)' : 'var(--border)'}`, background: checked ? 'var(--up)' : 'transparent', color: '#04223a' }}>
         {checked ? '✓' : ''}

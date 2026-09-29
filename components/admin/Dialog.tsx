@@ -70,7 +70,7 @@ const overlay: CSSProperties = { position: 'fixed', inset: 0, zIndex: 1000, back
 // Sans lui, le bouton OK de la feuille tombe pile derrière la barre : le message se lit, mais on ne peut
 // pas le fermer — constaté sur l'app de Mathieu (« les pop ups se cachent sous le footer »).
 const sheet: CSSProperties = { width: '100%', maxWidth: 560, maxHeight: '88vh', overflowY: 'auto', background: 'var(--panel, #0b1220)', border: '1px solid var(--border, rgba(130,152,190,.25))', borderBottom: 'none', borderRadius: '16px 16px 0 0', padding: '16px 18px calc(22px + env(safe-area-inset-bottom, 0px))', boxShadow: '0 -12px 40px rgba(0,0,0,.45)', display: 'flex', flexDirection: 'column', gap: 12 };
-const field: CSSProperties = { width: '100%', padding: '11px 12px', borderRadius: 10, border: '1px solid var(--border, rgba(130,152,190,.35))', background: 'rgba(10,17,31,.8)', color: 'var(--text, #e8eefc)', fontSize: 15, lineHeight: 1.4, boxSizing: 'border-box' };
+const field: CSSProperties = { width: '100%', padding: '11px 12px', borderRadius: 10, border: '1px solid var(--border, rgba(130,152,190,.35))', background: 'var(--surface-strong)', color: 'var(--text, #e8eefc)', fontSize: 15, lineHeight: 1.4, boxSizing: 'border-box' };
 const btn = (primary: boolean, danger?: boolean): CSSProperties => ({
   flex: primary ? 1 : 'none', padding: '12px 16px', borderRadius: 10, fontSize: 13.5, fontWeight: 800, cursor: 'pointer', letterSpacing: 0.3,
   border: primary ? 'none' : '1px solid var(--border, rgba(130,152,190,.35))',
@@ -153,7 +153,7 @@ export function DialogHost() {
         {cur.kind === 'prompt' && opts.options && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {opts.options.map((o) => (
-              <button key={o.value} onClick={() => ok(o.value)} style={{ textAlign: 'left', padding: '11px 12px', borderRadius: 10, border: '1px solid var(--border, rgba(130,152,190,.35))', background: 'rgba(10,17,31,.6)', color: 'var(--text, #e8eefc)', fontSize: 13.5, cursor: 'pointer', lineHeight: 1.35 }}>
+              <button key={o.value} onClick={() => ok(o.value)} style={{ textAlign: 'left', padding: '11px 12px', borderRadius: 10, border: '1px solid var(--border, rgba(130,152,190,.35))', background: 'var(--surface)', color: 'var(--text, #e8eefc)', fontSize: 13.5, cursor: 'pointer', lineHeight: 1.35 }}>
                 {o.label}
                 {o.hint && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--dim, #6b7fa6)', marginTop: 2 }}>{o.hint}</span>}
               </button>

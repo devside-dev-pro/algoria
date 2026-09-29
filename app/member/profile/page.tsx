@@ -9,6 +9,7 @@ import { TRC20_RE } from '@/lib/member/affiliate';
 import { LOT_CHOICES, LOT_MAX, LOT_STEP, isLotAllowed } from '@/lib/member/lots';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
 import { ask, DialogHost } from '@/components/admin/Dialog';
+import { applyTheme, currentTheme, type Theme } from '@/lib/member/theme';
 
 // Alertes push : wins d'Algoria, recap du jour, annonce de live. Opt-in explicite (permission navigateur).
 // Logique partagée avec la popup d'install (lib/push/client.ts) — ici c'est le réglage manuel dans Profile.
@@ -128,7 +129,7 @@ export default function Profile() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
           <StatusPill status={member.status} />
           {(member.status === 'live' || member.status === 'paused') && (
-            <button disabled={busy} onClick={() => act(member.status === 'paused' ? 'resume' : 'pause')} style={{ border: '1px solid var(--border)', background: 'rgba(10,17,31,.6)', color: member.status === 'paused' ? 'var(--up)' : 'var(--muted)', borderRadius: 9, padding: '6px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
+            <button disabled={busy} onClick={() => act(member.status === 'paused' ? 'resume' : 'pause')} style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: member.status === 'paused' ? 'var(--up)' : 'var(--muted)', borderRadius: 9, padding: '6px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
               {member.status === 'paused' ? '▶ RESUME' : '⏸ PAUSE'}
             </button>
           )}
@@ -170,7 +171,7 @@ export default function Profile() {
 
           {/* palier suivant — la carotte : barre de progression + récompense teasée */}
           {referral.nextMilestone ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, background: 'rgba(10,17,31,.55)', border: '1px solid var(--border)', borderRadius: 11, padding: '11px 13px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 11, padding: '11px 13px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
                 <span style={{ color: 'var(--muted)' }}><b style={{ color: 'var(--text)' }}>{referral.activated}</b> activated</span>
                 <span className="goldText" style={{ fontWeight: 800 }}>+${referral.nextMilestone.bonus} at {referral.nextMilestone.at} · {referral.nextMilestone.label}</span>
@@ -194,7 +195,7 @@ export default function Profile() {
 
           {/* lien de partage */}
           <div style={{ display: 'flex', gap: 8 }}>
-            <span className="mono" style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', fontSize: 12.5, color: 'var(--cyan)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span className="mono" style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-strong)', fontSize: 12.5, color: 'var(--cyan)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               app.algoria.tech/r/{referral.code}
             </span>
             <button
@@ -288,7 +289,7 @@ export default function Profile() {
                 <button key={l} disabled={busy || !unlocked || active} onClick={() => setLot(l)}
                   style={{ flex: '1 1 56px', padding: '11px 8px', borderRadius: 10, cursor: active ? 'default' : 'pointer', fontWeight: 800, fontSize: 13,
                     border: `1px solid ${active ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
-                    background: active ? 'rgba(43,227,245,.1)' : 'rgba(10,17,31,.55)',
+                    background: active ? 'rgba(43,227,245,.1)' : 'var(--surface)',
                     color: active ? 'var(--cyan)' : 'var(--muted)' }}>
                   {l.toFixed(2)}
                 </button>
@@ -304,7 +305,7 @@ export default function Profile() {
               onKeyDown={(e) => { if (e.key === 'Enter') applyCustomLot(); }}
               disabled={busy || !unlocked} placeholder={`or type any size — up to ${LOT_MAX.toFixed(2)}`}
               style={{ flex: '1 1 180px', minWidth: 0, padding: '11px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700,
-                border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', color: 'var(--text)' }}
+                border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
             />
             <button disabled={busy || !unlocked || !customLot.trim()} onClick={applyCustomLot}
               style={{ padding: '11px 18px', borderRadius: 10, border: 'none', fontWeight: 800, fontSize: 13,
@@ -322,6 +323,8 @@ export default function Profile() {
 
       <PushCard />
 
+      <ThemeCard />
+
       {/* LANGUE — accessible à TOUT LE MONDE, y compris hors abonnement : elle n'est pas une fonctionnalité
           premium, c'est la condition pour comprendre ce qu'on lit. Placée avant le bloc support, parce que
           quelqu'un qui ne comprend pas l'écran écrit au support précisément à cause de ça. */}
@@ -335,7 +338,7 @@ export default function Profile() {
                 style={{
                   flex: 1, padding: '12px 10px', borderRadius: 11, cursor: active ? 'default' : 'pointer', fontSize: 13, fontWeight: 800,
                   border: active ? '1px solid rgba(43,227,245,.55)' : '1px solid var(--border)',
-                  background: active ? 'rgba(43,227,245,.12)' : 'rgba(10,17,31,.6)',
+                  background: active ? 'rgba(43,227,245,.12)' : 'var(--surface)',
                   color: active ? 'var(--cyan)' : 'var(--muted)',
                 }}>
                 {label}
@@ -423,8 +426,8 @@ function WithdrawSheet({ open, onClose, referral, onDone }: { open: boolean; onC
         onClick={(e) => e.stopPropagation()}
         style={{
           width: '100%', maxWidth: 560, borderRadius: '22px 22px 0 0', borderBottom: 'none',
-          border: '1px solid rgba(245,194,74,.42)', background: 'linear-gradient(180deg, #132342 0%, #0a1425 100%)',
-          boxShadow: '0 -18px 60px rgba(2,6,16,.8), 0 0 34px rgba(245,194,74,.1)',
+          border: '1px solid rgba(245,194,74,.42)', background: 'linear-gradient(180deg, var(--panel-top) 0%, var(--panel-bottom) 100%)',
+          boxShadow: '0 -18px 60px var(--drop), 0 0 34px rgba(245,194,74,.1)',
           padding: '20px 20px max(24px, env(safe-area-inset-bottom))', display: 'flex', flexDirection: 'column', gap: 12,
           maxHeight: '86dvh', overflowY: 'auto',
         }}
@@ -455,7 +458,7 @@ function WithdrawSheet({ open, onClose, referral, onDone }: { open: boolean; onC
   );
 }
 const wdLbl = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 10.5, letterSpacing: 1, color: 'var(--dim)', textTransform: 'uppercase' } as const;
-const wdInp = { padding: '12px 13px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.7)', color: 'var(--text)', fontSize: 14.5, outline: 'none' } as const;
+const wdInp = { padding: '12px 13px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-strong)', color: 'var(--text)', fontSize: 14.5, outline: 'none' } as const;
 
 function RefStat({ label, value, color, gold }: { label: string; value: string; color?: string; gold?: boolean }) {
   return (
@@ -472,5 +475,32 @@ function RowKV({ k, v }: { k: string; v: string }) {
       <span style={{ fontSize: 11.5, color: 'var(--dim)', minWidth: 90 }}>{k}</span>
       <span className="mono" style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>{v}</span>
     </div>
+  );
+}
+
+/** APPARENCE (30/09/2026) — sombre ou clair, par appareil. Accessible à tous, comme la langue. */
+function ThemeCard() {
+  const [theme, setTheme] = useState<Theme>('dark');
+  useEffect(() => { setTheme(currentTheme()); }, []);
+  return (
+    <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: 'var(--muted)' }}>APPEARANCE</h2>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {([['dark', '🌙 Dark'], ['light', '☀️ Light']] as const).map(([code, label]) => {
+          const active = theme === code;
+          return (
+            <button key={code} disabled={active} onClick={() => { applyTheme(code); setTheme(code); }}
+              style={{
+                flex: 1, padding: '12px 10px', borderRadius: 11, cursor: active ? 'default' : 'pointer', fontSize: 13, fontWeight: 800,
+                border: active ? '1px solid rgba(43,227,245,.55)' : '1px solid var(--border)',
+                background: active ? 'rgba(43,227,245,.12)' : 'var(--surface)',
+                color: active ? 'var(--cyan)' : 'var(--muted)',
+              }}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }

@@ -22,7 +22,7 @@ const box: CSSProperties = { borderRadius: 11, padding: '11px 13px', fontSize: 1
 const label: CSSProperties = { fontSize: 9.5, letterSpacing: 1.3, fontWeight: 800, textTransform: 'uppercase' };
 // la fausse fenêtre MetaTrader : bord net, fond plus sombre que le formulaire, police mono — elle doit se
 // lire comme une CAPTURE, pas comme un bloc de plus du formulaire, sinon l'œil la traite comme du texte
-const dialog: CSSProperties = { border: '1px solid rgba(130,152,190,.45)', borderRadius: 9, background: 'rgba(6,11,22,.9)', overflow: 'hidden' };
+const dialog: CSSProperties = { border: '1px solid rgba(130,152,190,.45)', borderRadius: 9, background: 'var(--surface-strong)', overflow: 'hidden' };
 const titleBar: CSSProperties = { padding: '6px 10px', background: 'rgba(130,152,190,.14)', fontSize: 10, letterSpacing: 0.6, color: 'var(--muted)', borderBottom: '1px solid rgba(130,152,190,.3)' };
 const fieldRow: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px' };
 const fieldName: CSSProperties = { fontSize: 10.5, color: 'var(--dim)', minWidth: 62 };

@@ -8,8 +8,8 @@
   --blue: #2e8bf0;
   --royal: #1e40e5;
   --text: #dce9ff;
-  --muted: #8298be;
-  --dim: #54688e;
+  --muted: #93a8cc; /* 30/09/2026 : +contraste (un VIP : « sometimes it is difficult to see the writing ») */
+  --dim: #6d82a8;
   --up: #1fd8b0;
   --down: #ff6b8a;
   --gold: #f5c24a;
@@ -45,7 +45,50 @@
   --grad-gold: linear-gradient(90deg, #ffd166, #f5a623);
   /* OR MÉTALLIQUE (multi-tons, clair→profond) — pour le texte .goldText, pas un jaune plat */
   --gold-metal: linear-gradient(180deg, #fff6cf 0%, #ffe084 30%, #f4b93a 55%, #cf8f14 78%, #a76f0a 100%);
+
+  /* surfaces (ex-couleurs écrites en dur dans l'app membre — passées en variables pour le thème clair) */
+  --surface: rgba(10, 17, 31, 0.55);        /* champ, carte secondaire, bouton inactif */
+  --surface-strong: rgba(10, 17, 31, 0.72); /* champ de saisie, encart plein */
+  --panel-top: #12213e;                     /* haut des dégradés de panneau */
+  --panel-bottom: #0a1425;                  /* bas des dégradés de panneau */
+  --bg-halo: #10203c;                       /* halo du fond */
+  --nav-bg: rgba(8, 16, 31, 0.94);          /* barre d'onglets */
+  --drop: rgba(2, 6, 16, 0.6);              /* ombre portée des éléments flottants */
+  --hi: rgba(255, 255, 255, 0.055);         /* liseré lumineux du haut des panneaux */
+  --grain: 0.05;
 }
+
+/* ===== THÈME CLAIR (30/09/2026, demandé par un VIP) — app membre uniquement : seul son layout pose
+   data-theme sur <html> (lib/member/theme.ts). Les accents gardent la marque, assombris là où ils servent
+   de TEXTE (cyan, or, vert) : #2be3f5 sur blanc est illisible. */
+html[data-theme='light'] {
+  --bg: #eef2f9;
+  --panel: #ffffff;
+  --panel-2: #f3f6fc;
+  --border: rgba(30, 64, 140, 0.14);
+  --cyan: #0a86a8;
+  --blue: #1d64d8;
+  --text: #0d1b33;
+  --muted: #4b5d7e;
+  --dim: #6a7b9b;
+  --up: #0a9474;
+  --down: #d62e57;
+  --gold: #a87400;
+  --sh-1: 0 1px 2px rgba(15, 30, 60, 0.06), 0 8px 24px rgba(15, 30, 60, 0.07);
+  --sh-2: 0 2px 6px rgba(15, 30, 60, 0.08), 0 18px 44px rgba(15, 30, 60, 0.1);
+  --gold-metal: linear-gradient(180deg, #d9a21c 0%, #b88207 55%, #8a5d00 100%);
+  --surface: rgba(20, 50, 110, 0.045);
+  --surface-strong: #ffffff;
+  --panel-top: #ffffff;
+  --panel-bottom: #f5f8fd;
+  --bg-halo: #dce7fb;
+  --nav-bg: rgba(255, 255, 255, 0.94);
+  --drop: rgba(20, 40, 80, 0.14);
+  --hi: rgba(255, 255, 255, 0.9);
+  --grain: 0.025;
+  color-scheme: light;
+}
+html[data-theme='light'] .goldText { filter: none; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -53,7 +96,7 @@ html { background: var(--bg); } /* pas de flash blanc au chargement */
 body {
   /* ambiance en COUCHES (halos froids haut-gauche / bleu roi haut-droite) — un fond plat uni crie "généré" */
   background:
-    radial-gradient(110% 70% at 18% -12%, #10203c 0%, transparent 55%),
+    radial-gradient(110% 70% at 18% -12%, var(--bg-halo) 0%, transparent 55%),
     radial-gradient(90% 60% at 88% -8%, rgba(30, 64, 229, 0.13) 0%, transparent 55%),
     var(--bg);
   color: var(--text);
@@ -68,7 +111,7 @@ body::after {
   inset: 0;
   z-index: 2147483647;
   pointer-events: none;
-  opacity: 0.05;
+  opacity: var(--grain);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>");
 }
 /* texte OR métallique (reflet clair en haut → or profond en bas) + lueur chaude */
@@ -87,10 +130,10 @@ body::after {
 }
 .panel {
   /* dégradé vertical (haut légèrement éclairé) + liseré lumineux → matière, pas un rectangle plat */
-  background: linear-gradient(180deg, #12213e 0%, var(--panel) 34%, #0a1425 100%);
+  background: linear-gradient(180deg, var(--panel-top) 0%, var(--panel) 34%, var(--panel-bottom) 100%);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh-1), inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  box-shadow: var(--sh-1), inset 0 1px 0 var(--hi);
 }
 .glow { box-shadow: 0 0 12px rgba(43, 227, 245, 0.35); }
 
