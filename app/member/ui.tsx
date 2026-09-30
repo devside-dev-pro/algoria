@@ -317,6 +317,16 @@ function InstallPrompt() {
   useEffect(() => {
     const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
     if (standalone) {
+      // MESURE DES INSTALLATIONS (30/09) : l'app ouverte depuis l'icône se signale, une fois par jour.
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        if (localStorage.getItem('alg_pwa_ping') !== today) {
+          const ua = navigator.userAgent;
+          const platform = /iphone|ipad|ipod/i.test(ua) ? 'ios' : /android/i.test(ua) ? 'android' : 'desktop';
+          void fetch('/api/member/pwa', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform }) })
+            .then((r) => { if (r.ok) localStorage.setItem('alg_pwa_ping', today); }).catch(() => {});
+        }
+      } catch { /* stockage bloqué : on réessaiera à la prochaine ouverture */ }
       // installé → propose les ALERTES si pas encore activées (et pas déjà rejeté cette session)
       if (sessionStorage.getItem('alg_alerts_hide')) return;
       void pushState().then((st) => { if (st === 'off') setMode('alerts'); });
