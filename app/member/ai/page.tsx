@@ -18,18 +18,18 @@ import { useRouter } from 'next/navigation';
 import { ACADEMY, type Lesson } from '@/lib/member/academy';
 
 interface TrackDay { d: string; u: number; n: number }
-interface Ask { q: string; module: string; lesson: string }
+interface Ask { q: string; icon: string; module: string; lesson: string }
 
 // Chaque question pointe une leçon de l'Academy : une seule source de vérité, relue par Mathieu.
 const ASKS: Ask[] = [
-  { q: 'Why no trade right now ?', module: 'basics', lesson: 'quiet' },
-  { q: 'Is my money safe ?', module: 'basics', lesson: 'copy' },
-  { q: 'Is it a martingale ?', module: 'basics', lesson: 'lot' },
-  { q: 'What if a trade goes wrong ?', module: 'basics', lesson: 'sl' },
-  { q: 'How much should I deposit ?', module: 'faq', lesson: 'deposit' },
-  { q: 'When can I withdraw ?', module: 'faq', lesson: 'withdraw' },
-  { q: 'Which broker should I pick ?', module: 'faq', lesson: 'broker' },
-  { q: 'How does the referral work ?', module: 'referral', lesson: 'ref-how' },
+  { q: 'Why no trade right now ?', icon: '⏳', module: 'basics', lesson: 'quiet' },
+  { q: 'Is my money safe ?', icon: '🔐', module: 'basics', lesson: 'copy' },
+  { q: 'Is it a martingale ?', icon: '🎲', module: 'basics', lesson: 'lot' },
+  { q: 'What if a trade goes wrong ?', icon: '🛡️', module: 'basics', lesson: 'sl' },
+  { q: 'How much to deposit ?', icon: '💵', module: 'faq', lesson: 'deposit' },
+  { q: 'When can I withdraw ?', icon: '🏦', module: 'faq', lesson: 'withdraw' },
+  { q: 'Which broker should I pick ?', icon: '⭐', module: 'faq', lesson: 'broker' },
+  { q: 'How does the referral work ?', icon: '🤝', module: 'referral', lesson: 'ref-how' },
 ];
 const lessonOf = (a: Ask): Lesson | undefined => ACADEMY.find((m) => m.key === a.module)?.lessons.find((l) => l.id === a.lesson);
 const nb = (s: string) => s.replace(/ ([?!])/g, ' $1');
@@ -213,12 +213,20 @@ export default function AlgoriaAI() {
             </div>
           </div>
         )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+        {/* GRILLE RÉGULIÈRE 2 colonnes (30/09, Mathieu : des pastilles de longueurs différentes « empilées
+            bizarrement ») — tuiles de même taille, icône + question sur 2 lignes max. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           {ASKS.map((a) => {
             const on = ask?.q === a.q;
             return (
-              <button key={a.q} onClick={() => setAsk(a)} style={{ padding: '8px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', color: on ? '#0b0e14' : 'var(--text)', background: on ? 'linear-gradient(90deg,#2be3f5,#2e8bf0)' : 'var(--surface)', border: on ? '1px solid transparent' : '1px solid var(--border)' }}>
-                {nb(a.q)}
+              <button key={a.q} onClick={() => setAsk(a)} style={{
+                display: 'flex', alignItems: 'center', gap: 9, minHeight: 58, padding: '9px 11px', borderRadius: 13, textAlign: 'left',
+                fontSize: 12.5, fontWeight: 700, lineHeight: 1.3, cursor: 'pointer', color: on ? '#0b0e14' : 'var(--text)',
+                background: on ? 'linear-gradient(135deg,#2be3f5,#2e8bf0)' : 'var(--surface)', border: on ? '1px solid transparent' : '1px solid var(--border)',
+                boxShadow: on ? '0 6px 18px rgba(43,227,245,.25)' : 'none', transition: 'background .2s, box-shadow .2s',
+              }}>
+                <span aria-hidden style={{ flex: '0 0 auto', width: 30, height: 30, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, background: on ? 'rgba(11,14,20,.14)' : 'rgba(43,227,245,.08)' }}>{a.icon}</span>
+                <span>{nb(a.q)}</span>
               </button>
             );
           })}
