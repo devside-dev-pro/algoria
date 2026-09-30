@@ -331,7 +331,7 @@ type Body = {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; offboardBatch?: Array<{ tg_id: number; reason?: string }>; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; resetOnboarding?: number; offboardBatch?: Array<{ tg_id: number; reason?: string }>; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
     botBroadcast?: { audience: 'pending' | 'live' | 'stalled'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
@@ -602,6 +602,28 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
 
   // ===== REFUSER une demande de connexion (vérification broker échouée) — SANS bloquer le membre :
   // il repasse en onboarding à l'étape MT5, voit la raison dans le wizard, corrige et re-soumet.
+  // ↺ RETOUR AU FORMULAIRE (30/09/2026, demande Mathieu) — un client s'est trompé (mot de passe, serveur, broker)
+  // et doit ressaisir ses informations, mais son app reste sur l'écran d'attente, ou sa demande a déjà été traitée.
+  // Remet la fiche en onboarding étape 1 (broker conservé, identifiants re-saisis au wizard), classe les demandes de
+  // connexion encore en attente, note la timeline et prévient le membre. Réservé aux fiches pas encore LIVE :
+  // un membre live qui change de compte passe par OFF-BOARD / reconnexion, pas par ici.
+  if (body.resetOnboarding) {
+    const tg = Number(body.resetOnboarding);
+    const { data: m } = await db.from('members').select('tg_id,member_no,status').eq('tg_id', tg).limit(1);
+    if (!m?.[0]) return NextResponse.json({ error: 'member not found' }, { status: 404 });
+    if (!['onboarding', 'pending_copier'].includes(String(m[0].status))) return NextResponse.json({ error: `member is ${m[0].status} — only onboarding / pending members can be sent back to the form` }, { status: 400 });
+    const now = new Date().toISOString();
+    const { data: open } = await db.from('member_actions').select('id,detail').eq('tg_id', tg).eq('kind', 'connect').eq('status', 'pending');
+    for (const a of open ?? []) {
+      await db.from('member_actions').update({ status: 'rejected', done_at: now, done_by: who, detail: { ...((a.detail as Record<string, unknown> | null) ?? {}), reject_code: 'reset', reject_reason: 'Sent back to the form to re-enter the account details.' } as never }).eq('id', a.id);
+    }
+    await db.from('members').update({ status: 'onboarding', onboarding_step: 1, updated_at: now }).eq('tg_id', tg);
+    await db.from('member_actions').insert({ tg_id: tg, member_no: m[0].member_no, kind: 'note', status: 'done', done_by: who, detail: { text: `↺ sent back to the onboarding form by ${who}${open?.length ? ` (${open.length} pending request closed)` : ''}` } });
+    const { pushToUser } = await import('@/lib/push/send');
+    void pushToUser(tg, { title: 'Re-enter your account details', body: 'Open the app: your connection form is open again, enter the correct details and resubmit.', url: '/member/onboarding', tag: 'algoria-connect' });
+    return NextResponse.json({ ok: true, closed: open?.length ?? 0 });
+  }
+
   if (body.rejectConnect) {
     const { data: rows } = await db.from('member_actions').select('*').eq('id', body.rejectConnect).eq('status', 'pending').limit(1);
     const act = rows?.[0];

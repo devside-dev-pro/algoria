@@ -52,7 +52,14 @@ export default function Pending() {
       });
     check();
     const iv = setInterval(check, 20_000);
-    return () => { alive = false; clearInterval(iv); };
+    // AU RETOUR DANS L'APP, on revérifie tout de suite (30/09/2026) : sur iPhone le minuteur est gelé en arrière-plan,
+    // donc un membre refusé (ou approuvé) pendant que la PWA dormait restait sur un écran périmé — vu : un client refusé
+    // pour mauvais mot de passe voyait encore « submitted 8 h ago » et ne pouvait pas ressaisir ses identifiants.
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    window.addEventListener('pageshow', onVisible);
+    return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); window.removeEventListener('pageshow', onVisible); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
