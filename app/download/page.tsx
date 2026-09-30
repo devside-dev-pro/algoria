@@ -8,14 +8,11 @@
 //     CSS jusqu'au 14/08, dérivées au point de ne plus rien montrer de l'app.
 import { useEffect, useRef, useState } from 'react';
 
-const REVIEWS = [
-  { name: 'Marcus T.', stars: 5, when: 'this week', text: 'Watched the live on TikTok for a month before joining. Having the AI feed on my phone with the win alerts is another level.' },
-  { name: 'goldhunter_fx', stars: 5, when: 'last week', text: 'Cleanest trading app I have. No broker clutter — just what the AI is doing and my copying status. Installs in 5 seconds.' },
-  { name: 'Sarah K.', stars: 5, when: '2 weeks ago', text: 'The lock-screen alerts when a trade closes green are so satisfying. Feels like a native app, not a website.' },
-  { name: 'Dylan R.', stars: 4, when: 'this month', text: 'Great app, super smooth. Would love dark gold theme options — otherwise perfect for following the account.' },
-];
-const RATING = 4.9;
-const RATING_COUNT = '210+';
+// AVIS ET NOTE RETIRÉS (30/09/2026). La page affichait 4 avis inventés, une note « ★ 4.9 · 210+ members »
+// et une répartition d'étoiles qui ne venaient de nulle part. Présenter de faux avis comme vrais est trompeur
+// (et interdit dans la plupart des pays), et c'est le genre de détail qu'un prospect méfiant vérifie. À la
+// place : des faits vérifiables (le track record réel). De VRAIS témoignages de membres pourront revenir ici,
+// avec leur accord.
 
 type Platform = 'ios' | 'android' | 'desktop';
 type BipEvent = { prompt: () => Promise<void>; userChoice?: Promise<{ outcome: string }> };
@@ -212,7 +209,7 @@ export default function DownloadPage() {
           />
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
             <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, letterSpacing: 0.3 }}>Algoria</h1>
-            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>The AI that trades — live in your pocket</div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>The AI that trades gold &amp; crypto, in your pocket</div>
             <div style={{ fontSize: 11, color: 'var(--dim)' }}>Algoria AI · Finance</div>
           </div>
         </div>
@@ -261,13 +258,13 @@ export default function DownloadPage() {
         {/* ── barre d'infos façon App Store ── */}
         <div className="panel" style={{ display: 'flex', padding: '12px 6px' }}>
           {[
-            { top: `★ ${RATING}`, bottom: `${RATING_COUNT} members` },
-            { top: 'Free', bottom: 'forever' },
-            { top: '#1', bottom: 'AI trading' },
+            { top: 'Free', bottom: 'no card' },
+            { top: 'iPhone', bottom: '& Android' },
             { top: '< 1 MB', bottom: 'instant' },
+            { top: 'Real', bottom: 'track record' },
           ].map((c, i) => (
             <div key={i} style={{ flex: 1, textAlign: 'center', borderLeft: i ? '1px solid var(--border)' : 'none' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: i === 0 ? 'var(--gold)' : 'var(--text)' }}>{c.top}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: i === 3 ? 'var(--gold)' : 'var(--text)' }}>{c.top}</div>
               <div style={{ fontSize: 9.5, color: 'var(--dim)', marginTop: 2, letterSpacing: 0.4 }}>{c.bottom}</div>
             </div>
           ))}
@@ -283,13 +280,15 @@ export default function DownloadPage() {
             Les vraies captures dormaient dans public/adshots depuis le 30/07, référencées nulle part.
             Servies en WebP 600 px : 2,6 Mo → ~50 Ko pièce, l'original reste pour les visuels publicitaires.
             ⚠️ Quand l'app change d'allure, refaire les captures PUIS régénérer :
-               sharp(src).resize({ width: 600 }).webp({ quality: 82 }) */}
+               sharp(src).resize({ width: 600 }).webp({ quality: 82 })
+            30/09/2026 : captures refaites (Algoria AI, Academy, parrainage). Les anciennes montraient encore
+            les 3 stratégies, le Desk retiré et la taille du compte maître — trois choses qui n'existent plus. */}
         <div className="deskscroll" style={{ display: 'flex', gap: 12, overflowX: 'auto', padding: '4px 2px 10px' }}>
           {[
-            { src: '/adshots/web/cockpit.webp', title: 'Live AI feed' },
-            { src: '/adshots/web/history.webp', title: 'Your gains, trade by trade' },
-            { src: '/adshots/web/home.webp', title: 'Copying status' },
-            { src: '/adshots/web/strategies.webp', title: 'Pick your strategy' },
+            { src: '/adshots/web/ai.webp', title: 'Algoria AI · the real curve' },
+            { src: '/adshots/web/ai-ask.webp', title: 'Ask Algoria AI' },
+            { src: '/adshots/web/academy.webp', title: 'Academy · 5 min' },
+            { src: '/adshots/web/referral.webp', title: 'Refer & earn' },
           ].map((sh) => (
             <div key={sh.src} style={{ flex: 'none', display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center' }}>
               <img
@@ -308,14 +307,15 @@ export default function DownloadPage() {
         <section className="panel" style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <h2 style={secTitle}>About this app</h2>
           <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: 'var(--muted)' }}>
-            Algoria is an AI that trades <b style={{ color: 'var(--gold)' }}>gold</b> and <b style={{ color: '#f7931a' }}>Bitcoin</b> on
-            a real account, autonomously, and streams it live. The app puts her in your pocket:
+            Algoria is an AI that trades <b style={{ color: 'var(--gold)' }}>gold</b> and <b style={{ color: '#f7931a' }}>crypto</b>, 100% automated.
+            Every trade is copied to your own MT5 account, and the app puts it all in your pocket:
           </p>
           {[
-            ['🧠', 'Live AI feed — watch every decision she makes, explained in plain English'],
-            ['📈', 'Copying status — your balance, equity and risk control in one glance'],
-            ['🔔', 'Win alerts — a lock-screen notification when a trade closes'],
-            ['🎓', 'Academy — learn how she trades, step by step'],
+            ['🧠', 'Algoria AI: the real account curve since July, and answers to your questions'],
+            ['📜', 'History: every trade, at your own lot size'],
+            ['🔔', 'Win alerts: a lock-screen notification when a trade closes'],
+            ['🎓', 'Academy: everything in 5 minutes, with a quiz'],
+            ['🤝', 'Refer & earn: your link, your commissions, paid in USDT'],
           ].map(([ic, t]) => (
             <div key={t} style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
               <span style={{ fontSize: 14 }}>{ic}</span>
@@ -324,36 +324,31 @@ export default function DownloadPage() {
           ))}
         </section>
 
-        {/* ── AVIS ── */}
-        <section className="panel" style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2 style={secTitle}>Ratings &amp; reviews</h2>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 40, fontWeight: 700, lineHeight: 1 }}>{RATING}</div>
-              <div style={{ fontSize: 11, color: 'var(--gold)', letterSpacing: 1 }}>★★★★★</div>
-              <div style={{ fontSize: 9.5, color: 'var(--dim)', marginTop: 2 }}>{RATING_COUNT} members</div>
-            </div>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {[92, 6, 2, 0, 0].map((pct, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{ fontSize: 9, color: 'var(--dim)', width: 8, textAlign: 'right' }}>{5 - i}</span>
-                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,.06)' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', borderRadius: 2, background: 'var(--gold)' }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          {REVIEWS.map((r) => (
-            <div key={r.name} style={{ background: 'rgba(255,255,255,.03)', border: '1px solid var(--border)', borderRadius: 12, padding: '11px 13px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 700 }}>{r.name}</span>
-                <span style={{ fontSize: 10, color: 'var(--dim)' }}>{r.when}</span>
+        {/* ── POURQUOI L'INSTALLER (remplace les faux avis, 30/09) : ce que l'installation change VRAIMENT,
+            puis la preuve vérifiable plutôt qu'une note inventée. Sur iPhone, les alertes n'existent QUE dans
+            l'app installée (Apple n'autorise pas le push dans un onglet Safari) : c'est l'argument n°1. ── */}
+        <section className="panel" style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h2 style={secTitle}>Why install it</h2>
+          {[
+            ['🔔', 'Win alerts on your lock screen', 'on iPhone they only work in the installed app'],
+            ['📱', 'Full screen, one tap from your home screen', 'no address bar, no tabs to find'],
+            ['⚡', 'Always up to date', 'no store, no updates to download'],
+          ].map(([ic, t, d]) => (
+            <div key={t} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 16, width: 22, textAlign: 'center' }}>{ic}</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{t}</div>
+                <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.45 }}>{d}</div>
               </div>
-              <div style={{ fontSize: 10.5, color: 'var(--gold)', letterSpacing: 1, margin: '2px 0 5px' }}>{'★'.repeat(r.stars)}{'☆'.repeat(5 - r.stars)}</div>
-              <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: 'var(--muted)' }}>{r.text}</p>
             </div>
           ))}
+          <a href="https://algoria.tech/track-record" target="_blank" rel="noreferrer"
+            style={{ marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '12px 14px', borderRadius: 12, textDecoration: 'none', border: '1px solid rgba(245,194,74,.4)', background: 'rgba(245,194,74,.07)' }}>
+            <span style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.45 }}>
+              <b style={{ color: 'var(--gold)' }}>Don&rsquo;t trust, verify.</b> Every real trade since July, red months included.
+            </span>
+            <span style={{ fontSize: 16, color: 'var(--gold)' }}>→</span>
+          </a>
         </section>
 
         {/* ── TUTO iPHONE (détaillé — Apple n'offre aucun bouton d'installation) ── */}
