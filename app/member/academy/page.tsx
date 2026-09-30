@@ -7,7 +7,7 @@
 // encore de 3 stratégies. À la place : le contenu de lib/member/academy.ts, en texte natif (lisible sur
 // téléphone, suit le thème clair/sombre), plus un quiz. Lien direct vers un module : /academy#faq, #quiz…
 // Vidéo d'intro : NEXT_PUBLIC_INTRO_VIDEO_URL (16:9, .mp4/.webm ou iframe) — affichée seulement si elle existe.
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ACADEMY, QUIZ, type Fact, type Lesson } from '@/lib/member/academy';
 
 const INTRO = process.env.NEXT_PUBLIC_INTRO_VIDEO_URL ?? '';
@@ -64,7 +64,8 @@ function LessonCard({ l, n, total }: { l: Lesson; n: number; total: number }) {
         </div>
       )}
       {l.link && (
-        <a href={l.link.href} target="_blank" rel="noreferrer" style={{ alignSelf: 'flex-start', fontSize: 12.5, fontWeight: 750, color: 'var(--cyan)', textDecoration: 'none' }}>↗ {l.link.label}</a>
+        // lien interne (profil…) : même onglet — un _blank sortirait de la PWA
+        <a href={l.link.href} {...(l.link.href.startsWith('http') ? { target: '_blank', rel: 'noreferrer' } : {})} style={{ alignSelf: 'flex-start', fontSize: 12.5, fontWeight: 750, color: 'var(--cyan)', textDecoration: 'none' }}>↗ {l.link.label}</a>
       )}
     </article>
   );
@@ -143,6 +144,13 @@ export default function Academy() {
     try { window.history.replaceState(null, '', `#${k}`); } catch { /* sans importance */ }
   };
   const mod = ACADEMY.find((m) => m.key === tab);
+  // lien direct (#referral…) : l'onglet actif peut être hors de la barre défilante — on l'y ramène
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = navRef.current?.querySelector<HTMLElement>(`[data-k="${tab}"]`);
+    const nav = navRef.current;
+    if (el && nav) nav.scrollTo({ left: el.offsetLeft - nav.offsetLeft - (nav.clientWidth - el.offsetWidth) / 2, behavior: 'smooth' });
+  }, [tab]);
 
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
@@ -173,11 +181,11 @@ export default function Academy() {
         </a>
       )}
 
-      <nav style={{ display: 'flex', gap: 7, overflowX: 'auto', margin: '0 -2px', padding: '2px 2px 4px', scrollbarWidth: 'none' }}>
+      <nav ref={navRef} style={{ display: 'flex', gap: 7, overflowX: 'auto', margin: '0 -2px', padding: '2px 2px 4px', scrollbarWidth: 'none' }}>
         {TABS.map((t) => {
           const on = t.key === tab;
           return (
-            <button key={t.key} onClick={() => choose(t.key)} style={{ flex: '0 0 auto', padding: '8px 13px', borderRadius: 999, fontSize: 12.5, fontWeight: 750, cursor: 'pointer', whiteSpace: 'nowrap', color: on ? '#0b0e14' : 'var(--text)', background: on ? 'linear-gradient(90deg,#2be3f5,#2e8bf0)' : 'var(--surface)', border: on ? '1px solid transparent' : '1px solid var(--border)' }}>
+            <button key={t.key} data-k={t.key} onClick={() => choose(t.key)} style={{ flex: '0 0 auto', padding: '8px 13px', borderRadius: 999, fontSize: 12.5, fontWeight: 750, cursor: 'pointer', whiteSpace: 'nowrap', color: on ? '#0b0e14' : 'var(--text)', background: on ? 'linear-gradient(90deg,#2be3f5,#2e8bf0)' : 'var(--surface)', border: on ? '1px solid transparent' : '1px solid var(--border)' }}>
               {t.icon} {t.label}
             </button>
           );

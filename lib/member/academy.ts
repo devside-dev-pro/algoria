@@ -11,6 +11,10 @@
 //
 // Mise en forme : `**gras**` dans les textes, rien d'autre.
 
+import {
+  COMMISSION_CAP_AFTER_10_USD, COMMISSION_CAP_USD, COMMISSION_RATE, COMMISSION_RATE_AFTER_10, MILESTONES, MIN_PAYOUT_USD, commissionForActivation,
+} from './affiliate';
+
 export interface Fact { ok: boolean; t: string; s?: string }
 export interface Lesson {
   id: string;
@@ -25,6 +29,8 @@ export interface Lesson {
 export interface AcademyModule { key: string; label: string; icon: string; blurb: string; lessons: Lesson[] }
 export interface QuizQuestion { q: string; options: string[]; answer: number; why: string }
 
+const pct = (r: number) => `${Math.round(r * 100)}%`;
+const usd = (n: number) => `$${n.toLocaleString('en-US')}`;
 const TRACK = { href: 'https://algoria.tech/track-record', label: 'algoria.tech/track-record' };
 
 export const ACADEMY: AcademyModule[] = [
@@ -182,6 +188,54 @@ export const ACADEMY: AcademyModule[] = [
         id: 'r-steps', kicker: 'Broker spotlight', title: 'Open it in 4 steps',
         body: 'Everything starts from the app. The one step people miss: RaiseFX only enables trading once your **KYC level 2** is validated.',
         facts: [{ ok: true, t: '1. Open with the link', s: 'in the Algoria app' }, { ok: true, t: '2. MT5 standard account', s: 'leverage 1:500' }, { ok: true, t: '3. Validate KYC level 2', s: 'trading unlocks right after' }, { ok: true, t: '4. Deposit and connect', s: '$500 recommended' }],
+      },
+    ],
+  },
+  {
+    // PARRAINAGE (30/09/2026, Mathieu : « beaucoup ne comprennent pas comment fonctionne l'affiliation »).
+    // Les chiffres viennent de lib/member/affiliate.ts, jamais recopiés à la main : si le barème change,
+    // l'Academy suit. Le cycle réel (admin/route.ts) : commission créée « on the way » quand le filleul passe
+    // LIVE, retirable quand Mathieu confirme avoir reçu la commission broker, annulable si le dépôt repart.
+    key: 'referral', label: 'Refer & earn', icon: '🤝', blurb: 'How the Algoria referral works, step by step.',
+    lessons: [
+      {
+        id: 'ref-earn', kicker: 'Refer & earn', title: `Bring a friend, earn ${pct(COMMISSION_RATE)}`,
+        body: `When a friend you invited starts with Algoria, you earn **${pct(COMMISSION_RATE)} of their deposit**, up to ${usd(COMMISSION_CAP_USD)} per friend. The bigger they start, the more you make.`,
+        facts: [200, 500, 1000, 2000].map((d) => ({ ok: true, t: `Friend deposits ${usd(d)}${d === 2000 ? '+' : ''}`, s: `you earn ${usd(commissionForActivation(0, d))}` })),
+      },
+      {
+        id: 'ref-how', kicker: 'Refer & earn', title: 'How it works',
+        body: 'Your personal link is in the app. Your friend joins with it, deposits, goes live, and **your commission unlocks** once the broker pays Algoria for that account.',
+        facts: [
+          { ok: true, t: '1. Share your link', s: 'Profile → Refer & earn' },
+          { ok: true, t: '2. Your friend joins with it', s: 'the invitation stays linked to you for 30 days' },
+          { ok: true, t: '3. They deposit and go live', s: 'your commission shows “on the way”' },
+          { ok: true, t: '4. The broker pays Algoria', s: 'your commission becomes available to withdraw' },
+        ],
+        link: { href: '/member/profile', label: 'Open my referral link' },
+      },
+      {
+        id: 'ref-levels', kicker: 'Refer & earn', title: 'Level up',
+        body: `The more friends you bring, the more it pays. From your 10th friend, every new one pays **${pct(COMMISSION_RATE_AFTER_10)}**, up to ${usd(COMMISSION_CAP_AFTER_10_USD)} each.`,
+        facts: [
+          { ok: true, t: `Friends 1 to ${MILESTONES[0].at - 1}`, s: `${pct(COMMISSION_RATE)} of each deposit, up to ${usd(COMMISSION_CAP_USD)}` },
+          ...MILESTONES.map((m) => ({ ok: true, t: `${m.at} friends · ${m.label}`, s: m.at === 10 ? `+${usd(m.bonus)} bonus, or an iPhone instead` : `+${usd(m.bonus)} bonus` })),
+        ],
+      },
+      {
+        id: 'ref-paid', kicker: 'Refer & earn', title: 'Get paid',
+        body: `Withdraw from **${usd(MIN_PAYOUT_USD)}**, in USDT on the TRC20 network, straight to your own wallet. You request it from your Profile, and every payout shows its transaction link.`,
+        facts: [{ ok: true, t: `Minimum ${usd(MIN_PAYOUT_USD)}`, s: 'USDT · TRC20 network' }, { ok: false, t: 'Other networks', s: 'a TRC20 address only, starting with T' }],
+      },
+      {
+        id: 'ref-know', kicker: 'Refer & earn', title: 'Good to know',
+        body: 'The referral is based on **real deposits**, so it stays fair for everyone.',
+        facts: [
+          { ok: true, t: 'Your friend pays nothing extra', s: 'same free access, same rules' },
+          { ok: true, t: 'Based on the validated deposit', s: 'the amount the broker confirms' },
+          { ok: true, t: 'One friend = one commission', s: 'even if they reconnect later' },
+          { ok: false, t: 'Deposit withdrawn early', s: 'the commission for that friend is canceled' },
+        ],
       },
     ],
   },
