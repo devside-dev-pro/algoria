@@ -19,7 +19,9 @@ const marketLabel = (symbol: string): string => (symbol === 'XAUUSD' ? 'GOLD' : 
 
 const TELEGRAM = process.env.NEXT_PUBLIC_TELEGRAM_URL || 'https://t.me/'; // à définir en env Vercel
 const TIKTOK = process.env.NEXT_PUBLIC_TIKTOK_URL || '';
-const VIDEO = process.env.NEXT_PUBLIC_WELCOME_VIDEO_URL || ''; // vidéo de bienvenue (mp4 ou YouTube/Vimeo)
+// Vidéo d'intro « Algoria in 1 minute » (mp4 ou YouTube/Vimeo). 30/09/2026 : remplace NEXT_PUBLIC_WELCOME_VIDEO_URL,
+// l'ancienne vidéo du fondateur parlait encore de 3 stratégies. Même variable que l'Academy.
+const VIDEO = process.env.NEXT_PUBLIC_INTRO_VIDEO_URL || '';
 
 // montants de /api/public/proof, à 0.10 lot (24/09/2026) : à cette échelle un gain vaut souvent moins de
 // 10 $, et l'arrondir au dollar le déformerait — deux décimales sous 100 $, entier au-delà.
@@ -126,11 +128,11 @@ export default function Funnel() {
           )}
         </section>
 
-        {/* ===== vidéo de bienvenue (activée via NEXT_PUBLIC_WELCOME_VIDEO_URL) ===== */}
+        {/* ===== vidéo d'intro (activée via NEXT_PUBLIC_INTRO_VIDEO_URL) ===== */}
         {VIDEO && (
           <section style={{ width: '100%', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--border)', background: '#000' }}>
             {/youtube\.com|youtu\.be|vimeo\.com/.test(VIDEO) ? (
-              <iframe src={VIDEO} title="Welcome to Algoria" style={{ width: '100%', aspectRatio: '16/9', border: 'none', display: 'block' }} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
+              <iframe src={VIDEO} title="Algoria in 1 minute" style={{ width: '100%', aspectRatio: '16/9', border: 'none', display: 'block' }} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
             ) : (
               <video src={VIDEO} controls playsInline style={{ width: '100%', display: 'block' }} />
             )}

@@ -31,7 +31,9 @@ export const viewport = { themeColor: '#08101f' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${mono.variable}`}>
+    // suppressHydrationWarning : THEME_BOOT (lib/member/theme.ts) pose data-theme="light" sur <html> AVANT
+    // l'hydratation — c'est voulu (pas de flash sombre), React n'a pas à le signaler comme une erreur.
+    <html lang="en" className={`${display.variable} ${mono.variable}`} suppressHydrationWarning>
       <body>{children}</body>
     </html>
   );

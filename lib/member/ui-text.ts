@@ -66,7 +66,7 @@ export const UI: Dict = {
   'ob.proof.withdraw': { en: 'Withdraw anytime', it: 'Preleva quando vuoi' },
   'ob.proof.risk': { en: 'Risk capped', it: 'Rischio limitato' },
   'ob.proof.riskEnd': { en: 'every single day', it: 'ogni singolo giorno' },
-  'ob.proof.video': { en: '▶ New here? Watch the 2-min founder intro', it: '▶ Nuovo qui? Guarda la presentazione di 2 minuti' },
+  'ob.proof.video': { en: '🎓 New here? Learn how Algoria works in 5 min', it: '🎓 Nuovo qui? Scopri come funziona Algoria in 5 minuti' },
 
 
 
