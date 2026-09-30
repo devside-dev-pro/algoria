@@ -1,6 +1,6 @@
 # Algoria AI — knowledge
 
-Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire (v9 : 500 $ recommandés ; v8 : style réel de Mathieu ; v7 : comptes existants, 2e compte impossible chez le même broker, CPA pour VT et PU Prime) — c'est lui qui le complète et le corrige. C'est ce que sait Algoria AI : il s'en sert pour réfléchir, il ne recopie jamais une phrase telle quelle.
+Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire (v10 : bouton central Algoria AI, Academy et parrainage ; v9 : 500 $ recommandés ; v8 : style réel de Mathieu ; v7 : comptes existants, 2e compte impossible chez le même broker, CPA pour VT et PU Prime) — c'est lui qui le complète et le corrige. C'est ce que sait Algoria AI : il s'en sert pour réfléchir, il ne recopie jamais une phrase telle quelle.
 Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle des 30 jours viennent de l'app et sont ajoutés automatiquement : pas besoin de les écrire ici.
 
 ## Algoria en bref
@@ -69,7 +69,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 ## Résultats
 - Les trades réels clôturés sont dans l'onglet History de l'app.
 - Les captures de gains : avant, elles montraient les gains au lot du compte de Mathieu (1.00 lot) ; depuis fin septembre, elles sont toutes affichées à 0.10 lot. Le membre reçoit ces gains à SA taille de lot.
-- Le track record (algoria.tech/track-record, aussi le bouton central de l'app) montre le VRAI compte copié, trade par trade depuis juillet 2026, en % ou en $ à n'importe quel lot, mois rouges compris. Ce n'est ni une simulation ni un backtest.
+- Le track record (algoria.tech/track-record, aussi dans l'app : onglet History, ou depuis Algoria AI, le bouton central) montre le VRAI compte copié, trade par trade depuis juillet 2026, en % ou en $ à n'importe quel lot, mois rouges compris. Ce n'est ni une simulation ni un backtest.
 - Ne jamais citer soi-même un rendement, une moyenne ou un chiffre : envoyer le lien.
 - Le trading comporte des risques ; les résultats passés ne préjugent pas des résultats futurs.
 
@@ -88,6 +88,8 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - Le canal VIP est donné à toutes les personnes connectées à Algoria AI : on y voit les gains, les analyses et les infos en avant-première.
 
 ## App
+- Le bouton central de l'app ouvre Algoria AI : la courbe réelle du compte depuis juillet et les réponses aux questions fréquentes.
+- L'Academy (app.algoria.tech/academy) explique tout en 5 minutes, avec un quiz : How it works, FAQ, Myth vs Fact, Glossary, RaiseFX, et le parrainage (app.algoria.tech/academy#referral). Y renvoyer quelqu'un qui découvre ou qui ne comprend pas le parrainage.
 - Un souci pour installer l'app ou se connecter (code, région…) : essayer de comprendre d'où vient le problème ; sinon, la personne contacte Mathieu, qui l'aide.
 
 ## Ce dont on ne parle pas encore
