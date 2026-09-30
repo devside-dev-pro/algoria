@@ -70,9 +70,9 @@ export const CTA_TEMPLATES: Array<{ id: string; label: string; target: 'app' | '
     btn: '📲 INSTALL THE APP', url: 'https://app.algoria.tech/download',
   },
   {
-    id: 'proof', label: '🎥 Comprendre en 2 min → academy', target: 'app',
-    text: "🎥 <b>New here? Start with this.</b>\n\nTwo minutes to understand exactly what Algoria is, how it trades gold and Bitcoin, and why your money never leaves your own account.",
-    btn: '▶ WATCH THE INTRO', url: 'https://app.algoria.tech/academy',
+    id: 'proof', label: '🎓 Comprendre en 5 min → academy', target: 'app',
+    text: "🎓 <b>New here? Start with this.</b>\n\nA few minutes to understand exactly what Algoria is, how it trades gold and crypto, and why your money never leaves your own account.",
+    btn: '🎓 OPEN THE ACADEMY', url: 'https://app.algoria.tech/academy',
   },
   {
     id: 'stuck', label: '💬 Bloqué dans ton inscription → toi', target: 'mathieu',
