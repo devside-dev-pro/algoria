@@ -9,7 +9,7 @@ import { useEffect } from 'react';
 import { StatusChip, dangerBtn, dimP, goldBtn, inp, miniBtn, secH, td, useNarrow } from '../_shared';
 
 export function MembersTab() {
-  const { KIND_LABEL, actSummary, actions, addNote, alertsOn, banMember, busy, countrySelect, delNote, deposits, editLegalName, editPassword, editPick, editText, extraAccounts, filtered, input, legalOf, live, lotPick, market, nameOf, noteText, nudges, offboard, openMember, reconnectSth, rows, search, sel, selActs, selCreds, serverPick, setNoteText, setSearch, setSel, setSelActs, setSelCreds, showCreds, sthCheck } = useAdmin();
+  const { KIND_LABEL, actSummary, actions, addNote, alertsOn, banMember, busy, countrySelect, delNote, deposits, editLegalName, editPassword, editPick, editText, extraAccounts, filtered, input, legalOf, live, lotPick, market, nameOf, noteText, nudges, offboard, resetOnboarding, openMember, reconnectSth, rows, search, sel, selActs, selCreds, serverPick, setNoteText, setSearch, setSel, setSelActs, setSelCreds, showCreds, sthCheck } = useAdmin();
   const narrow = useNarrow();
   useEffect(() => {
     if (!sel || !narrow) return;
@@ -49,6 +49,9 @@ export function MembersTab() {
               {sel.mt5_login && <button disabled={busy} onClick={() => showCreds(sel.tg_id)} title="decrypt this member's MT5 login/server/password (timestamped)" style={goldBtn}>🔑 SHOW CREDENTIALS</button>}
               {sel.mt5_login && <button disabled={busy} onClick={() => reconnectSth(sel)} title="re-connect this member to the STH copier with the credentials on file (e.g. after an accidental disconnect on the STH dashboard)" style={goldBtn}>🔗 RECONNECT STH</button>}
               {sel.mt5_login && <button disabled={busy} onClick={() => sthCheck(sel.tg_id)} title="ask the STH API directly: is this member's MT account connected to the copier, and which masters does it see?" style={goldBtn}>🔍 STH STATUS</button>}
+              {(sel.status === 'onboarding' || sel.status === 'pending_copier') && (
+                <button disabled={busy} onClick={() => resetOnboarding(sel)} title="wrong password / server / broker: re-open the connection form for this member (closes any pending request, member gets a push)" style={goldBtn}>↺ BACK TO FORM</button>
+              )}
               {/* TOUJOURS visible : « paused » peut venir du membre lui-même (bouton pause copy) — masquer
                   l'off-board sur un membre en pause bloquait pile le cas « il a retiré, je veux le sortir » */}
               <button disabled={busy} onClick={() => offboard(sel)} title="client left → status offboarded (win-back DM sent) + copier disconnect (STH or queued) + timeline note (remove from the VIP Telegram channel manually)" style={dangerBtn}>⛔ OFF-BOARD</button>
