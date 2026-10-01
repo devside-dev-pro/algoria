@@ -48,7 +48,7 @@ export const ANGLES = ['proof', 'time', 'beginner', 'skeptic', 'money', 'curiosi
 export type AdScript = {
   id: string; pole: Pole; title: string; hook: string | null; body: string | null; prep: string | null;
   needs: Need[]; duration: string | null; status: Status; source: string | null; notes: string | null;
-  meta_flag: string | null; shot_at: string | null; created_at: string; updated_at: string;
+  meta_flag: string | null; shot_at: string | null; created_at: string; updated_at: string; batch_id: string | null;
 } & VerdictFields;
 export type AdHook = {
   id: string; text: string; angle: string | null; status: HookStatus; script_id: string | null; notes: string | null; created_at: string;
@@ -79,7 +79,7 @@ export const LOVE_REASONS: Record<string, string> = {
   fun: '😄 Fun / original',
 };
 
-export const SCRIPT_COLS = 'id,pole,title,hook,body,prep,needs,duration,status,source,notes,meta_flag,shot_at,created_at,updated_at,verdict,verdict_reasons,verdict_note,verdict_at';
+export const SCRIPT_COLS = 'id,pole,title,hook,body,prep,needs,duration,status,source,notes,meta_flag,shot_at,created_at,updated_at,batch_id,verdict,verdict_reasons,verdict_note,verdict_at';
 export const HOOK_COLS = 'id,text,angle,status,script_id,notes,created_at,verdict,verdict_reasons,verdict_note,verdict_at';
 
 /** Le texte d'une fiche, prêt à coller (WhatsApp à Benjamin, notes du tournage…). */
@@ -160,3 +160,32 @@ export function studioBrief(ads: AdScript[], altsOf: (id: string) => string[]): 
   out.push('', '────────────────────', '', 'Merci !', 'Mathieu');
   return { subject: `Algoria · brief tournage · ${n} ad${n > 1 ? 's' : ''}`, text: out.join('\n') };
 }
+
+// ===== ✨ GÉNÉRATEUR : CE QUE MATHIEU A SOUS LA MAIN (01/10/2026) =====
+// « Je suis avec un ami qui ne parle pas très bien anglais, j'ai un ordinateur… » : un sélecteur de ce qu'on a à
+// disposition. `label` pour l'écran, `prompt` pour le générateur (en anglais, c'est lui qui le lit).
+export const RESOURCES = {
+  phone: { label: '📱 My phone', prompt: "Mathieu's own phone (selfie, filming himself or his screens)" },
+  second_phone: { label: '📲 A 2nd phone', prompt: 'a second phone, to film MetaTrader or the Algoria app on screen' },
+  computer: { label: '💻 A computer', prompt: 'a laptop / computer (charts, the public track record on a big screen)' },
+  videographer: { label: '🎥 A videographer', prompt: 'a videographer with a proper camera and microphones' },
+  actors: { label: '🎭 2 English-speaking actors', prompt: 'two English-speaking actors who can play written scenes' },
+  friend_en: { label: '🗣 A friend who speaks English', prompt: 'a friend who speaks English and can say a few short lines on camera (not an actor)' },
+  friend_no_en: { label: '🙋 A friend (little English)', prompt: "a friend who does not speak English well: can hold the camera, appear on screen and react, but must have NO spoken English lines" },
+  passersby: { label: '🚶 English-speaking passers-by', prompt: 'access to English-speaking passers-by for street interviews' },
+  outdoors: { label: '🌳 Outdoors', prompt: 'can film outdoors (street, café, park)' },
+  event: { label: '🎤 An event / audience', prompt: 'an event with an audience (talk, conference)' },
+} as const;
+export type Resource = keyof typeof RESOURCES;
+export const RESOURCE_KEYS = Object.keys(RESOURCES) as Resource[];
+/** Les besoins qu'une ad générée a le droit d'avoir, vu ce que Mathieu a sous la main. */
+export function needsAllowed(res: Resource[]): Need[] {
+  const out: Need[] = ['solo'];
+  if (res.includes('videographer')) out.push('videographer');
+  if (res.includes('actors') || res.includes('friend_en')) out.push('actors');
+  if (res.includes('passersby')) out.push('street');
+  if (res.includes('event')) out.push('event');
+  return out;
+}
+/** Une ad générée et pas encore triée (ni ⭐ ni 👎, toujours en idée) : le badge 🆕. */
+export const isUntriaged = (x: Pick<AdScript, 'batch_id' | 'verdict' | 'status'>) => !!x.batch_id && !x.verdict && x.status === 'idea';

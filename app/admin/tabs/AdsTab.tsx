@@ -11,14 +11,17 @@
 // listes (archive « Rejected », restaurable) ; ces raisons servent à Claude pour apprendre ce que Mathieu tourne.
 // - MEMORY : ces signaux réunis (raisons, taux de rejet par pôle, dernières notes) + le document ads_memory
 //   (agent_docs, comme la mémoire du bot) : les règles que Claude suit avant d'écrire de nouvelles ads.
+// - ✨ GENERATE : Claude (Opus 5.5, clé API de Mathieu) écrit des ads selon ce qu'il a sous la main ; elles arrivent
+//   en IDEA, marquées 🆕 « à trier ». Voir lib/admin/adsGenerator.ts.
 // Données : /api/member/admin/ads. Bibliothèque de départ (brief de Benjamin) : lib/admin/adsSeed.ts, importée d'un clic.
 import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction, type SyntheticEvent } from 'react';
 import { ask, toast } from '@/components/admin/Dialog';
 import { dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 import { AgentBrain } from './AgentBrain';
 import {
-  ANGLES, HOOK_STATUSES, HOOK_STATUS_LABEL, LOVE_REASONS, NEEDS, NEED_LABEL, POLES, POLE_LABEL, READINESS, REJECT_REASONS, STATUSES, STATUS_LABEL, readinessOf, scriptText, studioBrief,
-  type AdHook, type AdScript, type HookStatus, type Need, type Pole, type Status, type Verdict,
+  ANGLES, HOOK_STATUSES, HOOK_STATUS_LABEL, LOVE_REASONS, NEEDS, NEED_LABEL, POLES, POLE_LABEL, READINESS, REJECT_REASONS, RESOURCES, RESOURCE_KEYS, STATUSES, STATUS_LABEL,
+  isUntriaged, needsAllowed, readinessOf, scriptText, studioBrief,
+  type AdHook, type AdScript, type HookStatus, type Need, type Pole, type Resource, type Status, type Verdict,
 } from '@/lib/admin/ads';
 
 type View = 'library' | 'list' | 'hooks' | 'shoot' | 'memory';
@@ -57,6 +60,8 @@ export function AdsTab() {
   const [sel, setSel] = useState<Set<string>>(new Set()); // ads cochées pour le brief du studio
   const [brief, setBrief] = useState(false);
   const [vq, setVq] = useState<VerdictAsk | null>(null); // la feuille ⭐ / 👎 ouverte
+  const [gen, setGen] = useState(false); // la feuille ✨ Generate
+  const [triage, setTriage] = useState(false); // Library filtrée sur les 🆕 à trier
   const [busy, setBusy] = useState(false);
   const [focus, setFocus] = useState<string | null>(null); // ad ouverte dans le mode tournage depuis la SHOOT LIST
 
@@ -102,7 +107,7 @@ export function AdsTab() {
   const aliveHooks = hooks.filter((h) => h.verdict !== 'rejected');
   const altsOf = (id: string) => aliveHooks.filter((h) => h.script_id === id).map((h) => h.text);
   const ctx: Ctx = {
-    scripts: alive, hooks: aliveHooks, setScripts, setHooks, patchScript, patchHook, sel, toggleSel, setSel,
+    scripts: alive, hooks: aliveHooks, setScripts, setHooks, patchScript, patchHook, sel, toggleSel, setSel, triage, setTriage,
     rejectedScripts: all.filter((x) => x.verdict === 'rejected'), rejectedHooks: hooks.filter((h) => h.verdict === 'rejected'), askVerdict, clearVerdict,
   };
   const openInShootMode = (id: string) => { setFocus(id); setView('shoot'); };
@@ -122,7 +127,13 @@ export function AdsTab() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-          <h2 style={secH}>🎬 ADS STUDIO · {alive.length} ads · {aliveHooks.length + alive.filter((x) => x.hook).length} hooks</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <h2 style={secH}>🎬 ADS STUDIO · {alive.length} ads · {aliveHooks.length + alive.filter((x) => x.hook).length} hooks</h2>
+            <button onClick={() => setGen(true)} style={{ ...goldBtn, padding: '8px 14px', fontSize: 12 }}>✨ GENERATE ADS</button>
+            {alive.some(isUntriaged) && (
+              <button onClick={() => { setTriage(true); setView('library'); }} style={{ ...okBtn, padding: '6px 12px' }}>🆕 {alive.filter(isUntriaged).length} to triage</button>
+            )}
+          </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {([['list', `🎯 Shoot list · ${count('to_shoot')} to shoot`], ['library', '📚 Library'], ['hooks', '🪝 Hooks bank'], ['shoot', '🎬 Shooting mode'], ['memory', '🧠 Memory']] as [View, string][]).map(([k, l]) => (
               <button key={k} onClick={() => { setFocus(null); setView(k); }} style={chip(view === k)}>{l}</button>
@@ -165,6 +176,14 @@ export function AdsTab() {
       {brief && (
         <BriefSheet ads={alive.filter((x) => sel.has(x.id))} altsOf={altsOf} onClose={() => setBrief(false)} />
       )}
+      {gen && (
+        <GenerateSheet onClose={() => setGen(false)}
+          onDone={(newScripts, newHooks) => {
+            setScripts((l) => [...(l ?? []), ...newScripts]);
+            setHooks((l) => [...l, ...newHooks]);
+            setGen(false); setTriage(true); setView('library');
+          }} />
+      )}
       {vq && (
         <VerdictSheet ask={vq} onClose={() => setVq(null)}
           onSubmit={async (reasons, note) => { await setVerdict(vq.kind, vq.id, vq.verdict, reasons, note); setVq(null); }} />
@@ -179,13 +198,14 @@ type Ctx = {
   patchScript: (id: string, p: Partial<AdScript>) => Promise<void>; patchHook: (id: string, p: Partial<AdHook>) => Promise<void>;
   sel: Set<string>; toggleSel: (id: string) => void; setSel: Dispatch<SetStateAction<Set<string>>>;
   rejectedScripts: AdScript[]; rejectedHooks: AdHook[];
+  triage: boolean; setTriage: (v: boolean) => void;
   askVerdict: (kind: 'script' | 'hook', item: { id: string; title: string } & Partial<Pick<AdScript, 'verdict' | 'verdict_reasons' | 'verdict_note'>>, v: Verdict) => void;
   clearVerdict: (kind: 'script' | 'hook', id: string) => void;
 };
 type VerdictAsk = { kind: 'script' | 'hook'; id: string; title: string; verdict: Verdict; reasons: string[]; note: string };
 
 // ===================== LIBRARY =====================
-function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggleSel, rejectedScripts, askVerdict, clearVerdict }: Ctx) {
+function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggleSel, rejectedScripts, askVerdict, clearVerdict, triage, setTriage }: Ctx) {
   const [pole, setPole] = useState<Pole | 'all'>('all');
   const [status, setStatus] = useState<Status | 'all'>('all');
   const [q, setQ] = useState('');
@@ -194,9 +214,10 @@ function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggl
 
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return scripts.filter((x) => (pole === 'all' || x.pole === pole) && (status === 'all' || x.status === status)
+    return scripts.filter((x) => (pole === 'all' || x.pole === pole) && (status === 'all' || x.status === status) && (!triage || isUntriaged(x))
       && (!s || [x.title, x.hook, x.body, x.notes, x.prep].some((t) => t?.toLowerCase().includes(s))));
-  }, [scripts, pole, status, q]);
+  }, [scripts, pole, status, q, triage]);
+  const nTriage = scripts.filter(isUntriaged).length;
 
   const remove = async (x: AdScript) => {
     if (!(await ask.confirm(`Delete “${x.title}” ? Its alternative hooks stay in the hooks bank.`, { danger: true, ok: 'Delete' }))) return;
@@ -210,6 +231,7 @@ function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggl
   return (
     <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {(nTriage > 0 || triage) && <button onClick={() => setTriage(!triage)} style={chip(triage, 'var(--up)')}>🆕 To triage · {nTriage}</button>}
         <button onClick={() => setPole('all')} style={chip(pole === 'all')}>All poles</button>
         {POLES.map((p) => <button key={p} onClick={() => setPole(p)} style={chip(pole === p)}>{POLE_LABEL[p]} · {scripts.filter((x) => x.pole === p).length}</button>)}
       </div>
@@ -249,7 +271,7 @@ function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggl
                 <div onClick={() => setOpen(isOpen ? null : x.id)} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <input type="checkbox" checked={sel.has(x.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSel(x.id)} title="Add to the studio brief" style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer', flex: 'none' }} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
-                    <b style={{ fontSize: 13.5, color: 'var(--text)' }}>{isOpen ? '▾' : '▸'} {x.verdict === 'loved' ? '⭐ ' : ''}{x.title}</b>
+                    <b style={{ fontSize: 13.5, color: 'var(--text)' }}>{isOpen ? '▾' : '▸'} {isUntriaged(x) ? '🆕 ' : ''}{x.verdict === 'loved' ? '⭐ ' : ''}{x.title}</b>
                     {x.hook && <span style={{ fontSize: 12.5, color: 'var(--gold)', lineHeight: 1.45 }}>🪝 {x.hook}</span>}
                     <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>
                       {x.needs.map((n) => NEED_LABEL[n]).join(' · ')}{x.duration ? ` · ⏱ ${x.duration}` : ''}{alts.length ? ` · +${alts.length} hooks` : ''}{x.source ? ` · ${x.source}` : ''}
@@ -563,7 +585,7 @@ function AdCard({ x, alts, open, onToggle, selected, onSelect, accent, actions, 
       <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
         <input type="checkbox" checked={selected} onClick={stop} onChange={onSelect} title="Add to the studio brief" style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer', flex: 'none' }} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <b style={{ fontSize: 13, color: 'var(--text)' }}>{open ? '▾' : '▸'} {x.verdict === 'loved' ? '⭐ ' : ''}{x.title}</b>
+          <b style={{ fontSize: 13, color: 'var(--text)' }}>{open ? '▾' : '▸'} {isUntriaged(x) ? '🆕 ' : ''}{x.verdict === 'loved' ? '⭐ ' : ''}{x.title}</b>
           <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{meta}{x.prep ? ' · 🧰 prep' : ''}{x.meta_flag ? ' · ⚠ Meta' : ''}</span>
           {!open && x.hook && (
             <span style={{ fontSize: 12, color: 'var(--gold)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>🪝 {x.hook}</span>
@@ -716,6 +738,18 @@ function RejectedArchive({ items, label, onRestore }: { items: { id: string; tit
 type Signal = { kind: 'ad' | 'hook'; title: string; pole: string; v: Pick<AdScript, 'verdict' | 'verdict_reasons' | 'verdict_note' | 'verdict_at'> };
 function AdsMemory({ scripts, hooks, rejectedScripts, rejectedHooks }: Ctx) {
   const allAds = [...scripts, ...rejectedScripts];
+  const [proposing, setProposing] = useState(false);
+  const [proposal, setProposal] = useState<{ text: string; changes: string[]; cost: number | null } | null>(null);
+  const [brainKey, setBrainKey] = useState(0); // remonte l'éditeur après un enregistrement
+  const propose = async () => {
+    setProposing(true);
+    try {
+      const r = await fetch('/api/member/admin/ads/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memory: true }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setProposal({ text: d.proposal, changes: d.changes ?? [], cost: d.costUsd ?? null });
+    } catch (e) { toast(`⚠ ${(e as Error).message}`, 'error'); } finally { setProposing(false); }
+  };
   const signals: Signal[] = [
     ...allAds.filter((x) => x.verdict).map((x) => ({ kind: 'ad' as const, title: x.title, pole: POLE_LABEL[x.pole], v: x })),
     ...[...hooks, ...rejectedHooks].filter((h) => h.verdict).map((h) => ({ kind: 'hook' as const, title: h.text, pole: `hook · ${h.angle ?? ''}`, v: h })),
@@ -798,7 +832,157 @@ function AdsMemory({ scripts, hooks, rejectedScripts, rejectedHooks }: Ctx) {
         <button onClick={() => void contextText()} style={{ ...okBtn, alignSelf: 'flex-start' }}>📋 COPY THE CONTEXT FOR CLAUDE</button>
         <p style={{ ...dimP, fontSize: 10.5 }}>Rules + numbers + latest verdicts in a short text. Paste it when you ask Claude for new ads elsewhere; here, Claude reads it on its own.</p>
       </section>
-      <AgentBrain docKey="ads_memory" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <section className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button disabled={proposing} onClick={() => void propose()} style={{ ...goldBtn, alignSelf: 'flex-start', padding: '9px 14px', fontSize: 12 }}>
+            {proposing ? '🧠 Claude is reading your verdicts… (~30 s)' : '🧠 PROPOSE A MEMORY UPDATE FROM MY VERDICTS'}
+          </button>
+          <p style={{ ...dimP, fontSize: 10.5 }}>Claude rereads every ⭐ / 👎 and proposes the new rules. Nothing is saved until you check and save. Costs a few cents (your API key).</p>
+        </section>
+        <AgentBrain key={brainKey} docKey="ads_memory" />
+      </div>
+      {proposal && (
+        <MemoryProposalSheet proposal={proposal} onClose={() => setProposal(null)} onSaved={() => { setProposal(null); setBrainKey((k) => k + 1); }} />
+      )}
+    </div>
+  );
+}
+
+// ===================== ✨ GENERATE =====================
+// « Un sélecteur de ce qu'on a à disposition : si on a des acteurs, un caméraman, si je me filme tout seul, un ami qui
+// ne parle pas bien anglais, un ordinateur… » (Mathieu). Un appel serveur = 5 ads (~1 min) : pour 10 ou 20, on
+// enchaîne les appels et on affiche la progression. Ce que Mathieu a coché est retenu sur l'appareil.
+const GEN_KEY = 'algoria.ads.genPrefs';
+type GenUsage = { today: number; limit: number; monthUsd: number; perCall: number };
+function GenerateSheet({ onClose, onDone }: { onClose: () => void; onDone: (s: AdScript[], h: AdHook[]) => void }) {
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(GEN_KEY) ?? '{}') as { resources?: Resource[]; extra?: string }; } catch { return {}; } })();
+  const [resources, setResources] = useState<Resource[]>(saved.resources?.length ? saved.resources : ['phone']);
+  const [extra, setExtra] = useState(saved.extra ?? '');
+  const [poles, setPoles] = useState<Pole[]>([]);
+  const [count, setCount] = useState(5);
+  const [direction, setDirection] = useState('');
+  const [usage, setUsage] = useState<GenUsage | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [spent, setSpent] = useState(0);
+  useEffect(() => {
+    void fetch('/api/member/admin/ads/generate').then(async (r) => { const d = await r.json().catch(() => null); if (d && !d.error) setUsage(d); }).catch(() => {});
+  }, []);
+  const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  const allowed = needsAllowed(resources);
+
+  const run = async () => {
+    try { localStorage.setItem(GEN_KEY, JSON.stringify({ resources, extra })); } catch { /* navigation privée */ }
+    const per = usage?.perCall ?? 5;
+    const calls = Math.ceil(count / per);
+    const all: { s: AdScript[]; h: AdHook[] } = { s: [], h: [] };
+    let cost = 0;
+    setProgress({ done: 0, total: count });
+    for (let i = 0; i < calls; i++) {
+      const n = Math.min(per, count - i * per);
+      try {
+        const r = await fetch('/api/member/admin/ads/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ generate: { count: n, resources, extra, poles, direction } }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.error) throw new Error(d.error ?? `HTTP ${r.status}`);
+        all.s.push(...d.scripts); all.h.push(...d.hooks); cost += Number(d.costUsd ?? 0);
+        if (d.usage) setUsage(d.usage);
+        setSpent(cost);
+        setProgress({ done: all.s.length, total: count });
+      } catch (e) {
+        toast(`⚠ ${(e as Error).message}`, 'error');
+        break;
+      }
+    }
+    setProgress(null);
+    if (all.s.length) { toast(`✨ ${all.s.length} new ads · $${cost.toFixed(2)}`); onDone(all.s, all.h); }
+  };
+
+  const busy = progress != null;
+  const limitHit = usage != null && usage.today >= usage.limit;
+  return (
+    <div onClick={busy ? undefined : onClose} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(3,7,14,.66)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 680, maxHeight: '92vh', overflowY: 'auto', background: 'var(--panel, #0b1220)', border: '1px solid var(--border)', borderBottom: 'none', borderRadius: '16px 16px 0 0', padding: '16px 18px calc(20px + env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <h2 style={{ ...secH, fontSize: 13, color: 'var(--gold)' }}>✨ GENERATE ADS · Claude Opus 5.5</h2>
+          {!busy && <button onClick={onClose} style={dangerBtn}>close</button>}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ ...secH, fontSize: 10 }}>WHAT DO YOU HAVE WITH YOU ?</span>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {RESOURCE_KEYS.map((k) => <button key={k} disabled={busy} onClick={() => setResources((r) => toggle(r, k))} style={chip(resources.includes(k), 'var(--gold)')}>{RESOURCES[k].label}</button>)}
+          </div>
+          <input value={extra} disabled={busy} onChange={(e) => setExtra(e.target.value)} placeholder="Anything else ? A place, props, people… (e.g. at a café, my car, my dog)" style={inp} />
+          <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>Ads will only need: {allowed.map((n) => NEED_LABEL[n]).join(' · ')}</span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ ...secH, fontSize: 10 }}>FORMATS (optional, none = Claude picks)</span>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {POLES.map((p) => <button key={p} disabled={busy} onClick={() => setPoles((l) => toggle(l, p))} style={chip(poles.includes(p))}>{POLE_LABEL[p]}</button>)}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ ...secH, fontSize: 10 }}>HOW MANY ?</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[5, 10, 20].map((n) => <button key={n} disabled={busy} onClick={() => setCount(n)} style={chip(count === n)}>{n} ads</button>)}
+          </div>
+        </div>
+
+        <textarea value={direction} disabled={busy} onChange={(e) => setDirection(e.target.value)} rows={3}
+          placeholder="Direction (optional): e.g. “for the Pau shoot”, “more proof, less money talk”, “answers to sceptical comments”…" style={area} />
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button disabled={busy || limitHit || resources.length === 0} onClick={() => void run()} style={{ ...goldBtn, padding: '11px 18px', fontSize: 13 }}>
+            {busy ? `Writing… ${progress.done}/${progress.total}` : `✨ WRITE ${count} ADS`}
+          </button>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>
+            ≈ ${(count * 0.03).toFixed(2)} · ~{Math.ceil(count / 5)} min{spent ? ` · spent $${spent.toFixed(2)}` : ''}
+          </span>
+        </div>
+        {busy && <p style={{ ...dimP, fontSize: 11 }}>Claude is writing, 5 ads at a time (about a minute each). Keep this open.</p>}
+        {usage && (
+          <p style={{ ...dimP, fontSize: 10.5, color: limitHit ? '#ff8a5c' : 'var(--dim)' }}>
+            Today: {usage.today}/{usage.limit} runs · This month: ${usage.monthUsd.toFixed(2)} on your API key{limitHit ? ' · daily limit reached' : ''}
+          </p>
+        )}
+        <p style={{ ...dimP, fontSize: 10.5 }}>New ads land in the Library as 🆕 to triage. ⭐ / 👎 them with a reason: that is how the next batches get better.</p>
+      </div>
+    </div>
+  );
+}
+
+// ===================== 🧠 PROPOSITION DE MÉMOIRE =====================
+function MemoryProposalSheet({ proposal, onClose, onSaved }: { proposal: { text: string; changes: string[]; cost: number | null }; onClose: () => void; onSaved: () => void }) {
+  const [text, setText] = useState(proposal.text);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch('/api/member/admin/brain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'ads_memory', content: text }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error ?? `HTTP ${r.status}`);
+      toast('🧠 Memory updated');
+      onSaved();
+    } catch (e) { toast(`⚠ ${(e as Error).message}`, 'error'); setSaving(false); }
+  };
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(3,7,14,.66)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 760, maxHeight: '92vh', overflowY: 'auto', background: 'var(--panel, #0b1220)', border: '1px solid var(--border)', borderBottom: 'none', borderRadius: '16px 16px 0 0', padding: '16px 18px calc(20px + env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h2 style={{ ...secH, fontSize: 13 }}>🧠 PROPOSED MEMORY{proposal.cost != null ? ` · $${Number(proposal.cost).toFixed(2)}` : ''}</h2>
+        {proposal.changes.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ ...secH, fontSize: 10, color: 'var(--gold)' }}>WHAT CHANGES</span>
+            {proposal.changes.map((c, i) => <span key={i} style={{ fontSize: 12, color: 'var(--text)' }}>• {c}</span>)}
+          </div>
+        )}
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={18} className="mono" style={{ ...area, fontSize: 12 }} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button disabled={saving} onClick={() => void save()} style={{ ...okBtn, padding: '10px 16px', fontSize: 12 }}>{saving ? 'saving…' : '💾 SAVE AS THE NEW MEMORY'}</button>
+          <button onClick={onClose} style={dangerBtn}>discard</button>
+        </div>
+        <p style={{ ...dimP, fontSize: 10.5 }}>The previous version stays in the history (saved versions, under the editor).</p>
+      </div>
     </div>
   );
 }
