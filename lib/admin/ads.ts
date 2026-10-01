@@ -46,13 +46,13 @@ export const ANGLES = ['proof', 'time', 'beginner', 'skeptic', 'money', 'curiosi
 export interface AdScript {
   id: string; pole: Pole; title: string; hook: string | null; body: string | null; prep: string | null;
   needs: Need[]; duration: string | null; status: Status; source: string | null; notes: string | null;
-  meta_flag: string | null; created_at: string; updated_at: string;
+  meta_flag: string | null; shot_at: string | null; created_at: string; updated_at: string;
 }
 export interface AdHook {
   id: string; text: string; angle: string | null; status: HookStatus; script_id: string | null; notes: string | null; created_at: string;
 }
 
-export const SCRIPT_COLS = 'id,pole,title,hook,body,prep,needs,duration,status,source,notes,meta_flag,created_at,updated_at';
+export const SCRIPT_COLS = 'id,pole,title,hook,body,prep,needs,duration,status,source,notes,meta_flag,shot_at,created_at,updated_at';
 export const HOOK_COLS = 'id,text,angle,status,script_id,notes,created_at';
 
 /** Le texte d'une fiche, prêt à coller (WhatsApp à Benjamin, notes du tournage…). */

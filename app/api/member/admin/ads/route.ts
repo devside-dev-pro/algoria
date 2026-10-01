@@ -21,6 +21,8 @@ function gate(req: NextRequest) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const tb = (t: 'ad_scripts' | 'ad_hooks') => (sdb() as any).from(t);
+/** Les statuts d'une ad déjà tournée. */
+const DONE = new Set(['shot', 'edited', 'live']);
 const txt = (v: unknown, max = 8000) => { const s = String(v ?? '').trim().slice(0, max); return s || null; };
 const oneOf = <T extends string>(list: readonly T[], v: unknown): T | undefined => (list as readonly string[]).includes(String(v)) ? (v as T) : undefined;
 
@@ -97,6 +99,7 @@ export async function POST(req: NextRequest) {
       const c = cleanScript({ status: 'idea', ...(body.addScript as Record<string, unknown>) });
       if (typeof c === 'string') return fail(c);
       if (!c.pole || !c.title) return fail('pole and title required');
+      if (DONE.has(String(c.status))) c.shot_at = new Date().toISOString();
       const { data, error } = await tb('ad_scripts').insert({ ...c, created_by: by }).select(SCRIPT_COLS);
       if (error) return fail(error.message, 500);
       return NextResponse.json({ ok: true, script: data?.[0] ?? null });
@@ -106,8 +109,17 @@ export async function POST(req: NextRequest) {
       if (!id || !patch) return fail('id and patch required');
       const c = cleanScript(patch);
       if (typeof c === 'string') return fail(c);
-      const { data, error } = await tb('ad_scripts').update({ ...c, updated_at: new Date().toISOString() }).eq('id', String(id)).select(SCRIPT_COLS);
+      const now = new Date().toISOString();
+      // Date de tournage : effacée si l'ad revient en idée / « à tourner », posée au PREMIER passage en
+      // shot / edited / live (passer de shot à edited ne change pas le jour où elle a été tournée).
+      if (c.status && !DONE.has(String(c.status))) c.shot_at = null;
+      const { data, error } = await tb('ad_scripts').update({ ...c, updated_at: now }).eq('id', String(id)).select(SCRIPT_COLS);
       if (error) return fail(error.message, 500);
+      if (c.status && DONE.has(String(c.status)) && data?.[0] && !data[0].shot_at) {
+        const r = await tb('ad_scripts').update({ shot_at: now }).eq('id', String(id)).is('shot_at', null).select(SCRIPT_COLS);
+        if (r.error) return fail(r.error.message, 500);
+        return NextResponse.json({ ok: true, script: r.data?.[0] ?? { ...data[0], shot_at: now } });
+      }
       return NextResponse.json({ ok: true, script: data?.[0] ?? null });
     }
     if (body.deleteScript) {
