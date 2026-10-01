@@ -11,8 +11,8 @@ import { dimP, inp, miniBtn, okBtn, secH } from '../_shared';
 interface Version { id: number; created_at: string; created_by: string | null; size: number }
 interface Doc { content: string; updated_at: string | null; updated_by: string | null; versions: Version[]; max: number }
 
-type DocKey = 'knowledge' | 'memory';
-const COPY: Record<DocKey, { title: string; intro: string; empty: string }> = {
+type DocKey = 'knowledge' | 'memory' | 'ads_memory';
+const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?: string }> = {
   knowledge: {
     title: '🧠 ALGORIA AI — KNOWLEDGE',
     intro: 'What the bot knows, in your words (French is fine: it replies in the client’s language). It reasons from it, it never pastes it. Partner brokers, minimum deposit, activation lot and the 30-day rule come from the app automatically — no need to write them.',
@@ -22,6 +22,12 @@ const COPY: Record<DocKey, { title: string; intro: string; empty: string }> = {
     title: '📝 ALGORIA AI — MEMORY',
     intro: 'What the bot learned from your corrections in Telegram (reply to a proposal with your version, or with # + a remark). One lesson per line, the latest wins. Clean it up here: delete a wrong line, or move a lasting rule into the knowledge.',
     empty: 'Empty: no correction yet. Reply to a proposal in Telegram to teach the bot.',
+  },
+  ads_memory: {
+    title: '🧠 ADS STUDIO — WHAT CLAUDE LEARNED',
+    intro: 'The rules Claude follows when it writes new ads, drawn from your ⭐ and 👎. Claude reads this before every new batch. One rule per line, the latest wins. Fix a wrong line, delete it, or add your own.',
+    empty: 'Empty: rate a few ads (⭐ / 👎 with the reason), then ask Claude to update this memory.',
+    saved: 'Saved — Claude will follow it for the next ads.',
   },
 };
 
@@ -52,7 +58,7 @@ export function AgentBrain({ docKey = 'knowledge' }: { docKey?: DocKey }) {
       const r = await fetch('/api/member/admin/brain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: docKey, content: text }) });
       const d = (await r.json().catch(() => ({}))) as { error?: string };
       if (!r.ok || d.error) { setMsg(`Not saved: ${d.error ?? `HTTP ${r.status}`}`); return; }
-      setMsg('Saved — the bot uses it within a minute.');
+      setMsg(copy.saved ?? 'Saved — the bot uses it within a minute.');
       await load();
     } finally {
       setSaving(false);

@@ -1,4 +1,6 @@
 // ADS STUDIO (01/10/2026) — types et libellés partagés par l'onglet ADS STUDIO et son API.
+// ⚠ AVANT D'ÉCRIRE DE NOUVELLES ADS (Claude ou générateur) : lire agent_docs key 'ads_memory' (les règles tirées des
+// avis de Mathieu) et les verdicts récents (ad_scripts / ad_hooks .verdict, .verdict_reasons, .verdict_note).
 // Une « fiche » = une ad : pôle, hook, déroulé, besoins, statut. La banque de hooks vit à côté (ad_hooks).
 
 export const POLES = ['street', 'scene', 'acting', 'ugly', 'broll', 'other'] as const;

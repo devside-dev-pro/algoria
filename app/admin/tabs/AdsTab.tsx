@@ -9,16 +9,19 @@
 // - SHOOT : le mode tournage, un script à la fois en gros caractères, pour lire sur le téléphone pendant la prise.
 // Sur chaque ad et chaque hook : ⭐ « j'adore » ou 👎 « pas pour moi », avec la raison. Une ad rejetée sort des
 // listes (archive « Rejected », restaurable) ; ces raisons servent à Claude pour apprendre ce que Mathieu tourne.
+// - MEMORY : ces signaux réunis (raisons, taux de rejet par pôle, dernières notes) + le document ads_memory
+//   (agent_docs, comme la mémoire du bot) : les règles que Claude suit avant d'écrire de nouvelles ads.
 // Données : /api/member/admin/ads. Bibliothèque de départ (brief de Benjamin) : lib/admin/adsSeed.ts, importée d'un clic.
 import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction, type SyntheticEvent } from 'react';
 import { ask, toast } from '@/components/admin/Dialog';
 import { dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
+import { AgentBrain } from './AgentBrain';
 import {
   ANGLES, HOOK_STATUSES, HOOK_STATUS_LABEL, LOVE_REASONS, NEEDS, NEED_LABEL, POLES, POLE_LABEL, READINESS, REJECT_REASONS, STATUSES, STATUS_LABEL, readinessOf, scriptText, studioBrief,
   type AdHook, type AdScript, type HookStatus, type Need, type Pole, type Status, type Verdict,
 } from '@/lib/admin/ads';
 
-type View = 'library' | 'list' | 'hooks' | 'shoot';
+type View = 'library' | 'list' | 'hooks' | 'shoot' | 'memory';
 const day = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 const api = async (body: Record<string, unknown>) => {
   const r = await fetch('/api/member/admin/ads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -121,7 +124,7 @@ export function AdsTab() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
           <h2 style={secH}>🎬 ADS STUDIO · {alive.length} ads · {aliveHooks.length + alive.filter((x) => x.hook).length} hooks</h2>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {([['list', `🎯 Shoot list · ${count('to_shoot')} to shoot`], ['library', '📚 Library'], ['hooks', '🪝 Hooks bank'], ['shoot', '🎬 Shooting mode']] as [View, string][]).map(([k, l]) => (
+            {([['list', `🎯 Shoot list · ${count('to_shoot')} to shoot`], ['library', '📚 Library'], ['hooks', '🪝 Hooks bank'], ['shoot', '🎬 Shooting mode'], ['memory', '🧠 Memory']] as [View, string][]).map(([k, l]) => (
               <button key={k} onClick={() => { setFocus(null); setView(k); }} style={chip(view === k)}>{l}</button>
             ))}
           </div>
@@ -147,6 +150,7 @@ export function AdsTab() {
       {view === 'hooks' && <HooksBank {...ctx} />}
       {view === 'list' && <ShootList {...ctx} onRead={openInShootMode} />}
       {view === 'shoot' && <ShootMode key={focus ?? 'all'} {...ctx} startId={focus} />}
+      {view === 'memory' && <AdsMemory {...ctx} />}
 
       {/* La barre du brief : visible dès qu'une ad est cochée, quelle que soit la vue. */}
       {sel.size > 0 && (
@@ -700,5 +704,101 @@ function RejectedArchive({ items, label, onRestore }: { items: { id: string; tit
         ))}
       </div>
     </details>
+  );
+}
+
+// ===================== 🧠 MEMORY =====================
+// « Que tu comprennes pourquoi, sur 100 ads, il y en a 20 que je n'ai pas tournées, et que tu t'adaptes » (Mathieu).
+// À gauche, les signaux bruts (calculés ici, rien de stocké en plus) ; à droite, ce que Claude en a tiré
+// (document ads_memory, modifiable et versionné comme la mémoire du bot). Le bouton « copier le contexte »
+// produit un texte court (règles + chiffres + dernières notes) : c'est ce qu'on donnera au générateur d'ads,
+// plutôt que tout l'historique, pour que ça coûte peu.
+type Signal = { kind: 'ad' | 'hook'; title: string; pole: string; v: Pick<AdScript, 'verdict' | 'verdict_reasons' | 'verdict_note' | 'verdict_at'> };
+function AdsMemory({ scripts, hooks, rejectedScripts, rejectedHooks }: Ctx) {
+  const allAds = [...scripts, ...rejectedScripts];
+  const signals: Signal[] = [
+    ...allAds.filter((x) => x.verdict).map((x) => ({ kind: 'ad' as const, title: x.title, pole: POLE_LABEL[x.pole], v: x })),
+    ...[...hooks, ...rejectedHooks].filter((h) => h.verdict).map((h) => ({ kind: 'hook' as const, title: h.text, pole: `hook · ${h.angle ?? ''}`, v: h })),
+  ].sort((a, b) => (b.v.verdict_at ?? '').localeCompare(a.v.verdict_at ?? ''));
+  const countReasons = (verdict: Verdict, labels: Record<string, string>) => {
+    const c = new Map<string, number>();
+    for (const s of signals) if (s.v.verdict === verdict) for (const r of s.v.verdict_reasons) c.set(r, (c.get(r) ?? 0) + 1);
+    return [...c.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ label: labels[k] ?? k, n }));
+  };
+  const rejectR = countReasons('rejected', REJECT_REASONS);
+  const loveR = countReasons('loved', LOVE_REASONS);
+  const done = (x: AdScript) => x.status === 'shot' || x.status === 'edited' || x.status === 'live';
+  const poles = POLES.map((p) => {
+    const xs = allAds.filter((x) => x.pole === p);
+    return { p, total: xs.length, rejected: xs.filter((x) => x.verdict === 'rejected').length, loved: xs.filter((x) => x.verdict === 'loved').length, shot: xs.filter(done).length };
+  }).filter((r) => r.total > 0);
+  const nRej = signals.filter((s) => s.v.verdict === 'rejected').length;
+  const nLove = signals.filter((s) => s.v.verdict === 'loved').length;
+
+  const why = (s: Signal) => verdictWhy(s.v);
+  const contextText = async () => {
+    const r = await fetch('/api/member/admin/brain?key=ads_memory');
+    const d = (await r.json().catch(() => ({}))) as { content?: string };
+    const lines = [
+      d.content?.trim() || '(no rules yet)',
+      '',
+      `## Signals (${new Date().toLocaleDateString('en-GB')})`,
+      `- ${allAds.length} ads · ${allAds.filter(done).length} shot · ${allAds.filter((x) => x.status === 'live').length} live · ${nRej} rejected · ${nLove} loved`,
+      ...poles.map((r) => `- ${r.p}: ${r.total} ads, ${r.shot} shot, ${r.rejected} rejected, ${r.loved} loved`),
+      rejectR.length ? `- Reject reasons: ${rejectR.map((x) => `${x.label} ×${x.n}`).join(', ')}` : '',
+      loveR.length ? `- Love reasons: ${loveR.map((x) => `${x.label} ×${x.n}`).join(', ')}` : '',
+      '',
+      '## Latest verdicts',
+      ...signals.slice(0, 20).map((s) => `- ${s.v.verdict === 'rejected' ? '👎' : '⭐'} ${s.kind} « ${s.title.slice(0, 90)} » : ${why(s) || '(no reason)'}`),
+    ];
+    copy(lines.filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n'), 'Context copied');
+  };
+
+  const bar = (n: number, max: number, col: string) => (
+    <span style={{ display: 'inline-block', height: 6, borderRadius: 3, background: col, width: `${Math.max(6, (n / Math.max(1, max)) * 100)}%`, opacity: 0.85 }} />
+  );
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14, alignItems: 'start' }}>
+      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h2 style={secH}>📊 YOUR SIGNALS · {nRej} 👎 · {nLove} ⭐</h2>
+        <p style={{ ...dimP, fontSize: 11.5 }}>Every 👎 and ⭐ you give, with its reason. Claude reads this to write ads you actually shoot.</p>
+        {signals.length === 0 && <p style={dimP}>No verdict yet. Open an ad and tap ☆ love it or 👎 not for me.</p>}
+        {rejectR.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ ...secH, fontSize: 10, color: 'rgba(255,107,138,.95)' }}>WHY YOU SAY NO</span>
+            {rejectR.map((r) => <div key={r.label} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 22px', gap: 8, alignItems: 'center', fontSize: 11.5, color: 'var(--text)' }}><span>{r.label}</span>{bar(r.n, rejectR[0].n, 'rgba(255,107,138,.8)')}<span className="mono">{r.n}</span></div>)}
+          </div>
+        )}
+        {loveR.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ ...secH, fontSize: 10, color: 'var(--gold)' }}>WHAT YOU LOVE</span>
+            {loveR.map((r) => <div key={r.label} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 22px', gap: 8, alignItems: 'center', fontSize: 11.5, color: 'var(--text)' }}><span>{r.label}</span>{bar(r.n, loveR[0].n, 'var(--gold)')}<span className="mono">{r.n}</span></div>)}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ ...secH, fontSize: 10 }}>BY POLE · shot / rejected / loved</span>
+          {poles.map((r) => (
+            <div key={r.p} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, color: 'var(--text)' }}>
+              <span>{POLE_LABEL[r.p]}</span>
+              <span className="mono" style={{ color: 'var(--dim)' }}>{r.total} ads · <span style={{ color: 'var(--cyan)' }}>{r.shot} ✓</span> · <span style={{ color: 'rgba(255,107,138,.95)' }}>{r.rejected} 👎</span> · <span style={{ color: 'var(--gold)' }}>{r.loved} ⭐</span></span>
+            </div>
+          ))}
+        </div>
+        {signals.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ ...secH, fontSize: 10 }}>LATEST VERDICTS</span>
+            {signals.slice(0, 15).map((sg, i) => (
+              <div key={i} style={{ fontSize: 11.5, lineHeight: 1.45, color: 'var(--text)', padding: '6px 8px', borderRadius: 8, border: `1px solid ${sg.v.verdict === 'rejected' ? 'rgba(255,107,138,.25)' : 'rgba(245,194,74,.25)'}` }}>
+                <b>{sg.v.verdict === 'rejected' ? '👎' : '⭐'} {sg.title}</b>
+                <div style={{ color: 'var(--muted)' }}>{why(sg) || 'no reason given'}{sg.v.verdict_at ? ` · ${day(sg.v.verdict_at)}` : ''}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button onClick={() => void contextText()} style={{ ...okBtn, alignSelf: 'flex-start' }}>📋 COPY THE CONTEXT FOR CLAUDE</button>
+        <p style={{ ...dimP, fontSize: 10.5 }}>Rules + numbers + latest verdicts in a short text. Paste it when you ask Claude for new ads elsewhere; here, Claude reads it on its own.</p>
+      </section>
+      <AgentBrain docKey="ads_memory" />
+    </div>
   );
 }

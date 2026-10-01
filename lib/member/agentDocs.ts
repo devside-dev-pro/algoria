@@ -2,11 +2,14 @@
 // `knowledge` = ce qu'il sait, écrit par Mathieu dans l'admin (onglet TOOLS).
 // `memory`    = ce qu'il a APPRIS : une ligne par correction de Mathieu (réponse à une proposition dans Telegram),
 //               ajoutée automatiquement, relisible et modifiable dans l'admin comme le knowledge.
+// `ads_memory` = ADS STUDIO (01/10/2026) : ce que Claude a appris des avis de Mathieu sur les ads (⭐ / 👎 + raisons).
+//               Lu par Claude AVANT d'écrire de nouvelles ads ; modifiable dans l'onglet ADS STUDIO → 🧠 Memory.
+//               Le bot Telegram ne le lit pas.
 // Cache 60 s : une modification est prise en compte en une minute, sans redéploiement, et le bot ne relit pas la
 // base à chaque message.
 import { sdb } from './server';
 
-export const AGENT_DOC_KEYS = ['knowledge', 'memory'] as const;
+export const AGENT_DOC_KEYS = ['knowledge', 'memory', 'ads_memory'] as const;
 export type AgentDocKey = (typeof AGENT_DOC_KEYS)[number];
 /** Plafond d'un document : au-delà, le prompt s'alourdit (coût, lenteur) et l'agent s'y perd. */
 export const AGENT_DOC_MAX = 20_000;
