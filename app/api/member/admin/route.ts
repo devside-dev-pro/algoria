@@ -6,9 +6,11 @@ import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster, s
 import { BROKERS } from '@/lib/member/brokers';
 import { estimateCommission } from '@/lib/member/commissions';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
-import { ctaKeyboard, asLocale } from '@/lib/member/i18n';
+import { ctaKeyboard, asLocale, APP_URL } from '@/lib/member/i18n';
 import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
-import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, type OffboardReason } from '@/lib/member/winback';
+import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, winbackFollowup, type OffboardReason, type WinbackGroup } from '@/lib/member/winback';
+import { summarizeTrack, fmtPct } from '@/lib/member/trackFacts';
+import { redDayRecoveries } from '@/lib/member/redDays';
 import { isPermanentTelegramFailure } from '@/lib/member/telegramErrors';
 import { personalise } from '@/lib/member/personalise';
 import { TG_ALLOWED_UPDATES } from '@/lib/member/tgWebhook';
@@ -331,7 +333,7 @@ type Body = {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; resetOnboarding?: number; offboardBatch?: Array<{ tg_id: number; reason?: string }>; connectSth?: string; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; resetOnboarding?: number; offboardBatch?: Array<{ tg_id: number; reason?: string }>; connectSth?: string; winbackList?: boolean; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
     botBroadcast?: { audience: 'pending' | 'live' | 'stalled'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
@@ -1416,6 +1418,79 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       detail: { chat_id: chatId, message_id: main.messageId, text: text.slice(0, 500), button: btnText || null, url: btnUrl || null, report } as never,
     });
     return NextResponse.json({ ok: true, messageId: main.messageId, report });
+  }
+  // 🔄 WIN-BACK (01/10/2026) — les DÉPOSANTS partis puis revenus dans le tunnel (statut onboarding), chacun
+  // avec un message PRÉPARÉ selon la façon dont il est parti. Rien n'est envoyé ici : l'écran affiche, Mathieu
+  // relit et clique (l'envoi passe par botDm, tracé comme une relance). Constat qui l'a fait naître : les 10
+  // « déposants jamais connectés » du dashboard avaient TOUS copié, puis étaient partis — 4 après un retrait
+  // revenus d'eux-mêmes dans l'app, 6 déconnectés d'un tap, dont 3 en dix minutes un jour rouge (23/09).
+  if (body.winbackList) {
+    const rq = db as unknown as { from: (t: string) => any };
+    const { data: depRows } = await db.from('member_actions').select('tg_id').eq('kind', 'deposit').eq('status', 'done').limit(5000);
+    const depIds = [...new Set((depRows ?? []).map((r) => Number(r.tg_id)))];
+    if (!depIds.length) return NextResponse.json({ list: [] });
+    const { data: ms } = await rq.from('members').select('member_no,tg_id,tg_username,tg_name,locale,broker').eq('status', 'onboarding').in('tg_id', depIds) as { data: Array<{ member_no: number; tg_id: number; tg_username: string | null; tg_name: string | null; locale: string | null; broker: string | null }> | null };
+    const members = ms ?? [];
+    if (!members.length) return NextResponse.json({ list: [] });
+    const { data: acts } = await db.from('member_actions').select('tg_id,kind,status,created_at,detail')
+      .in('tg_id', members.map((m) => m.tg_id)).in('kind', ['note', 'nudge', 'connect']).order('created_at', { ascending: false }).limit(5000);
+    // Le track record, pour des faits PASSÉS exacts : le résultat du jour du départ et le dernier mois clos.
+    type TDay = { d: string; u: number; net: number; cash: number; n: number; w: number };
+    let tdays: TDay[] = [];
+    let monthLine: string | null = null;
+    try {
+      const r = await fetch(`${APP_URL}/api/public/track`, { signal: AbortSignal.timeout(4000) });
+      if (r.ok) {
+        const t = (await r.json()) as { days: TDay[]; startBalance: number; updatedAt: string };
+        tdays = t.days ?? [];
+        const sum = summarizeTrack(t as unknown as Parameters<typeof summarizeTrack>[0]);
+        const curYm = new Date().toISOString().slice(0, 7);
+        const last = sum?.months.filter((m) => m.ym < curYm).at(-1);
+        if (last) {
+          const mName = new Date(`${last.ym}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' });
+          monthLine = `${mName} closed at ${fmtPct(last.pct)} on the track record (past results don't guarantee future results).`;
+        }
+      }
+    } catch { /* sans track record, les messages partent sans chiffres */ }
+    const recov = new Map(redDayRecoveries(tdays).map((x) => [x.d, x.days]));
+    const fmtDay = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+    const fmtMonth = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' });
+    const textOf = (a: { detail: unknown }) => String(((a.detail ?? {}) as Record<string, unknown>).text ?? '');
+    const list = members.map((m) => {
+      const mine = (acts ?? []).filter((a) => Number(a.tg_id) === Number(m.tg_id)); // du plus récent au plus ancien
+      const exit = mine.find((a) => a.kind === 'note' && /off-boarded|disconnected from the copier/.test(textOf(a)));
+      if (!exit) return null;
+      const exitAt = String(exit.created_at);
+      const offboard = /off-boarded/.test(textOf(exit));
+      const back = mine.some((a) => a.kind === 'note' && /recovery started/.test(textOf(a)) && String(a.created_at) > exitAt);
+      const group: WinbackGroup = offboard && back ? 'returned' : !offboard && exitAt >= '2026-09-01' ? 'disconnected' : 'old';
+      // jour rouge ? (même maille que l'écran membre : la courbe à 1 lot)
+      const day = exitAt.slice(0, 10);
+      const td = tdays.find((x) => x.d === day);
+      let redDayLine: string | null = null;
+      if (td && td.n > 0 && td.u < 0) {
+        const k = recov.get(day);
+        redDayLine = 'That was a losing day and I know it\'s not nice to watch.' +
+          (k === 1 ? ' The next day was positive and covered it.' : k != null ? ` The account was back above that level ${k} trading days later.` : '');
+      }
+      const lastConnect = mine.find((a) => a.kind === 'connect');
+      const cd = ((lastConnect?.detail ?? {}) as Record<string, unknown>);
+      const notPartner = lastConnect?.status === 'rejected' && (cd.reject_code === 'not_partner' || /partner/i.test(String(cd.reject_reason ?? '')));
+      const sentAt = mine.find((a) => a.kind === 'nudge' && a.status === 'done' && ((a.detail ?? {}) as Record<string, unknown>).via === 'admin' && String(a.created_at) > exitAt)?.created_at ?? null;
+      // injoignable par le bot : un échec PERMANENT plus récent que toute relance réussie
+      const lastNudge = mine.find((a) => a.kind === 'nudge' && (a.status === 'done' || a.status === 'failed'));
+      const botBlocked = lastNudge?.status === 'failed' && isPermanentTelegramFailure(String(((lastNudge.detail ?? {}) as Record<string, unknown>).error ?? ''));
+      const first = (m.tg_name ?? '').trim().split(/\s+/)[0] || null;
+      const name = first ? first.charAt(0).toUpperCase() + first.slice(1) : m.tg_username;
+      const broker = BROKERS.find((b) => b.key === m.broker)?.name ?? null;
+      return {
+        member_no: m.member_no, tg_id: m.tg_id, username: m.tg_username, name: m.tg_name, broker, group, exitAt, sentAt, botBlocked,
+        text: winbackFollowup(group, { name, broker, exitDate: fmtDay(exitAt), exitMonth: fmtMonth(exitAt), redDayLine, monthLine, notPartner }),
+      };
+    }).filter(Boolean);
+    const order: Record<WinbackGroup, number> = { returned: 0, disconnected: 1, old: 2 };
+    list.sort((a, b) => order[a!.group] - order[b!.group] || (b!.exitAt > a!.exitAt ? 1 : -1));
+    return NextResponse.json({ list });
   }
   if (body.botDm) {
     // 💬 RÉPONDRE VIA LE BOT — depuis le fil BOT ACTIVITY : la réponse part DANS la conversation que la
