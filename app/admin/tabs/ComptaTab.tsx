@@ -173,6 +173,7 @@ export function ComptaTab() {
               <Delta cur={q.cur.earned} prev={q.prev.earned} />
             </div>
             <div className="mono" style={{ fontSize: 25, fontWeight: 800, marginTop: 4, color: 'var(--up)' }}>{usd(q.cur.earned)}</div>
+            <div className="mono" style={{ fontSize: 9.5, color: 'var(--dim)', marginTop: 1 }}>expected · {usd(q.cur.cash)} cashed</div>
             <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 3 }}>
               {q.cur.accounts} account{q.cur.accounts === 1 ? '' : 's'} · {usd(q.cur.deposited)} deposited
             </div>
@@ -204,8 +205,8 @@ export function ComptaTab() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-          <Kpi label="EARNED" value={usd(cur.earned)} accent="var(--up)" hot sub={`prev ${usd(before.earned)}`} />
-          <Kpi label="CASHED" value={usd(cur.cash)} accent="var(--up)" sub="com received + direct" />
+          <Kpi label="CASHED" value={usd(cur.cash)} accent="var(--up)" hot sub="com received + direct" />
+          <Kpi label="EXPECTED" value={usd(cur.earned)} accent="var(--up)" sub={`received + pending · prev ${usd(before.earned)}`} />
           <Kpi label="COM PENDING" value={usd(cur.pending)} accent="var(--gold)" hot={cur.pending > 0} />
           <Kpi label="COM LOST" value={usd(cur.lost)} accent="#ff6b8a" />
           <Kpi label="NEW ACCOUNTS" value={String(cur.accounts)} accent="var(--cyan)" sub={`prev ${before.accounts}`} />
@@ -368,7 +369,7 @@ export function ComptaTab() {
             </span>
           </div>
         ))}
-        <p style={dimP}>Dates are the real deposit dates. The DEPOSITS tab books late commissions into the next month; this view never moves them.</p>
+        <p style={dimP}>Dates shown are the real deposit dates. Money (cashed, expected, split) follows the accounting month: a line moved to next month in DEPOSITS counts there, like the broker pays it.</p>
       </section>
     </>
   );
