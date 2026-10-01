@@ -10,7 +10,12 @@ export interface Broker {
   // Noms EXACTS des serveurs MT5 (au caractère près) — proposés en menu déroulant à la connexion.
   // Le copieur STH exige la chaîne EXACTE : « PuPrime Live6 » ≠ « PUPrime-Live 6 » → erreur, la copie ne démarre pas.
   // Relevés directement dans la liste serveur de STH/MT5 (screens Mathieu). SERVEURS LIVE UNIQUEMENT (pas de demo :
-  // un membre doit être en réel). Serveur non listé → saisie libre en repli, donc jamais de blocage.
+  // un membre doit être en réel).
+  // PLUS DE SAISIE LIBRE pour un broker qui a une liste (01/10/2026, demande Mathieu) : un client VT Markets
+  // avait tapé « VTMarkets-Live6 » au lieu de choisir « VTMarkets-Live 6 » juste au-dessus — refusé, renvoyé
+  // à l'identique, puis connecté du premier coup une fois l'espace ajoutée. Serveur absent de la liste →
+  // le membre écrit à Mathieu, qui l'ajoute ICI. Côté serveur, canonicalServer() rattrape les fautes d'espace
+  // et de casse des anciennes versions de l'app.
   servers?: string[];
   // Code bonus de dépôt négocié avec le broker (confirmé cumulable avec le lien IB). ARME DE CLOSING,
   // pas un banner : servi uniquement aux hésitants (popup onboarding sur signal d'hésitation, relances
@@ -51,7 +56,7 @@ export const BROKERS: Broker[] = [
     servers: ['RaiseGlobal-Live'], // société "RaiseGlobal"
     bonus: { code: 'ALGORIA100', pct: 100 }, // 100% de bonus de dépôt — confirmé RaiseFX 27/07/2026
   },
-  { key: 'vtmarkets', name: 'VT Markets', url: 'https://go.vtaffiliates.com/visit/?bta=35824&brand=vt', affiliateId: '35824', servers: ['VTMarkets-Live', 'VTMarkets-Live 2', 'VTMarkets-Live 3', 'VTMarkets-Live 5', 'VTMarkets-Live 6', 'VTMarkets-Live 7', 'VTMarkets-Live 8'] },
+  { key: 'vtmarkets', name: 'VT Markets', url: 'https://go.vtaffiliates.com/visit/?bta=35824&brand=vt', affiliateId: '35824', servers: ['VTMarkets-Live', 'VTMarkets-Live 2', 'VTMarkets-Live 3', 'VTMarkets-Live 5', 'VTMarkets-Live 6', 'VTMarkets-Live 7', 'VTMarkets-Live 8', 'VTMarketsLtd-Live 4'] }, // VTMarketsLtd-Live 4 : relevé sur un membre live (01/10)
   // PU Prime — attention : « PUPrime-Live2 » (sans espace) ET « PUPrime-Live 2 » (avec espace) sont DEUX serveurs distincts.
   { key: 'puprime', name: 'PU Prime', url: 'https://go.puprime.partners/visit/?bta=35491&brand=pu&campaign=230205&afp=ALGORIA', affiliateId: '35491', servers: ['PUPrime-Live', 'PUPrime-Live 2', 'PUPrime-Live2', 'PUPrime-Live 4', 'PUPrime-Live 5', 'PUPrime-Live 6', 'PUPrime-Live 7'] },
   // FXCESS — RETIRÉ le 10/08/2026 : le broker arrête et s'auto-remplace par TradingSphere, sa seconde
@@ -60,7 +65,7 @@ export const BROKERS: Broker[] = [
   // (2 live, 2 onboarding, 1 pending_copier) — leurs fiches continuent de fonctionner grâce à cette
   // entrée conservée, serveurs MT5 compris. Voir le champ `retired` pour le détail.
   { key: 'fxcess', name: 'FXCESS', url: '', retired: true, servers: ['FXCESS-Live01', 'FXCESS-Live02', 'FXCess-Live02'] },
-  { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', affiliateId: '35182', servers: ['TradingSphere-Real1'] },
+  { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', affiliateId: '35182', servers: ['TradingSphere-Real1', 'Trading Sphere-MT5 Real1'] }, // le second : relevé sur un membre live (01/10)
   // XLENCE — nouveau partenaire (01/09/2026). Il PREND LA PLACE DE FXCESS, retiré le 10/08 : on repasse
   // donc à cinq brokers ouverts. Barème IDENTIQUE à TradingSphere (400/700/900/1800, confirmé sur leur
   // dashboard partenaire), ce qui en fait un second lien de tête sur les gros dépôts.
@@ -87,4 +92,17 @@ export const PARTNER_BROKERS = BROKERS.filter((b) => !b.nonPartner && !b.retired
  *  broker. Personne d'autre ne peut le sélectionner. */
 export function selectableBrokers(currentKey?: string | null): Broker[] {
   return BROKERS.filter((b) => !b.retired || b.key === currentKey);
+}
+
+/** Le nom de serveur EXACT de la liste du broker, quand la saisie n'en diffère que par les espaces, les
+ *  tirets ou la casse (« VTMarkets-Live6 » → « VTMarkets-Live 6 »). Ne tranche JAMAIS une ambiguïté :
+ *  chez PU Prime, « PUPrime-Live2 » et « PUPrime-Live 2 » sont deux serveurs distincts — une saisie exacte
+ *  est gardée telle quelle, et une saisie qui correspondrait aux deux n'est pas touchée. Hors liste → inchangée. */
+export function canonicalServer(brokerKey: string | null | undefined, server: string): string {
+  const list = BROKERS.find((b) => b.key === brokerKey)?.servers ?? [];
+  const s = server.trim();
+  if (!list.length || list.includes(s)) return s;
+  const norm = (x: string) => x.toLowerCase().replace(/[\s_-]+/g, '');
+  const hits = list.filter((x) => norm(x) === norm(s));
+  return hits.length === 1 ? hits[0] : s;
 }

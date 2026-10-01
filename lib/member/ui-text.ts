@@ -126,6 +126,8 @@ export const UI: Dict = {
   'ob.serverType': { en: 'type it EXACTLY as MetaTrader shows it', it: 'scrivilo ESATTAMENTE come appare in MetaTrader' },
   'ob.serverHint': { en: 'Must match your broker\'s server exactly — copy it from MetaTrader (caps & spaces count).', it: 'Deve corrispondere esattamente al server del broker — copialo da MetaTrader (maiuscole e spazi contano).' },
   'ob.serverBack': { en: '← Pick from the list instead', it: '← Scegli invece dall\'elenco' },
+  'ob.serverPick': { en: 'Pick the exact server shown in your MetaTrader or in your account opening email.', it: 'Scegli esattamente il server che vedi in MetaTrader o nell\'email di apertura del conto.' },
+  'ob.serverMissing': { en: 'Your server isn\'t in the list\u00a0? Message Mathieu, he adds it for you →', it: 'Il tuo server non è in elenco\u00a0? Scrivi a Mathieu, lo aggiunge per te →' },
   // ⚠️ TEXTE RÉÉCRIT (14/08/2026) — il DISAIT « the one you log in with », ce qui se lit « celui avec
   // lequel je me connecte chez le broker ». C'est exactement la confusion qui produit le premier motif de
   // refus : 20 demandes sur 42 refusées pour identifiants invalides, presque toujours le mot de passe de

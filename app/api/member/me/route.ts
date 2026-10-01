@@ -6,7 +6,7 @@ import { inMaintenance } from '@/lib/member/maintenance';
 import { lotsStateOf } from '@/lib/member/activation';
 import { DIRECT_ACCESS_PRICE_USD } from '@/lib/member/directAccess';
 import { OFFBOARDED } from '@/lib/member/winback';
-import { BROKERS } from '@/lib/member/brokers';
+import { BROKERS, canonicalServer } from '@/lib/member/brokers';
 import { notifyOwner } from '@/lib/member/notifyOwner';
 import { rejectMessage } from '@/lib/member/rejectReasons';
 
@@ -211,7 +211,8 @@ export async function POST(req: NextRequest) {
     if (broker) patch.broker = broker; // broker choisi sur l'écran de connexion (menu déroulant)
     const platform = String(body.platform ?? 'mt5') === 'mt4' ? 'mt4' : 'mt5'; // MT4 vs MT5 → STH IsMT4
     const login = String(body.login ?? '').trim().slice(0, 40);
-    const server = String(body.server ?? '').trim().slice(0, 80);
+    // canonicalServer : « VTMarkets-Live6 » tapé à la main → « VTMarkets-Live 6 » de la liste (01/10/2026)
+    const server = canonicalServer(broker || null, String(body.server ?? '').trim().slice(0, 80));
     const password = String(body.password ?? '');
     const fullName = String(body.name ?? '').trim().slice(0, 80);
     const deposit = Math.round(Number(body.deposit ?? 0));
@@ -394,7 +395,8 @@ export async function POST(req: NextRequest) {
     if (!BROKERS.some((b) => b.key === broker)) return NextResponse.json({ error: 'pick a partner broker' }, { status: 400 });
     const platform = String(body.platform ?? 'mt5') === 'mt4' ? 'mt4' : 'mt5';
     const login = String(body.login ?? '').trim().slice(0, 40);
-    const server = String(body.server ?? '').trim().slice(0, 80);
+    // canonicalServer : « VTMarkets-Live6 » tapé à la main → « VTMarkets-Live 6 » de la liste (01/10/2026)
+    const server = canonicalServer(broker || null, String(body.server ?? '').trim().slice(0, 80));
     const password = String(body.password ?? '');
     const fullName = String(body.name ?? '').trim().slice(0, 80);
     const deposit = Math.round(Number(body.deposit ?? 0));
