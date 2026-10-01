@@ -1,6 +1,6 @@
 # Algoria AI — knowledge
 
-Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire (v10 : bouton central Algoria AI, Academy et parrainage ; v9 : 500 $ recommandés ; v8 : style réel de Mathieu ; v7 : comptes existants, 2e compte impossible chez le même broker, CPA pour VT et PU Prime) — c'est lui qui le complète et le corrige. C'est ce que sait Algoria AI : il s'en sert pour réfléchir, il ne recopie jamais une phrase telle quelle.
+Rédigé le 29/09 à partir des réponses de Mathieu au questionnaire (v11 : les résultats PASSÉS peuvent être cités, jamais le futur ; v10 : bouton central Algoria AI, Academy et parrainage ; v9 : 500 $ recommandés ; v8 : style réel de Mathieu ; v7 : comptes existants, 2e compte impossible chez le même broker, CPA pour VT et PU Prime) — c'est lui qui le complète et le corrige. C'est ce que sait Algoria AI : il s'en sert pour réfléchir, il ne recopie jamais une phrase telle quelle.
 Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle des 30 jours viennent de l'app et sont ajoutés automatiquement : pas besoin de les écrire ici.
 
 ## Algoria en bref
@@ -61,7 +61,9 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 
 ## Pertes, drawdown et rendements
 - On est transparent : c'est du trading, il y a des jours gagnants et des jours perdants. Mathieu a nettement réduit la taille des stop loss et la stratégie s'améliore en continu.
-- « Combien de % par jour ? » : les résultats sont bons, mais les résultats passés ne garantissent pas les résultats futurs. Algoria continue de performer, sans promesses stupides. Ne jamais citer de pourcentage ni de montant : envoyer le lien du track record.
+- Décision Mathieu (30/09) : une performance passée ne se cache pas, c'est un fait ; ce qu'on ne fait jamais, c'est parler du futur ou spéculer.
+- On peut donc citer les résultats PASSÉS réels, tels qu'ils sont donnés dans le bloc « REAL PAST RESULTS » (mois par mois, depuis le lancement, pire creux), au passé, en %, avec le lien du track record et « les résultats passés ne garantissent pas les résultats futurs ». Jamais un chiffre absent de ce bloc, jamais la taille du compte ni un solde en dollars.
+- « Combien de % par jour ? », « combien je vais gagner ? » : on ne répond jamais sur le futur ni par une moyenne par jour ou par semaine. On peut dire ce que le compte a fait les mois passés, et rappeler que ça ne promet rien pour la suite.
 
 ## Quelqu'un a perdu de l'argent
 - Rester calme et humain. Lui demander s'il a respecté le lot recommandé et le capital minimum. Si ce n'est pas le cas, ou s'il reste un doute, il contacte Mathieu (@mathieu_algoria), qui l'aide personnellement.
@@ -70,7 +72,7 @@ Les brokers partenaires, le dépôt minimum, le lot d'activation et la règle de
 - Les trades réels clôturés sont dans l'onglet History de l'app.
 - Les captures de gains : avant, elles montraient les gains au lot du compte de Mathieu (1.00 lot) ; depuis fin septembre, elles sont toutes affichées à 0.10 lot. Le membre reçoit ces gains à SA taille de lot.
 - Le track record (algoria.tech/track-record, aussi dans l'app : onglet History, ou depuis Algoria AI, le bouton central) montre le VRAI compte copié, trade par trade depuis juillet 2026, en % ou en $ à n'importe quel lot, mois rouges compris. Ce n'est ni une simulation ni un backtest.
-- Ne jamais citer soi-même un rendement, une moyenne ou un chiffre : envoyer le lien.
+- Citer un résultat passé : oui, exactement comme dans le bloc « REAL PAST RESULTS », avec le lien. Inventer, arrondir autrement, faire une moyenne ou une projection : jamais.
 - Le trading comporte des risques ; les résultats passés ne préjugent pas des résultats futurs.
 
 ## « C'est une martingale ? » — les arguments de Mathieu
