@@ -33,6 +33,8 @@ export const LOGIN_CODE_RE = /^[A-Za-z0-9]{16,64}$/;
 // Le code court renverse le sens : plus rien à transporter d'un navigateur à l'autre, la personne RECOPIE
 // six chiffres là où elle veut se connecter. C'est la seule forme qui traverse deux magasins de cookies.
 export const SHORT_CODE_RE = /^[0-9]{6}$/;
+/** Code de parrainage (members.referral_code, lien /r/<code>) — le même motif que la route /r/. */
+export const REF_CODE_RE = /^[a-f0-9]{6,12}$/;
 const SHORT_CODE_TTL_MIN = 10; // même fenêtre que le code long
 // ⚠️ 6 chiffres = 1e6 combinaisons seulement. Avec quelques codes vivants à un instant donné, un tirage au
 // sort devient payant en quelques heures de requêtes : la limitation par IP ci-dessous n'est pas un
@@ -102,7 +104,7 @@ export async function consumeLoginCode(
   const db = sdb();
   const { data } = await db.from('member_login_codes').select('*').eq('code', code).limit(1);
   const row = data?.[0] as
-    | { status: string; tg_id: number | null; tg_username: string | null; tg_name: string | null; photo_url: string | null; created_at: string }
+    | { status: string; tg_id: number | null; tg_username: string | null; tg_name: string | null; photo_url: string | null; created_at: string; ref_code?: string | null }
     | undefined;
   if (!row || Date.now() - Date.parse(row.created_at) > 10 * 60_000) return { kind: 'expired' };
   const usable = row.status === 'confirmed' || (opts.allowUsed === true && row.status === 'used');
@@ -121,10 +123,13 @@ export async function consumeLoginCode(
   // Le VRAI filtre n'a pas bougé : l'approbation admin (compte via notre lien + dépôt ≥ 500$) débloque tout.
   // Chaque visiteur devient un LEAD visible dans le CRM au lieu d'un rebond sur une page fermée.
   // PARRAINAGE : un lien /r/<code> valide (cookie) attache le filleul à son parrain. Auto-parrainage exclu.
+  // Le code posé sur le code de connexion (à sa création, par le navigateur qui a ouvert le lien /r/) passe
+  // AVANT le cookie : la connexion se termine souvent dans un autre navigateur, qui n'a pas le cookie.
   const refCookie = (req.cookies.get('alg_ref')?.value ?? '').toLowerCase();
+  const refCode = REF_CODE_RE.test(String(row.ref_code ?? '')) ? String(row.ref_code) : refCookie;
   let referrerTg: number | null = null;
-  if (/^[a-f0-9]{6,12}$/.test(refCookie)) {
-    const { data: r } = await db.from('members').select('tg_id').eq('referral_code', refCookie).limit(1);
+  if (REF_CODE_RE.test(refCode)) {
+    const { data: r } = await db.from('members').select('tg_id').eq('referral_code', refCode).limit(1);
     if (r?.length && Number(r[0].tg_id) !== row.tg_id) referrerTg = Number(r[0].tg_id);
   }
 

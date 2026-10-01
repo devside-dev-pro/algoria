@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { sdb, SESSION_COOKIE } from '@/lib/member/server';
-import { consumeLoginCode, SESSION_COOKIE_OPTS } from '@/lib/member/login';
+import { consumeLoginCode, REF_CODE_RE, SESSION_COOKIE_OPTS } from '@/lib/member/login';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,9 +12,13 @@ export const dynamic = 'force-dynamic';
 // que le bot envoie après le START (seule porte qui fonctionne quand le navigateur intégré de Telegram
 // emporte l'onglet qui poll). Deux portes, une seule implémentation de session.
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   const code = randomBytes(16).toString('hex');
-  const { error } = await sdb().from('member_login_codes').insert({ code });
+  // PARRAINAGE (02/10/2026) : le code du parrain voyage AVEC le code de connexion, côté serveur. Sinon il
+  // dépendait du cookie du navigateur qui TERMINE la connexion — souvent le navigateur intégré de Telegram
+  // (bouton du bot), qui ne l'a jamais vu : l'ami arrivait sans parrain. Relu dans consumeLoginCode.
+  const ref = (req.cookies.get('alg_ref')?.value ?? '').toLowerCase();
+  const { error } = await sdb().from('member_login_codes').insert({ code, ...(REF_CODE_RE.test(ref) ? { ref_code: ref } : {}) });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const bot = process.env.NEXT_PUBLIC_TELEGRAM_BOT ?? '';
   return NextResponse.json({ code, link: `https://t.me/${bot}?start=lg_${code}` });
