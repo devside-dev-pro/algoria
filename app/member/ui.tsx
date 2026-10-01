@@ -10,6 +10,7 @@ import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, RECOMMENDED_DEPOSIT } from '@/
 import { asLocale, type Locale } from '@/lib/member/i18n';
 import { tr, guessLocale, rememberLocale } from '@/lib/member/ui-text';
 import { inMaintenance } from '@/lib/member/maintenance';
+import { track } from '@/lib/member/funnel';
 
 export interface Member {
   member_no: number;
@@ -259,7 +260,7 @@ export function UnlockSheet({ open, onClose, status }: { open: boolean; onClose:
                 </div>
               ))}
             </div>
-            <button onClick={() => router.push('/member/onboarding')} style={{ ...sheetGoldCta, border: 'none', cursor: 'pointer' }}>⚡ UNLOCK MY ACCESS →</button>
+            <button onClick={() => { track('unlock_cta'); router.push('/member/onboarding'); }} style={{ ...sheetGoldCta, border: 'none', cursor: 'pointer' }}>⚡ UNLOCK MY ACCESS →</button>
             <a
               {...tgHref(BOOK_CALL_URL)}
               rel="noreferrer"

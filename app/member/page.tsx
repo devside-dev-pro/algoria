@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount } from './ui';
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
+import { track, trackOnce } from '@/lib/member/funnel';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string; lot?: number }
 
@@ -40,6 +41,10 @@ export default function MemberHome() {
   // hors « ta taille », la référence est 0.10 lot (24/09/2026, lib/display/scale.ts) — plus le lot du maître
   const ref = (t: FeedTrade) => atRef(t.pnl, t.lot);
   const sameAsRef = Math.abs(clientLot - REF_LOT) < 1e-9; // copie à 0.10 : la parenthèse répéterait le même chiffre
+  // 📊 ENTONNOIR (01/10/2026) : l'accueil prospect a bien été vu (lib/member/funnel.ts, ne bloque rien)
+  useEffect(() => {
+    if (member && !unlocked && member.status === 'onboarding') trackOnce('home_view', 'home_view', member.onboarding_step ?? 0);
+  }, [member, unlocked]);
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   // OFF-BOARDÉ → écran de récupération, jamais le dashboard verrouillé. Un membre dont l'accès vient d'être
@@ -99,7 +104,7 @@ export default function MemberHome() {
                 You&rsquo;re watching from the outside — members&rsquo; accounts copy every one of these trades <b style={{ color: 'var(--text)' }}>automatically</b>.
                 {winTotal > 0 && <> The wins below alone made <b className="goldText">+{winTotal.toFixed(0)}$</b> at {REF_LABEL}.</>}
               </p>
-              <button onClick={() => setPaywall(true)} style={ctaGold}>⚡ UNLOCK MY ACCESS</button>
+              <button onClick={() => { setPaywall(true); track('unlock_open', member.onboarding_step ?? 0); }} style={ctaGold}>⚡ UNLOCK MY ACCESS</button>
               {/* l'appel = l'arme de closing : 10 min au téléphone avec Mathieu et c'est signé */}
               <a {...tgHref(BOOK_CALL_URL)} rel="noreferrer" style={ctaGhost}>📞 BOOK A CALL WITH MATHIEU</a>
               <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ ...ctaGhost, border: 'none', background: 'transparent', fontSize: 12, color: 'var(--muted)' }}>💬 or just message @mathieu_algoria</a>
