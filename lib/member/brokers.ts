@@ -65,7 +65,7 @@ export const BROKERS: Broker[] = [
   // (2 live, 2 onboarding, 1 pending_copier) — leurs fiches continuent de fonctionner grâce à cette
   // entrée conservée, serveurs MT5 compris. Voir le champ `retired` pour le détail.
   { key: 'fxcess', name: 'FXCESS', url: '', retired: true, servers: ['FXCESS-Live01', 'FXCESS-Live02', 'FXCess-Live02'] },
-  { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', affiliateId: '35182', servers: ['TradingSphere-Real1', 'Trading Sphere-MT5 Real1'] }, // le second : relevé sur un membre live (01/10)
+  { key: 'tradingsphere', name: 'TradingSphere', url: 'https://go.tradingsphere.com/visit/?bta=35182&brand=tradingsphere&afp=ALGORIA', affiliateId: '35182', servers: ['TradingSphere-Real1'] }, // « Trading Sphere-MT5 Real1 » RETIRÉ (01/10) : ajouté à tort le matin même — le seul membre qui l'avait (#13, juillet) avait été branché à la main ; #1812 a été refusé deux fois avec ce nom, alors que les 12 membres TradingSphere qui copient sont tous sur TradingSphere-Real1
   // XLENCE — nouveau partenaire (01/09/2026). Il PREND LA PLACE DE FXCESS, retiré le 10/08 : on repasse
   // donc à cinq brokers ouverts. Barème IDENTIQUE à TradingSphere (400/700/900/1800, confirmé sur leur
   // dashboard partenaire), ce qui en fait un second lien de tête sur les gros dépôts.
