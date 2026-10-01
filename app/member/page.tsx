@@ -12,6 +12,7 @@ import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { track, trackOnce } from '@/lib/member/funnel';
 import { ShareWinSheet, type ShareableWin } from '@/components/member/ShareWinSheet';
+import { InviteSheet, exampleDeposits, rewardFor } from '@/components/member/InviteSheet';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string; lot?: number }
 
@@ -21,6 +22,12 @@ export default function MemberHome() {
   const [clientLot, setClientLot] = useState(0.01);
   const [paywall, setPaywall] = useState(false);
   const [shareTarget, setShareTarget] = useState<ShareableWin | null>(null); // 📤 partager un gain
+  const [invite, setInvite] = useState(false); // 🤝 inviter un ami
+  // « NEW » sur la carte tant que le membre ne l'a jamais ouverte : c'est le rappel après l'activation
+  // (pas de DM automatique aux clients). Stockage local : perdu = la pastille revient, sans conséquence.
+  const [inviteSeen, setInviteSeen] = useState(true);
+  useEffect(() => { try { setInviteSeen(localStorage.getItem('alg_invite_seen') === '1'); } catch { /* navigation privée */ } }, []);
+  const openInvite = () => { setInvite(true); setInviteSeen(true); try { localStorage.setItem('alg_invite_seen', '1'); } catch { /* rien */ } };
   interface Social { members: number; live: number; joins48h: number; lastLiveNo: number | null; lastLiveHours: number | null }
   const [social, setSocial] = useState<Social | null>(null);
   const router = useRouter();
@@ -80,6 +87,27 @@ export default function MemberHome() {
 
       {/* MON COMPTE (estimation) — « à combien est mon compte ? » sans ouvrir MetaTrader */}
       {unlocked && <AccountCard member={member} />}
+
+      {/* 🤝 INVITER UN AMI (02/10/2026) — le parrainage n'était qu'au fond du Profil : 7 filleuls sur 1 946 inscrits.
+          Membres actifs seulement (ils parlent de ce qu'ils vivent). Le montant en DOLLARS, pas un pourcentage. */}
+      {unlocked && referral?.code && (() => {
+        const ex = exampleDeposits(referral).find((d) => d >= 500) ?? exampleDeposits(referral)[0];
+        return (
+          <button onClick={openInvite} className="panel"
+            style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 7, textAlign: 'left', cursor: 'pointer', color: 'var(--text)', borderColor: 'rgba(245,194,74,.45)', boxShadow: inviteSeen ? 'none' : '0 0 22px rgba(245,194,74,.12)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+              <span style={{ fontSize: 15, fontWeight: 800 }}>🤝 Invite a friend, earn up to <span className="goldText">${referral.rewardCapUsd}</span></span>
+              <span style={{ flex: 1 }} />
+              {!inviteSeen && <span className="mono" style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1, padding: '2px 7px', borderRadius: 999, color: '#0b0e14', background: 'linear-gradient(90deg,#ffd166,#f5a623)' }}>NEW</span>}
+            </div>
+            <span style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.45 }}>
+              Your friend deposits ${ex.toLocaleString('en-US')} → you get <b className="goldText">+${rewardFor(referral, ex)}</b> in USDT.
+              {referral.totalEarnedUsd > 0 && <> <b style={{ color: 'var(--up)' }}>💰 ${referral.totalEarnedUsd} earned so far.</b></>}
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--gold)', letterSpacing: 0.4 }}>📤 SEND MY LINK →</span>
+          </button>
+        );
+      })()}
 
       {/* HERO PROSPECT — pas de mur : l'app entière est visible, ce bloc vend le déblocage */}
       {!unlocked && (
@@ -195,13 +223,9 @@ export default function MemberHome() {
         </p>
       </section>
 
-      {/* PARRAINAGE — sur le Home, là où le membre regarde ses gains chaque jour = le moment où il est
-          content. On surfe sur la dopamine des wins juste au-dessus : "Algoria vient de te faire gagner,
-          amène ton crew et touche 10% du dépôt de chaque ami financé". La mécanique complète (retrait, historique,
-          paliers) reste dans le Profil ; ici c'est le déclencheur en un tap. */}
-
       <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />
       <ShareWinSheet win={shareTarget} code={referral?.code ?? null} copying={member.status === 'live' || member.status === 'paused'} rewardRate={referral?.rewardRate ?? null} onClose={() => setShareTarget(null)} />
+      <InviteSheet open={invite} referral={referral} from="home" onClose={() => setInvite(false)} />
     </main>
   );
 }

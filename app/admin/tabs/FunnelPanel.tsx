@@ -16,6 +16,7 @@ type Data = {
   bonus: { shown: number; clicked: number }; backs: number;
   help?: { opened: number; topics: { topic: string; people: number }[] };
   shares?: { openedBy: number; sharers: number; byChannel: { channel: string; n: number }[] };
+  invites?: { openedBy: number; sharers: number; byChannel: { channel: string; n: number }[] };
 };
 const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
 const dur = (s: number | null) => (s == null ? '—' : s < 90 ? `${s} s` : `${Math.round(s / 60)} min`);
@@ -89,6 +90,7 @@ export function FunnelPanel() {
               <span style={{ fontSize: 12, color: 'var(--text)' }}>Bonus popup : {d.bonus.shown} shown → {d.bonus.clicked} clicked</span>
               <span style={{ fontSize: 12, color: 'var(--text)' }}>Went back a step : {d.backs} people</span>
               {d.shares && <span style={{ fontSize: 12, color: 'var(--text)' }}>📤 Win shares : {d.shares.openedBy} opened · {d.shares.sharers} shared{d.shares.byChannel.length ? ` (${d.shares.byChannel.map((c) => `${c.channel} ×${c.n}`).join(', ')})` : ''}</span>}
+              {d.invites && <span style={{ fontSize: 12, color: 'var(--text)' }}>🤝 Invite a friend : {d.invites.openedBy} opened · {d.invites.sharers} sent their link{d.invites.byChannel.length ? ` (${d.invites.byChannel.map((c) => `${c.channel} ×${c.n}`).join(', ')})` : ''}</span>}
               {d.help && <span style={{ fontSize: 12, color: 'var(--text)' }}>🆘 “I’m stuck” : opened by {d.help.opened}{d.help.topics.length ? ` · sent: ${d.help.topics.map((x) => `${x.topic} ×${x.people}`).join(', ')}` : ''}</span>}
               {d.budgets.length > 0 && <span style={{ fontSize: 12, color: 'var(--text)' }}>Budget picked : {d.budgets.map((b) => `${b.bracket} ×${b.n}`).join(' · ')}</span>}
             </div>
