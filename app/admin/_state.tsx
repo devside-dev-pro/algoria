@@ -20,7 +20,7 @@ import { WL, Row, Action, Affiliate, Deposit, Tab, Center, AdminGate } from './_
 // rafraîchissement reste sur place, le bouton retour d'iOS fait ce qu'on attend, et un onglet se partage.
 // L'état initial reste 'dashboard' : le serveur ne voit pas le hash, le lire au premier rendu casserait
 // l'hydratation. On le corrige dans l'effet, après le montage.
-const TAB_KEYS: Tab[] = ['dashboard', 'queue', 'members', 'deposits', 'compta', 'affiliate', 'tools'];
+const TAB_KEYS: Tab[] = ['dashboard', 'queue', 'members', 'deposits', 'compta', 'ads', 'affiliate', 'tools'];
 const tabFromHash = (): Tab => {
   const h = typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, '');
   return (TAB_KEYS as string[]).includes(h) ? (h as Tab) : 'dashboard';
@@ -1165,6 +1165,7 @@ export function useAdminState() {
     { key: 'members', label: 'MEMBERS', badge: rows.length },
     { key: 'deposits', label: 'DEPOSITS', badge: deposits.filter((d) => String(d.detail?.commission_status ?? 'pending') === 'pending').length + liveNoDeposit.length },
     { key: 'compta', label: 'COMPTA' },
+    { key: 'ads', label: 'ADS STUDIO' },
     { key: 'affiliate', label: 'AFFILIATE', badge: (aff?.pendingCommissions.length ?? 0) + (aff?.pendingPayouts.length ?? 0) },
     { key: 'tools', label: 'TOOLS' },
   ];
