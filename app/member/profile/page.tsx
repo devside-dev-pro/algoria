@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, Locked, UnlockSheet, type Member, type Referral, LoadFailed } from '../ui';
 import { TRC20_RE } from '@/lib/member/affiliate';
+import { InviteSheet } from '@/components/member/InviteSheet';
 import { LOT_CHOICES, LOT_MAX, LOT_STEP, isLotAllowed } from '@/lib/member/lots';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
 import { ask, DialogHost } from '@/components/admin/Dialog';
@@ -58,7 +59,7 @@ export default function Profile() {
   const { member, setMember, referral: refInit, unlocked, loading } = useMe();
   const [busy, setBusy] = useState(false);
   const [disc, setDisc] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [invite, setInvite] = useState(false); // 🤝 la feuille « inviter un ami » (components/member/InviteSheet)
   const [paywall, setPaywall] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
   const [customLot, setCustomLot] = useState(''); // taille de copie hors grille (gros comptes)
@@ -66,6 +67,11 @@ export default function Profile() {
   // copie locale du wallet : rafraîchie après un retrait / changement d'adresse (useMe ne charge qu'une fois)
   const [referral, setReferral] = useState<Referral | null>(null);
   useEffect(() => { if (refInit) setReferral(refInit); }, [refInit]);
+  // arrivée depuis la feuille « inviter un ami » de l'accueil (/member/profile#refer) : la section n'existe qu'une
+  // fois le parrainage chargé, le navigateur ne peut donc pas y descendre seul
+  useEffect(() => {
+    if (referral?.code && window.location.hash === '#refer') document.getElementById('refer')?.scrollIntoView({ block: 'start' });
+  }, [referral?.code]);
   const reloadWallet = () =>
     void fetch('/api/member/me').then(async (r) => { const d = (await r.json()) as { referral?: Referral }; if (d.referral) setReferral(d.referral); });
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
@@ -140,7 +146,7 @@ export default function Profile() {
 
       {/* PARTNER HUB — le moteur de croissance : wallet retirable en USDT, paliers, historique */}
       {referral?.code && (
-        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 13, borderColor: 'rgba(245,194,74,.35)' }}>
+        <section id="refer" className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 13, borderColor: 'rgba(245,194,74,.35)', scrollMarginTop: 12 }}>
           <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2 }} className="goldText">REFER & EARN</h2>
 
           {/* wallet — le retirable en GROS : c'est lui qui donne envie de partager le lien */}
@@ -201,14 +207,10 @@ export default function Profile() {
               app.algoria.tech/r/{referral.code}
             </span>
             <button
-              onClick={() => {
-                const link = `https://app.algoria.tech/r/${referral.code}`;
-                if (navigator.share) void navigator.share({ title: 'Join Algoria', text: 'The AI that trades gold & Bitcoin — get in with my link:', url: link }).catch(() => {});
-                else { void navigator.clipboard?.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1600); }
-              }}
+              onClick={() => setInvite(true)}
               style={{ padding: '10px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 12, letterSpacing: 0.5, color: '#0b0e14', background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}
             >
-              {copied ? '✓ COPIED' : 'SHARE'}
+              SHARE
             </button>
           </div>
           <div style={{ display: 'flex', gap: 16 }}>
@@ -252,6 +254,7 @@ export default function Profile() {
           )}
         </section>
       )}
+      <InviteSheet open={invite} referral={referral} from="profile" onClose={() => setInvite(false)} />
       {referral && (
         <WithdrawSheet
           open={withdraw}

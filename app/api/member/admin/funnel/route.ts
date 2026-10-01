@@ -87,11 +87,14 @@ export async function GET(req: NextRequest) {
     const shareCh = new Map<string, number>();
     for (const e of evs) if (e.event === 'share_done') { const c = String(e.meta?.channel ?? '?'); shareCh.set(c, (shareCh.get(c) ?? 0) + 1); }
     const shares = { openedBy: who(is('share_open')).size, sharers: who(is('share_done')).size, byChannel: [...shareCh.entries()].map(([channel, n]) => ({ channel, n })).sort((a, b) => b.n - a.n) };
+    const invCh = new Map<string, number>();
+    for (const e of evs) if (e.event === 'invite_share') { const c = String(e.meta?.channel ?? '?'); invCh.set(c, (invCh.get(c) ?? 0) + 1); }
+    const invites = { openedBy: who(is('invite_open')).size, sharers: who(is('invite_share')).size, byChannel: [...invCh.entries()].map(([channel, n]) => ({ channel, n })).sort((a, b) => b.n - a.n) };
     const help = { opened: helpOpened, topics: [...helpTopics.entries()].map(([topic, s]) => ({ topic, people: s.size })).sort((a, b) => b.people - a.people) };
 
     return NextResponse.json({
       days, signups: signups ?? 0, since: first?.[0]?.created_at ?? null, events: evs.length,
-      stages, leaveSecs, brokers, errors, budgets: [...budgets.entries()].map(([bracket, n]) => ({ bracket, n })), bonus, backs, help, shares,
+      stages, leaveSecs, brokers, errors, budgets: [...budgets.entries()].map(([bracket, n]) => ({ bracket, n })), bonus, backs, help, shares, invites,
     });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

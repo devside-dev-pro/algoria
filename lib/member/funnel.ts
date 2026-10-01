@@ -23,6 +23,8 @@ export const FUNNEL_EVENTS = [
   'ob_help',            // 🆘 « je bloque » envoyé (meta.topic)
   'share_open',         // 📤 feuille « partager ce gain » ouverte (meta.ticket)
   'share_done',         // 📤 partage lancé (meta.channel : image | whatsapp | telegram | copy)
+  'invite_open',        // 🤝 feuille « inviter un ami » ouverte (meta.from : home | profile)
+  'invite_share',       // 🤝 lien de parrainage envoyé (meta.channel : native | whatsapp | telegram | copy)
 ] as const;
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];
 type Meta = Record<string, string | number | boolean | null>;
