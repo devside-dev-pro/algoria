@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin, decryptSecret, encryptSecret } from '@/lib/member/server';
 import { rejectMessage, rejectReasonOf } from '@/lib/member/rejectReasons';
 import { MILESTONES, commissionForActivation } from '@/lib/member/affiliate';
-import { sthReady, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster, sthConfiguredMaster } from '@/lib/member/sth';
+import { sthReady, sthConnected, sthConnectAndJoin, sthDisconnect, sthStatus, sthMoveMaster, sthConfiguredMaster } from '@/lib/member/sth';
 import { BROKERS } from '@/lib/member/brokers';
 import { estimateCommission } from '@/lib/member/commissions';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
@@ -1333,7 +1333,7 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     if (!sthReady()) return NextResponse.json({ error: 'STH not configured — set STH_PARTNER_LICENSE (Vercel)' }, { status: 400 });
     const st = await sthStatus(String(body.sthStatusCheck));
     if (!st.ok) return NextResponse.json({ error: `STH: ${st.errorMessage}` }, { status: 400 });
-    return NextResponse.json({ connected: st.data.tradingAccountConnected === true, masters: st.data.masterAccountsList ?? [], raw: st.data });
+    return NextResponse.json({ connected: sthConnected(st.data), masters: st.data.masterAccountsList ?? [], raw: st.data });
   }
   if (body.setupTgWebhook) {
     // 🤖 (RÉ)ENREGISTRER LE WEBHOOK UNIQUE du bot — /api/telegram, qui porte TOUT : login /start, waitlist

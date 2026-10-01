@@ -39,9 +39,18 @@ async function sthPost<T = Record<string, unknown>>(route: string, payload: Reco
   }
 }
 
+type SthUserStatus = { isTradingAccountConnected?: boolean; tradingAccountConnected?: boolean; masterAccountsList?: Array<{ id: string; name?: string }> };
+
+/** « Compte MetaTrader branché chez STH ? » — LE BON NOM DE CHAMP (01/10/2026, confirmé par Johann, STH) :
+ *  `isTradingAccountConnected`. On lisait `tradingAccountConnected`, qui n'existe pas : undefined pour TOUT le
+ *  monde, d'où le « drapeau mort » constaté le 26/08 sur tout le parc — et très probablement les 0 inscriptions du
+ *  15/08 (le contrôle attendait un champ qui ne pouvait jamais passer à vrai). L'ancien nom reste lu en repli. */
+export const sthConnected = (d: SthUserStatus | null | undefined): boolean =>
+  (d?.isTradingAccountConnected ?? d?.tradingAccountConnected) === true;
+
 /** Statut d'un utilisateur du copieur : compte connecté ? + liste des masters de la licence. */
 export function sthStatus(userId: string) {
-  return sthPost<{ tradingAccountConnected?: boolean; masterAccountsList?: Array<{ id: string; name?: string }> }>(
+  return sthPost<SthUserStatus>(
     '/Partner/get-user-status',
     { UserID: userId },
   );
@@ -119,10 +128,13 @@ function hintUnknownUser(error: string): string {
  * post-connect), où « possède un master » est une preuve suffisante et où un faux négatif ne fait que
  * remonter l'erreur réelle du connect.
  * NE PAS la réintroduire comme pré-condition tant que STH n'a pas réparé ce champ.
+ * ⚠️ 01/10/2026 : le champ n'était pas cassé chez STH — on lisait le mauvais nom (voir sthConnected). Il est
+ * désormais lu correctement ; la règle ci-dessus reste néanmoins valable tant qu'on n'a pas vu le vrai champ
+ * se comporter sur le parc.
  */
-function isApiKnown(st: { ok: boolean; data: { tradingAccountConnected?: boolean; masterAccountsList?: Array<{ id: string }> } }): boolean {
+function isApiKnown(st: { ok: boolean; data: SthUserStatus }): boolean {
   if (!st.ok) return true; // STH injoignable → on laisse passer, l'appel suivant tranchera avec sa vraie erreur
-  return st.data.tradingAccountConnected === true || (st.data.masterAccountsList ?? []).length > 0;
+  return sthConnected(st.data) || (st.data.masterAccountsList ?? []).length > 0;
 }
 
 /** PAUSE la copie d'un utilisateur API : join-master-account DÉCLARATIF avec une liste VIDE = désabonné de
