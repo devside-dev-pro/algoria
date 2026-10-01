@@ -42,7 +42,7 @@ async function applyTelegramWebhook(token: string): Promise<{ ok: boolean; descr
   });
   return (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string } as { ok: boolean; description?: string };
 }
-const MEMBER_COLS = 'member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at,locale,strategy,lot';
+const MEMBER_COLS = 'member_no,tg_id,tg_username,tg_name,status,broker,risk_tier,created_at,updated_at,onboarding_step,mt5_login,mt5_server,usdt_trc20,referred_by,country,source,banned_at,locale,strategy,lot,pwa_seen_at,pwa_platform';
 type MemberRow = { tg_id: number; tg_username: string | null; member_no: number | null } & Record<string, unknown>;
 async function allMembers(db: ReturnType<typeof sdb>): Promise<{ data: MemberRow[] }> {
   const PAGE = 1000;
