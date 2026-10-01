@@ -1,8 +1,9 @@
 'use client';
 // ADS STUDIO (01/10/2026) — la bibliothèque d'ads de Mathieu : « une sorte de bibliothèque d'ads avec un stock
 // d'ads, là où je peux stocker tous mes scripts, idées etc. » ; « si je suis en manque de hooks je vais dans
-// ma banque de hooks ». Trois vues :
+// ma banque de hooks ». Quatre vues :
 // - LIBRARY : une fiche par ad (pôle, hook, déroulé, besoins, statut idée → à tourner → tournée → montée → en ligne) ;
+// - SHOOT LIST : « à tourner » d'un côté, « déjà tournées » (avec la date) de l'autre, pour ne pas retourner la même ;
 // - HOOKS : la banque de hooks, avec leur statut de test (winner / loser) ;
 // - SHOOT : le mode tournage, un script à la fois en gros caractères, pour lire sur le téléphone pendant la prise.
 // Données : /api/member/admin/ads. Bibliothèque de départ (brief de Benjamin) : lib/admin/adsSeed.ts, importée d'un clic.
@@ -14,7 +15,8 @@ import {
   type AdHook, type AdScript, type HookStatus, type Need, type Pole, type Status,
 } from '@/lib/admin/ads';
 
-type View = 'library' | 'hooks' | 'shoot';
+type View = 'library' | 'list' | 'hooks' | 'shoot';
+const day = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 const api = async (body: Record<string, unknown>) => {
   const r = await fetch('/api/member/admin/ads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const d = await r.json().catch(() => ({}));
@@ -47,6 +49,7 @@ export function AdsTab() {
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<View>('library');
   const [busy, setBusy] = useState(false);
+  const [focus, setFocus] = useState<string | null>(null); // ad ouverte dans le mode tournage depuis la SHOOT LIST
 
   const load = async () => {
     setErr(null);
@@ -61,7 +64,10 @@ export function AdsTab() {
   const patchScript = async (id: string, patch: Partial<AdScript>) => {
     const before = scripts;
     setScripts((l) => (l ?? []).map((x) => (x.id === id ? { ...x, ...patch } : x)));
-    try { await api({ patchScript: { id, patch } }); } catch (e) { setScripts(before); toast(`⚠ ${(e as Error).message}`, 'error'); }
+    try {
+      const d = await api({ patchScript: { id, patch } });
+      if (d.script) setScripts((l) => (l ?? []).map((x) => (x.id === id ? d.script : x))); // shot_at est posé par le serveur
+    } catch (e) { setScripts(before); toast(`⚠ ${(e as Error).message}`, 'error'); }
   };
   const patchHook = async (id: string, patch: Partial<AdHook>) => {
     const before = hooks;
@@ -69,6 +75,7 @@ export function AdsTab() {
     try { await api({ patchHook: { id, patch } }); } catch (e) { setHooks(before); toast(`⚠ ${(e as Error).message}`, 'error'); }
   };
   const ctx = { scripts: scripts ?? [], hooks, setScripts, setHooks, patchScript, patchHook };
+  const openInShootMode = (id: string) => { setFocus(id); setView('shoot'); };
 
   const seed = async () => {
     setBusy(true);
@@ -87,8 +94,8 @@ export function AdsTab() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
           <h2 style={secH}>🎬 ADS STUDIO · {scripts.length} ads · {hooks.length + scripts.filter((x) => x.hook).length} hooks</h2>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {([['library', '📚 Library'], ['hooks', '🪝 Hooks bank'], ['shoot', '🎬 Shooting mode']] as [View, string][]).map(([k, l]) => (
-              <button key={k} onClick={() => setView(k)} style={chip(view === k)}>{l}</button>
+            {([['library', '📚 Library'], ['list', `✅ Shoot list · ${count('to_shoot')} to shoot`], ['hooks', '🪝 Hooks bank'], ['shoot', '🎬 Shooting mode']] as [View, string][]).map(([k, l]) => (
+              <button key={k} onClick={() => { setFocus(null); setView(k); }} style={chip(view === k)}>{l}</button>
             ))}
           </div>
         </div>
@@ -111,7 +118,8 @@ export function AdsTab() {
       </section>
       {view === 'library' && <Library {...ctx} />}
       {view === 'hooks' && <HooksBank {...ctx} />}
-      {view === 'shoot' && <ShootMode {...ctx} />}
+      {view === 'list' && <ShootList {...ctx} onRead={openInShootMode} />}
+      {view === 'shoot' && <ShootMode key={focus ?? 'all'} {...ctx} startId={focus} />}
     </div>
   );
 }
@@ -191,6 +199,7 @@ function Library({ scripts, hooks, setScripts, setHooks, patchScript }: Ctx) {
                     <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>
                       {x.needs.map((n) => NEED_LABEL[n]).join(' · ')}{x.duration ? ` · ⏱ ${x.duration}` : ''}{alts.length ? ` · +${alts.length} hooks` : ''}{x.source ? ` · ${x.source}` : ''}
                     </span>
+                    {x.shot_at && <span style={{ fontSize: 11, color: 'var(--cyan)' }}>✓ shot {day(x.shot_at)}</span>}
                     {x.meta_flag && <span style={{ fontSize: 11, color: '#ff8a5c' }}>⚠ Meta risk</span>}
                   </div>
                   <StatusSelect value={x.status} onChange={(s) => void patchScript(x.id, { status: s })} />
@@ -351,15 +360,16 @@ function HooksBank({ scripts, hooks, setHooks, patchHook }: Ctx) {
 
 // ===================== SHOOTING MODE =====================
 // Pendant la prise : un script à la fois, en gros, lisible sur le téléphone. « ✓ SHOT » le passe en « tournée ».
-function ShootMode({ scripts, hooks, patchScript }: Ctx) {
-  const [need, setNeed] = useState<Need | 'all'>('solo');
+function ShootMode({ scripts, hooks, patchScript, startId }: Ctx & { startId: string | null }) {
+  const [need, setNeed] = useState<Need | 'all'>(startId ? 'all' : 'solo');
   const [ids, setIds] = useState<string[] | null>(null);
   const [i, setI] = useState(0);
   // La liste est figée à l'ouverture (et à chaque changement de filtre) : marquer « tournée » ne la fait pas
   // sauter sous les yeux, on avance simplement à la suivante.
   useEffect(() => {
-    setIds(scripts.filter((x) => x.status === 'to_shoot' && (need === 'all' || x.needs.includes(need))).map((x) => x.id));
-    setI(0);
+    const next = scripts.filter((x) => x.status === 'to_shoot' && (need === 'all' || x.needs.includes(need))).map((x) => x.id);
+    setIds(next);
+    setI(Math.max(0, startId ? next.indexOf(startId) : 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [need]);
   const list = (ids ?? []).map((id) => scripts.find((x) => x.id === id)).filter((x): x is AdScript => !!x);
@@ -402,5 +412,75 @@ function ShootMode({ scripts, hooks, patchScript }: Ctx) {
         </>
       )}
     </section>
+  );
+}
+
+// ===================== SHOOT LIST =====================
+// « Un endroit où on peut passer une ad de à tourner à tournée, que je refasse pas les mêmes » (Mathieu, 01/10).
+// À gauche ce qui reste à tourner, à droite ce qui est déjà dans la boîte, avec le jour du tournage.
+function ShootList({ scripts, patchScript, onRead }: Ctx & { onRead: (id: string) => void }) {
+  const todo = scripts.filter((x) => x.status === 'to_shoot');
+  const done = scripts.filter((x) => x.status === 'shot' || x.status === 'edited' || x.status === 'live')
+    .sort((a, b) => (b.shot_at ?? b.updated_at).localeCompare(a.shot_at ?? a.updated_at));
+  const ideas = scripts.filter((x) => x.status === 'idea');
+  const row: CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', padding: '9px 11px', borderRadius: 9, border: '1px solid var(--border)', flexWrap: 'wrap' };
+  const meta = (x: AdScript) => [POLE_LABEL[x.pole], ...x.needs.map((n) => NEED_LABEL[n]), x.duration ? `⏱ ${x.duration}` : ''].filter(Boolean).join(' · ');
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 14, alignItems: 'start' }}>
+      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <h2 style={{ ...secH, color: 'var(--gold)' }}>🎯 TO SHOOT · {todo.length}</h2>
+        {todo.length === 0 && <p style={dimP}>Nothing left to shoot. Add ideas from the list below.</p>}
+        {POLES.filter((p) => todo.some((x) => x.pole === p)).map((p) => (
+          <div key={p} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 10.5, letterSpacing: 1, color: 'var(--cyan)', marginTop: 4 }}>{POLE_LABEL[p]}</span>
+            {todo.filter((x) => x.pole === p).map((x) => (
+              <div key={x.id} style={{ ...row, borderLeft: '3px solid var(--gold)' }}>
+                <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <b style={{ fontSize: 13, color: 'var(--text)' }}>{x.title}</b>
+                  <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{meta(x)}</span>
+                </div>
+                <button onClick={() => onRead(x.id)} style={goldBtn}>▶ read</button>
+                <button onClick={() => { void patchScript(x.id, { status: 'shot' }); toast(`✓ “${x.title}” shot`); }} style={{ ...okBtn, padding: '8px 14px' }}>✓ SHOT</button>
+              </div>
+            ))}
+          </div>
+        ))}
+        {ideas.length > 0 && (
+          <details style={{ marginTop: 8 }}>
+            <summary style={{ ...secH, cursor: 'pointer', fontSize: 11 }}>💡 IDEAS · {ideas.length} · add to the shoot list</summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+              {ideas.map((x) => (
+                <div key={x.id} style={row}>
+                  <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text)' }}>{x.title}</span>
+                    <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{meta(x)}</span>
+                  </div>
+                  <button onClick={() => void patchScript(x.id, { status: 'to_shoot' })} style={goldBtn}>＋ to shoot</button>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </section>
+
+      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <h2 style={{ ...secH, color: 'var(--up)' }}>✅ ALREADY SHOT · {done.length}</h2>
+        <p style={{ ...dimP, fontSize: 11 }}>Already in the box: no need to shoot these again. Move them to EDITED and LIVE in the Library.</p>
+        {done.length === 0 && <p style={dimP}>Nothing shot yet.</p>}
+        {done.map((x) => (
+          <div key={x.id} style={{ ...row, borderLeft: `3px solid ${STATUS_LABEL[x.status].col}` }}>
+            <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--text)' }}>{x.title}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{POLE_LABEL[x.pole]}{x.shot_at ? ` · shot ${day(x.shot_at)}` : ''}</span>
+            </div>
+            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: STATUS_LABEL[x.status].col }}>{STATUS_LABEL[x.status].label}</span>
+            {x.status === 'shot' && (
+              <button onClick={() => void patchScript(x.id, { status: 'to_shoot' })} title="Back to the shoot list (to redo it)" style={miniBtn}>↩ undo</button>
+            )}
+          </div>
+        ))}
+      </section>
+    </div>
   );
 }

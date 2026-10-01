@@ -17,98 +17,178 @@ export interface SeedHook { key: string; text: string; angle: string }
 
 const RISK = 'Texte de fin à l\'écran : Trading involves risk. Past results don\'t guarantee future results.';
 const BRIEF = 'Brief Benjamin';
-const UGLY = 'Brief Benjamin · script prêt';
+const READY = 'Brief Benjamin · script prêt';
+const STREET_PREP = 'Micro (cravate ou micro main), ton téléphone avec l\'app ouverte sur la page live et le track record. Une autorisation de droit à l\'image signée par chaque passant gardé au montage. Les ads sont en anglais : il faut des passants anglophones (étudiants étrangers, touristes, quartier international).';
+const BROLL_PREP = 'Micro-cravate pour la voix off, enregistrée au calme. Tourner chaque plan 2 ou 3 fois, en plans courts (2 à 4 s), pour pouvoir monter plusieurs versions.';
 const PLAYED = 'Scène jouée : si un personnage parle de ses gains, afficher « Dramatization » à l\'écran et n\'utiliser qu\'une card de gain réelle (vrai trade du track record). Meta sanctionne les faux témoignages dans la pub financière.';
 
 export const SEED_SCRIPTS: SeedScript[] = [
-  // ===== PÔLE 1 · MICRO-TROTTOIRS =====
+  // ===== PÔLE 1 · MICRO-TROTTOIRS (scripts prêts à tourner) =====
+  // Les passants ne sont pas scriptés : la fiche donne les questions, les relances selon leurs réponses, la phrase
+  // pivot vers Algoria, ce qu'on montre, et la fin. Au montage, on garde 2 ou 3 réponses, coupées vite, sous-titrées.
   {
-    key: 'street-1', pole: 'street', title: 'Questions à choix, puis Algoria', status: 'idea', source: BRIEF, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    key: 'street-1', pole: 'street', title: 'Questions à choix, puis Algoria', status: 'to_shoot', source: READY, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    prep: STREET_PREP,
     hook: '"1 Bitcoin or 10,000 dollars ? You have 2 seconds."',
-    body: `Mathieu pose 4 à 5 questions rapides à une personne, de plus en plus proches du revenu passif. La dernière réponse amène Algoria.
-
-Exemple d'enchaînement :
+    body: `Les questions, très vite, sans laisser réfléchir :
 1. "1 Bitcoin or 10,000 dollars ?"
-2. "Work one more hour a day, or never think about money again ?"
-3. "Learn trading for 2 years, or let an AI do it ?"
+2. "A pay rise, or 2 extra hours of free time every day ?"
+3. "Learn trading for 2 years, or let an AI trade for you ?"
 4. "Watch charts all day, or check your phone twice ?"
-5. "Last one: would you let an AI trade gold for you ?"
+5. "Last one. Would you let an AI trade gold on your own account ?"
 
-Sur la dernière réponse : "That's what Algoria is. An AI trades gold, and your own broker account copies it, automatically."
+Relance selon la réponse à la 5
+- Oui : "Then you'll like this." → tu sors le téléphone.
+- Non ou hésitant : "Fair. What would you need to see first ?" (souvent : une preuve) → tu sors le téléphone.
 
-Fin
+Le pivot (10 s, face à la personne)
+"That's Algoria. An AI trades gold, and your own broker account copies every trade, automatically. Your money stays in your name, and every trade is public."
+
+Ce que tu montres : la page live, puis le track record.
+
+Fin (face caméra)
 "Every trade is public. Link below 🙏🏼"
-${RISK}`,
+${RISK}
+
+Montage : enchaîner 3 ou 4 personnes sur les questions 1 à 4 (cuts rapides), garder la meilleure réaction sur la 5.`,
+    alt: [
+      ['Pick fast. No thinking. 1 Bitcoin or 10,000 dollars ?', 'question'],
+      ['5 quick questions to strangers. Watch the last one.', 'curiosity'],
+      ['Would you let an AI trade for you ? I asked people in the street.', 'question'],
+    ],
   },
   {
-    key: 'street-2', pole: 'street', title: 'Rencontre spontanée dans la rue', status: 'idea', source: BRIEF, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    key: 'street-2', pole: 'street', title: 'Rencontre spontanée dans la rue', status: 'to_shoot', source: READY, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    prep: STREET_PREP,
     hook: '"Quick question: is any of your money working for you right now ?"',
-    body: `Mathieu arrête 1 ou 2 passants, leur parle d'investissement passif, rebondit sur leurs réponses, puis amène Algoria naturellement.
+    body: `Les questions
+1. "What do you do with your savings ?"
+2. "Have you ever tried investing ?"
+3. "What stopped you ?"
 
-Les 3 points à placer, simplement :
-1. "An AI trades gold. Your account copies every trade, automatically."
-2. "Your money stays on your own broker account, in your name."
-3. "Every trade is public, wins and losses."
+Relance selon la réponse à la 3 (les 3 réponses les plus probables)
+- "No time" → "What if it didn't take any of your time ?"
+- "I don't know how" → "What if you didn't need to know ?"
+- "Too risky" → "Fair, you can lose. That's why I'd only trust something where you see every trade, losses included."
 
-Fin
+Le pivot
+"That's Algoria. An AI trades gold, your own broker account copies every trade, and your money stays in your name."
+
+Ce que tu montres : la page live, puis un jour rouge sur le track record si la personne a parlé du risque.
+
+Fin (face caméra)
 "Go check the track record yourself. Link below 🙏🏼"
-${RISK}`,
+${RISK}
+
+Montage : une version par objection (no time / don't know how / too risky) = 3 ads avec le même tournage.`,
+    alt: [
+      ['No time, no idea, too risky. Here\'s what I told them.', 'skeptic'],
+      ['Is your money working, or just sitting there ?', 'question'],
+      ['What\'s stopping you from investing ? I asked strangers.', 'question'],
+    ],
   },
   {
-    key: 'street-3', pole: 'street', title: 'Débutants perdus face au trading', status: 'idea', source: BRIEF, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    key: 'street-3', pole: 'street', title: 'Débutants perdus face au trading', status: 'to_shoot', source: READY, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    prep: STREET_PREP,
     hook: '"If you had to start trading today, where would you even begin ?"',
-    body: `Mathieu interroge des personnes qui ne connaissent rien au trading. Leurs réponses montrent qu'elles ne savent pas par où commencer (c'est le cœur de la vidéo, garder les hésitations).
+    body: `Les questions (le cœur de la vidéo : garder les hésitations et les rires)
+1. "What's a pip ?"
+2. "What's leverage ?"
+3. "Which broker would you pick ?"
+4. "So… where would you start ?"
 
-Puis Mathieu sort son téléphone, page live de l'app :
-"With Algoria you don't need to know where to begin. There's nothing to set up: the AI trades, your account copies it. And if you want to learn the basics, there's an Academy inside the app."
+Le pivot
+"Honestly ? You don't need to know any of that to start."
+"With Algoria there's nothing to set up. An AI trades gold, and your account copies it. If you're curious, there's an Academy in the app to learn the basics."
 
-Fin
-"Link below 🙏🏼"
+Ce que tu montres : l'écran broker de l'app, puis l'Academy.
+
+Fin (face caméra)
+"Start by watching. Every trade is public. Link below 🙏🏼"
 ${RISK}`,
+    alt: [
+      ['Can you explain leverage in 10 seconds ?', 'beginner'],
+      ['I asked people what a pip is.', 'beginner'],
+      ['Want to start trading but don\'t know where to begin ? Same as them.', 'beginner'],
+    ],
   },
   {
-    key: 'street-4', pole: 'street', title: 'Combien vaut ton temps ?', status: 'idea', source: BRIEF, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    key: 'street-4', pole: 'street', title: 'Combien vaut ton temps ?', status: 'to_shoot', source: READY, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    prep: STREET_PREP,
     hook: '"How much is one hour of your time worth ?"',
-    body: `Mathieu demande aux passants ce qu'ils font dans la vie et combien vaut une heure de leur temps. Quand l'un explique qu'il est salarié, Mathieu fait le lien : aujourd'hui, il échange son temps contre de l'argent.
+    body: `Les questions
+1. "What do you do for a living ?"
+2. "How much is one hour of your time worth ?"
+3. "How many hours a week do you work ?"
+4. "If someone gave you back one hour a day, what would you do with it ?"
 
-Mathieu : "What if part of your money worked without taking your time ? That's the idea behind Algoria: an AI trades gold, your account copies it, and you don't spend your days on charts."
+Le pivot (quand la personne est salariée)
+"So right now, you trade your time for money. Totally normal. The question is: is any of your money working while you don't ?"
+"That's the idea behind Algoria. An AI trades gold, your own account copies it, and you don't spend your days on charts."
 
-Fin
+Ce que tu montres : la page live, puis une notification de gain réelle.
+
+Fin (face caméra)
 "See every trade it has taken. Link below 🙏🏼"
 ${RISK}`,
     meta_flag: 'Ne pas présenter Algoria comme un remplacement de salaire ni promettre un revenu (« earn X without working ») : Meta refuse ces pubs dans la catégorie services financiers.',
+    alt: [
+      ['What\'s your hourly rate ? I asked strangers.', 'question'],
+      ['If you got one hour back every day, what would you do ?', 'time'],
+      ['Time or money ? Pick one.', 'time'],
+    ],
   },
   {
-    key: 'street-5', pole: 'street', title: 'Que ferais-tu avec 200 $ ?', status: 'idea', source: BRIEF, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    key: 'street-5', pole: 'street', title: 'Que ferais-tu avec 200 $ ?', status: 'to_shoot', source: READY, needs: ['street', 'videographer'], duration: '30 à 45 s',
+    prep: STREET_PREP,
     hook: '"What would you do with 200 dollars ?"',
-    body: `Mathieu demande aux passants ce qu'ils feraient avec 200 $. Leurs réponses ouvrent la discussion sur l'investissement.
+    body: `Les questions
+1. "What would you do with 200 dollars ?"
+2. "Would you ever invest it ?"
+3. "How much do you think you need to start trading ?"
 
-Mathieu : "You don't need thousands to start. With Algoria the minimum is 200 dollars. 500 is better: the guideline is 0.01 lot per 500 dollars."
+Le pivot
+"200. That's the minimum on Algoria. 500 is better: the guideline is 0.01 lot per 500 dollars."
 
-Les points qui rassurent un débutant (confirmés) :
-- "Your money stays on your own broker account, in your name. We never touch it."
-- "You withdraw from your broker, the same way you deposited."
-- "It works with our partner brokers: RaiseFX, VT Markets, PU Prime, TradingSphere and Xlence."
+Les questions que la personne pose d'elle-même (sinon, tu les amènes) :
+- "Where does my money go ?" → "Nowhere. It stays on your own broker account, in your name. We never touch it."
+- "Can I take it out ?" → "You withdraw from your broker, the same way you deposited."
+- "Which broker ?" → "Our partner brokers: RaiseFX, VT Markets, PU Prime, TradingSphere and Xlence."
 
-Fin
+Ce que tu montres : l'écran broker de l'app.
+
+Fin (face caméra)
 "Start small, watch every trade, decide for yourself. Link below 🙏🏼"
 Texte : Trading involves risk. Only invest what you can afford to lose.`,
     notes: 'Ne pas parler de la règle des 30 jours (décision Mathieu).',
+    alt: [
+      ['How much do you think you need to start trading ?', 'money'],
+      ['200 dollars. Spend it or invest it ?', 'money'],
+      ['Most people think you need thousands to start trading.', 'money'],
+    ],
   },
   {
-    key: 'street-6', pole: 'street', title: 'Tu laisserais une IA trader pour toi ?', status: 'idea', source: BRIEF, needs: ['street', 'videographer'], duration: '45 à 60 s',
+    key: 'street-6', pole: 'street', title: 'Tu laisserais une IA trader pour toi ?', status: 'to_shoot', source: READY, needs: ['street', 'videographer'], duration: '45 à 60 s',
+    prep: `${STREET_PREP}
+Ton téléphone sur le tunnel d'inscription, sans aucun identifiant réel.`,
     hook: '"Would you let an AI trade for you ?"',
-    body: `La personne est d'abord sceptique et pose ses questions. Mathieu répond en montrant l'app :
-- "Where's my money ?" → "On your own broker account. The password you give us only lets the AI copy trades. It can't withdraw."
-- "Does it lose ?" → il montre le track record public, avec un jour rouge.
-- "How do I start ?" → il fait les premières étapes avec elle, en direct : l'écran broker de l'app, le tunnel d'inscription.
+    body: `La question, puis : "Why not ?" → la personne donne ses objections. Tes réponses :
+- "It's a scam" → tu montres le track record avec un jour rouge. "Every trade is public, losses included. And your money never comes to us."
+- "I'll lose everything" → "You can lose, it's trading. Start with the minimum, watch every trade, and you can pause in one tap."
+- "How does it get access to my money ?" → "It can't. The trader password only lets it copy trades. No withdrawals, no deposits."
+- "Is it complicated ?" → "Let's look at it together, right now." → tu fais les premières étapes de l'app avec elle (choix du broker), sans identifiants.
 
-Fin
+Fin (face caméra)
 "Want to see every trade it has taken ? Link below 🙏🏼"
-${RISK}`,
-    notes: 'Ne jamais filmer de vrais identifiants (login, mot de passe, serveur).',
-  },
+${RISK}
 
+Montage : garder la personne la plus sceptique au début, c'est elle qui fait le hook.`,
+    alt: [
+      ['Your money, an AI, and a password. Would you ?', 'question'],
+      ['What would it take for you to trust an AI with trading ?', 'skeptic'],
+      ['A sceptic asks me every hard question about Algoria.', 'skeptic'],
+    ],
+  },
   // ===== PÔLE 2 · SCÈNES JOUÉES =====
   {
     key: 'scene-1', pole: 'scene', title: 'Le seau d\'eau', status: 'idea', source: BRIEF, needs: ['actors', 'videographer'], duration: '30 à 40 s',
@@ -269,7 +349,7 @@ ${RISK}`,
 
   // ===== PÔLE 4 · UGLY ADS (scripts prêts à tourner) =====
   {
-    key: 'ugly-1', pole: 'ugly', title: 'This is my real trading account', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '30 à 40 s',
+    key: 'ugly-1', pole: 'ugly', title: 'This is my real trading account', status: 'to_shoot', source: READY, needs: ['solo'], duration: '30 à 40 s',
     prep: 'Ton téléphone pour filmer, un 2e téléphone avec MetaTrader ouvert sur un compte qui copie à 0.01 lot, et l\'app Algoria ouverte sur la page live.',
     hook: '"This is my real trading account, and I haven\'t placed a single trade myself." · Texte : I don\'t place the trades. The AI does.',
     body: `1. (Selfie) "Algoria is an AI that trades gold. My account just copies it, automatically."
@@ -287,7 +367,7 @@ Texte : Every trade public. Link below. + ${RISK}`,
     ],
   },
   {
-    key: 'ugly-2', pole: 'ugly', title: 'One notification. One trade. One hour.', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '30 s une fois monté',
+    key: 'ugly-2', pole: 'ugly', title: 'One notification. One trade. One hour.', status: 'to_shoot', source: READY, needs: ['solo'], duration: '30 s une fois monté',
     prep: 'Un jour où le marché est actif. Tu filmes en vrai sur environ une heure, chaque plan affiche l\'heure (horloge visible ou ajoutée au montage).',
     hook: '(La vraie card de gain apparaît) "There it is." · Texte : 10:42 · the AI just closed a trade',
     body: `Plans courts, l'heure à l'écran :
@@ -307,7 +387,7 @@ ${RISK}`,
     ],
   },
   {
-    key: 'ugly-3a', pole: 'ugly', title: 'You asked me · Where is my money ?', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '20 à 30 s',
+    key: 'ugly-3a', pole: 'ugly', title: 'You asked me · Where is my money ?', status: 'to_shoot', source: READY, needs: ['solo'], duration: '20 à 30 s',
     prep: 'La question s\'affiche comme une boîte à questions Instagram. Tourne les 5 questions à la suite, même cadre, même lumière : 5 ads en une session.',
     hook: 'Question à l\'écran : "Where is my money actually ?"',
     body: `"On your own broker account. In your name. Algoria never touches it. The password you give us only lets the AI copy trades. It can't withdraw, it can't deposit. Nothing."
@@ -317,7 +397,7 @@ Fin
 "Got a question ? Ask me in the channel. Link below 🙏🏼"`,
   },
   {
-    key: 'ugly-3b', pole: 'ugly', title: 'You asked me · Do I need to know trading ?', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '20 à 30 s',
+    key: 'ugly-3b', pole: 'ugly', title: 'You asked me · Do I need to know trading ?', status: 'to_shoot', source: READY, needs: ['solo'], duration: '20 à 30 s',
     prep: 'Même session que les 4 autres questions.',
     hook: 'Question à l\'écran : "Do I need to know anything about trading ?"',
     body: `"No. The AI trades, your account copies it. There's nothing to set up, no strategy to pick. You can learn the basics in the Academy inside the app if you want to."
@@ -327,7 +407,7 @@ Fin
 "Got a question ? Ask me in the channel. Link below 🙏🏼"`,
   },
   {
-    key: 'ugly-3c', pole: 'ugly', title: 'You asked me · How much do I need ?', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '20 à 30 s',
+    key: 'ugly-3c', pole: 'ugly', title: 'You asked me · How much do I need ?', status: 'to_shoot', source: READY, needs: ['solo'], duration: '20 à 30 s',
     prep: 'Même session que les 4 autres questions.',
     hook: 'Question à l\'écran : "How much do I need to start ?"',
     body: `"The minimum is 200 dollars. I recommend 500, because the guideline is 0.01 lot for every 500 dollars. Start small, watch it work, then decide."
@@ -337,7 +417,7 @@ Fin
 Texte : Trading involves risk. Only invest what you can afford to lose.`,
   },
   {
-    key: 'ugly-3d', pole: 'ugly', title: 'You asked me · Can I withdraw ?', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '20 à 30 s',
+    key: 'ugly-3d', pole: 'ugly', title: 'You asked me · Can I withdraw ?', status: 'to_shoot', source: READY, needs: ['solo'], duration: '20 à 30 s',
     prep: 'Même session que les 4 autres questions.',
     hook: 'Question à l\'écran : "Can I withdraw whenever I want ?"',
     body: `"It's your own broker account, so yes, it's your money. You withdraw from your broker, the same way you deposited. Nothing is locked with us."
@@ -347,7 +427,7 @@ Fin
     notes: 'Pas de règle des 30 jours dans les ads (décision Mathieu).',
   },
   {
-    key: 'ugly-3e', pole: 'ugly', title: 'You asked me · Does it lose sometimes ?', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '20 à 30 s',
+    key: 'ugly-3e', pole: 'ugly', title: 'You asked me · Does it lose sometimes ?', status: 'to_shoot', source: READY, needs: ['solo'], duration: '20 à 30 s',
     prep: 'Même session que les 4 autres questions. La page track record ouverte, avec un jour rouge visible.',
     hook: 'Question à l\'écran : "Does it lose sometimes ?"',
     body: `"Of course. Every trader loses trades, the AI too. That's why every single trade is public on the track record, wins and losses. Go check it."
@@ -357,7 +437,7 @@ Fin
 "Got a question ? Ask me in the channel. Link below 🙏🏼"`,
   },
   {
-    key: 'ugly-4', pole: 'ugly', title: 'A day with Algoria', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '30 à 40 s',
+    key: 'ugly-4', pole: 'ugly', title: 'A day with Algoria', status: 'to_shoot', source: READY, needs: ['solo'], duration: '30 à 40 s',
     prep: '6 à 8 plans courts filmés pendant une vraie journée, chacun avec l\'heure.',
     hook: '(Réveil, téléphone à la main) "First thing I check every morning." · Texte : A normal day. Algoria runs in the background.',
     body: `Plans de 3 à 5 s :
@@ -378,7 +458,7 @@ ${RISK}`,
     ],
   },
   {
-    key: 'ugly-5', pole: 'ugly', title: 'Someone said this is a scam', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '30 à 40 s',
+    key: 'ugly-5', pole: 'ugly', title: 'Someone said this is a scam', status: 'to_shoot', source: READY, needs: ['solo'], duration: '30 à 40 s',
     prep: 'Un vrai commentaire sceptique (support, Instagram, Telegram), nom et photo floutés. Ton ordinateur ouvert sur le track record public.',
     hook: '(Tu lis le commentaire) "\'Another trading scam.\' Fair. Let me show you."',
     body: `1. "First: your money never comes to us. It stays on your own broker account, in your name."
@@ -396,7 +476,7 @@ ${RISK}`,
     ],
   },
   {
-    key: 'ugly-6', pole: 'ugly', title: 'Only got $200 ?', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '30 à 40 s',
+    key: 'ugly-6', pole: 'ugly', title: 'Only got $200 ?', status: 'to_shoot', source: READY, needs: ['solo'], duration: '30 à 40 s',
     prep: 'L\'app ouverte sur le tunnel d\'inscription (écran broker, puis écran connexion), sans vrai identifiant.',
     hook: '"Only got 200 dollars ? You can still start." · Texte : Start from $200',
     body: `1. "You don't need thousands. The minimum is 200 dollars. If you can, 500 is better: the guideline is 0.01 lot per 500 dollars."
@@ -414,7 +494,7 @@ Texte : Trading involves risk. Only invest what you can afford to lose. + rappel
     ],
   },
   {
-    key: 'ugly-7', pole: 'ugly', title: 'I\'m closing my laptop', status: 'to_shoot', source: UGLY, needs: ['solo'], duration: '25 à 35 s',
+    key: 'ugly-7', pole: 'ugly', title: 'I\'m closing my laptop', status: 'to_shoot', source: READY, needs: ['solo'], duration: '25 à 35 s',
     prep: 'Ton ordinateur ouvert sur des graphiques, puis ton téléphone avec l\'app.',
     hook: '(Tu fermes l\'ordinateur d\'un coup sec) "I used to stare at this all day. Not anymore." · Texte : I closed the charts.',
     body: `1. "There's nothing to set up. The AI trades gold on its own, and my account copies every trade."
@@ -432,83 +512,137 @@ ${RISK}`,
     ],
   },
 
-  // ===== PÔLE 5 · B-ROLL + VOIX OFF =====
+  // ===== PÔLE 5 · B-ROLL + VOIX OFF (scripts prêts à tourner) =====
+  // Hook face caméra 3 s, puis la voix off au micro-cravate, phrase par phrase, avec le plan qui va dessous.
+  // Sous-titres sur toute la vidéo. Les plans peuvent venir des anciennes vidéos, des UGC, ou du tournage à Pau.
   {
-    key: 'broll-1', pole: 'broll', title: 'Ce que personne ne voit derrière un trade', status: 'idea', source: BRIEF, needs: ['solo', 'videographer'], duration: '30 à 40 s',
+    key: 'broll-1', pole: 'broll', title: 'Ce que personne ne voit derrière un trade', status: 'to_shoot', source: READY, needs: ['solo', 'videographer'], duration: '30 à 35 s',
+    prep: BROLL_PREP,
     hook: 'Face caméra (3 s) : "Clicking buy or sell is the smallest part of a trade."',
-    body: `Voix off (micro-cravate), sous-titres sur toute la vidéo :
-"Before every trade, someone has to watch the market. Analyse it. Wait for the right moment. Check again. Most people do all of that themselves, for hours. With Algoria, the AI does that part, and your account copies the trade when it happens. You just see the notification."
-
-Inserts : Mathieu devant ses graphiques, prenant des notes, puis consultant l'app Algoria.
-
-Fin
-"Every trade is public. Link below 🙏🏼"
-${RISK}`,
-    notes: 'Adaptation : chez Algoria ce n\'est pas la méthode de Mathieu qui est montrée, c\'est le travail que l\'IA fait à la place du membre.',
-  },
-  {
-    key: 'broll-2', pole: 'broll', title: 'J\'ai arrêté de regarder les graphiques toute la journée', status: 'idea', source: BRIEF, needs: ['solo', 'videographer'], duration: '30 s',
-    hook: 'Face caméra (3 s) : "How many hours did you spend on charts this week ?"',
-    body: `Voix off :
-"That's the part I wanted to get rid of. Now the AI watches gold, takes the trades, and my account copies them. I check the app a couple of times a day, and the rest of my time is mine."
-
-Inserts : l'ordinateur, le téléphone, puis Mathieu qui s'éloigne du bureau, marche, sort.
+    body: `Voix off · plan dessous
+1. "Before every trade, someone has to watch the market." · un graphique de l'or à l'écran, Mathieu de dos
+2. "Analyse it. Wait. Check again. Sometimes for hours." · des notes, une horloge, un café qui refroidit
+3. "That's the part most people burn out on." · Mathieu se frotte les yeux devant l'écran
+4. "With Algoria, the AI does that part. It trades gold, and your own broker account copies the trade when it happens." · le téléphone, page live
+5. "You just get the notification." · une card de gain réelle
+6. "And every trade, wins and losses, is public." · le track record qui défile
 
 Fin
 "Link below 🙏🏼"
 ${RISK}`,
-    notes: 'Angle : le temps récupéré, sans promesse de résultat.',
+    alt: [
+      ['This is what happens before every trade.', 'curiosity'],
+      ['The click takes one second. The rest takes hours.', 'time'],
+      ['Nobody films this part of trading.', 'curiosity'],
+    ],
   },
   {
-    key: 'broll-3', pole: 'broll', title: 'Une notification, et ensuite ?', status: 'idea', source: BRIEF, needs: ['solo', 'videographer'], duration: '25 à 30 s',
-    hook: 'Face caméra (3 s), le téléphone vibre : "My phone just buzzed. So what do I do now ?"',
-    body: `Voix off :
-"Nothing. That notification means the AI just closed a trade, and my account already copied it. No button to press, no order to place. If I want the details, it's all in the app. And every trade, wins and losses, is on the public track record."
+    key: 'broll-2', pole: 'broll', title: 'J\'ai arrêté de regarder les graphiques toute la journée', status: 'to_shoot', source: READY, needs: ['solo', 'videographer'], duration: '30 s',
+    prep: BROLL_PREP,
+    hook: 'Face caméra (3 s) : "How many hours did you spend on charts this week ?"',
+    body: `Voix off · plan dessous
+1. "For a lot of traders, it's most of their day." · plusieurs écrans de graphiques, la nuit
+2. "Watching. Waiting. Refreshing." · un doigt qui rafraîchit le téléphone, au lit
+3. "That's the part I wanted to get rid of." · Mathieu ferme l'ordinateur
+4. "Now an AI trades gold, and my account copies it, at 0.01 lot." · page live de l'app
+5. "I check the app a couple of times a day." · Mathieu regarde son téléphone en marchant
+6. "The rest of my time is mine." · dehors, sport, amis
 
-Inserts : la card de gain, la page live, le track record.
+Fin
+"Link below 🙏🏼"
+${RISK}`,
+    meta_flag: 'Plans « temps libre » simples : pas de voiture, de billets ni de montre de luxe. Trading + train de vie = pub souvent refusée par Meta.',
+    alt: [
+      ['Charts at 2 AM. Sound familiar ?', 'pov'],
+      ['Trading shouldn\'t take your whole day.', 'time'],
+      ['Most of your screen time is charts, isn\'t it ?', 'question'],
+    ],
+  },
+  {
+    key: 'broll-3', pole: 'broll', title: 'Une notification, et ensuite ?', status: 'to_shoot', source: READY, needs: ['solo', 'videographer'], duration: '25 à 30 s',
+    prep: `${BROLL_PREP}
+Une vraie card de gain (trade réel) et un 2e téléphone avec MetaTrader sur un compte qui copie à 0.01 lot.`,
+    hook: 'Face caméra (3 s), le téléphone vibre : "My phone just buzzed. So what do I do now ?"',
+    body: `Voix off · plan dessous
+1. "Nothing." · Mathieu repose le téléphone et continue ce qu'il faisait
+2. "That notification means the AI just closed a trade on gold." · la card de gain
+3. "And my account already copied it. No button to press, no order to place." · l'historique MetaTrader sur le 2e téléphone
+4. "If I want the details, it's all in the app." · le détail du trade dans l'app
+5. "And every trade, wins and losses, is on the public track record." · le track record
 
 Fin
 "Link below 🙏🏼"
 ${RISK}`,
     notes: 'Adaptation de « Une alerte, et ensuite ? » : chez Algoria il n\'y a rien à faire après la notification. Card réelle uniquement.',
+    alt: [
+      ['This is the only trading notification I get.', 'curiosity'],
+      ['Buzz. Trade closed. That\'s it.', 'pov'],
+      ['What happens when an Algoria notification arrives ?', 'question'],
+    ],
   },
   {
-    key: 'broll-4', pole: 'broll', title: 'La partie de l\'IA qu\'on ne filme jamais', status: 'idea', source: BRIEF, needs: ['solo', 'videographer'], duration: '30 à 40 s',
+    key: 'broll-4', pole: 'broll', title: 'La partie de l\'IA qu\'on ne filme jamais', status: 'to_shoot', source: READY, needs: ['solo', 'videographer'], duration: '30 s',
+    prep: BROLL_PREP,
     hook: 'Face caméra (3 s) : "This is the part of Algoria nobody films."',
-    body: `Voix off :
-"Every week I read what members tell me, and we improve the app. A clearer screen here, a faster setup there. The AI trades, but there's a team behind it, every day."
+    body: `Voix off · plan dessous
+1. "Every day, members message me." · des messages Telegram, noms et photos floutés
+2. "Questions, ideas, problems." · Mathieu lit et prend des notes
+3. "And every week, we improve the app with what they tell us." · Mathieu au bureau, l'app ouverte sur l'ordinateur
+4. "A clearer screen here. A faster setup there." · un avant / après d'un écran de l'app
+5. "The AI trades. But there's a real team behind it, every day." · une réunion, l'équipe
 
-Inserts : Mathieu au bureau, en réunion, devant ses écrans, pendant le tournage.
-
-Fin
-"Link below 🙏🏼"`,
+Fin (face caméra)
+"You can message me directly. Link below 🙏🏼"`,
+    notes: 'Aucune donnée de membre lisible à l\'écran (noms, numéros, montants) : tout flouter.',
+    alt: [
+      ['Behind the AI, there\'s a team. Here\'s what we do.', 'proof'],
+      ['What I do all day as the founder of Algoria.', 'curiosity'],
+      ['Members message me every day. Here\'s what happens next.', 'proof'],
+    ],
   },
   {
-    key: 'broll-5', pole: 'broll', title: 'On a filmé tout ça à Pau', status: 'idea', source: BRIEF, needs: ['solo', 'videographer'], duration: '30 à 40 s',
+    key: 'broll-5', pole: 'broll', title: 'On a filmé tout ça à Pau', status: 'to_shoot', source: READY, needs: ['solo', 'videographer'], duration: '30 s',
+    prep: `${BROLL_PREP}
+Le jour du tournage à Pau : filmer l'arrivée, l'installation, les répétitions, les pauses. Beaucoup de plans courts.`,
     hook: 'Face caméra (3 s) : "Behind every ad you\'ve seen, here\'s what really happens."',
-    body: `Voix off :
-"This is the day we filmed in Pau. The setup, the team, the demo. And in between takes, the AI kept trading, and my account kept copying."
-
-Inserts : arrivée sur le lieu, préparation d'une démo, échanges avec l'équipe, l'app ouverte entre deux prises.
+    body: `Voix off · plan dessous
+1. "This is the day we filmed in Pau." · l'arrivée sur le lieu
+2. "Lights, cameras, the team." · l'installation
+3. "A demo to prepare, lines to learn." · Mathieu qui répète
+4. "And in between takes, the AI kept working. My account kept copying." · le téléphone entre deux prises, page live
+5. "That's Algoria: it runs while you do something else." · la fin de journée, on range
 
 Fin
 "Link below 🙏🏼"`,
-    notes: 'Faisable dès le jour du tournage : prévoir beaucoup de plans courts et variés.',
+    alt: [
+      ['Making of an Algoria ad.', 'curiosity'],
+      ['Behind the scenes of our ads.', 'curiosity'],
+      ['We filmed all day. The AI kept working all day.', 'time'],
+    ],
   },
   {
-    key: 'broll-6', pole: 'broll', title: 'Si je découvrais le trading aujourd\'hui', status: 'idea', source: BRIEF, needs: ['solo', 'videographer'], duration: '30 à 40 s',
+    key: 'broll-6', pole: 'broll', title: 'Si je découvrais le trading aujourd\'hui', status: 'to_shoot', source: READY, needs: ['solo', 'videographer'], duration: '35 à 40 s',
+    prep: BROLL_PREP,
     hook: 'Face caméra (3 s) : "If I was starting trading today, here\'s what I\'d want to know first."',
-    body: `Voix off :
-"Where is my money ? Can I see every trade, including the losses ? How much do I really need to start ? With Algoria, your money stays on your own broker account, every trade is public, and you can start from 200 dollars."
-
-Inserts : Mathieu qui marche, explique un graphique, ouvre l'app, montre le track record.
+    body: `Voix off · plan dessous
+1. "Where is my money ?" · Mathieu qui marche
+2. "With Algoria, it stays on your own broker account, in your name." · l'écran broker de l'app
+3. "Can I see every trade, including the losses ?" · Mathieu qui ouvre l'app
+4. "Yes. Every single one is public." · un jour rouge sur le track record
+5. "How much do I really need ?" · Mathieu devant un graphique
+6. "You can start from 200 dollars. 500 is better: the guideline is 0.01 lot per 500." · l'app
+7. "Start small. Watch. Decide." · Mathieu range son téléphone
 
 Fin
 "Link below 🙏🏼"
-${RISK}`,
+Texte : Trading involves risk. Only invest what you can afford to lose.`,
     notes: 'Ton débutant, aucune promesse de gain.',
+    alt: [
+      ['3 questions before you start trading.', 'beginner'],
+      ['What I\'d want to know before my first trade.', 'beginner'],
+      ['Beginner ? Ask these 3 questions first.', 'beginner'],
+    ],
   },
-
   // ===== PÔLE 6 · AUTRES PISTES =====
   {
     key: 'other-1', pole: 'other', title: 'UGC à distance', status: 'idea', source: BRIEF, needs: ['creators'],
