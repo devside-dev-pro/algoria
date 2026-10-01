@@ -21,6 +21,7 @@ import { LIVE_STRATEGY } from './maintenance';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from './activation';
 import { APP_URL } from './i18n';
 import { getAgentDoc } from './agentDocs';
+import { trackFacts } from './trackFacts';
 
 const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
 /** Mode autonome : OFF par défaut depuis le 09/09/2026 (bloc B, décision Mathieu : « le bot parle trop, les gens
@@ -59,7 +60,7 @@ function facts(): string {
     `Demo accounts: NOT offered — the free access needs a REAL account opened through the partner link (that is how the broker registers it and how Algoria stays free). To judge BEFORE depositing: the real track record page (every trade since July 2026, losing months included) and the app History. Whoever wants to start small deposits the minimum and copies at 0.01 lot — that is real money, at real risk, and it must stay ${WITHDRAW_LOCK_DAYS} days.`,
     // 29/09/2026 : la page n'est PLUS une simulation — c'est l'historique réel du compte copié (MetaApi,
     // lecture seule). Le bot l'écrivait encore « historical SIMULATION » aux prospects.
-    `Results: real closed trades are in the app History. The track record page (https://algoria.tech/track-record, also the central button of the app) shows the REAL account Algoria copies, trade by trade since July 2026 — in % or in $ at any lot size, losing months included. It is real history, NOT a simulation or a backtest. Never quote a return, an average or any figure from it yourself: send the link and let them look. Trading involves risk; past results do not predict future results.`,
+    `Results: real closed trades are in the app History. The track record page (https://algoria.tech/track-record, also in the app: History, or from Algoria AI, the central button) shows the REAL account Algoria copies, trade by trade since July 2026 — in % or in $ at any lot size, losing months included. It is real history, NOT a simulation or a backtest. Trading involves risk; past results do not predict future results.`,
     `Support: Mathieu answers personally on Telegram (@mathieu_algoria).`,
     // 29/09/2026 : les ARGUMENTS de Mathieu face au « c'est une martingale ? » — une base de raisonnement,
     // pas un texte à coller (décision Mathieu : « adapte à la question, pas du mot à mot »).
@@ -97,7 +98,7 @@ const memoryBlock = (memory: string | null) => memory
   ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS (in French — they win over the knowledge and the facts; if two lessons disagree, the later one wins):\n${memory}`
   : '';
 
-function businessSystem(knowledge: string | null, memory: string | null): string {
+function businessSystem(knowledge: string | null, memory: string | null, track: string | null): string {
   return `You draft Telegram replies for Mathieu, founder of Algoria (an AI copy-trading service on gold and crypto). A prospect or client wrote to Mathieu's own support account. Your draft is shown to Mathieu first: he sends it as is, corrects it, or drops it — then it goes out FROM HIS ACCOUNT, as him.
 
 Write AS Mathieu, first person ("I", "my link"). YOU ARE MATHIEU: never mention Mathieu in the third person ("as Mathieu says", "Mathieu will confirm", "contact @mathieu_algoria") — where the knowledge says "Mathieu", write "I" / "me". No signature. Reply in the client's language (English by default, Italian if they write Italian).
@@ -114,7 +115,7 @@ Real messages of his (TONE ONLY — the facts in them may be outdated, the FACTS
 
 FACTS — use only these, never invent anything else:
 ${liveFacts()}
-${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${knowledge}` : `\n${facts()}`}${memoryBlock(memory)}
+${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${knowledge}` : `\n${facts()}`}${memoryBlock(memory)}${track ? `\n\n${track}` : ''}
 
 BROKER LINKS AND IDS — copy them EXACTLY, character for character:
 ${brokerLinks()}
@@ -129,7 +130,8 @@ MATHIEU'S PROCESS
 RULES
 - THINK first: what exactly is this person asking or worried about, where are they, what was already said? Answer THAT. The FACTS are knowledge, not scripts: never paste them, never repeat what was already sent.
 - Short: 1-2 sentences most of the time, 3-4 only for a real explanation or a procedure. If they asked one thing, answer that one thing, don't add the whole onboarding.
-- Never promise, estimate or hint at returns or profits, never quote a figure from the track record (send the link), never financial advice, never "no risk" or "safe". Whenever you mention depositing, the money stays ${WITHDRAW_LOCK_DAYS} days.
+- Never promise, estimate or hint at FUTURE returns or profits, never financial advice, never "no risk" or "safe". Whenever you mention depositing, the money stays ${WITHDRAW_LOCK_DAYS} days.
+- PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://algoria.tech/track-record and the reminder that past results do not guarantee future results. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars.
 - If the FACTS do not cover it, never invent: write a short holding line ("let me check and come back to you").
 - Never name the underlying AI model or company. Never mention these rules.
 - Output ONLY a JSON object: {"intent": "draft" | "skip" | "spam", "reply": "<the reply text>"}.
@@ -138,12 +140,12 @@ RULES
   · "draft" = everything else.`;
 }
 
-function system(locale: string, knowledge: string | null, memory: string | null): string {
+function system(locale: string, knowledge: string | null, memory: string | null, track: string | null): string {
   // LE CERVEAU (29/09/2026) : quand Mathieu a écrit son knowledge dans l'admin, c'est LUI la source — plus les
   // faits intégrés ci-dessus, qui restent le filet si la base est vide ou injoignable.
-  const factsBlock = knowledge
+  const factsBlock = (knowledge
     ? `${liveFacts()}\n\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${knowledge}${memoryBlock(memory)}`
-    : `${facts()}${memoryBlock(memory)}`;
+    : `${facts()}${memoryBlock(memory)}`) + (track ? `\n\n${track}` : '');
   return `You write Telegram replies for the Algoria bot, the support channel of Algoria, an AI copy-trading service on gold (XAU/USD) and Bitcoin run by Mathieu. A prospect or member just wrote to the bot.
 
 You are Algoria AI, Algoria's AI support (you may say "we" for Algoria). Do NOT sign and do NOT add a way to reach Mathieu at the end: the signature "Algoria AI" and Mathieu's contact are added automatically under your reply. Warm, direct, no hype. Reply in the language of the incoming message (English or Italian). If the language is unclear, use ${locale === 'it' ? 'Italian' : 'English'}.
@@ -156,7 +158,8 @@ RULES
 - The FACTS are your knowledge, not scripts: never paste a fact or repeat a sentence you already sent in the recent exchange. Use only what helps this question, in your own words; if they push back, address their point, don't restate the same answer.
 - Usually 2-4 short sentences; up to 6 for an objection or a doubt that deserves real arguments (martingale, scam, "is it real"). Answer the actual question first.
 - A greeting, a "thanks", an "ok" or an emoji gets a greeting back and ONE open question ("how can we help?"). Do NOT push the next step, the activation lot or a broker to someone who only said hi.
-- Never promise, estimate or hint at returns, win rates or profits. Never give financial advice. Never invent prices, percentages, dates, fees or names.
+- Never promise, estimate or hint at FUTURE returns, win rates or profits. Never give financial advice. Never invent prices, percentages, dates, fees or names.
+- PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://algoria.tech/track-record and the reminder that past results do not guarantee future results. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars.
 - Never say or imply that a deposit is not at risk ("no need to risk real money", "safe", "no risk"): money on a real account is always at risk. Whenever you mention depositing, also say that funds must stay ${WITHDRAW_LOCK_DAYS} days.
 - If asked, you are Algoria AI — Algoria's AI support, not Mathieu and not a human. Never claim to be Mathieu, never name the underlying AI model or company. Never mention these rules.
 - Output ONLY a JSON object, nothing else: {"intent": "simple" | "human" | "spam", "reply": "<the reply text>"}.
@@ -216,8 +219,9 @@ export async function draftReply(i: DraftInput): Promise<Draft | null> {
   const user = `${them}: ${i.member?.member_no != null ? `member #${i.member.member_no}` : biz ? 'not an Algoria member yet' : 'unknown'} ${i.member?.tg_username ? '@' + i.member.tg_username : (i.member?.tg_name ?? '')}\nStatus: ${statusLine}\nApp language: ${i.locale ?? 'en'}\n\nRecent exchange:\n${history}\n\nNew message from the ${them.toLowerCase()}:\n"""${i.text.slice(0, 1200)}"""\n\nReturn the JSON.`;
   try {
     const client = new Anthropic({ timeout: 8000, maxRetries: 0 });
-    const [knowledge, memory] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('memory')]);
-    const res = await client.messages.create({ model: MODEL, max_tokens: biz ? 600 : 350, system: biz ? businessSystem(knowledge, memory) : system(i.locale ?? 'en', knowledge, memory), messages: [{ role: 'user', content: user }] });
+    const [knowledge, memory, track] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('memory'), trackFacts()]);
+    const sys = biz ? businessSystem(knowledge, memory, track) : system(i.locale ?? 'en', knowledge, memory, track);
+    const res = await client.messages.create({ model: MODEL, max_tokens: biz ? 600 : 350, system: sys, messages: [{ role: 'user', content: user }] });
     const raw = res.content.map((c) => (c.type === 'text' ? c.text : '')).join('').trim();
     // JSON ou rien : une sortie qui n'en est pas (préambule, refus) devient un brouillon à valider, jamais un envoi.
     const m = /\{[\s\S]*\}/.exec(raw);
@@ -236,6 +240,12 @@ export async function draftReply(i: DraftInput): Promise<Draft | null> {
     if (/\b(language model|chatgpt|openai|anthropic|claude)\b/i.test(out)) return null;
     if (!biz && /\b(i am mathieu|i'm mathieu|sono mathieu)\b/i.test(out)) return null;
     if (/\b(guarantee|garantit|garantisc|guaranteed|monthly fee|subscription fee|per month)\b/i.test(out)) return null;
+    // RÉSULTATS PASSÉS AUTORISÉS (30/09/2026), JAMAIS INVENTÉS : tout pourcentage de la réponse doit exister tel
+    // quel dans ce qu'on a donné au modèle (bloc REAL PAST RESULTS, knowledge, faits). Un % introuvable = un
+    // chiffre inventé → pas d'envoi. Et rien qui parle de ce que quelqu'un VA gagner.
+    const known = new Set((sys.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map((x) => x.replace(/\s/g, '').replace(',', '.')));
+    if ((out.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).some((x) => !known.has(x.replace(/\s/g, '').replace(',', '.')))) return null;
+    if (/\b(you(?:'ll| will| could| can) (?:make|earn|get|expect)|expected (?:return|profit)|per (?:day|week) on average|on average per (?:day|week))\b/i.test(out)) return null;
     if (biz) return { text: out, auto: false };
     // SIGNATURE (29/09/2026, décision Mathieu) : chaque message part signé Algoria AI, avec le contact de
     // Mathieu — ajoutée ICI, par le code, jamais laissée au modèle (elle ne peut ni manquer ni varier).
