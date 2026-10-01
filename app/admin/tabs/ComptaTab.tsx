@@ -6,8 +6,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Kpi, dangerBtn, dimP, inp, miniBtn, okBtn, secH } from '../_shared';
 import {
-  addDays, breakdown, daysBetween, delta, localDay, monthEnd, monthStart, normalize, series, totals, weekStart,
-  type Cost, type Dep, type RawDeposit, type RawExpense, type RawMember, type RawPayout,
+  PARTNERS, addDays, breakdown, daysBetween, delta, localDay, monthEnd, monthStart, normalize, series, split, totals, weekStart,
+  type Cost, type Partner, type Dep, type RawDeposit, type RawExpense, type RawMember, type RawPayout,
 } from '@/lib/admin/compta';
 
 type Preset = 'day' | 'week' | 'month' | 'year' | 'custom';
@@ -49,7 +49,7 @@ export function ComptaTab() {
   const [custom, setCustom] = useState({ from: monthStart(today), to: today });
   const [by, setBy] = useState<By>('country');
   const [showList, setShowList] = useState(false);
-  const [exp, setExp] = useState({ spent_on: today, amount: '', category: 'Ads', note: '' });
+  const [exp, setExp] = useState<{ spent_on: string; amount: string; category: string; note: string; paid_by: Partner }>({ spent_on: today, amount: '', category: 'Ads', note: '', paid_by: 'mathieu' });
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
@@ -67,6 +67,7 @@ export function ComptaTab() {
   const prev = prevRange(preset, from, to);
   const cur = useMemo(() => totals(deps, costs, from, to), [deps, costs, from, to]);
   const before = useMemo(() => totals(deps, costs, prev.from, prev.to), [deps, costs, prev.from, prev.to]);
+  const sp = useMemo(() => split(deps, costs, from, to), [deps, costs, from, to]);
 
   // les 4 cartes rapides : la réponse à « combien j'ai fait aujourd'hui / hier »
   const quick = useMemo(() => {
@@ -114,6 +115,17 @@ export function ComptaTab() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok || d.error) { setErr(d.error ?? `HTTP ${r.status}`); return; }
       setExp({ ...exp, amount: '', note: '' });
+      await load();
+    } finally { setBusy(false); }
+  };
+  // QUI A PAYÉ — un clic bascule Mathieu ↔ Benjamin (une dépense sans payeur passe d'abord à Mathieu)
+  const togglePayer = async (c: Cost) => {
+    const next: Partner = c.paidBy === 'mathieu' ? 'benjamin' : 'mathieu';
+    setBusy(true);
+    try {
+      const r = await fetch('/api/member/admin/compta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ setPaidBy: { id: c.id, paid_by: next } }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) { setErr(d.error ?? `HTTP ${r.status}`); return; }
       await load();
     } finally { setBusy(false); }
   };
@@ -289,6 +301,9 @@ export function ComptaTab() {
           <select value={exp.category} onChange={(e) => setExp({ ...exp, category: e.target.value })} style={{ ...inp, width: 190 }}>
             {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+          <select value={exp.paid_by} onChange={(e) => setExp({ ...exp, paid_by: e.target.value as Partner })} style={{ ...inp, width: 170 }} title="who paid this expense">
+            {(Object.keys(PARTNERS) as Partner[]).map((k) => <option key={k} value={k}>paid by {PARTNERS[k].label}</option>)}
+          </select>
           <input value={exp.note} onChange={(e) => setExp({ ...exp, note: e.target.value })} placeholder="note (e.g. TikTok ads UK)" style={{ ...inp, flex: 1, minWidth: 160 }} />
           <button disabled={busy || !Number(exp.amount)} onClick={() => void addExpense()} style={{ ...okBtn, opacity: busy || !Number(exp.amount) ? 0.5 : 1 }}>+ ADD EXPENSE</button>
         </div>
@@ -297,10 +312,40 @@ export function ComptaTab() {
           <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
             <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 80 }}>{c.day}</span>
             <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{c.kind === 'referral' ? '🤝 ' : '🧾 '}{c.label}</span>
+            {c.kind === 'expense' ? (
+              <button disabled={busy} onClick={() => void togglePayer(c)} title="who paid it — click to switch" className="mono"
+                style={{ ...miniBtn, padding: '2px 8px', color: c.paidBy ? 'var(--muted)' : '#ff8a5c', borderColor: c.paidBy ? 'var(--border)' : 'rgba(255,138,92,.5)' }}>
+                {c.paidBy ? PARTNERS[c.paidBy].label : '? who paid'}
+              </button>
+            ) : <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{PARTNERS.mathieu.label}</span>}
             <span className="mono" style={{ fontSize: 12.5, fontWeight: 800, color: '#ff8aa2' }}>−{usd(c.amount)}</span>
             {c.kind === 'expense' ? <button disabled={busy} onClick={() => void delExpense(c.id)} style={dangerBtn}>🗑</button> : <span style={{ width: 34 }} />}
           </div>
         ))}
+      </section>
+
+      {/* ===== PARTAGE 60/40 (01/10/2026) — qui doit combien à qui. Recettes = encaissé seulement (commissions
+          RECEIVED + accès directs), toutes sur le compte de Benjamin ; coûts = ce que chacun a réglé. Règle et
+          formule : lib/admin/compta.ts → split(). Se recalcule seul quand une commission passe en reçue. ===== */}
+      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h2 style={secH}>🤝 PARTNER SPLIT · {Math.round(PARTNERS.mathieu.share * 100)}/{Math.round(PARTNERS.benjamin.share * 100)} · {label.toUpperCase()}</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+          <Kpi label="CASHED · ON BENJAMIN'S ACCOUNT" value={usd(sp.cashed)} accent="var(--up)" sub="com received + direct" />
+          <Kpi label="PAID BY MATHIEU" value={usd(sp.paidMathieu)} accent="#ff6b8a" sub="incl. referral payouts" />
+          <Kpi label="PAID BY BENJAMIN" value={usd(sp.paidBenjamin)} accent="#ff6b8a" />
+          <Kpi label="NET PROFIT" value={usd(sp.net)} accent={sp.net >= 0 ? 'var(--up)' : '#ff6b8a'} sub={`Mathieu ${usd(sp.mathieuNet)} · Benjamin ${usd(sp.benjaminNet)}`} />
+        </div>
+        <div style={{ padding: '14px 16px', borderRadius: 12, border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, color: 'var(--muted)' }}>{sp.benjaminOwesMathieu >= 0 ? 'Benjamin pays Mathieu' : 'Mathieu pays Benjamin'}</span>
+          <span className="mono" style={{ fontSize: 24, fontWeight: 800, color: 'var(--cyan)' }}>{usd(Math.abs(sp.benjaminOwesMathieu))}</span>
+        </div>
+        {sp.unassignedCount > 0 && (
+          <p style={{ ...dimP, color: '#ff8a5c' }}>⚠ {sp.unassignedCount} expense(s) for {usd(sp.unassigned)} have no payer yet, so they are left out of the split. Click &ldquo;? who paid&rdquo; in COSTS to set it.</p>
+        )}
+        <p style={dimP}>
+          Only cashed money counts: a pending commission joins the split once it is marked RECEIVED. Rule: Mathieu gets {Math.round(PARTNERS.mathieu.share * 100)}% and Benjamin {Math.round(PARTNERS.benjamin.share * 100)}% of (cashed − all expenses), whoever paid them.
+          Each one keeps what he paid, then the transfer above settles the rest.
+        </p>
       </section>
 
       {/* ===== LE DÉTAIL : toutes les lignes de la période ===== */}

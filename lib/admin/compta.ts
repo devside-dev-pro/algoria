@@ -15,14 +15,15 @@
 export interface RawDeposit { id: string; tg_id: number; member_no: number | null; created_at: string; detail: Record<string, unknown> | null }
 export interface RawMember { tg_id: number; member_no: number | null; tg_username: string | null; country: string | null; source: string | null; broker: string | null }
 export interface RawPayout { id: string; tg_id: number; amount: number; status: string; created_at: string; decided_at: string | null }
-export interface RawExpense { id: string; spent_on: string; amount_usd: number; category: string; note: string | null }
+export interface RawExpense { id: string; spent_on: string; amount_usd: number; category: string; note: string | null; paid_by?: string | null }
 
 export interface Dep {
   id: string; tgId: number; memberNo: number | null; who: string; day: string;
   nature: 'broker' | 'direct'; amount: number; com: number; status: 'pending' | 'received' | 'canceled';
   broker: string; country: string; source: string; redeposit: boolean;
 }
-export interface Cost { id: string; day: string; amount: number; kind: 'referral' | 'expense'; label: string }
+export type Partner = 'mathieu' | 'benjamin';
+export interface Cost { id: string; day: string; amount: number; kind: 'referral' | 'expense'; label: string; paidBy: Partner | null }
 
 const pad = (n: number) => String(n).padStart(2, '0');
 /** Jour local AAAA-MM-JJ d'une date. */
@@ -60,8 +61,9 @@ export function normalize(deps: RawDeposit[], members: RawMember[], payouts: Raw
     };
   });
   const costs: Cost[] = [
-    ...payouts.filter((p) => p.status === 'paid').map((p) => ({ id: p.id, day: dayOf(p.decided_at ?? p.created_at), amount: Number(p.amount) || 0, kind: 'referral' as const, label: 'Referral payout' })),
-    ...expenses.map((e) => ({ id: e.id, day: String(e.spent_on).slice(0, 10), amount: Number(e.amount_usd) || 0, kind: 'expense' as const, label: e.note ? `${e.category} · ${e.note}` : e.category })),
+    // les retraits de parrainage sont payés par Mathieu (01/10/2026)
+    ...payouts.filter((p) => p.status === 'paid').map((p) => ({ id: p.id, day: dayOf(p.decided_at ?? p.created_at), amount: Number(p.amount) || 0, kind: 'referral' as const, label: 'Referral payout', paidBy: 'mathieu' as Partner })),
+    ...expenses.map((e) => ({ id: e.id, day: String(e.spent_on).slice(0, 10), amount: Number(e.amount_usd) || 0, kind: 'expense' as const, label: e.note ? `${e.category} · ${e.note}` : e.category, paidBy: (e.paid_by === 'mathieu' || e.paid_by === 'benjamin' ? e.paid_by : null) as Partner | null })),
   ];
   return { deps: out, costs };
 }
@@ -127,3 +129,40 @@ export function breakdown(deps: Dep[], from: string, to: string, by: 'country' |
 
 /** Variation en % (null si la période de comparaison est à zéro). */
 export const delta = (cur: number, prev: number): number | null => (prev ? ((cur - prev) / Math.abs(prev)) * 100 : null);
+
+// ── PARTAGE ENTRE ASSOCIÉS (01/10/2026) ─────────────────────────────────────────────────────────────────
+// Mathieu 60 %, Benjamin 40 %, sur le bénéfice RÉELLEMENT encaissé. Toutes les recettes (commissions broker
+// reçues, accès directs) arrivent sur le compte de Benjamin ; chacun paie des dépenses de son côté (le
+// parrainage, c'est Mathieu). Règle de Mathieu : « je paie 60 % de ses dépenses, il paie 40 % des miennes ;
+// je reçois 60 % des com, il en reçoit 40 % ». Algébriquement :
+//   Benjamin doit à Mathieu = 60 % × encaissé − 60 % × dépenses payées par Benjamin + 40 % × dépenses payées par Mathieu
+// (négatif = c'est Mathieu qui doit à Benjamin). Une dépense sans payeur est EXCLUE et signalée : la
+// compter chez l'un ou l'autre au hasard fausserait le virement.
+export const PARTNERS: Record<Partner, { label: string; share: number }> = {
+  mathieu: { label: 'Mathieu', share: 0.6 },
+  benjamin: { label: 'Benjamin', share: 0.4 },
+};
+export const INCOME_HOLDER: Partner = 'benjamin';
+
+export interface Split {
+  cashed: number; paidMathieu: number; paidBenjamin: number; unassigned: number; unassignedCount: number;
+  net: number; mathieuNet: number; benjaminNet: number; benjaminOwesMathieu: number;
+}
+export function split(deps: Dep[], costs: Cost[], from: string, to: string): Split {
+  const t = totals(deps, costs, from, to);
+  let paidMathieu = 0, paidBenjamin = 0, unassigned = 0, unassignedCount = 0;
+  for (const c of costs) {
+    if (!inRange(c.day, from, to)) continue;
+    if (c.paidBy === 'mathieu') paidMathieu += c.amount;
+    else if (c.paidBy === 'benjamin') paidBenjamin += c.amount;
+    else { unassigned += c.amount; unassignedCount += 1; }
+  }
+  const cashed = t.cash;
+  const net = cashed - paidMathieu - paidBenjamin;
+  const m = PARTNERS.mathieu.share, b = PARTNERS.benjamin.share;
+  return {
+    cashed, paidMathieu, paidBenjamin, unassigned, unassignedCount, net,
+    mathieuNet: m * net, benjaminNet: b * net,
+    benjaminOwesMathieu: m * cashed - m * paidBenjamin + b * paidMathieu,
+  };
+}
