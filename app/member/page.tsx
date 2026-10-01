@@ -11,6 +11,7 @@ import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, 
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { track, trackOnce } from '@/lib/member/funnel';
+import { ShareWinSheet, type ShareableWin } from '@/components/member/ShareWinSheet';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; pnl: number; r: number | null; closed_at: string; lot?: number }
 
@@ -19,6 +20,7 @@ export default function MemberHome() {
   const [trades, setTrades] = useState<FeedTrade[]>([]);
   const [clientLot, setClientLot] = useState(0.01);
   const [paywall, setPaywall] = useState(false);
+  const [shareTarget, setShareTarget] = useState<ShareableWin | null>(null); // 📤 partager un gain
   interface Social { members: number; live: number; joins48h: number; lastLiveNo: number | null; lastLiveHours: number | null }
   const [social, setSocial] = useState<Social | null>(null);
   const router = useRouter();
@@ -152,6 +154,19 @@ export default function MemberHome() {
               : 'ALGORIA 2.0 just went live. Its first trades land here as they close — be set up before they do.'}
           </p>
         )}
+        {/* 🎉 LE MOMENT DE JOIE (01/10/2026) : un gain fermé depuis moins de 3 h = le moment où le membre a le plus
+            envie d'en parler. Un tap → la card avec SON lien de parrainage. Membres actifs seulement. */}
+        {unlocked && (() => {
+          const fresh = trades.find((t) => Number(t.pnl) > 0 && Date.now() - Date.parse(t.closed_at) < 3 * 3600_000);
+          if (!fresh) return null;
+          return (
+            <button onClick={() => setShareTarget({ ticket: fresh.ticket, symbol: fresh.symbol, direction: fresh.direction, refPnl: ref(fresh), closedAt: fresh.closed_at })}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '11px 13px', borderRadius: 12, cursor: 'pointer', border: '1px solid rgba(31,216,176,.45)', background: 'rgba(31,216,176,.08)', color: 'var(--text)', textAlign: 'left' }}>
+              <span style={{ fontSize: 13, lineHeight: 1.4 }}>🎉 <b style={{ color: 'var(--up)' }}>{fmtYou(you(fresh))}</b> just now on {fresh.symbol}. Show your friends.</span>
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--cyan)', whiteSpace: 'nowrap' }}>📤 SHARE</span>
+            </button>
+          );
+        })()}
         {trades.map((t) => {
           const win = Number(t.pnl) > 0;
           return (
@@ -164,6 +179,10 @@ export default function MemberHome() {
                 <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                   <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ ' : ''}{fmtYou(you(t))}</span>
                   {!sameAsRef && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>({ref(t) > 0 ? '+' : ''}{ref(t).toFixed(0)}$)</span>}
+                  {win && (
+                    <button onClick={() => setShareTarget({ ticket: t.ticket, symbol: t.symbol, direction: t.direction, refPnl: ref(t), closedAt: t.closed_at })} title="Share this win (your referral QR)"
+                      style={{ border: 'none', background: 'transparent', color: 'var(--cyan)', fontSize: 13, cursor: 'pointer', padding: '0 0 0 2px', lineHeight: 1 }}>📤</button>
+                  )}
                 </span>
               ) : (
                 <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ +' : ''}{ref(t).toFixed(0)}$</span>
@@ -182,6 +201,7 @@ export default function MemberHome() {
           paliers) reste dans le Profil ; ici c'est le déclencheur en un tap. */}
 
       <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />
+      <ShareWinSheet win={shareTarget} code={referral?.code ?? null} copying={member.status === 'live' || member.status === 'paused'} rewardRate={referral?.rewardRate ?? null} onClose={() => setShareTarget(null)} />
     </main>
   );
 }
