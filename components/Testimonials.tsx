@@ -10,7 +10,7 @@
 // Remplace les faux avis retirés de /download le 30/09.
 export const TESTIMONIALS = [
   { name: 'Reece', when: '17 Sep 2026', lot: '0.05 lot', img: '/testimonials/reece.webp', text: 'Very happy with my first day can’t win every trade but profit is what matters. Incredible mate 👍🏻' },
-  { name: 'Ajibade O.', when: '22 Sep 2026', lot: '0.05 lot', img: '/testimonials/ajibade.webp', text: 'Thank you Mathieu.. your algoria Ai is producing great results. Today is my first day with you and I am happy to be with you. We achieved good success today. Market was a bit crazy today but at the end I got unbelievable profits' },
+  { name: 'Ajibade O.', when: '22 Sep 2026', lot: '0.05 lot', img: '/testimonials/ajibade.webp', text: 'Thank you Mathieu.. your algoria Ai is producing great results.\n\nToday is my first day with you and I am happy to be with you\nWe achieved good success today\n\nMarket was a bit crazy today but at the end I got unbelievable profits' },
   { name: 'M. Manzini', when: '25 Sep 2026', lot: '0.01 lot', img: '/testimonials/manzini.webp', text: 'When I checked 30min ago it was 510, now 518. Wow.' },
   { name: 'Peter B.', when: '24 Sep 2026', lot: '0.01 lot', img: '/testimonials/peter.webp', text: 'And it’s ONLY midday! Low wins but they soon accumulate! Climbing to £1000 then up my lot size slightly! ALGORIA TO THE MOON! 🚀💥' },
   { name: 'Rapheal', when: '18 Sep 2026', lot: '0.01 lot', img: '/testimonials/rapheal.webp', text: 'I have seen it God bless you abundantly I’m grateful' },
@@ -24,7 +24,7 @@ export function Testimonials({ title = 'What members say' }: { title?: string })
       <div className="deskscroll" style={{ display: 'flex', gap: 12, overflowX: 'auto', padding: '2px 2px 10px', scrollSnapType: 'x mandatory' }}>
         {TESTIMONIALS.map((t) => (
           <figure key={t.name} className="panel" style={{ flex: '0 0 248px', margin: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, scrollSnapAlign: 'start' }}>
-            <blockquote style={{ margin: 0, padding: '10px 12px', borderRadius: '4px 14px 14px 14px', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: 13, lineHeight: 1.5, color: 'var(--text)' }}>
+            <blockquote style={{ margin: 0, padding: '10px 12px', borderRadius: '4px 14px 14px 14px', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: 13, lineHeight: 1.5, color: 'var(--text)', whiteSpace: 'pre-line' }}>
               {t.text}
             </blockquote>
             <figcaption style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5 }}>
