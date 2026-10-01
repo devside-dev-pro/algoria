@@ -13,6 +13,7 @@ import { QueueTab } from './tabs/QueueTab';
 import { MembersTab } from './tabs/MembersTab';
 import { DepositsTab } from './tabs/DepositsTab';
 import { ComptaTab } from './tabs/ComptaTab';
+import { AdsTab } from './tabs/AdsTab';
 import { AffiliateTab } from './tabs/AffiliateTab';
 import { ToolsTab } from './tabs/ToolsTab';
 
@@ -91,6 +92,9 @@ export default function AdminCRM() {
 
           {/* ===== COMPTA — jour, semaine, mois, pays, broker, source, coûts, net (30/09/2026) ===== */}
           {tab === 'compta' && <ComptaTab />}
+
+          {/* ===== ADS STUDIO — la bibliothèque d'ads : fiches, banque de hooks, mode tournage (01/10/2026) ===== */}
+          {tab === 'ads' && <AdsTab />}
 
           {/* ===== AFFILIATE — l'argent des parrains ===== */}
           {tab === 'affiliate' && <AffiliateTab />}
