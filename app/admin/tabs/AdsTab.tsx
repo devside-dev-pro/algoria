@@ -1,17 +1,18 @@
 'use client';
 // ADS STUDIO (01/10/2026) — la bibliothèque d'ads de Mathieu : « une sorte de bibliothèque d'ads avec un stock
 // d'ads, là où je peux stocker tous mes scripts, idées etc. » ; « si je suis en manque de hooks je vais dans
-// ma banque de hooks ». Quatre vues :
+// ma banque de hooks » ; « il faut que ce soit vraiment pratique et ergonomique ». Quatre vues :
 // - LIBRARY : une fiche par ad (pôle, hook, déroulé, besoins, statut idée → à tourner → tournée → montée → en ligne) ;
-// - SHOOT LIST : « à tourner » d'un côté, « déjà tournées » (avec la date) de l'autre, pour ne pas retourner la même ;
+// - SHOOT LIST (vue d'accueil) : « à tourner », rangées par ce qu'il faut réunir (seul avec le téléphone d'abord),
+//   et « déjà tournées » avec la date ; les cartes se déplient au clic ; les cases cochées font le brief du studio ;
 // - HOOKS : la banque de hooks, avec leur statut de test (winner / loser) ;
 // - SHOOT : le mode tournage, un script à la fois en gros caractères, pour lire sur le téléphone pendant la prise.
 // Données : /api/member/admin/ads. Bibliothèque de départ (brief de Benjamin) : lib/admin/adsSeed.ts, importée d'un clic.
-import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction, type SyntheticEvent } from 'react';
 import { ask, toast } from '@/components/admin/Dialog';
 import { dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 import {
-  ANGLES, HOOK_STATUSES, HOOK_STATUS_LABEL, NEEDS, NEED_LABEL, POLES, POLE_LABEL, STATUSES, STATUS_LABEL, scriptText,
+  ANGLES, HOOK_STATUSES, HOOK_STATUS_LABEL, NEEDS, NEED_LABEL, POLES, POLE_LABEL, READINESS, STATUSES, STATUS_LABEL, readinessOf, scriptText, studioBrief,
   type AdHook, type AdScript, type HookStatus, type Need, type Pole, type Status,
 } from '@/lib/admin/ads';
 
@@ -47,7 +48,9 @@ export function AdsTab() {
   const [scripts, setScripts] = useState<AdScript[] | null>(null);
   const [hooks, setHooks] = useState<AdHook[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const [view, setView] = useState<View>('library');
+  const [view, setView] = useState<View>('list');
+  const [sel, setSel] = useState<Set<string>>(new Set()); // ads cochées pour le brief du studio
+  const [brief, setBrief] = useState(false);
   const [busy, setBusy] = useState(false);
   const [focus, setFocus] = useState<string | null>(null); // ad ouverte dans le mode tournage depuis la SHOOT LIST
 
@@ -74,7 +77,9 @@ export function AdsTab() {
     setHooks((l) => l.map((x) => (x.id === id ? { ...x, ...patch } : x)));
     try { await api({ patchHook: { id, patch } }); } catch (e) { setHooks(before); toast(`⚠ ${(e as Error).message}`, 'error'); }
   };
-  const ctx = { scripts: scripts ?? [], hooks, setScripts, setHooks, patchScript, patchHook };
+  const toggleSel = (id: string) => setSel((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const altsOf = (id: string) => hooks.filter((h) => h.script_id === id).map((h) => h.text);
+  const ctx = { scripts: scripts ?? [], hooks, setScripts, setHooks, patchScript, patchHook, sel, toggleSel, setSel };
   const openInShootMode = (id: string) => { setFocus(id); setView('shoot'); };
 
   const seed = async () => {
@@ -94,15 +99,15 @@ export function AdsTab() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
           <h2 style={secH}>🎬 ADS STUDIO · {scripts.length} ads · {hooks.length + scripts.filter((x) => x.hook).length} hooks</h2>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {([['library', '📚 Library'], ['list', `✅ Shoot list · ${count('to_shoot')} to shoot`], ['hooks', '🪝 Hooks bank'], ['shoot', '🎬 Shooting mode']] as [View, string][]).map(([k, l]) => (
+            {([['list', `🎯 Shoot list · ${count('to_shoot')} to shoot`], ['library', '📚 Library'], ['hooks', '🪝 Hooks bank'], ['shoot', '🎬 Shooting mode']] as [View, string][]).map(([k, l]) => (
               <button key={k} onClick={() => { setFocus(null); setView(k); }} style={chip(view === k)}>{l}</button>
             ))}
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 6 }}>
           {STATUSES.map((s) => (
-            <div key={s} style={{ padding: '9px 11px', borderRadius: 9, border: '1px solid var(--border)', borderTop: `2px solid ${STATUS_LABEL[s].col}` }}>
-              <div style={{ fontSize: 9.5, letterSpacing: 1.2, color: 'var(--dim)' }}>{STATUS_LABEL[s].label}</div>
+            <div key={s} style={{ padding: '7px 9px', borderRadius: 9, border: '1px solid var(--border)', borderTop: `2px solid ${STATUS_LABEL[s].col}`, minWidth: 0 }}>
+              <div style={{ fontSize: 8.5, letterSpacing: 0.8, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{STATUS_LABEL[s].label}</div>
               <div className="mono" style={{ fontSize: 20, fontWeight: 800, color: count(s) ? STATUS_LABEL[s].col : 'var(--dim)' }}>{count(s)}</div>
             </div>
           ))}
@@ -120,6 +125,20 @@ export function AdsTab() {
       {view === 'hooks' && <HooksBank {...ctx} />}
       {view === 'list' && <ShootList {...ctx} onRead={openInShootMode} />}
       {view === 'shoot' && <ShootMode key={focus ?? 'all'} {...ctx} startId={focus} />}
+
+      {/* La barre du brief : visible dès qu'une ad est cochée, quelle que soit la vue. */}
+      {sel.size > 0 && (
+        <div style={{ position: 'sticky', bottom: 10, zIndex: 50, display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(43,227,245,.5)', background: 'var(--panel, #0b1220)', boxShadow: '0 8px 30px rgba(0,0,0,.45)' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--text)' }}><b>{sel.size}</b> ad{sel.size > 1 ? 's' : ''} selected</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setSel(new Set())} style={dangerBtn}>clear</button>
+            <button onClick={() => setBrief(true)} style={{ ...okBtn, padding: '9px 16px', fontSize: 12 }}>📨 BRIEF FOR THE STUDIO</button>
+          </div>
+        </div>
+      )}
+      {brief && (
+        <BriefSheet ads={scripts.filter((x) => sel.has(x.id))} altsOf={altsOf} onClose={() => setBrief(false)} />
+      )}
     </div>
   );
 }
@@ -128,10 +147,11 @@ type Ctx = {
   scripts: AdScript[]; hooks: AdHook[];
   setScripts: Dispatch<SetStateAction<AdScript[] | null>>; setHooks: Dispatch<SetStateAction<AdHook[]>>;
   patchScript: (id: string, p: Partial<AdScript>) => Promise<void>; patchHook: (id: string, p: Partial<AdHook>) => Promise<void>;
+  sel: Set<string>; toggleSel: (id: string) => void; setSel: Dispatch<SetStateAction<Set<string>>>;
 };
 
 // ===================== LIBRARY =====================
-function Library({ scripts, hooks, setScripts, setHooks, patchScript }: Ctx) {
+function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggleSel }: Ctx) {
   const [pole, setPole] = useState<Pole | 'all'>('all');
   const [status, setStatus] = useState<Status | 'all'>('all');
   const [q, setQ] = useState('');
@@ -193,7 +213,8 @@ function Library({ scripts, hooks, setScripts, setHooks, patchScript }: Ctx) {
             return (
               <div key={x.id} style={{ ...card, borderLeft: `3px solid ${STATUS_LABEL[x.status].col}` }}>
                 <div onClick={() => setOpen(isOpen ? null : x.id)} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', justifyContent: 'space-between', cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                  <input type="checkbox" checked={sel.has(x.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSel(x.id)} title="Add to the studio brief" style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer', flex: 'none' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
                     <b style={{ fontSize: 13.5, color: 'var(--text)' }}>{isOpen ? '▾' : '▸'} {x.title}</b>
                     {x.hook && <span style={{ fontSize: 12.5, color: 'var(--gold)', lineHeight: 1.45 }}>🪝 {x.hook}</span>}
                     <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>
@@ -416,71 +437,156 @@ function ShootMode({ scripts, hooks, patchScript, startId }: Ctx & { startId: st
 }
 
 // ===================== SHOOT LIST =====================
-// « Un endroit où on peut passer une ad de à tourner à tournée, que je refasse pas les mêmes » (Mathieu, 01/10).
-// À gauche ce qui reste à tourner, à droite ce qui est déjà dans la boîte, avec le jour du tournage.
-function ShootList({ scripts, patchScript, onRead }: Ctx & { onRead: (id: string) => void }) {
-  const todo = scripts.filter((x) => x.status === 'to_shoot');
-  const done = scripts.filter((x) => x.status === 'shot' || x.status === 'edited' || x.status === 'live')
+// « Un endroit où on peut passer une ad de à tourner à tournée, que je refasse pas les mêmes » ; « survoler les
+// ads : en cliquant, ça déplie la carte, et dès que j'appuie sur le bouton, ça la replie » (Mathieu, 01/10).
+// À tourner : rangées par ce qu'il faut réunir (seul avec le téléphone d'abord). Déjà tournées : avec la date.
+// Les cases cochées alimentent le brief pour le studio.
+function ShootList({ scripts, hooks, patchScript, onRead, sel, toggleSel, setSel }: Ctx & { onRead: (id: string) => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [q, setQ] = useState('');
+  const s = q.trim().toLowerCase();
+  const match = (x: AdScript) => !s || [x.title, x.hook, x.body, x.prep].some((t) => t?.toLowerCase().includes(s));
+  const todo = scripts.filter((x) => x.status === 'to_shoot' && match(x));
+  const done = scripts.filter((x) => (x.status === 'shot' || x.status === 'edited' || x.status === 'live') && match(x))
     .sort((a, b) => (b.shot_at ?? b.updated_at).localeCompare(a.shot_at ?? a.updated_at));
-  const ideas = scripts.filter((x) => x.status === 'idea');
-  const row: CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', padding: '9px 11px', borderRadius: 9, border: '1px solid var(--border)', flexWrap: 'wrap' };
-  const meta = (x: AdScript) => [POLE_LABEL[x.pole], ...x.needs.map((n) => NEED_LABEL[n]), x.duration ? `⏱ ${x.duration}` : ''].filter(Boolean).join(' · ');
+  const ideas = scripts.filter((x) => x.status === 'idea' && match(x));
+  const altsOf = (id: string) => hooks.filter((h) => h.script_id === id).map((h) => h.text);
+  const toggle = (id: string) => setOpen((o) => (o === id ? null : id));
+  const renderCard = (x: AdScript, actions: ReactNode, accent: string) => (
+    <AdCard key={x.id} x={x} alts={altsOf(x.id)} open={open === x.id} onToggle={() => toggle(x.id)}
+      selected={sel.has(x.id)} onSelect={() => toggleSel(x.id)} accent={accent} actions={actions} onRead={() => onRead(x.id)} />
+  );
+  const shotBtn = (x: AdScript) => (
+    <button onClick={() => { setOpen(null); void patchScript(x.id, { status: 'shot' }); toast(`✓ “${x.title}” shot`); }} style={{ ...okBtn, padding: '8px 14px' }}>✓ SHOT</button>
+  );
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 14, alignItems: 'start' }}>
-      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <h2 style={{ ...secH, color: 'var(--gold)' }}>🎯 TO SHOOT · {todo.length}</h2>
-        {todo.length === 0 && <p style={dimP}>Nothing left to shoot. Add ideas from the list below.</p>}
-        {POLES.filter((p) => todo.some((x) => x.pole === p)).map((p) => (
-          <div key={p} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 10.5, letterSpacing: 1, color: 'var(--cyan)', marginTop: 4 }}>{POLE_LABEL[p]}</span>
-            {todo.filter((x) => x.pole === p).map((x) => (
-              <div key={x.id} style={{ ...row, borderLeft: '3px solid var(--gold)' }}>
-                <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <b style={{ fontSize: 13, color: 'var(--text)' }}>{x.title}</b>
-                  <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{meta(x)}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search an ad, a word, a prop…" style={{ ...inp, width: '100%', boxSizing: 'border-box' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14, alignItems: 'start' }}>
+        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h2 style={{ ...secH, color: 'var(--gold)' }}>🎯 TO SHOOT · {todo.length}</h2>
+          {todo.length === 0 && <p style={dimP}>Nothing left to shoot. Add ideas from the list below.</p>}
+          {READINESS.map((g) => {
+            const items = todo.filter((x) => readinessOf(x.needs) === g.key);
+            if (!items.length) return null;
+            const allOn = items.every((x) => sel.has(x.id));
+            return (
+              <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.8, color: g.col }}>{g.label} · {items.length}</span>
+                  <button onClick={() => setSel((cur) => { const n = new Set(cur); items.forEach((x) => (allOn ? n.delete(x.id) : n.add(x.id))); return n; })} style={miniBtn}>
+                    {allOn ? 'unselect' : 'select all'}
+                  </button>
                 </div>
-                <button onClick={() => onRead(x.id)} style={goldBtn}>▶ read</button>
-                <button onClick={() => { void patchScript(x.id, { status: 'shot' }); toast(`✓ “${x.title}” shot`); }} style={{ ...okBtn, padding: '8px 14px' }}>✓ SHOT</button>
+                {items.map((x) => renderCard(x, <>{shotBtn(x)}</>, g.col))}
               </div>
-            ))}
-          </div>
-        ))}
-        {ideas.length > 0 && (
-          <details style={{ marginTop: 8 }}>
-            <summary style={{ ...secH, cursor: 'pointer', fontSize: 11 }}>💡 IDEAS · {ideas.length} · add to the shoot list</summary>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-              {ideas.map((x) => (
-                <div key={x.id} style={row}>
-                  <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 12.5, color: 'var(--text)' }}>{x.title}</span>
-                    <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{meta(x)}</span>
-                  </div>
-                  <button onClick={() => void patchScript(x.id, { status: 'to_shoot' })} style={goldBtn}>＋ to shoot</button>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-      </section>
+            );
+          })}
+          {ideas.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ ...secH, cursor: 'pointer', fontSize: 11 }}>💡 IDEAS · {ideas.length} · add them to the shoot list</summary>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 8 }}>
+                {ideas.map((x) => renderCard(x, <button onClick={() => { setOpen(null); void patchScript(x.id, { status: 'to_shoot' }); }} style={goldBtn}>＋ to shoot</button>, 'var(--muted)'))}
+              </div>
+            </details>
+          )}
+        </section>
 
-      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <h2 style={{ ...secH, color: 'var(--up)' }}>✅ ALREADY SHOT · {done.length}</h2>
-        <p style={{ ...dimP, fontSize: 11 }}>Already in the box: no need to shoot these again. Move them to EDITED and LIVE in the Library.</p>
-        {done.length === 0 && <p style={dimP}>Nothing shot yet.</p>}
-        {done.map((x) => (
-          <div key={x.id} style={{ ...row, borderLeft: `3px solid ${STATUS_LABEL[x.status].col}` }}>
-            <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 12.5, color: 'var(--text)' }}>{x.title}</span>
-              <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{POLE_LABEL[x.pole]}{x.shot_at ? ` · shot ${day(x.shot_at)}` : ''}</span>
-            </div>
-            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: STATUS_LABEL[x.status].col }}>{STATUS_LABEL[x.status].label}</span>
-            {x.status === 'shot' && (
-              <button onClick={() => void patchScript(x.id, { status: 'to_shoot' })} title="Back to the shoot list (to redo it)" style={miniBtn}>↩ undo</button>
-            )}
+        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <h2 style={{ ...secH, color: 'var(--up)' }}>✅ ALREADY SHOT · {done.length}</h2>
+          <p style={{ ...dimP, fontSize: 11 }}>Already in the box: no need to shoot these again.</p>
+          {done.length === 0 && <p style={dimP}>Nothing shot yet.</p>}
+          {done.map((x) => renderCard(x, (
+            <>
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: STATUS_LABEL[x.status].col }}>{STATUS_LABEL[x.status].label}{x.shot_at ? ` · ${day(x.shot_at)}` : ''}</span>
+              {x.status === 'shot' && <button onClick={() => void patchScript(x.id, { status: 'edited' })} style={miniBtn}>→ edited</button>}
+              {x.status === 'edited' && <button onClick={() => void patchScript(x.id, { status: 'live' })} style={miniBtn}>→ live</button>}
+            </>
+          ), STATUS_LABEL[x.status].col))}
+        </section>
+      </div>
+      <p style={{ ...dimP, fontSize: 11 }}>Tip: tap a card to read it, tap again to fold it. Tick the boxes to build a brief for the studio. ▶ in an open card opens the big-text shooting mode.</p>
+    </div>
+  );
+}
+
+/** Une ad en une ligne ; un clic la déplie (tout le script), un autre la replie. Les boutons ne déplient pas. */
+function AdCard({ x, alts, open, onToggle, selected, onSelect, accent, actions, onRead }: {
+  x: AdScript; alts: string[]; open: boolean; onToggle: () => void; selected: boolean; onSelect: () => void;
+  accent: string; actions: ReactNode; onRead?: () => void;
+}) {
+  const stop = (e: SyntheticEvent) => e.stopPropagation();
+  const meta = [POLE_LABEL[x.pole], ...x.needs.map((n) => NEED_LABEL[n]), x.duration ? `⏱ ${x.duration}` : ''].filter(Boolean).join(' · ');
+  return (
+    <div onClick={onToggle} style={{ ...card, gap: 6, padding: '10px 12px', cursor: 'pointer', borderLeft: `3px solid ${accent}`, background: open ? 'var(--surface-strong)' : 'var(--surface)', outline: selected ? '1px solid rgba(43,227,245,.6)' : 'none' }}>
+      <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
+        <input type="checkbox" checked={selected} onClick={stop} onChange={onSelect} title="Add to the studio brief" style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer', flex: 'none' }} />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <b style={{ fontSize: 13, color: 'var(--text)' }}>{open ? '▾' : '▸'} {x.title}</b>
+          <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{meta}{x.prep ? ' · 🧰 prep' : ''}{x.meta_flag ? ' · ⚠ Meta' : ''}</span>
+          {!open && x.hook && (
+            <span style={{ fontSize: 12, color: 'var(--gold)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>🪝 {x.hook}</span>
+          )}
+        </div>
+        {!open && <div onClick={stop} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>{actions}</div>}
+      </div>
+      {open && (
+        <div onClick={stop} style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '6px 2px 2px 25px', cursor: 'auto' }}>
+          {x.prep && <div><div style={{ ...secH, fontSize: 10, color: 'var(--gold)' }}>🧰 TO PREPARE</div><p style={pre}>{x.prep}</p></div>}
+          {x.hook && <div><div style={{ ...secH, fontSize: 10 }}>🪝 HOOK</div><p style={{ ...pre, fontSize: 14, fontWeight: 700, color: 'var(--gold)' }}>{x.hook}</p></div>}
+          {x.body && <div><div style={{ ...secH, fontSize: 10 }}>SCRIPT</div><p style={pre}>{x.body}</p></div>}
+          {alts.length > 0 && <div><div style={{ ...secH, fontSize: 10 }}>ALTERNATIVE HOOKS · same outfit</div>{alts.map((h) => <p key={h} style={{ ...pre, padding: '2px 0' }}>• {h}</p>)}</div>}
+          {x.meta_flag && <p style={{ margin: 0, fontSize: 12, color: '#ff8a5c', lineHeight: 1.5 }}>⚠ Meta: {x.meta_flag}</p>}
+          {x.notes && <p style={{ ...pre, color: 'var(--muted)' }}>📝 {x.notes}</p>}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {actions}
+            {onRead && <button onClick={onRead} style={goldBtn}>▶ big-text mode</button>}
+            <button onClick={() => copy(scriptText(x, alts), 'Script copied')} style={miniBtn}>📋 copy</button>
+            <button onClick={onToggle} style={miniBtn}>▴ fold</button>
           </div>
-        ))}
-      </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===================== BRIEF POUR LE STUDIO =====================
+// Les ads cochées → un mail prêt à envoyer : besoins réunis en tête (équipe, matériel), les règles, puis chaque
+// ad (à préparer, hook, script, hooks de rechange). Modifiable avant l'envoi. L'adresse du studio est retenue
+// dans ce navigateur seulement.
+const STUDIO_KEY = 'algoria.ads.studioEmail';
+function BriefSheet({ ads, altsOf, onClose }: { ads: AdScript[]; altsOf: (id: string) => string[]; onClose: () => void }) {
+  const [initial] = useState(() => studioBrief(ads, altsOf));
+  const [subject, setSubject] = useState(initial.subject);
+  const [text, setText] = useState(initial.text);
+  const [to, setTo] = useState(() => { try { return localStorage.getItem(STUDIO_KEY) ?? ''; } catch { return ''; } });
+  const saveTo = (v: string) => { setTo(v); try { localStorage.setItem(STUDIO_KEY, v); } catch { /* navigation privée */ } };
+  const mailto = `mailto:${encodeURIComponent(to.trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+  const long = mailto.length > 7000; // au-delà, certaines apps mail coupent le texte
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `${subject.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-')}.txt`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(3,7,14,.66)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 820, maxHeight: '92vh', overflowY: 'auto', background: 'var(--panel, #0b1220)', border: '1px solid var(--border)', borderBottom: 'none', borderRadius: '16px 16px 0 0', padding: '16px 18px calc(20px + env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <h2 style={{ ...secH, fontSize: 13 }}>📨 BRIEF FOR THE STUDIO · {ads.length} ad{ads.length > 1 ? 's' : ''}</h2>
+          <button onClick={onClose} style={dangerBtn}>close</button>
+        </div>
+        <input value={to} onChange={(e) => saveTo(e.target.value)} placeholder="Studio email (remembered on this device)" style={inp} />
+        <input value={subject} onChange={(e) => setSubject(e.target.value)} style={inp} />
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={18} style={{ ...area, fontSize: 12.5 }} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => copy(`${subject}\n\n${text}`, 'Brief copied')} style={{ ...okBtn, padding: '10px 16px', fontSize: 12 }}>📋 COPY THE BRIEF</button>
+          <a href={mailto} style={{ ...goldBtn, padding: '10px 16px', fontSize: 12, textDecoration: 'none' }}>✉️ OPEN IN MY MAIL APP</a>
+          <button onClick={download} style={{ ...miniBtn, padding: '8px 12px', fontSize: 11 }}>⬇ download .txt</button>
+        </div>
+        {long && <p style={{ ...dimP, fontSize: 11, color: 'var(--gold)' }}>Long brief: if your mail app cuts it, use COPY and paste it into the mail, or attach the .txt.</p>}
+      </div>
     </div>
   );
 }

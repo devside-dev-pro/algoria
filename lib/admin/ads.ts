@@ -65,3 +65,71 @@ export function scriptText(s: Pick<AdScript, 'pole' | 'title' | 'hook' | 'body' 
   if (s.notes) parts.push(`NOTES\n${s.notes}`);
   return parts.join('\n\n');
 }
+
+// ===== PRÊTE À TOURNER ? (01/10/2026) =====
+// « Savoir quelles ads tourner, lesquelles ont des prérequis, lesquelles peuvent être tournées de suite » (Mathieu).
+// Une ad est rangée selon son besoin le plus lourd : seul avec le téléphone = tout de suite ; sinon il faut
+// réunir quelqu'un (vidéaste, acteurs, passants, un événement).
+export const READINESS = [
+  { key: 'now', label: '🟢 READY NOW · just you and your phone', col: 'var(--up)' },
+  { key: 'videographer', label: '🎥 WITH THE VIDEOGRAPHER', col: 'var(--cyan)' },
+  { key: 'actors', label: '🎭 WITH THE 2 ACTORS', col: '#a78bfa' },
+  { key: 'street', label: '🚶 STREET · English-speaking passers-by', col: 'var(--gold)' },
+  { key: 'event', label: '🎤 EVENT OR UGC CREATORS', col: '#ff8a5c' },
+] as const;
+export type Readiness = (typeof READINESS)[number]['key'];
+export function readinessOf(needs: Need[]): Readiness {
+  if (needs.includes('actors')) return 'actors';
+  if (needs.includes('street')) return 'street';
+  if (needs.includes('event') || needs.includes('creators')) return 'event';
+  if (needs.includes('videographer')) return 'videographer';
+  return 'now';
+}
+
+// ===== LE BRIEF POUR LE STUDIO (01/10/2026) =====
+// Mathieu coche des ads et envoie le tout au studio (souvent par mail). Le studio (Pau) lit le français ;
+// les répliques restent en anglais, telles qu'elles seront dites.
+const POLE_FR: Record<Pole, string> = {
+  street: 'Micro-trottoir', scene: 'Scène jouée', acting: 'Scène avec Mathieu', ugly: 'Ugly ad (Mathieu au téléphone)',
+  broll: 'B-roll + voix off', other: 'Autre format',
+};
+const NEED_FR: Record<Need, string> = {
+  solo: 'Mathieu seul', actors: '2 acteurs anglophones', videographer: 'vidéaste', street: 'passants anglophones (rue)',
+  event: 'événement', creators: 'créateurs UGC',
+};
+export function studioBrief(ads: AdScript[], altsOf: (id: string) => string[]): { subject: string; text: string } {
+  const n = ads.length;
+  const needs = [...new Set(ads.flatMap((a) => a.needs))].map((x) => NEED_FR[x]);
+  const preps = [...new Set(ads.flatMap((a) => (a.prep ?? '').split('\n').map((l) => l.trim()).filter(Boolean)))];
+  const out: string[] = [
+    'Bonjour,',
+    '',
+    `Voici le brief pour le prochain tournage Algoria : ${n} ad${n > 1 ? 's' : ''}.`,
+    '',
+    'CE QU\'IL FAUT PRÉVOIR',
+    `- Équipe : ${needs.length ? needs.join(', ') : 'Mathieu seul'}`,
+  ];
+  if (preps.length) out.push('- Préparation et matériel :', ...preps.map((p) => `  · ${p}`));
+  out.push(
+    '',
+    'LES RÈGLES (pour toutes les ads)',
+    '- Les ads sont en anglais. Les répliques entre guillemets se disent telles quelles.',
+    '- Uniquement de vrais trades, de vraies notifications et de vrais écrans de l\'app. Rien de truqué.',
+    '- Jamais de taille de compte à l\'écran : toujours « 0.01 lot ».',
+    '- Aucun identifiant ni mot de passe visible à l\'écran.',
+    '- Texte de fin à l\'écran : Trading involves risk. Past results don\'t guarantee future results.',
+  );
+  ads.forEach((a, i) => {
+    out.push('', '────────────────────', `AD ${i + 1}/${n} · ${a.title}`,
+      `${POLE_FR[a.pole]}${a.duration ? ` · ${a.duration}` : ''}${a.needs.length ? ` · ${a.needs.map((x) => NEED_FR[x]).join(', ')}` : ''}`);
+    if (a.prep) out.push('', 'À PRÉPARER', a.prep);
+    if (a.hook) out.push('', 'HOOK (les 3 premières secondes)', a.hook);
+    if (a.body) out.push('', 'SCRIPT', a.body);
+    const alts = altsOf(a.id);
+    if (alts.length) out.push('', 'HOOKS DE RECHANGE (à tourner à la suite, même tenue)', ...alts.map((h) => `- ${h}`));
+    if (a.meta_flag) out.push('', `⚠ À ÉVITER : ${a.meta_flag}`);
+    if (a.notes) out.push('', `NOTES : ${a.notes}`);
+  });
+  out.push('', '────────────────────', '', 'Merci !', 'Mathieu');
+  return { subject: `Algoria · brief tournage · ${n} ad${n > 1 ? 's' : ''}`, text: out.join('\n') };
+}
