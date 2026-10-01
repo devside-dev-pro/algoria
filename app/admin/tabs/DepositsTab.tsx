@@ -2,12 +2,41 @@
 // DEPOSITS — le registre des dépôts broker : la source du bilan de fin de mois
 // Découpé depuis app/admin/page.tsx (03/09/2026) : un fichier par onglet, l’état et les handlers restent
 // dans useAdminState (app/admin/_state.tsx) et arrivent ici par contexte.
+import { useState } from 'react';
+import { toast } from '@/components/admin/Dialog';
 import { BROKERS } from '@/lib/member/brokers';
 import { useAdmin } from '../_state';
 import { Kpi, dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 
 export function DepositsTab() {
-  const { addDeposit, busy, copyBrokerLink, countrySelect, deleteDeposit, depAmount, depBroker, depCom, depComAuto, depDate, depDateOf, depNote, depTg, depNature, setDepNature, depTotals, deposits, editDepositAmount, editDepositCom, exportCsv, input, legalOf, liveNoDeposit, monthDeps, monthLabel, nameOf, nextYm, planAmount, planCopied, planExcluded, planRanking, planTg, post, rows, setDepAmount, setDepBroker, setDepCom, setDepDate, setDepNote, setDepTg, setPlanAmount, setPlanTg, shiftMonth, ym } = useAdmin();
+  const { addDeposit, busy, copyBrokerLink, countrySelect, deleteDeposit, depAmount, depBroker, depCom, depComAuto, depDate, depDateOf, depNote, depTg, depNature, setDepNature, depTotals, deposits, editDepositAmount, editDepositCom, exportCsv, input, legalOf, liveNoDeposit, monthDeps, monthLabel, nameOf, nextYm, planAmount, planCopied, planExcluded, planRanking, planTg, post, rows, setDeposits, setDepAmount, setDepBroker, setDepCom, setDepDate, setDepNote, setDepTg, setPlanAmount, setPlanTg, shiftMonth, ym } = useAdmin();
+  // POINTAGE DES COMMISSIONS (01/10/2026, demande Mathieu : « quand je clique sur received ça charge longtemps »).
+  // L'ancien bouton passait par post() : tous les boutons de l'admin grisés, puis rechargement COMPLET de
+  // l'admin (membres, actions, relances…) après chaque clic — insupportable sur 50 lignes à pointer.
+  // Ici : la ligne change d'état TOUT DE SUITE à l'écran, l'enregistrement part en arrière-plan, et seule une
+  // erreur la remet comme avant (avec un message). Rien d'autre n'est rechargé.
+  const [onlyTodo, setOnlyTodo] = useState(false);
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const setComStatus = (d: (typeof deposits)[number], comStatus: 'pending' | 'received' | 'canceled') => {
+    const prev = d.detail;
+    const patch = (det: typeof prev) => ({ ...(det ?? {}), commission_status: comStatus });
+    setDeposits((list) => list.map((x) => (x.id === d.id ? { ...x, detail: patch(x.detail) } : x)));
+    setSaving((m) => ({ ...m, [d.id]: true }));
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updateDeposit: { id: d.id, comStatus } }) })
+      .then(async (r) => {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        if (!r.ok || j.error) throw new Error(j.error ?? `HTTP ${r.status}`);
+      })
+      .catch((e) => {
+        setDeposits((list) => list.map((x) => (x.id === d.id ? { ...x, detail: prev } : x)));
+        toast(`⚠ not saved: ${(e as Error).message}`, 'error');
+      })
+      .finally(() => setSaving((m) => { const n = { ...m }; delete n[d.id]; return n; }));
+  };
+  const comSt = (d: (typeof deposits)[number]) => String(d.detail?.commission_status ?? 'pending');
+  const todoCount = monthDeps.filter((d) => d.detail?.nature !== 'direct' && comSt(d) === 'pending').length;
+  const checkedCount = monthDeps.filter((d) => d.detail?.nature !== 'direct' && comSt(d) !== 'pending').length;
+  const shownDeps = onlyTodo ? monthDeps.filter((d) => comSt(d) === 'pending') : monthDeps;
   return (
           <>
             {/* filet de sécurité : LIVE sans ligne de dépôt — cliquer pré-remplit le formulaire ci-dessous */}
@@ -145,11 +174,32 @@ export function DepositsTab() {
                 <Kpi label="DIRECT ACCESS" value={`$${Math.floor(depTotals.direct)}`} accent="var(--cyan)" />
               </div>
               {monthDeps.length === 0 && <p style={dimP}>No deposits logged for this month yet — add one above as soon as a member funds his broker account.</p>}
-              {monthDeps.map((d) => {
-                const st = String(d.detail?.commission_status ?? 'pending');
+              {/* PROGRESSION DU POINTAGE — combien il en reste, et un filtre pour ne voir que ceux-là */}
+              {monthDeps.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                  <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: todoCount ? 'var(--gold)' : 'var(--up)' }}>
+                    {todoCount ? `⏳ ${todoCount} to check` : '✓ all checked'}
+                  </span>
+                  <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>✓ {checkedCount} done</span>
+                  <div style={{ flex: 1, minWidth: 120, height: 6, borderRadius: 4, background: 'rgba(130,152,190,.18)', overflow: 'hidden' }}>
+                    <div style={{ width: `${todoCount + checkedCount ? (checkedCount / (todoCount + checkedCount)) * 100 : 0}%`, height: '100%', background: 'var(--up)', transition: 'width .3s' }} />
+                  </div>
+                  <button onClick={() => setOnlyTodo((v) => !v)} style={{ ...miniBtn, fontSize: 11, padding: '4px 10px', color: onlyTodo ? 'var(--gold)' : 'var(--muted)', borderColor: onlyTodo ? 'rgba(245,194,74,.5)' : 'var(--border)' }}>
+                    {onlyTodo ? '👁 show all' : '⏳ show only to check'}
+                  </button>
+                </div>
+              )}
+              {shownDeps.map((d) => {
+                const st = comSt(d);
                 const stC = st === 'received' ? 'var(--up)' : st === 'canceled' ? '#ff6b8a' : 'var(--gold)';
+                // REPÈRE VISUEL : à pointer = liseré doré ; reçue = carte verte ; perdue = carte rouge, estompée
+                const card = st === 'received'
+                  ? { border: '1px solid rgba(31,216,176,.45)', borderLeft: '5px solid var(--up)', background: 'rgba(31,216,176,.08)' }
+                  : st === 'canceled'
+                    ? { border: '1px solid rgba(255,107,138,.35)', borderLeft: '5px solid #ff6b8a', background: 'rgba(255,107,138,.06)', opacity: 0.7 }
+                    : { border: '1px solid var(--border)', borderLeft: '5px solid var(--gold)', background: 'rgba(10,17,31,.55)' };
                 return (
-                  <div key={d.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                  <div key={d.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '9px 12px', borderRadius: 10, transition: 'background .2s, opacity .2s', ...card }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                       <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 70 }}>{depDateOf(d).slice(0, 10)}</span>
                       {/* la ligne vient d'un mois précédent : sans ce repère, un dépôt de juillet reporté
@@ -178,11 +228,13 @@ export function DepositsTab() {
                       <button onClick={() => editDepositAmount(d)} title="edit deposit amount (e.g. member deposited in several chunks)" className="mono" style={{ ...miniBtn, fontSize: 12.5, fontWeight: 800, color: 'var(--cyan)' }}>${Number(d.detail?.amount_usd ?? 0)} ✎</button>
                       <span style={{ color: 'var(--dim)', fontSize: 11 }}>→ com</span>
                       <button onClick={() => editDepositCom(d)} title="edit expected commission" className="mono" style={{ ...miniBtn, fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>${Number(d.detail?.commission_usd ?? 0)} ✎</button>
-                      <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, color: stC, border: `1px solid color-mix(in srgb, ${stC} 40%, transparent)`, borderRadius: 6, padding: '2px 7px' }}>{st === 'canceled' ? 'LOST' : st.toUpperCase()}</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.8, color: st === 'pending' ? 'var(--gold)' : '#0b0e14', background: st === 'pending' ? 'transparent' : stC, border: `1px solid color-mix(in srgb, ${stC} 55%, transparent)`, borderRadius: 7, padding: '3px 9px' }}>
+                        {st === 'canceled' ? '✗ LOST' : st === 'received' ? '✓ RECEIVED' : '⏳ TO CHECK'}{saving[d.id] ? ' …' : ''}
+                      </span>
                       <span style={{ flex: 1 }} />
-                      {st !== 'received' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'received' } })} style={okBtn}>✓ RECEIVED</button>}
-                      {st !== 'canceled' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'canceled' } })} title="commission fell through (flash withdrawal, broker refusal…)" style={dangerBtn}>✗ LOST</button>}
-                      {st !== 'pending' && <button disabled={busy} onClick={() => post({ updateDeposit: { id: d.id, comStatus: 'pending' } })} title="back to pending" style={miniBtn}>↺</button>}
+                      {st !== 'received' && <button disabled={saving[d.id]} onClick={() => setComStatus(d, 'received')} style={okBtn}>✓ RECEIVED</button>}
+                      {st !== 'canceled' && <button disabled={saving[d.id]} onClick={() => setComStatus(d, 'canceled')} title="commission fell through (flash withdrawal, broker refusal…)" style={dangerBtn}>✗ LOST</button>}
+                      {st !== 'pending' && <button disabled={saving[d.id]} onClick={() => setComStatus(d, 'pending')} title="back to « to check »" style={miniBtn}>↺</button>}
                       {/* REPORT AU MOIS SUIVANT — pour les dépôts dont la com n'est pas encore validée (lot
                           minimum pas atteint). La ligne quitte le bilan de ce mois et réapparaît au suivant,
                           SANS que la date du dépôt soit modifiée. Réversible : le bouton ↩ la ramène. */}
