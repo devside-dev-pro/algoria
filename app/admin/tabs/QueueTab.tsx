@@ -112,6 +112,22 @@ export function QueueTab() {
                               compte MetaTrader. Inutile de le refuser pour « invalid account » — s'il y a
                               un problème il est ailleurs (rattachement, dépôt). Ça enlève le premier motif
                               de refus du champ des hypothèses avant même d'ouvrir le dashboard broker. */}
+                          {/* PRÉ-TEST STH (01/10/2026, mode observation) — le compte a été pré-connecté chez STH à
+                              l'envoi du formulaire, SANS master : il ne copie rien tant que CONNECT n'est pas cliqué.
+                              À comparer à ton verdict pendant une semaine avant d'en faire un message au membre. */}
+                          {(() => {
+                            const pc = a.detail?.sth_precheck as { result?: string; error?: string } | undefined;
+                            if (!pc?.result) return null;
+                            const m: Record<string, [string, string]> = {
+                              ok: ['var(--up)', '🧪 STH pre-check: credentials accepted (pre-connected, NOT copying until CONNECT)'],
+                              invalid: ['#ff8a5c', `🧪 STH pre-check: ${pc.error || 'Invalid account'} — likely wrong login/password/server`],
+                              error: ['var(--gold)', `🧪 STH pre-check: ${pc.error || 'error'}`],
+                              timeout: ['var(--dim)', '🧪 STH pre-check: no answer within 25 s (inconclusive)'],
+                              known: ['var(--dim)', '🧪 STH pre-check: skipped — already known to STH (answer would be ambiguous)'],
+                            };
+                            const [col, txt] = m[pc.result] ?? ['var(--dim)', `🧪 STH pre-check: ${pc.result}`];
+                            return <div style={{ fontSize: 10, marginTop: 2, color: col, fontWeight: 700 }}>{txt}</div>;
+                          })()}
                           {a.detail?.verify === 'ok' && (
                             <div style={{ fontSize: 10, marginTop: 2, color: 'var(--up)', fontWeight: 700 }}>🔐 credentials verified at signup — MetaTrader login/password/server all work</div>
                           )}

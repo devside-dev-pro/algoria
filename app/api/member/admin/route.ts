@@ -1067,7 +1067,14 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       return NextResponse.json({ error: 'decryption failed (MEMBER_CREDS_KEY changed?)' }, { status: 500 });
     }
     const lots = memberLot ?? (Number(detail.lot ?? 0.01) || 0.01); // fiche d'abord, carte ensuite — cohérent avec reconnectSth et moveSth
-    const r = await sthConnectAndJoin({ userId: creds.sthUser, login: creds.login as number, password, server: String(creds.server), isMt4: Boolean(detail.is_mt4), lots, strategy: creds.strategy });
+    let r = await sthConnectAndJoin({ userId: creds.sthUser, login: creds.login as number, password, server: String(creds.server), isMt4: Boolean(detail.is_mt4), lots, strategy: creds.strategy });
+    // PRÉ-CONNECTÉ À L'INSCRIPTION (sthPrecheck, 01/10/2026) : le compte est déjà enregistré chez STH, donc
+    // le connect répond « Invalid account » (déjà connu) et sthConnectAndJoin abandonne, faute de master.
+    // Il ne manque que l'abonnement : on le fait directement. Les autres dossiers ne passent pas par ici.
+    if (!r.ok && !accountId && (detail.sth_precheck as { result?: string } | undefined)?.result === 'ok') {
+      const j = await sthMoveMaster(creds.sthUser, creds.strategy, lots);
+      if (j.ok) r = { ok: true, error: '' };
+    }
     if (!r.ok) return NextResponse.json({ error: `STH: ${r.error}` }, { status: 400 });
     await db.from('member_actions').insert({ tg_id: act[0].tg_id, member_no: creds.memberNo, kind: 'note', status: 'done', done_by: who, detail: { text: `🔗 copier connected via STH (lots ${lots} · S${creds.strategy}${accountId ? ` · account #${detail.account_no}` : ''})` } as never });
     return NextResponse.json({ ok: true });
@@ -1265,8 +1272,20 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       .select('tg_id,member_no,tg_username,tg_name,status,strategy,lot,mt5_login')
       .in('status', ['live', 'pending_copier']).not('mt5_login', 'is', null).limit(200) as { // 60 → 200 (audit 03/09 : 38 comptes aujourd'hui, l'audit doit rester complet)
         data: Array<{ tg_id: number; member_no: number | null; tg_username: string | null; tg_name: string | null; status: string; strategy: number | null; lot: number | null; mt5_login: string | null }> | null };
+    // ⚠️ DOSSIERS EN ATTENTE DE VALIDATION — JAMAIS REBRANCHÉS PAR L'AUDIT (01/10/2026). Depuis le pré-test
+    // STH à l'inscription (lib/member/sthPrecheck.ts), un 'pending_copier' aux identifiants valides est DÉJÀ
+    // connu de STH, sans master. Le rejoin ci-dessous réussirait donc, et passerait le membre en 'live' sans
+    // que Mathieu ait vérifié le broker ni le lot d'activation : exactement le contournement que le verrou de
+    // connectSth interdit. Avant le pré-test ce rejoin échouait (utilisateur inconnu de STH) ; c'est cette
+    // garde, et elle seule, qui conserve ce comportement.
+    const { data: waiting } = await db.from('member_actions').select('tg_id').eq('kind', 'connect').eq('status', 'pending').limit(1000);
+    const awaitingValidation = new Set((waiting ?? []).map((w) => Number(w.tg_id)));
     const rows: Array<Record<string, unknown>> = [];
     for (const m of lives ?? []) {
+      if (m.status === 'pending_copier' && awaitingValidation.has(Number(m.tg_id))) {
+        rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'ok', detail: 'awaiting your validation (CONNECT card pending) — not checked, never rejoined by the audit' });
+        continue;
+      }
       const st = await sthStatus(String(m.tg_id));
       if (!st.ok) { rows.push({ member_no: m.member_no, name: m.tg_username ? '@' + m.tg_username : m.tg_name, state: 'error', detail: st.errorMessage }); continue; }
       // QUELS masters, pas COMBIEN (13/09/2026). L'audit disait « 2 master(s) » et s'arrêtait là : un membre
