@@ -75,10 +75,19 @@ export async function GET(req: NextRequest) {
     for (const e of evs) if (e.event === 'ob_budget') { const b = String(e.meta?.bracket ?? '?'); budgets.set(b, (budgets.get(b) ?? 0) + 1); }
     const bonus = { shown: who(is('ob_bonus_shown')).size, clicked: who(is('ob_bonus_click')).size };
     const backs = who(is('ob_back')).size;
+    // 🆘 « je bloque » : ouvert, puis envoyé (par sujet)
+    const helpOpened = who((e) => e.event === 'ob_help' && e.meta?.opened === true).size;
+    const helpTopics = new Map<string, Set<number>>();
+    for (const e of evs) if (e.event === 'ob_help' && typeof e.meta?.topic === 'string') {
+      const k = String(e.meta.topic);
+      if (!helpTopics.has(k)) helpTopics.set(k, new Set());
+      helpTopics.get(k)!.add(e.tg_id);
+    }
+    const help = { opened: helpOpened, topics: [...helpTopics.entries()].map(([topic, s]) => ({ topic, people: s.size })).sort((a, b) => b.people - a.people) };
 
     return NextResponse.json({
       days, signups: signups ?? 0, since: first?.[0]?.created_at ?? null, events: evs.length,
-      stages, leaveSecs, brokers, errors, budgets: [...budgets.entries()].map(([bracket, n]) => ({ bracket, n })), bonus, backs,
+      stages, leaveSecs, brokers, errors, budgets: [...budgets.entries()].map(([bracket, n]) => ({ bracket, n })), bonus, backs, help,
     });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

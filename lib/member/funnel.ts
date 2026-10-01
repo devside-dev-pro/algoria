@@ -20,6 +20,7 @@ export const FUNNEL_EVENTS = [
   'ob_strategy_done',   // dernier écran validé : demande envoyée
   'ob_back',            // retour à un écran précédent
   'ob_leave',           // onglet quitté / caché pendant le parcours, avec le temps passé sur l'écran
+  'ob_help',            // 🆘 « je bloque » envoyé (meta.topic)
 ] as const;
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];
 type Meta = Record<string, string | number | boolean | null>;
@@ -42,3 +43,15 @@ export function trackOnce(key: string, event: FunnelEvent, step: number | null =
   sentOnce.add(key);
   track(event, step, meta);
 }
+
+/** 🆘 « Je bloque » : les sujets proposés au membre. Clés fixes (comptées dans le panneau FUNNEL) ; libellé
+ *  français pour l'alerte de Mathieu, les libellés membre sont dans ui-text (help.t.<clé>). */
+export const HELP_TOPICS = {
+  open_account: 'ouvrir le compte broker',
+  verify: 'vérification d’identité (KYC)',
+  deposit: 'faire le dépôt',
+  credentials: 'trouver ses identifiants MT5',
+  refused: 'l’app refuse ses identifiants',
+  other: 'autre',
+} as const;
+export type HelpTopic = keyof typeof HELP_TOPICS;

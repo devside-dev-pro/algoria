@@ -15,6 +15,7 @@ import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/membe
 import { DIRECT_ACCESS_PRICE_USD, DIRECT_ACCESS_URL } from '@/lib/member/directAccess';
 import { WhereAreMyCredentials } from '@/components/member/WhereAreMyCredentials';
 import { track, trackOnce } from '@/lib/member/funnel';
+import { StuckHelp } from '@/components/member/StuckHelp';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
@@ -250,6 +251,8 @@ export default function Onboarding() {
           <span key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= cur ? 'linear-gradient(90deg,#2be3f5,#2e8bf0)' : 'rgba(130,152,190,.2)' }} />
         ))}
       </div>
+      {/* 🆘 « je bloque » : visible à chaque écran, discret (lien), l'alerte part chez Mathieu avec le contexte */}
+      <StuckHelp step={cur} t={t} />
 
       {/* demande précédente REFUSÉE (vérification broker) : la raison s'affiche, on corrige, on re-soumet —
           jamais de blocage définitif (le membre qui s'est trompé — ou a tenté — garde une porte de sortie) */}

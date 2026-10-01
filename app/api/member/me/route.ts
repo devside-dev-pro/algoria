@@ -202,6 +202,36 @@ export async function POST(req: NextRequest) {
     if (!['en', 'it'].includes(loc)) return NextResponse.json({ error: 'unsupported locale' }, { status: 400 });
     patch.locale = loc;
     patch.locale_chosen_at = new Date().toISOString();
+  } else if (body.action === 'help') {
+    // 🆘 « JE BLOQUE » (01/10/2026) — 385 inscrits ont choisi un broker sans jamais envoyer leurs identifiants
+    // MT5. Le membre dit où il bloque ; Mathieu reçoit l'alerte avec le contexte (étape, broker, ancienneté) et
+    // un lien pour lui écrire. Une note sur la fiche garde la trace. Rien n'est envoyé au membre automatiquement.
+    // Pas de mise à jour de la fiche membre : updated_at sert au « bloqué depuis N jours » de l'admin.
+    const { HELP_TOPICS } = await import('@/lib/member/funnel');
+    const topic = String(body.topic ?? '') as keyof typeof HELP_TOPICS;
+    if (!(topic in HELP_TOPICS)) return NextResponse.json({ error: 'unknown topic' }, { status: 400 });
+    const text = String(body.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    // anti-doublon : une demande toutes les 30 min suffit, Mathieu a déjà l'alerte
+    const { data: recent } = await db.from('member_actions').select('id').eq('tg_id', s.tgId).eq('kind', 'note')
+      .ilike('detail->>text', '🆘%').gte('created_at', new Date(Date.now() - 30 * 60_000).toISOString()).limit(1);
+    if (recent?.length) return NextResponse.json({ ok: true, already: true });
+    const { data: mrows } = await db.from('members').select('member_no,tg_username,tg_name,broker,onboarding_step,created_at').eq('tg_id', s.tgId).limit(1);
+    const m = mrows?.[0] as { member_no: number | null; tg_username: string | null; tg_name: string | null; broker: string | null; onboarding_step: number | null; created_at: string } | undefined;
+    const step = Math.min(3, (m?.onboarding_step ?? 0) + 1);
+    const days = m ? Math.max(0, Math.floor((Date.now() - Date.parse(m.created_at)) / 86_400_000)) : 0;
+    await db.from('member_actions').insert({ tg_id: s.tgId, member_no: m?.member_no ?? null, kind: 'note', status: 'done', done_by: 'member', detail: { text: `🆘 Stuck: ${HELP_TOPICS[topic]}${text ? ` · « ${text} »` : ''} (step ${step}/3 · ${m?.broker ?? 'no broker'})`, help_topic: topic } as never });
+    void notifyOwner({
+      title: `🆘 Bloqué : ${HELP_TOPICS[topic]}`,
+      lines: [
+        `#${m?.member_no ?? '?'} ${m?.tg_username ? `@${m.tg_username}` : (m?.tg_name ?? '')}`.trim(),
+        `Étape ${step}/3 · ${m?.broker ?? 'pas encore de broker'} · inscrit il y a ${days} j`,
+        text ? `« ${text} »` : '',
+        m?.tg_username ? `Lui écrire : https://t.me/${m.tg_username}` : '',
+      ],
+      path: '/#members',
+      tag: 'owner-help',
+    });
+    return NextResponse.json({ ok: true });
   } else if (body.action === 'broker') {
     const broker = String(body.broker ?? '').slice(0, 40);
     if (!broker) return NextResponse.json({ error: 'broker required' }, { status: 400 });
