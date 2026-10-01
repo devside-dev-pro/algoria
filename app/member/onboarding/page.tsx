@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, LoadFailed, useUILocale, SUPPORT_TG, Check } from '../ui';
 import { tgHref } from '@/lib/telegram';
-import { BROKERS, PARTNER_BROKERS, selectableBrokers, type Broker } from '@/lib/member/brokers';
+import { BROKERS, PARTNER_BROKERS, canonicalServer, selectableBrokers, type Broker } from '@/lib/member/brokers';
 import { brokerAttachMessage } from '@/lib/member/ui-text';
 import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, minDepositFor, RECOMMENDED_DEPOSIT } from '@/lib/member/minimums';
 import { LIVE_STRATEGY } from '@/lib/member/maintenance';
@@ -96,7 +96,6 @@ export default function Onboarding() {
   const [login, setLogin] = useState('');
   const [brokerOther, setBrokerOther] = useState(''); // nom du broker quand il n'est pas partenaire (résidents US)
   const [server, setServer] = useState('');
-  const [serverManual, setServerManual] = useState(false); // « mon serveur n'est pas listé » → saisie libre
   const [platform, setPlatform] = useState<'mt5' | 'mt4'>('mt5'); // MT5 par défaut ; le copieur STH a besoin du IsMT4
   const [password, setPassword] = useState('');
   // VÉRIFICATION : le support contrôle le compte chez le broker AVANT d'approuver — sans le nom du
@@ -146,9 +145,11 @@ export default function Onboarding() {
     if (prefill.brokerOther) setBrokerOther(prefill.brokerOther);
     if (prefill.login) setLogin(prefill.login);
     if (prefill.server) {
-      setServer(prefill.server);
+      // serveur pré-rempli hors liste (ancienne saisie libre) : on le rattache à la liste s'il n'en diffère
+      // que par une espace ou la casse, sinon on le vide — le membre le re-choisit dans le menu.
       const known = BROKERS.find((b) => b.key === prefill.broker)?.servers ?? [];
-      if (known.length && !known.includes(prefill.server)) setServerManual(true);
+      const fixed = canonicalServer(prefill.broker, prefill.server);
+      setServer(!known.length || known.includes(fixed) ? fixed : '');
     }
     if (prefill.name) setFullName(prefill.name);
     if (prefill.deposit) setDeposit(String(prefill.deposit));
@@ -400,7 +401,7 @@ export default function Onboarding() {
             <span style={grpLbl}>{t('ob.yourAccount')}</span>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <label style={{ ...lbl, flex: '1 1 130px' }}>{t('ob.broker')}
-                <select value={picked ?? ''} onChange={(e) => { setBrokerPick(e.target.value || null); setServer(''); setServerManual(false); }} style={inp}>
+                <select value={picked ?? ''} onChange={(e) => { setBrokerPick(e.target.value || null); setServer(''); }} style={inp}>
                   <option value="">{t('ob.choose')}</option>
                   {/* un broker retiré (FXCESS) n'apparaît que si c'est DÉJÀ celui du membre — sinon sa
                       fiche s'ouvrirait sur un menu vide et le premier enregistrement l'effacerait */}
@@ -472,17 +473,20 @@ export default function Onboarding() {
               {loginLooksWrong && <span style={{ fontSize: 11.5, color: 'var(--gold)', lineHeight: 1.5, textTransform: 'none', letterSpacing: 0 }}>⚠️ {t('ob.loginWarn')}</span>}
             </label>
             <label style={lbl}>Server
-              {brokerServers.length > 0 && !serverManual ? (
-                <select value={server} onChange={(e) => { const v = e.target.value; if (v === '__other__') { setServerManual(true); setServer(''); } else setServer(v); }} style={inp}>
+              {/* BROKER PARTENAIRE = MENU SEUL (01/10/2026) : la saisie libre « mon serveur n'est pas listé »
+                  fabriquait des refus (« VTMarkets-Live6 » tapé au lieu de « VTMarkets-Live 6 » choisi juste
+                  au-dessus). La liste couvre les serveurs réels ; un serveur absent passe par Mathieu, qui
+                  l'ajoute dans lib/member/brokers.ts. La saisie libre reste pour « autre broker » (pas de liste). */}
+              {brokerServers.length > 0 ? (
+                <select value={server} onChange={(e) => setServer(e.target.value)} style={inp}>
                   <option value="">{t('ob.chooseServer')}</option>
                   {brokerServers.map((s) => <option key={s} value={s}>{s}</option>)}
-                  <option value="__other__">{t('ob.serverNotListed')}</option>
                 </select>
               ) : (
                 <input value={server} onChange={(e) => setServer(e.target.value)} placeholder={t('ob.serverType')} style={inp} />
               )}
-              <span style={hint}>{t('ob.serverHint')}</span>
-              {brokerServers.length > 0 && serverManual && <button type="button" onClick={() => { setServerManual(false); setServer(''); }} style={{ ...linkBtn, marginTop: 4, textAlign: 'left' }}>{t('ob.serverBack')}</button>}
+              <span style={hint}>{brokerServers.length > 0 ? t('ob.serverPick') : t('ob.serverHint')}</span>
+              {brokerServers.length > 0 && <a href="https://t.me/mathieu_algoria" target="_blank" rel="noreferrer" style={{ ...linkBtn, marginTop: 4, textAlign: 'left', textDecoration: 'none' }}>{t('ob.serverMissing')}</a>}
             </label>
             {/* MOT DE PASSE — la cause n°1 des refus « invalid account ». L'ancien texte disait « the one
                 you log in with », qui se lit « celui de mon espace client broker » : il fabriquait
