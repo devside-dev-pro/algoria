@@ -87,3 +87,27 @@ export function winbackMessage(reason: OffboardReason, name: string | null, loca
   const hi = locale === 'it' ? `Ciao${name ? ` ${name}` : ''},` : `Hi${name ? ` ${name}` : ''},`;
   return `${hi}\n\n${body}`;
 }
+
+// ── RELANCE DES DÉPOSANTS PARTIS (01/10/2026) ──────────────────────────────────────────────────────────
+// Le message ci-dessus part AU MOMENT du départ. Ceux-ci partent APRÈS, depuis le panneau WIN-BACK de
+// l'admin : Mathieu relit, ajuste, clique. Trois cas, tirés de l'historique réel des 10 premiers :
+//   · returned     — off-boardé (capital retiré) puis revenu de lui-même dans l'app : le plus chaud ;
+//   · disconnected — a coupé la copie lui-même, récemment (souvent un jour rouge) ;
+//   · old          — parti à l'époque des 3 stratégies (avant septembre) : beaucoup a changé depuis.
+// Style de Mathieu : pas de tiret long, une espace avant ? et !, 🙏🏼 à la fin. Résultats PASSÉS seulement.
+export type WinbackGroup = 'returned' | 'disconnected' | 'old';
+
+export function winbackFollowup(group: WinbackGroup, o: { name: string | null; broker: string | null; exitDate: string; exitMonth: string; redDayLine?: string | null; monthLine?: string | null; notPartner?: boolean }): string {
+  const hi = `Hi${o.name ? ` ${o.name}` : ''},`;
+  let text: string;
+  if (group === 'returned') {
+    text = `${hi} I saw you opened the Algoria app again 🙂 Welcome back ! If you want to restart the copy, it's simple: fund your ${o.broker ?? 'broker'} account again, then tap Connect in the app and I activate you myself. Any question before you restart ? I'm here 🙏🏼`;
+  } else if (group === 'disconnected') {
+    const facts = [o.redDayLine, o.monthLine].filter(Boolean).join(' ');
+    text = `${hi} I saw you disconnected the copy on ${o.exitDate}.${facts ? ` ${facts}` : ''} Your account is still yours, nothing changed on your side. If you want to reconnect, it's one tap in the app. Can I help with anything ? 🙏🏼`;
+  } else {
+    text = `${hi} it's Mathieu from Algoria. A lot has changed since ${o.exitMonth}: one single strategy now (no more choosing between 3), Algoria AI in the app, and every trade public on the track record. If you'd like to give it another go, reconnect from the app and I'll activate you myself. And if something went wrong for you, tell me, I want to know 🙏🏼`;
+  }
+  if (o.notPartner) text += `\n\nOne thing: your account must be opened through the Algoria link so the broker attaches it to us. I can send you the link.`;
+  return text;
+}

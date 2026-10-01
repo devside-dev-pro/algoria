@@ -9,6 +9,7 @@ import { TRC20_RE } from '@/lib/member/affiliate';
 import { LOT_CHOICES, LOT_MAX, LOT_STEP, isLotAllowed } from '@/lib/member/lots';
 import { pushState, enablePush, disablePush } from '@/lib/push/client';
 import { ask, DialogHost } from '@/components/admin/Dialog';
+import { StopCopySheet } from '@/components/member/StopCopySheet';
 import { applyTheme, currentTheme, type Theme } from '@/lib/member/theme';
 
 // Alertes push : wins d'Algoria, recap du jour, annonce de live. Opt-in explicite (permission navigateur).
@@ -61,6 +62,7 @@ export default function Profile() {
   const [paywall, setPaywall] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
   const [customLot, setCustomLot] = useState(''); // taille de copie hors grille (gros comptes)
+  const [stopAsk, setStopAsk] = useState<'pause' | 'disconnect' | null>(null); // écran « avant d'arrêter la copie »
   // copie locale du wallet : rafraîchie après un retrait / changement d'adresse (useMe ne charge qu'une fois)
   const [referral, setReferral] = useState<Referral | null>(null);
   useEffect(() => { if (refInit) setReferral(refInit); }, [refInit]);
@@ -103,8 +105,8 @@ export default function Profile() {
   };
   // DÉCONNECTER le compte de trading : coupe la copie (queue une action pour STH) et repasse en onboarding
   // pour reconnecter / changer de broker. Confirmation obligatoire (destructif).
-  const disconnect = async () => {
-    if (!(await ask.confirm('Disconnect your trading account?\nThis stops the copy and you’ll re-enter your MT5 details to reconnect.', { danger: true, ok: 'DISCONNECT' }))) return;
+  // La confirmation passe par StopCopySheet (01/10/2026) : les faits passés des jours rouges, puis un tap.
+  const disconnect = () => {
     setDisc(true);
     void fetch('/api/member/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'disconnect' }) })
       .then((r) => (r.ok ? router.push('/member/onboarding') : setDisc(false)))
@@ -129,7 +131,7 @@ export default function Profile() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
           <StatusPill status={member.status} />
           {(member.status === 'live' || member.status === 'paused') && (
-            <button disabled={busy} onClick={() => act(member.status === 'paused' ? 'resume' : 'pause')} style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: member.status === 'paused' ? 'var(--up)' : 'var(--muted)', borderRadius: 9, padding: '6px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
+            <button disabled={busy} onClick={() => (member.status === 'paused' ? act('resume') : setStopAsk('pause'))} style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: member.status === 'paused' ? 'var(--up)' : 'var(--muted)', borderRadius: 9, padding: '6px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
               {member.status === 'paused' ? '▶ RESUME' : '⏸ PAUSE'}
             </button>
           )}
@@ -367,7 +369,7 @@ export default function Profile() {
           <RowKV k="MT5 login" v={member.mt5_login ?? '—'} />
           <RowKV k="Server" v={member.mt5_server ?? '—'} />
           <p style={{ margin: '2px 0 0', fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Your password is encrypted and never displayed. To revoke access, change it on your broker account.</p>
-          <button onClick={disconnect} disabled={disc} style={{ alignSelf: 'flex-start', marginTop: 4, border: '1px solid rgba(255,107,138,.28)', background: 'transparent', color: 'rgba(210,150,165,.9)', borderRadius: 9, padding: '8px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
+          <button onClick={() => setStopAsk('disconnect')} disabled={disc} style={{ alignSelf: 'flex-start', marginTop: 4, border: '1px solid rgba(255,107,138,.28)', background: 'transparent', color: 'rgba(210,150,165,.9)', borderRadius: 9, padding: '8px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
             {disc ? 'Disconnecting…' : 'Disconnect / change trading account'}
           </button>
         </section>
@@ -377,6 +379,8 @@ export default function Profile() {
         <button style={{ flex: 1, border: '1px solid rgba(255,107,138,.3)', background: 'rgba(255,107,138,.05)', color: 'rgba(210,150,165,.9)', borderRadius: 11, padding: '11px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>SIGN OUT</button>
       </form>
       {!unlocked && <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />}
+      <StopCopySheet kind={stopAsk} onKeep={() => setStopAsk(null)}
+        onStop={() => { const k = stopAsk; setStopAsk(null); if (k === 'pause') act('pause'); else if (k === 'disconnect') disconnect(); }} />
     </main>
   );
 }

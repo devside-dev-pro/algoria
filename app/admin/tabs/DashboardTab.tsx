@@ -4,6 +4,7 @@
 // dans useAdminState (app/admin/_state.tsx) et arrivent ici par contexte.
 import { ask } from '@/components/admin/Dialog';
 import { useAdmin } from '../_state';
+import { WinbackPanel } from './WinbackPanel';
 import { Kpi, RowLine, SCRIPTS, dimP, goldBtn, inp, miniBtn, okBtn, personalise, secH, td, warnBox } from '../_shared';
 
 export function DashboardTab() {
@@ -62,6 +63,7 @@ export function DashboardTab() {
                 </section>
               );
             })()}
+            <WinbackPanel />
             {/* ===== ENTONNOIR D'ACTIVATION — où fuit l'argent. Le levier n°1 : la plupart des inscrits ne
                 financent jamais. On voit la marche qui saigne + la relance auto la travaille chaque jour. */}
             {(() => {
