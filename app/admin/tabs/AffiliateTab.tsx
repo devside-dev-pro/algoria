@@ -4,11 +4,13 @@
 // dans useAdminState (app/admin/_state.tsx) et arrivent ici par contexte.
 import { useAdmin } from '../_state';
 import { dangerBtn, dimP, miniBtn, okBtn, secH, warnBox } from '../_shared';
+import { ReferralPanel } from './ReferralPanel';
 
 export function AffiliateTab() {
   const { aff, busy, cancelCommission, nameOf, payPayout, post, rejectPayout } = useAdmin();
   return (
     <>
+      <ReferralPanel />
       {aff && (
           <>
             {aff.flagged.length > 0 && <div style={warnBox}>⚠ negative balance: {aff.flagged.map((f) => `${f.username ? '@' + f.username : '#' + f.member_no} (${Math.floor(f.balance)}$)`).join(' · ')}</div>}
