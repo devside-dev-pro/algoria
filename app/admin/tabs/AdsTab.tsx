@@ -7,13 +7,15 @@
 //   et « déjà tournées » avec la date ; les cartes se déplient au clic ; les cases cochées font le brief du studio ;
 // - HOOKS : la banque de hooks, avec leur statut de test (winner / loser) ;
 // - SHOOT : le mode tournage, un script à la fois en gros caractères, pour lire sur le téléphone pendant la prise.
+// Sur chaque ad et chaque hook : ⭐ « j'adore » ou 👎 « pas pour moi », avec la raison. Une ad rejetée sort des
+// listes (archive « Rejected », restaurable) ; ces raisons servent à Claude pour apprendre ce que Mathieu tourne.
 // Données : /api/member/admin/ads. Bibliothèque de départ (brief de Benjamin) : lib/admin/adsSeed.ts, importée d'un clic.
 import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction, type SyntheticEvent } from 'react';
 import { ask, toast } from '@/components/admin/Dialog';
 import { dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 import {
-  ANGLES, HOOK_STATUSES, HOOK_STATUS_LABEL, NEEDS, NEED_LABEL, POLES, POLE_LABEL, READINESS, STATUSES, STATUS_LABEL, readinessOf, scriptText, studioBrief,
-  type AdHook, type AdScript, type HookStatus, type Need, type Pole, type Status,
+  ANGLES, HOOK_STATUSES, HOOK_STATUS_LABEL, LOVE_REASONS, NEEDS, NEED_LABEL, POLES, POLE_LABEL, READINESS, REJECT_REASONS, STATUSES, STATUS_LABEL, readinessOf, scriptText, studioBrief,
+  type AdHook, type AdScript, type HookStatus, type Need, type Pole, type Status, type Verdict,
 } from '@/lib/admin/ads';
 
 type View = 'library' | 'list' | 'hooks' | 'shoot';
@@ -51,6 +53,7 @@ export function AdsTab() {
   const [view, setView] = useState<View>('list');
   const [sel, setSel] = useState<Set<string>>(new Set()); // ads cochées pour le brief du studio
   const [brief, setBrief] = useState(false);
+  const [vq, setVq] = useState<VerdictAsk | null>(null); // la feuille ⭐ / 👎 ouverte
   const [busy, setBusy] = useState(false);
   const [focus, setFocus] = useState<string | null>(null); // ad ouverte dans le mode tournage depuis la SHOOT LIST
 
@@ -77,9 +80,28 @@ export function AdsTab() {
     setHooks((l) => l.map((x) => (x.id === id ? { ...x, ...patch } : x)));
     try { await api({ patchHook: { id, patch } }); } catch (e) { setHooks(before); toast(`⚠ ${(e as Error).message}`, 'error'); }
   };
+  // L'avis de Mathieu (⭐ / 👎 + raisons). null efface l'avis (restaurer une ad rejetée).
+  const setVerdict = async (kind: 'script' | 'hook', id: string, verdict: Verdict | null, reasons: string[] = [], note = '') => {
+    const d = await api({ verdict: { kind, id, verdict, reasons, note } });
+    if (!d.row) return;
+    if (kind === 'script') setScripts((l) => (l ?? []).map((x) => (x.id === id ? d.row : x)));
+    else setHooks((l) => l.map((x) => (x.id === id ? d.row : x)));
+    if (verdict === 'rejected') setSel((cur) => { const n = new Set(cur); n.delete(id); return n; });
+    toast(verdict === 'rejected' ? '👎 Removed. Noted why.' : verdict === 'loved' ? '⭐ Noted: more like this.' : '↩ Restored');
+  };
+  const askVerdict = (kind: 'script' | 'hook', item: { id: string; title: string } & Partial<Pick<AdScript, 'verdict' | 'verdict_reasons' | 'verdict_note'>>, verdict: Verdict) =>
+    setVq({ kind, id: item.id, title: item.title, verdict, reasons: item.verdict === verdict ? item.verdict_reasons ?? [] : [], note: item.verdict === verdict ? item.verdict_note ?? '' : '' });
+  const clearVerdict = (kind: 'script' | 'hook', id: string) => { void setVerdict(kind, id, null).catch((e) => toast(`⚠ ${(e as Error).message}`, 'error')); };
   const toggleSel = (id: string) => setSel((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const altsOf = (id: string) => hooks.filter((h) => h.script_id === id).map((h) => h.text);
-  const ctx = { scripts: scripts ?? [], hooks, setScripts, setHooks, patchScript, patchHook, sel, toggleSel, setSel };
+  // Les ads et hooks rejetés sortent de toutes les vues (ils restent dans l'archive « Rejected »).
+  const all = scripts ?? [];
+  const alive = all.filter((x) => x.verdict !== 'rejected');
+  const aliveHooks = hooks.filter((h) => h.verdict !== 'rejected');
+  const altsOf = (id: string) => aliveHooks.filter((h) => h.script_id === id).map((h) => h.text);
+  const ctx: Ctx = {
+    scripts: alive, hooks: aliveHooks, setScripts, setHooks, patchScript, patchHook, sel, toggleSel, setSel,
+    rejectedScripts: all.filter((x) => x.verdict === 'rejected'), rejectedHooks: hooks.filter((h) => h.verdict === 'rejected'), askVerdict, clearVerdict,
+  };
   const openInShootMode = (id: string) => { setFocus(id); setView('shoot'); };
 
   const seed = async () => {
@@ -92,12 +114,12 @@ export function AdsTab() {
   if (err) return <section className="panel" style={{ padding: 16 }}><p style={{ ...dimP, color: 'var(--down)' }}>⚠ {err}</p><button onClick={() => void load()} style={miniBtn}>retry</button></section>;
   if (!scripts) return <section className="panel" style={{ padding: 16 }}><p style={dimP}>Loading the library…</p></section>;
 
-  const count = (s: Status) => scripts.filter((x) => x.status === s).length;
+  const count = (s: Status) => alive.filter((x) => x.status === s).length;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-          <h2 style={secH}>🎬 ADS STUDIO · {scripts.length} ads · {hooks.length + scripts.filter((x) => x.hook).length} hooks</h2>
+          <h2 style={secH}>🎬 ADS STUDIO · {alive.length} ads · {aliveHooks.length + alive.filter((x) => x.hook).length} hooks</h2>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {([['list', `🎯 Shoot list · ${count('to_shoot')} to shoot`], ['library', '📚 Library'], ['hooks', '🪝 Hooks bank'], ['shoot', '🎬 Shooting mode']] as [View, string][]).map(([k, l]) => (
               <button key={k} onClick={() => { setFocus(null); setView(k); }} style={chip(view === k)}>{l}</button>
@@ -137,7 +159,11 @@ export function AdsTab() {
         </div>
       )}
       {brief && (
-        <BriefSheet ads={scripts.filter((x) => sel.has(x.id))} altsOf={altsOf} onClose={() => setBrief(false)} />
+        <BriefSheet ads={alive.filter((x) => sel.has(x.id))} altsOf={altsOf} onClose={() => setBrief(false)} />
+      )}
+      {vq && (
+        <VerdictSheet ask={vq} onClose={() => setVq(null)}
+          onSubmit={async (reasons, note) => { await setVerdict(vq.kind, vq.id, vq.verdict, reasons, note); setVq(null); }} />
       )}
     </div>
   );
@@ -148,10 +174,14 @@ type Ctx = {
   setScripts: Dispatch<SetStateAction<AdScript[] | null>>; setHooks: Dispatch<SetStateAction<AdHook[]>>;
   patchScript: (id: string, p: Partial<AdScript>) => Promise<void>; patchHook: (id: string, p: Partial<AdHook>) => Promise<void>;
   sel: Set<string>; toggleSel: (id: string) => void; setSel: Dispatch<SetStateAction<Set<string>>>;
+  rejectedScripts: AdScript[]; rejectedHooks: AdHook[];
+  askVerdict: (kind: 'script' | 'hook', item: { id: string; title: string } & Partial<Pick<AdScript, 'verdict' | 'verdict_reasons' | 'verdict_note'>>, v: Verdict) => void;
+  clearVerdict: (kind: 'script' | 'hook', id: string) => void;
 };
+type VerdictAsk = { kind: 'script' | 'hook'; id: string; title: string; verdict: Verdict; reasons: string[]; note: string };
 
 // ===================== LIBRARY =====================
-function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggleSel }: Ctx) {
+function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggleSel, rejectedScripts, askVerdict, clearVerdict }: Ctx) {
   const [pole, setPole] = useState<Pole | 'all'>('all');
   const [status, setStatus] = useState<Status | 'all'>('all');
   const [q, setQ] = useState('');
@@ -215,7 +245,7 @@ function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggl
                 <div onClick={() => setOpen(isOpen ? null : x.id)} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <input type="checkbox" checked={sel.has(x.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSel(x.id)} title="Add to the studio brief" style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer', flex: 'none' }} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
-                    <b style={{ fontSize: 13.5, color: 'var(--text)' }}>{isOpen ? '▾' : '▸'} {x.title}</b>
+                    <b style={{ fontSize: 13.5, color: 'var(--text)' }}>{isOpen ? '▾' : '▸'} {x.verdict === 'loved' ? '⭐ ' : ''}{x.title}</b>
                     {x.hook && <span style={{ fontSize: 12.5, color: 'var(--gold)', lineHeight: 1.45 }}>🪝 {x.hook}</span>}
                     <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>
                       {x.needs.map((n) => NEED_LABEL[n]).join(' · ')}{x.duration ? ` · ⏱ ${x.duration}` : ''}{alts.length ? ` · +${alts.length} hooks` : ''}{x.source ? ` · ${x.source}` : ''}
@@ -243,6 +273,7 @@ function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggl
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button onClick={() => copy(scriptText(x, alts.map((h) => h.text)), 'Script copied')} style={okBtn}>📋 COPY SCRIPT</button>
                       <button onClick={() => setEditing(x.id)} style={goldBtn}>✏️ EDIT</button>
+                      <VerdictButtons x={x} onAsk={(v) => askVerdict('script', x, v)} onClear={() => clearVerdict('script', x.id)} />
                       <button onClick={() => void remove(x)} style={dangerBtn}>delete</button>
                     </div>
                   </div>
@@ -252,6 +283,7 @@ function Library({ scripts, hooks, setScripts, setHooks, patchScript, sel, toggl
           })}
         </div>
       ))}
+      <RejectedArchive items={rejectedScripts.map((x) => ({ id: x.id, title: x.title, sub: POLE_LABEL[x.pole], v: x }))} label="REJECTED ADS" onRestore={(id) => clearVerdict('script', id)} />
     </section>
   );
 }
@@ -303,7 +335,7 @@ function ScriptEditor({ initial, onSave, onCancel }: { initial: Draft; onSave: (
 }
 
 // ===================== HOOKS BANK =====================
-function HooksBank({ scripts, hooks, setHooks, patchHook }: Ctx) {
+function HooksBank({ scripts, hooks, setHooks, patchHook, rejectedHooks, askVerdict, clearVerdict }: Ctx) {
   const [angle, setAngle] = useState<string>('all');
   const [st, setSt] = useState<HookStatus | 'all'>('all');
   const [q, setQ] = useState('');
@@ -350,7 +382,7 @@ function HooksBank({ scripts, hooks, setHooks, patchHook }: Ctx) {
       {shown.map((h) => (
         <div key={h.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 11px', borderRadius: 9, border: '1px solid var(--border)', borderLeft: `3px solid ${HOOK_STATUS_LABEL[h.status].col}`, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.45 }}>{h.text}</span>
+            <span style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.45 }}>{h.verdict === 'loved' ? '⭐ ' : ''}{h.text}</span>
             <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{h.angle ?? 'no angle'}{h.script_id && titleOf.get(h.script_id) ? ` · for “${titleOf.get(h.script_id)}”` : ''}</span>
           </div>
           <select value={h.status} onChange={(e) => void patchHook(h.id, { status: e.target.value as HookStatus })}
@@ -358,6 +390,7 @@ function HooksBank({ scripts, hooks, setHooks, patchHook }: Ctx) {
             {HOOK_STATUSES.map((x) => <option key={x} value={x}>{HOOK_STATUS_LABEL[x].label}</option>)}
           </select>
           <button onClick={() => copy(h.text, 'Hook copied')} style={okBtn}>copy</button>
+          <VerdictButtons x={h} compact onAsk={(v) => askVerdict('hook', { ...h, title: h.text }, v)} onClear={() => clearVerdict('hook', h.id)} />
           <button onClick={() => void remove(h)} style={dangerBtn}>×</button>
         </div>
       ))}
@@ -375,6 +408,7 @@ function HooksBank({ scripts, hooks, setHooks, patchHook }: Ctx) {
           </div>
         </details>
       )}
+      <RejectedArchive items={rejectedHooks.map((h) => ({ id: h.id, title: h.text, sub: h.angle ?? '', v: h }))} label="REJECTED HOOKS" onRestore={(id) => clearVerdict('hook', id)} />
     </section>
   );
 }
@@ -441,7 +475,7 @@ function ShootMode({ scripts, hooks, patchScript, startId }: Ctx & { startId: st
 // ads : en cliquant, ça déplie la carte, et dès que j'appuie sur le bouton, ça la replie » (Mathieu, 01/10).
 // À tourner : rangées par ce qu'il faut réunir (seul avec le téléphone d'abord). Déjà tournées : avec la date.
 // Les cases cochées alimentent le brief pour le studio.
-function ShootList({ scripts, hooks, patchScript, onRead, sel, toggleSel, setSel }: Ctx & { onRead: (id: string) => void }) {
+function ShootList({ scripts, hooks, patchScript, onRead, sel, toggleSel, setSel, askVerdict, clearVerdict }: Ctx & { onRead: (id: string) => void }) {
   const [open, setOpen] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const s = q.trim().toLowerCase();
@@ -454,7 +488,8 @@ function ShootList({ scripts, hooks, patchScript, onRead, sel, toggleSel, setSel
   const toggle = (id: string) => setOpen((o) => (o === id ? null : id));
   const renderCard = (x: AdScript, actions: ReactNode, accent: string) => (
     <AdCard key={x.id} x={x} alts={altsOf(x.id)} open={open === x.id} onToggle={() => toggle(x.id)}
-      selected={sel.has(x.id)} onSelect={() => toggleSel(x.id)} accent={accent} actions={actions} onRead={() => onRead(x.id)} />
+      selected={sel.has(x.id)} onSelect={() => toggleSel(x.id)} accent={accent} actions={actions} onRead={() => onRead(x.id)}
+      verdict={<VerdictButtons x={x} onAsk={(v) => { setOpen(null); askVerdict('script', x, v); }} onClear={() => clearVerdict('script', x.id)} />} />
   );
   const shotBtn = (x: AdScript) => (
     <button onClick={() => { setOpen(null); void patchScript(x.id, { status: 'shot' }); toast(`✓ “${x.title}” shot`); }} style={{ ...okBtn, padding: '8px 14px' }}>✓ SHOT</button>
@@ -468,7 +503,8 @@ function ShootList({ scripts, hooks, patchScript, onRead, sel, toggleSel, setSel
           <h2 style={{ ...secH, color: 'var(--gold)' }}>🎯 TO SHOOT · {todo.length}</h2>
           {todo.length === 0 && <p style={dimP}>Nothing left to shoot. Add ideas from the list below.</p>}
           {READINESS.map((g) => {
-            const items = todo.filter((x) => readinessOf(x.needs) === g.key);
+            // ⭐ d'abord : ce que Mathieu a aimé remonte en tête de son groupe.
+            const items = todo.filter((x) => readinessOf(x.needs) === g.key).sort((a, b) => Number(b.verdict === 'loved') - Number(a.verdict === 'loved'));
             if (!items.length) return null;
             const allOn = items.every((x) => sel.has(x.id));
             return (
@@ -512,9 +548,9 @@ function ShootList({ scripts, hooks, patchScript, onRead, sel, toggleSel, setSel
 }
 
 /** Une ad en une ligne ; un clic la déplie (tout le script), un autre la replie. Les boutons ne déplient pas. */
-function AdCard({ x, alts, open, onToggle, selected, onSelect, accent, actions, onRead }: {
+function AdCard({ x, alts, open, onToggle, selected, onSelect, accent, actions, onRead, verdict }: {
   x: AdScript; alts: string[]; open: boolean; onToggle: () => void; selected: boolean; onSelect: () => void;
-  accent: string; actions: ReactNode; onRead?: () => void;
+  accent: string; actions: ReactNode; onRead?: () => void; verdict?: ReactNode;
 }) {
   const stop = (e: SyntheticEvent) => e.stopPropagation();
   const meta = [POLE_LABEL[x.pole], ...x.needs.map((n) => NEED_LABEL[n]), x.duration ? `⏱ ${x.duration}` : ''].filter(Boolean).join(' · ');
@@ -523,7 +559,7 @@ function AdCard({ x, alts, open, onToggle, selected, onSelect, accent, actions, 
       <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
         <input type="checkbox" checked={selected} onClick={stop} onChange={onSelect} title="Add to the studio brief" style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer', flex: 'none' }} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <b style={{ fontSize: 13, color: 'var(--text)' }}>{open ? '▾' : '▸'} {x.title}</b>
+          <b style={{ fontSize: 13, color: 'var(--text)' }}>{open ? '▾' : '▸'} {x.verdict === 'loved' ? '⭐ ' : ''}{x.title}</b>
           <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{meta}{x.prep ? ' · 🧰 prep' : ''}{x.meta_flag ? ' · ⚠ Meta' : ''}</span>
           {!open && x.hook && (
             <span style={{ fontSize: 12, color: 'var(--gold)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>🪝 {x.hook}</span>
@@ -539,8 +575,10 @@ function AdCard({ x, alts, open, onToggle, selected, onSelect, accent, actions, 
           {alts.length > 0 && <div><div style={{ ...secH, fontSize: 10 }}>ALTERNATIVE HOOKS · same outfit</div>{alts.map((h) => <p key={h} style={{ ...pre, padding: '2px 0' }}>• {h}</p>)}</div>}
           {x.meta_flag && <p style={{ margin: 0, fontSize: 12, color: '#ff8a5c', lineHeight: 1.5 }}>⚠ Meta: {x.meta_flag}</p>}
           {x.notes && <p style={{ ...pre, color: 'var(--muted)' }}>📝 {x.notes}</p>}
+          {x.verdict === 'loved' && <p style={{ margin: 0, fontSize: 12, color: 'var(--gold)' }}>⭐ You loved it{verdictWhy(x) ? `: ${verdictWhy(x)}` : ''}</p>}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             {actions}
+            {verdict}
             {onRead && <button onClick={onRead} style={goldBtn}>▶ big-text mode</button>}
             <button onClick={() => copy(scriptText(x, alts), 'Script copied')} style={miniBtn}>📋 copy</button>
             <button onClick={onToggle} style={miniBtn}>▴ fold</button>
@@ -588,5 +626,79 @@ function BriefSheet({ ads, altsOf, onClose }: { ads: AdScript[]; altsOf: (id: st
         {long && <p style={{ ...dimP, fontSize: 11, color: 'var(--gold)' }}>Long brief: if your mail app cuts it, use COPY and paste it into the mail, or attach the .txt.</p>}
       </div>
     </div>
+  );
+}
+
+// ===================== ⭐ / 👎 : L'AVIS DE MATHIEU =====================
+const verdictWhy = (v: Pick<AdScript, 'verdict' | 'verdict_reasons' | 'verdict_note'>) => {
+  const labels = v.verdict === 'rejected' ? REJECT_REASONS : LOVE_REASONS;
+  return [...v.verdict_reasons.map((r) => labels[r] ?? r), v.verdict_note ?? ''].filter(Boolean).join(' · ');
+};
+
+function VerdictButtons({ x, onAsk, onClear, compact }: { x: Pick<AdScript, 'verdict'>; onAsk: (v: Verdict) => void; onClear: () => void; compact?: boolean }) {
+  const loved = x.verdict === 'loved';
+  return (
+    <>
+      <button onClick={() => (loved ? onClear() : onAsk('loved'))} title={loved ? 'Remove the star' : 'Love it: more like this'}
+        style={{ ...goldBtn, ...(loved ? { background: 'rgba(245,194,74,.22)' } : {}) }}>{loved ? '★' : '☆'}{compact ? '' : loved ? ' loved' : ' love it'}</button>
+      <button onClick={() => onAsk('rejected')} title="Not for me: remove it and say why" style={dangerBtn}>👎{compact ? '' : ' not for me'}</button>
+    </>
+  );
+}
+
+/** La feuille qui demande pourquoi : quelques raisons en un tap, et une phrase libre. */
+function VerdictSheet({ ask, onSubmit, onClose }: { ask: VerdictAsk; onSubmit: (reasons: string[], note: string) => Promise<void>; onClose: () => void }) {
+  const reject = ask.verdict === 'rejected';
+  const options = reject ? REJECT_REASONS : LOVE_REASONS;
+  const [reasons, setReasons] = useState<string[]>(ask.reasons);
+  const [note, setNote] = useState(ask.note);
+  const [saving, setSaving] = useState(false);
+  const ok = !reject || reasons.length > 0 || note.trim().length > 0;
+  const submit = async () => {
+    setSaving(true);
+    try { await onSubmit(reasons, note); } catch (e) { toast(`⚠ ${(e as Error).message}`, 'error'); setSaving(false); }
+  };
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(3,7,14,.66)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 560, background: 'var(--panel, #0b1220)', border: '1px solid var(--border)', borderBottom: 'none', borderRadius: '16px 16px 0 0', padding: '16px 18px calc(20px + env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h2 style={{ ...secH, fontSize: 13, color: reject ? 'rgba(255,107,138,.95)' : 'var(--gold)' }}>{reject ? '👎 NOT FOR ME' : '⭐ LOVE IT · MORE LIKE THIS'}</h2>
+        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text)', lineHeight: 1.45 }}>{ask.title}</p>
+        <p style={{ ...dimP, fontSize: 11 }}>{reject ? 'Why ? Pick one or more, or write it. This is how Claude learns what you actually shoot.' : 'What do you like about it ? Claude will write more like this.'}</p>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {Object.entries(options).map(([k, label]) => (
+            <button key={k} onClick={() => setReasons((r) => (r.includes(k) ? r.filter((x) => x !== k) : [...r, k]))}
+              style={chip(reasons.includes(k), reject ? 'rgba(255,107,138,.95)' : 'var(--gold)')}>{label}</button>
+          ))}
+        </div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={reject ? 'In your words (optional): e.g. “I never show my laptop”, “too salesy for me”…' : 'In your words (optional)'} style={area} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button disabled={!ok || saving} onClick={() => void submit()} style={{ ...(reject ? dangerBtn : goldBtn), padding: '10px 16px', fontSize: 12, opacity: ok ? 1 : 0.5 }}>
+            {saving ? 'saving…' : reject ? '👎 REMOVE IT' : '⭐ SAVE'}
+          </button>
+          <button onClick={onClose} style={{ ...miniBtn, padding: '8px 12px' }}>cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** L'archive des rejets : rien n'est perdu, la raison reste visible, et on restaure d'un clic. */
+function RejectedArchive({ items, label, onRestore }: { items: { id: string; title: string; sub: string; v: Pick<AdScript, 'verdict' | 'verdict_reasons' | 'verdict_note' | 'verdict_at'> }[]; label: string; onRestore: (id: string) => void }) {
+  if (!items.length) return null;
+  return (
+    <details style={{ marginTop: 6 }}>
+      <summary style={{ ...secH, cursor: 'pointer', fontSize: 11, color: 'rgba(210,150,165,.9)' }}>👎 {label} · {items.length}</summary>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+        {items.map((it) => (
+          <div key={it.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 10px', borderRadius: 9, border: '1px solid rgba(255,107,138,.25)', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 220px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--muted)', textDecoration: 'line-through' }}>{it.title}</span>
+              <span style={{ fontSize: 11, color: 'rgba(210,150,165,.9)' }}>{verdictWhy(it.v)}{it.v.verdict_at ? ` · ${day(it.v.verdict_at)}` : ''}{it.sub ? ` · ${it.sub}` : ''}</span>
+            </div>
+            <button onClick={() => onRestore(it.id)} style={miniBtn}>↩ restore</button>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
