@@ -7,6 +7,7 @@
 //   · screenshots = VRAIES captures de l'app (public/adshots → WebP 600 px). C'étaient des maquettes
 //     CSS jusqu'au 14/08, dérivées au point de ne plus rien montrer de l'app.
 import { useEffect, useRef, useState } from 'react';
+import { Testimonials } from '@/components/Testimonials';
 
 // AVIS ET NOTE RETIRÉS (30/09/2026). La page affichait 4 avis inventés, une note « ★ 4.9 · 210+ members »
 // et une répartition d'étoiles qui ne venaient de nulle part. Présenter de faux avis comme vrais est trompeur
@@ -323,6 +324,9 @@ export default function DownloadPage() {
             </div>
           ))}
         </section>
+
+        {/* ── TÉMOIGNAGES RÉELS (01/10/2026) — à la place des faux avis retirés le 30/09 ── */}
+        <Testimonials />
 
         {/* ── POURQUOI L'INSTALLER (remplace les faux avis, 30/09) : ce que l'installation change VRAIMENT,
             puis la preuve vérifiable plutôt qu'une note inventée. Sur iPhone, les alertes n'existent QUE dans

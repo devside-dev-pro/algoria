@@ -4,6 +4,7 @@ import { REF_LABEL } from '@/lib/display/scale';
 import { usePrice, useFeedHealth } from '@/lib/cockpit/useRealtime';
 import { tgHref } from '@/lib/telegram';
 import { WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
+import { Testimonials } from '@/components/Testimonials';
 
 // Funnel PUBLIC (domaine racine) : ce que voit un viewer qui tape algoria.tech (lien en bio TikTok).
 // VERSION CLOSING — une seule page qui déroule l'argumentaire complet : bannière live, hero, PREUVE
@@ -156,6 +157,9 @@ export default function Funnel() {
             </div>
           ))}
         </section>
+
+        {/* ===== témoignages réels (01/10/2026) — voir components/Testimonials.tsx ===== */}
+        <Testimonials />
 
         {/* ===== FAQ anti-objections — l'honnêteté qui close ===== */}
         <section style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 7, textAlign: 'left' }}>
