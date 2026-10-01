@@ -5,6 +5,7 @@
 import { ask } from '@/components/admin/Dialog';
 import { useAdmin } from '../_state';
 import { WinbackPanel } from './WinbackPanel';
+import { FunnelPanel } from './FunnelPanel';
 import { Kpi, RowLine, SCRIPTS, dimP, goldBtn, inp, miniBtn, okBtn, personalise, secH, td, warnBox } from '../_shared';
 
 export function DashboardTab() {
@@ -64,6 +65,8 @@ export function DashboardTab() {
               );
             })()}
             <WinbackPanel />
+            {/* 🔎 OÙ LES INSCRITS S'ARRÊTENT : écran par écran (funnel_events), à la demande */}
+            <FunnelPanel />
             {/* ===== ENTONNOIR D'ACTIVATION — où fuit l'argent. Le levier n°1 : la plupart des inscrits ne
                 financent jamais. On voit la marche qui saigne + la relance auto la travaille chaque jour. */}
             {(() => {

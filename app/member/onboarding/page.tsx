@@ -14,6 +14,7 @@ import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/member/activation';
 import { DIRECT_ACCESS_PRICE_USD, DIRECT_ACCESS_URL } from '@/lib/member/directAccess';
 import { WhereAreMyCredentials } from '@/components/member/WhereAreMyCredentials';
+import { track, trackOnce } from '@/lib/member/funnel';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
@@ -160,10 +161,24 @@ export default function Onboarding() {
     try { if (Date.now() - Number(localStorage.getItem('alg_b100_at') ?? 0) < 86_400_000) return; } catch { /* localStorage indispo → tant pis, pas de popup */ }
     const t = setTimeout(() => {
       setBonusPop(true);
+      track('ob_bonus_shown', 0);
       try { localStorage.setItem('alg_b100_at', String(Date.now())); } catch { /* idem */ }
     }, 45_000);
     return () => clearTimeout(t);
   }, [member, step, brokerPick, bonusPop]);
+
+  // 📊 ENTONNOIR (01/10/2026) : quel écran est affiché, et combien de temps le membre y reste avant de cacher
+  // l'onglet (fermeture, retour à Telegram, ou départ vers le site du broker). Ne bloque rien (lib/member/funnel.ts).
+  const obCur = member && member.status === 'onboarding' ? (step ?? member.onboarding_step ?? 0) : null;
+  const enteredAt = useRef(Date.now());
+  useEffect(() => {
+    if (obCur == null) return;
+    enteredAt.current = Date.now();
+    trackOnce(`ob_view:${obCur}`, 'ob_view', obCur);
+    const onHide = () => { if (document.visibilityState === 'hidden') track('ob_leave', obCur, { secs: Math.round((Date.now() - enteredAt.current) / 1000) }); };
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, [obCur]);
 
   if (loading) return <Center>loading…</Center>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
@@ -220,7 +235,7 @@ export default function Onboarding() {
     setErr(null);
     post(body)
       .then(() => (next === 'done' ? router.replace('/member/pending') : setStep(next))) // l'écran d'attente : ce qui manque, la règle des 30 jours, le lot (audit 03/09 : personne n'y arrivait plus)
-      .catch((e) => setErr((e as Error).message))
+      .catch((e) => { setErr((e as Error).message); track('ob_error', next === 'done' ? 2 : next - 1, { msg: (e as Error).message.slice(0, 100) }); })
       .finally(() => setBusy(false));
   };
 
@@ -259,7 +274,7 @@ export default function Onboarding() {
             <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>{t('ob.budget.label')}</span>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {BUDGET_BRACKETS.map((b) => (
-                <button key={b.key} type="button" onClick={() => setBudget(budget === b.key ? null : b.key)}
+                <button key={b.key} type="button" onClick={() => { setBudget(budget === b.key ? null : b.key); track('ob_budget', 0, { bracket: String(b.key) }); }}
                   style={{ flex: '1 1 100px', padding: '9px 6px', borderRadius: 10, cursor: 'pointer', fontWeight: 750, fontSize: 12, letterSpacing: 0.2,
                     border: `1px solid ${budget === b.key ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
                     background: budget === b.key ? 'rgba(43,227,245,.08)' : 'var(--surface)',
@@ -274,7 +289,7 @@ export default function Onboarding() {
             <span className="mono" style={{ alignSelf: 'flex-start', fontSize: 9, letterSpacing: 1.4, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 5, padding: '2px 7px', fontWeight: 800 }}>{t('ob.budget.best')}</span>
           )}
           <p style={pMuted}>{lead.note ?? (budget ? `${lead.name} ${t('ob.broker.recoNote')}` : t('ob.broker.genericNote'))}</p>
-          <a href={lead.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(lead.key)} style={ctaGold}>{t('ob.broker.createCta')} {lead.name.toUpperCase()} {t('ob.broker.createCtaEnd')}</a>
+          <a href={lead.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(lead.key); track('ob_broker_link', 0, { broker: lead.key, lead: true }); }} style={ctaGold}>{t('ob.broker.createCta')} {lead.name.toUpperCase()} {t('ob.broker.createCtaEnd')}</a>
           <div style={{ borderLeft: '3px solid var(--gold)', background: 'rgba(245,194,74,.06)', borderRadius: 8, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
             <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
               <strong style={{ color: 'var(--gold)' }}>{t('ob.min.title')}</strong> {t('ob.min.body')}
@@ -288,12 +303,12 @@ export default function Onboarding() {
             <p style={{ ...pMuted, margin: 0, fontSize: 11.5, color: 'var(--dim)' }}>{t('ob.min.warn')}</p>
           </div>
           {!othersOpen ? (
-            <button onClick={() => setShowOthers(true)} style={linkBtn}>{t('ob.other')}</button>
+            <button onClick={() => { setShowOthers(true); track('ob_others', 0); }} style={linkBtn}>{t('ob.other')}</button>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>{t('ob.othersLabel')}</span>
               {rest.map((b) => (
-                <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => setBrokerPick(b.key)}
+                <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(b.key); track('ob_broker_link', 0, { broker: b.key, lead: false }); }}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${picked === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: picked === b.key ? 'rgba(43,227,245,.07)' : 'var(--surface)' }}>
                   <span style={{ fontWeight: 750, fontSize: 13.5 }}>{b.name}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: picked === b.key ? 'var(--cyan)' : 'var(--dim)' }}>{picked === b.key ? t('ob.selected') : t('ob.openAccount')}</span>
@@ -301,7 +316,7 @@ export default function Onboarding() {
               ))}
             </div>
           )}
-          <button disabled={busy} onClick={() => run({ action: 'broker', broker: picked ?? lead.key }, 1)} style={cta(busy)}>{t('ob.ready')}</button>
+          <button disabled={busy} onClick={() => { track('ob_broker_confirm', 0, { broker: picked ?? lead.key }); run({ action: 'broker', broker: picked ?? lead.key }, 1); }} style={cta(busy)}>{t('ob.ready')}</button>
           <SubmitError msg={err} t={t} />
         </section>
       )}
@@ -325,7 +340,7 @@ export default function Onboarding() {
             <span style={grpLbl}>Where does this account come from?</span>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {([['new', '✨ I just created it with the Algoria link'], ['existing', '🕗 I already had this account']] as const).map(([k, label]) => (
-                <button key={k} type="button" onClick={() => setOrigin(k)}
+                <button key={k} type="button" onClick={() => { setOrigin(k); track('ob_origin', 1, { origin: k }); }}
                   style={{ flex: '1 1 150px', padding: '12px 13px', borderRadius: 11, cursor: 'pointer', textAlign: 'left', fontSize: 12.5, fontWeight: 700, lineHeight: 1.4,
                     border: `1px solid ${origin === k ? 'rgba(43,227,245,.55)' : 'var(--border)'}`,
                     background: origin === k ? 'rgba(43,227,245,.08)' : 'var(--surface)',
@@ -388,7 +403,7 @@ export default function Onboarding() {
                 {exCopied && <div style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--dim)', textAlign: 'center' }}>{t('ob.exist.contHint')}</div>}
               </>)}
               <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--dim)', textDecoration: 'underline' }}>{t('ob.exist.ask')}</a>
-              <button onClick={() => { setOrigin(null); setStep(0); }} style={linkBtn}>{t('ob.exist.newInstead')}</button>
+              <button onClick={() => { track('ob_back', 1, { to: 0 }); setOrigin(null); setStep(0); }} style={linkBtn}>{t('ob.exist.newInstead')}</button>
             </div>
           )}
 
@@ -438,7 +453,7 @@ export default function Onboarding() {
                 <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}><b>{t('ob.direct.title')}</b></div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <button onClick={() => { setOrigin(null); setStep(0); }} style={{ ...ctaGold, border: 'none', cursor: 'pointer', textAlign: 'left' }}>{t('ob.direct.freeTitle')}</button>
+                  <button onClick={() => { track('ob_back', 1, { to: 0 }); setOrigin(null); setStep(0); }} style={{ ...ctaGold, border: 'none', cursor: 'pointer', textAlign: 'left' }}>{t('ob.direct.freeTitle')}</button>
                   <span style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--dim)' }}>{t('ob.direct.freeBody')}</span>
                 </div>
 
@@ -581,7 +596,7 @@ export default function Onboarding() {
             <p style={{ margin: '-4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--gold)' }}>⏳ {t('ob.exist.pending')}</p>
           )}
 
-          <button disabled={mt5Blocked} onClick={() => run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, ackLots: picked === 'other' ? false : ackLots, ackPaid: picked === 'other' ? ackDirect : undefined, origin: origin ?? undefined }, 2)} style={cta(mt5Blocked)}>
+          <button disabled={mt5Blocked} onClick={() => { track('ob_mt5_click', 1, { broker: picked ?? '' }); run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, ackLots: picked === 'other' ? false : ackLots, ackPaid: picked === 'other' ? ackDirect : undefined, origin: origin ?? undefined }, 2); }} style={cta(mt5Blocked)}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
           {/* remplace l'ancien « Tick both boxes above » : il ne couvrait QUE les cases, alors que huit
@@ -603,7 +618,7 @@ export default function Onboarding() {
               puis dénicher le lien en bas du formulaire. Personne ne devine ça.
               Le libellé suit la situation : « je n'en ai pas encore » n'a aucun sens pour quelqu'un dont
               la fiche porte déjà un broker — celui-là veut en CHANGER. */}
-          <button onClick={() => { setOrigin(null); setStep(0); }} style={linkBtn}>{picked ? t('ob.changeBroker') : t('ob.noBroker')}</button>
+          <button onClick={() => { track('ob_back', 1, { to: 0 }); setOrigin(null); setStep(0); }} style={linkBtn}>{picked ? t('ob.changeBroker') : t('ob.noBroker')}</button>
         </section>
       )}
 
@@ -628,9 +643,9 @@ export default function Onboarding() {
               Fund your account, then go back and update the amount — or message us and we&rsquo;ll sort it out.
             </p>
           )}
-          <button disabled={busy || belowMinimum} onClick={() => run({ action: 'strategy', choice: LIVE_STRATEGY }, 'done')} style={cta(busy || belowMinimum)}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
+          <button disabled={busy || belowMinimum} onClick={() => { track('ob_strategy_done', 2); run({ action: 'strategy', choice: LIVE_STRATEGY }, 'done'); }} style={cta(busy || belowMinimum)}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
           <SubmitError msg={err} t={t} />
-          <button onClick={() => setStep(1)} style={linkBtn}>{t('ob.backMt5')}</button>
+          <button onClick={() => { track('ob_back', 2, { to: 1 }); setStep(1); }} style={linkBtn}>{t('ob.backMt5')}</button>
         </section>
       )}
 
@@ -645,7 +660,7 @@ export default function Onboarding() {
               <b className="goldText">{FEATURED.bonus.pct}% deposit bonus</b> at {FEATURED.name} with the code below — deposit $300, the AI trades with <b style={{ color: 'var(--text)' }}>$600 of buying power</b>. Enter it when you fund your account.
             </p>
             <div className="mono" style={{ textAlign: 'center', fontSize: 20, fontWeight: 800, letterSpacing: 3, color: 'var(--gold)', border: '1px dashed rgba(245,194,74,.55)', borderRadius: 10, padding: '10px 12px' }}>{FEATURED.bonus.code}</div>
-            <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(FEATURED.key); setBonusPop(false); }} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
+            <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(FEATURED.key); setBonusPop(false); track('ob_bonus_click', 0, { broker: FEATURED.key }); }} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
             <button onClick={() => setBonusPop(false)} style={linkBtn}>Maybe later</button>
             <p className="mono" style={{ margin: 0, fontSize: 9.5, color: 'var(--dim)', textAlign: 'center', letterSpacing: 0.4, lineHeight: 1.5 }}>BONUS = TRADING CREDIT ON YOUR BROKER ACCOUNT · YOUR OWN DEPOSIT STAYS YOURS, WITHDRAWABLE ANYTIME</p>
           </section>
