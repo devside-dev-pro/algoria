@@ -14,6 +14,7 @@ type Data = {
   errors: { msg: string; n: number }[];
   budgets: { bracket: string; n: number }[];
   bonus: { shown: number; clicked: number }; backs: number;
+  help?: { opened: number; topics: { topic: string; people: number }[] };
 };
 const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
 const dur = (s: number | null) => (s == null ? '—' : s < 90 ? `${s} s` : `${Math.round(s / 60)} min`);
@@ -86,6 +87,7 @@ export function FunnelPanel() {
               <span style={{ ...secH, fontSize: 10 }}>OTHER SIGNALS</span>
               <span style={{ fontSize: 12, color: 'var(--text)' }}>Bonus popup : {d.bonus.shown} shown → {d.bonus.clicked} clicked</span>
               <span style={{ fontSize: 12, color: 'var(--text)' }}>Went back a step : {d.backs} people</span>
+              {d.help && <span style={{ fontSize: 12, color: 'var(--text)' }}>🆘 “I’m stuck” : opened by {d.help.opened}{d.help.topics.length ? ` · sent: ${d.help.topics.map((x) => `${x.topic} ×${x.people}`).join(', ')}` : ''}</span>}
               {d.budgets.length > 0 && <span style={{ fontSize: 12, color: 'var(--text)' }}>Budget picked : {d.budgets.map((b) => `${b.bracket} ×${b.n}`).join(' · ')}</span>}
             </div>
           </div>

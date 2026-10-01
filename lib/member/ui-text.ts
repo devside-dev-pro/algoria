@@ -230,6 +230,20 @@ export const UI: Dict = {
     en: 'Waiting on your broker to confirm the link. Nothing else to do — we’ll switch the copying on as soon as they do.',
     it: 'In attesa che il tuo broker confermi il collegamento. Nient’altro da fare — attiveremo la copia appena lo fanno.',
   },
+  // 🆘 « JE BLOQUE » (01/10/2026) — le membre dit où il bloque, Mathieu reçoit l'alerte avec le contexte
+  'help.open': { en: '🆘 I’m stuck, help me', it: '🆘 Sono bloccato, aiutami' },
+  'help.title': { en: 'Where are you stuck ?', it: 'Dove sei bloccato ?' },
+  'help.sub': { en: 'Pick what blocks you. Mathieu gets it right away with your details and messages you on Telegram.', it: 'Scegli cosa ti blocca. Mathieu lo riceve subito con i tuoi dati e ti scrive su Telegram.' },
+  'help.t.open_account': { en: 'I can’t open the broker account', it: 'Non riesco ad aprire il conto broker' },
+  'help.t.verify': { en: 'My ID verification is stuck', it: 'La verifica dell’identità è bloccata' },
+  'help.t.deposit': { en: 'I can’t make the deposit', it: 'Non riesco a fare il deposito' },
+  'help.t.credentials': { en: 'I can’t find my MT5 login, server or password', it: 'Non trovo login, server o password MT5' },
+  'help.t.refused': { en: 'The app refuses my details', it: 'L’app rifiuta i miei dati' },
+  'help.t.other': { en: 'Something else', it: 'Altro' },
+  'help.text': { en: 'Tell us more (optional). Never write a password here.', it: 'Dicci di più (facoltativo). Non scrivere mai una password qui.' },
+  'help.send': { en: 'SEND TO MATHIEU', it: 'INVIA A MATHIEU' },
+  'help.sent': { en: '✅ Sent. Mathieu will message you on Telegram shortly.', it: '✅ Inviato. Mathieu ti scriverà su Telegram a breve.' },
+  'help.direct': { en: 'or message him directly', it: 'oppure scrivigli direttamente' },
 };
 
 /** Message que le MEMBRE envoie au support de son broker pour faire rattacher un compte préexistant.
