@@ -204,7 +204,7 @@ export function AdminGate({ forbidden, deniedAs }: { forbidden: boolean; deniedA
       if (poll.current) clearInterval(poll.current);
       poll.current = setInterval(async () => {
         const p = (await fetch(`/api/member/tglogin?code=${d.code}`).then((x) => x.json()).catch(() => null)) as { ok?: boolean; expired?: boolean } | null;
-        if (p?.ok) { if (poll.current) clearInterval(poll.current); window.location.replace('/admin'); } // reload complet → re-check admin
+        if (p?.ok) { if (poll.current) clearInterval(poll.current); window.location.replace('/admin' + window.location.hash); } // reload complet → re-check admin, sur l'onglet où l'on était
         else if (p?.expired) { if (poll.current) clearInterval(poll.current); setLink(null); setPhase('expired'); }
       }, 2000);
     } catch {

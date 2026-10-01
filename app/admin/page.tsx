@@ -20,7 +20,7 @@ import { ToolsTab } from './tabs/ToolsTab';
 export default function AdminCRM() {
   const s = useAdminState();
   if (s.gate) return s.gate;
-  const { TABS, actions, busy, deposits, leads, liveAlert, market, post, rows, runnerLastSeen, setMarket, setTab, tab } = s;
+  const { TABS, actions, busy, deposits, leads, liveAlert, load, loadedAt, market, post, reloading, rows, runnerLastSeen, setMarket, setTab, tab } = s;
   return (
     <AdminCtx.Provider value={s}>
       <main style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
@@ -59,6 +59,12 @@ export default function AdminCRM() {
               </button>
             ))}
           </div>
+          {/* ↻ recharge les données sur place (pas la page) : on reste sur l'onglet, sans relire le site entier.
+              Elles se rechargent aussi seules toutes les 30 s et au retour sur l'onglet du navigateur. */}
+          <button disabled={reloading} onClick={() => load()} title={loadedAt ? `Data updated at ${new Date(loadedAt).toLocaleTimeString('en-GB')} · refreshes on its own every 30 s` : 'Refresh the data'}
+            style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid rgba(43,227,245,.35)', background: 'transparent', color: 'var(--cyan)', fontWeight: 800, fontSize: 11, cursor: 'pointer' }}>
+            {reloading ? '↻ …' : `↻ ${loadedAt ? new Date(loadedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'REFRESH'}`}
+          </button>
           <button disabled={busy} onClick={liveAlert} title="notification dans l'app (pas un DM Telegram) : « 🔴 ALGORIA IS LIVE » à tous les abonnés push, sans écran de rédaction" style={{ padding: '7px 13px', borderRadius: 9, border: '1px solid rgba(255,90,60,.5)', background: 'rgba(255,90,60,.08)', color: '#ff8a5c', fontWeight: 800, letterSpacing: 0.6, fontSize: 11, cursor: 'pointer' }}>🔔 PUSH · LIVE</button>
           <form action="/api/member/logout" method="post" style={{ display: 'flex' }}>
             <button style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer' }}>sign out</button>
