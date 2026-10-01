@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin } from '@/lib/member/server';
-import { ANGLES, HOOK_COLS, HOOK_STATUSES, NEEDS, POLES, SCRIPT_COLS, STATUSES } from '@/lib/admin/ads';
+import { ANGLES, HOOK_COLS, HOOK_STATUSES, LOVE_REASONS, NEEDS, POLES, REJECT_REASONS, SCRIPT_COLS, STATUSES } from '@/lib/admin/ads';
 import { SEED_HOOKS, SEED_SCRIPTS } from '@/lib/admin/adsSeed';
 
 export const runtime = 'nodejs';
@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic';
 // POST {patchScript: {id, patch}}      → modifie une fiche (statut, hook, déroulé…)
 // POST {deleteScript: id}
 // POST {addHook: {text, angle?, script_id?}} · {patchHook: {id, patch}} · {deleteHook: id}
+// POST {verdict: {kind: 'script'|'hook', id, verdict: 'rejected'|'loved'|null, reasons?, note?}} → l'avis de Mathieu
 
 function gate(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -144,6 +145,22 @@ export async function POST(req: NextRequest) {
       const { data, error } = await tb('ad_hooks').update(c).eq('id', String(id)).select(HOOK_COLS);
       if (error) return fail(error.message, 500);
       return NextResponse.json({ ok: true, hook: data?.[0] ?? null });
+    }
+    if (body.verdict) {
+      // L'avis de Mathieu : rejetée (avec au moins une raison ou une note) ou adorée ; null = on efface l'avis.
+      const v = body.verdict as { kind?: string; id?: string; verdict?: string | null; reasons?: unknown; note?: unknown };
+      const table = v.kind === 'hook' ? 'ad_hooks' : v.kind === 'script' ? 'ad_scripts' : null;
+      if (!table || !v.id) return fail('kind (script | hook) and id required');
+      const verdict = v.verdict === 'rejected' || v.verdict === 'loved' ? v.verdict : null;
+      if (v.verdict != null && !verdict) return fail('verdict must be rejected, loved or null');
+      const allowed = verdict === 'rejected' ? REJECT_REASONS : LOVE_REASONS;
+      const reasons = verdict && Array.isArray(v.reasons) ? [...new Set(v.reasons.map(String).filter((r) => r in allowed))] : [];
+      const note = verdict ? txt(v.note, 1000) : null;
+      if (verdict === 'rejected' && !reasons.length && !note) return fail('say why: pick a reason or write a note');
+      const cols = table === 'ad_hooks' ? HOOK_COLS : SCRIPT_COLS;
+      const { data, error } = await tb(table).update({ verdict, verdict_reasons: reasons, verdict_note: note, verdict_at: verdict ? new Date().toISOString() : null }).eq('id', String(v.id)).select(cols);
+      if (error) return fail(error.message, 500);
+      return NextResponse.json({ ok: true, row: data?.[0] ?? null });
     }
     if (body.deleteHook) {
       const { error } = await tb('ad_hooks').delete().eq('id', String(body.deleteHook));

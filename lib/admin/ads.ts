@@ -43,17 +43,42 @@ export const HOOK_STATUS_LABEL: Record<HookStatus, { label: string; col: string 
 };
 export const ANGLES = ['proof', 'time', 'beginner', 'skeptic', 'money', 'curiosity', 'pov', 'question'] as const;
 
-export interface AdScript {
+export type AdScript = {
   id: string; pole: Pole; title: string; hook: string | null; body: string | null; prep: string | null;
   needs: Need[]; duration: string | null; status: Status; source: string | null; notes: string | null;
   meta_flag: string | null; shot_at: string | null; created_at: string; updated_at: string;
-}
-export interface AdHook {
+} & VerdictFields;
+export type AdHook = {
   id: string; text: string; angle: string | null; status: HookStatus; script_id: string | null; notes: string | null; created_at: string;
-}
+} & VerdictFields;
 
-export const SCRIPT_COLS = 'id,pole,title,hook,body,prep,needs,duration,status,source,notes,meta_flag,shot_at,created_at,updated_at';
-export const HOOK_COLS = 'id,text,angle,status,script_id,notes,created_at';
+// ===== L'AVIS DE MATHIEU (01/10/2026) =====
+// « Cette ad ne me convient pas, et pourquoi » / « j'adore, plus comme ça ». Ces raisons sont la matière dont
+// Claude se sert pour apprendre ce que Mathieu tourne vraiment (étape 2 : la mémoire). Clés fixes, pour pouvoir
+// compter ; la note libre dit le reste.
+export type Verdict = 'rejected' | 'loved';
+export type VerdictFields = { verdict: Verdict | null; verdict_reasons: string[]; verdict_note: string | null; verdict_at: string | null };
+export const REJECT_REASONS: Record<string, string> = {
+  clickbait: '🎣 Too clickbait / not credible',
+  not_me: '🙅 I wouldn\'t say that',
+  too_hard: '🧗 Too hard to shoot',
+  meta_risk: '⚠ Meta / compliance risk',
+  inaccurate: '❌ Not how Algoria works',
+  weak_hook: '🪝 Weak hook',
+  boring: '😴 Boring, no angle',
+  duplicate: '♻️ Duplicate of another ad',
+};
+export const LOVE_REASONS: Record<string, string> = {
+  strong_hook: '🪝 Strong hook',
+  authentic: '🤝 Feels real',
+  proof: '📊 Shows real proof',
+  easy: '⚡ Easy to shoot',
+  my_style: '🎯 My style',
+  fun: '😄 Fun / original',
+};
+
+export const SCRIPT_COLS = 'id,pole,title,hook,body,prep,needs,duration,status,source,notes,meta_flag,shot_at,created_at,updated_at,verdict,verdict_reasons,verdict_note,verdict_at';
+export const HOOK_COLS = 'id,text,angle,status,script_id,notes,created_at,verdict,verdict_reasons,verdict_note,verdict_at';
 
 /** Le texte d'une fiche, prêt à coller (WhatsApp à Benjamin, notes du tournage…). */
 export function scriptText(s: Pick<AdScript, 'pole' | 'title' | 'hook' | 'body' | 'prep' | 'duration' | 'notes'>, altHooks: string[] = []): string {
