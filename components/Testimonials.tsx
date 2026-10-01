@@ -10,10 +10,10 @@
 // Remplace les faux avis retirés de /download le 30/09.
 export const TESTIMONIALS = [
   { name: 'Reece', when: '17 Sep 2026', lot: '0.05 lot', img: '/testimonials/reece.webp', text: 'Very happy with my first day can’t win every trade but profit is what matters. Incredible mate 👍🏻' },
+  { name: 'Ajibade O.', when: '22 Sep 2026', lot: '0.05 lot', img: '/testimonials/ajibade.webp', text: 'Thank you Mathieu.. your algoria Ai is producing great results. Today is my first day with you and I am happy to be with you. We achieved good success today. Market was a bit crazy today but at the end I got unbelievable profits' },
   { name: 'M. Manzini', when: '25 Sep 2026', lot: '0.01 lot', img: '/testimonials/manzini.webp', text: 'When I checked 30min ago it was 510, now 518. Wow.' },
   { name: 'Peter B.', when: '24 Sep 2026', lot: '0.01 lot', img: '/testimonials/peter.webp', text: 'And it’s ONLY midday! Low wins but they soon accumulate! Climbing to £1000 then up my lot size slightly! ALGORIA TO THE MOON! 🚀💥' },
   { name: 'Rapheal', when: '18 Sep 2026', lot: '0.01 lot', img: '/testimonials/rapheal.webp', text: 'I have seen it God bless you abundantly I’m grateful' },
-  { name: 'Neil', when: '21 Sep 2026', lot: '0.04 lot', img: '/testimonials/neil.webp', text: '🔥🔥🔥🔥 😱' },
 ];
 
 export function Testimonials({ title = 'What members say' }: { title?: string }) {
