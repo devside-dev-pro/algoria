@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, after, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin, isVip } from '@/lib/member/server';
 import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, commissionTermsFor, nextMilestone } from '@/lib/member/affiliate';
 import { minDepositFor, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
@@ -9,6 +9,7 @@ import { OFFBOARDED } from '@/lib/member/winback';
 import { BROKERS, canonicalServer } from '@/lib/member/brokers';
 import { notifyOwner } from '@/lib/member/notifyOwner';
 import { rejectMessage } from '@/lib/member/rejectReasons';
+import { sthPrecheck } from '@/lib/member/sthPrecheck';
 
 
 // Familles d'actions dont seul le DERNIER état compte : une nouvelle demande REMPLACE les précédentes en attente.
@@ -261,7 +262,7 @@ export async function POST(req: NextRequest) {
     // STASH VÉRIFICATION (nom du titulaire + dépôt déclaré) : porté par la file d'actions (statut done →
     // jamais dans la queue), relu à la fin du wizard pour enrichir la carte CONNECT côté admin.
     const { data: mn } = await db.from('members').select('member_no').eq('tg_id', s.tgId).limit(1);
-    await db.from('member_actions').insert({
+    const { data: kycIns } = await db.from('member_actions').insert({
       tg_id: s.tgId, member_no: mn?.[0]?.member_no ?? null, kind: 'kyc', status: 'done', done_by: 'member',
       // broker_label : nom saisi à la main quand le broker n'est PAS partenaire (résidents US, qui paient
       // l'accès directement). Porté jusqu'à la carte admin — sans lui, le support voit « other » et doit
@@ -298,7 +299,14 @@ export async function POST(req: NextRequest) {
       //     gardait un ack_link:true faux (constaté sur #1469) — une déclaration inexploitable à l'examen ;
       //   • le cas courant       → il a bien ouvert via le lien.
       detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount || broker === 'other' ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}), ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true, direct_access: true, ack_direct: ackLink, ack_paid: body.ackPaid === true, direct_price_usd: DIRECT_ACCESS_PRICE_USD } : {}) } as never,
-    });
+    }).select('id');
+    // PRÉ-TEST STH EN ARRIÈRE-PLAN (01/10/2026, mode observation — voir lib/member/sthPrecheck.ts) : APRÈS
+    // la réponse, jamais dans le chemin de l'envoi (leçon du 15/08). Pas pour « autre broker » : ce
+    // dossier-là se branche à la main. Le résultat s'affiche sur la carte admin ; le membre n'en voit rien.
+    if (broker !== 'other') {
+      const kycId = (kycIns as Array<{ id: string }> | null)?.[0]?.id ?? null;
+      after(() => sthPrecheck({ tgId: s.tgId, kycId, login, server, password, isMt4: platform === 'mt4' }).catch(() => {}));
+    }
     // SUCCÈS — indispensable, et pas seulement pour la statistique : l'alarme se déclenche sur « aucune
     // acceptée », donc sans cette ligne le dénominateur ne contient QUE des refus et l'alarme sonne au
     // troisième mot de passe oublié de la journée. Un capteur qui n'enregistre pas le succès ne mesure
@@ -348,10 +356,13 @@ export async function POST(req: NextRequest) {
         ...kycDetail,
         ...(preExisting ? { waiting_broker: { since: new Date().toISOString(), by: 'member (pre-existing account)', note: 'member asked the broker to attach this account to the Algoria affiliate ID' } } : {}),
       });
-    } else {
+    } else if (['live', 'paused'].includes(cur.status)) {
       // AUTO via STH (demande Mathieu 29/07 : il validait 100 % des cartes — la file ne sert plus qu'aux
       // connexions, où le dépôt se vérifie). join-master déclaratif = un appel déplace le receiver vers le
       // master de la nouvelle stratégie. Échec (receiver manuel, STH down…) → carte dans la file (backup).
+      // ⚠️ 'live'/'paused' SEULEMENT (01/10/2026) — même verrou que le lot et la pause. Un 'pending_copier'
+      // pré-connecté à l'inscription (sthPrecheck) est connu de STH : ce join l'abonnerait au master AVANT
+      // la validation de Mathieu. Hors de ces deux statuts, la stratégie est seulement notée sur la fiche.
       const { data: mrow } = await db.from('members').select('member_no,lot').eq('tg_id', s.tgId).limit(1);
       const lot = Number((mrow?.[0] as { lot?: number } | undefined)?.lot ?? 0.01) || 0.01;
       let applied = false;
