@@ -8,8 +8,13 @@
 //   · « encaissé » = commissions marquées RECEIVED + accès directs (déjà payés) ;
 //   · coûts = parrainage PAYÉ (referral_payouts status 'paid') + dépenses saisies (table expenses) ;
 //   · net = gagné − coûts.
-// DATES : on range un dépôt au jour RÉEL du dépôt (deposited_at), pas au mois comptable (booked_ym) de l'onglet
-// DEPOSITS — ici on veut savoir ce qui s'est passé tel jour. Une date saisie à la main (minuit UTC pile) est un
+// DATES — DEUX HORLOGES (01/10/2026, décision Mathieu : « les reports au mois d'après sont payés comme si on
+// les avait faits le mois d'après ») :
+//   · l'ARGENT (gagné, encaissé, en attente, perdu, partage 60/40) suit le mois COMPTABLE : une ligne reportée
+//     (booked_ym) compte le 1er du mois de report — exactement comme l'onglet DEPOSITS et le relevé du broker ;
+//   · l'ACTIVITÉ (comptes ouverts, montants déposés) reste au jour RÉEL du dépôt.
+// Avant, COMPTA rangeait tout à la date réelle : septembre y valait 23 750 $ quand DEPOSITS et le broker
+// disaient 24 450 $. Une date saisie à la main (minuit UTC pile) est un
 // jour calendaire ; un horodatage réel (GO LIVE) est converti au jour LOCAL de l'admin.
 
 export interface RawDeposit { id: string; tg_id: number; member_no: number | null; created_at: string; detail: Record<string, unknown> | null }
@@ -18,7 +23,10 @@ export interface RawPayout { id: string; tg_id: number; amount: number; status: 
 export interface RawExpense { id: string; spent_on: string; amount_usd: number; category: string; note: string | null; paid_by?: string | null }
 
 export interface Dep {
-  id: string; tgId: number; memberNo: number | null; who: string; day: string;
+  // day = date RÉELLE du dépôt (activité : comptes ouverts, montants déposés) ;
+  // acctDay = jour COMPTABLE de la commission : le 1er du mois de report quand la ligne a été reportée
+  // (booked_ym, bouton « → mois suivant » de DEPOSITS), sinon la date réelle.
+  id: string; tgId: number; memberNo: number | null; who: string; day: string; acctDay: string;
   nature: 'broker' | 'direct'; amount: number; com: number; status: 'pending' | 'received' | 'canceled';
   broker: string; country: string; source: string; redeposit: boolean;
 }
@@ -51,6 +59,11 @@ export function normalize(deps: RawDeposit[], members: RawMember[], payouts: Raw
       id: d.id, tgId: Number(d.tg_id), memberNo: d.member_no ?? m?.member_no ?? null,
       who: m?.tg_username ? `@${m.tg_username}` : `#${d.member_no ?? m?.member_no ?? '?'}`,
       day: dayOf(String(x.deposited_at ?? d.created_at)),
+      acctDay: (() => {
+        const real = dayOf(String(x.deposited_at ?? d.created_at));
+        const b = typeof x.booked_ym === 'string' && /^\d{4}-\d{2}$/.test(x.booked_ym) ? x.booked_ym : null;
+        return b && b !== real.slice(0, 7) ? `${b}-01` : real;
+      })(),
       nature: String(x.nature ?? 'broker') === 'direct' ? 'direct' : 'broker',
       amount: Number(x.amount_usd ?? 0) || 0, com: Number(x.commission_usd ?? 0) || 0,
       status: st === 'received' ? 'received' : st === 'canceled' ? 'canceled' : 'pending',
@@ -77,10 +90,14 @@ const inRange = (day: string, from: string, to: string) => day >= from && day <=
 export function totals(deps: Dep[], costs: Cost[], from: string, to: string): Totals {
   const t: Totals = { accounts: 0, deposited: 0, earned: 0, cash: 0, pending: 0, lost: 0, brokerCom: 0, direct: 0, directCount: 0, referral: 0, expenses: 0, net: 0 };
   for (const d of deps) {
-    if (!inRange(d.day, from, to)) continue;
+    // activité : date réelle
+    if (inRange(d.day, from, to) && d.nature !== 'direct') {
+      if (!d.redeposit) t.accounts += 1;
+      t.deposited += d.amount;
+    }
+    // argent : mois comptable
+    if (!inRange(d.acctDay, from, to)) continue;
     if (d.nature === 'direct') { t.direct += d.com; t.directCount += 1; t.earned += d.com; t.cash += d.com; continue; }
-    if (!d.redeposit) t.accounts += 1;
-    t.deposited += d.amount;
     if (d.status === 'canceled') { t.lost += d.com; continue; }
     t.brokerCom += d.com; t.earned += d.com;
     if (d.status === 'received') t.cash += d.com; else t.pending += d.com;
@@ -99,10 +116,10 @@ export function series(deps: Dep[], costs: Cost[], from: string, to: string): Da
   const pts = new Map<string, DayPoint>();
   for (let i = 0; i < n; i++) { const day = addDays(from, i); pts.set(day, { day, earned: 0, deposited: 0, accounts: 0, costs: 0 }); }
   for (const d of deps) {
-    const p = pts.get(d.day); if (!p) continue;
-    if (d.nature === 'direct') { p.earned += d.com; continue; }
-    p.deposited += d.amount; if (!d.redeposit) p.accounts += 1;
-    if (d.status !== 'canceled') p.earned += d.com;
+    const p = pts.get(d.day);
+    if (p && d.nature !== 'direct') { p.deposited += d.amount; if (!d.redeposit) p.accounts += 1; }
+    const q = pts.get(d.acctDay);
+    if (q && (d.nature === 'direct' || d.status !== 'canceled')) q.earned += d.com;
   }
   for (const c of costs) { const p = pts.get(c.day); if (p) p.costs += c.amount; }
   return [...pts.values()];
@@ -113,14 +130,14 @@ export interface GroupRow { key: string; accounts: number; deposited: number; ea
 export function breakdown(deps: Dep[], from: string, to: string, by: 'country' | 'broker' | 'source'): GroupRow[] {
   const g = new Map<string, GroupRow & { deps: number }>();
   for (const d of deps) {
-    if (!inRange(d.day, from, to)) continue;
+    const inReal = inRange(d.day, from, to), inAcct = inRange(d.acctDay, from, to);
+    if (!inReal && !inAcct) continue;
     const key = by === 'broker' ? (d.nature === 'direct' ? 'Direct access' : d.broker.toUpperCase()) : d[by];
     const r = g.get(key) ?? { key, accounts: 0, deposited: 0, earned: 0, avgDeposit: 0, deps: 0 };
-    if (d.nature === 'direct') r.earned += d.com;
+    if (d.nature === 'direct') { if (inAcct) r.earned += d.com; }
     else {
-      r.deposited += d.amount; r.deps += 1;
-      if (!d.redeposit) r.accounts += 1;
-      if (d.status !== 'canceled') r.earned += d.com;
+      if (inReal) { r.deposited += d.amount; r.deps += 1; if (!d.redeposit) r.accounts += 1; }
+      if (inAcct && d.status !== 'canceled') r.earned += d.com;
     }
     g.set(key, r);
   }
