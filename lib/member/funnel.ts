@@ -21,6 +21,8 @@ export const FUNNEL_EVENTS = [
   'ob_back',            // retour à un écran précédent
   'ob_leave',           // onglet quitté / caché pendant le parcours, avec le temps passé sur l'écran
   'ob_help',            // 🆘 « je bloque » envoyé (meta.topic)
+  'share_open',         // 📤 feuille « partager ce gain » ouverte (meta.ticket)
+  'share_done',         // 📤 partage lancé (meta.channel : image | whatsapp | telegram | copy)
 ] as const;
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];
 type Meta = Record<string, string | number | boolean | null>;

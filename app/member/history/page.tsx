@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
 import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
-import { drawWinCard, shareOrDownloadCard } from '@/lib/cards/winCard';
+import { ShareWinSheet, type ShareableWin } from '@/components/member/ShareWinSheet';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; closed_at: string; lot?: number }
 
@@ -15,7 +15,7 @@ export default function MemberHistory() {
   const [trades, setTrades] = useState<FeedTrade[]>([]);
   const [clientLot, setClientLot] = useState(0.01);
   const [paywall, setPaywall] = useState(false);
-  const [sharing, setSharing] = useState<string | null>(null);
+  const [shareTarget, setShareTarget] = useState<ShareableWin | null>(null);
   const [trackSince, setTrackSince] = useState<string | null>(null); // départ du track record visible (lib/member/trackSince.ts)
   // PÉRIODE (28/09/2026) : « depuis Algoria 2.0 » par défaut. Sur 7 jours seuls, une mauvaise séance rendait
   // tout l'historique rouge alors que le membre est vert depuis le départ. Le prospect garde le flux court.
@@ -46,20 +46,8 @@ export default function MemberHistory() {
   // WIN CARD — le flex viral : la carte façon Binance avec le QR du lien de PARRAINAGE du membre.
   // Il frime avec son gain → ses viewers scannent → il touche 50$ par activation. Tout le monde gagne.
   // Deux formats : story 9:16 (Insta/TikTok) et paysage 16:9 (posts, statuts, X).
-  const shareWin = async (t: FeedTrade, format: 'story' | 'landscape') => {
-    setSharing(`${t.ticket}-${format}`);
-    try {
-      const code = referral?.code;
-      const blob = await drawWinCard({
-        symbol: t.symbol, direction: t.direction, pnl: ref(t), closedAt: t.closed_at, format,
-        qrUrl: code ? `https://app.algoria.tech/r/${code}` : 'https://algoria.tech',
-        qrLabel: code ? `app.algoria.tech/r/${code}` : 'algoria.tech',
-      });
-      await shareOrDownloadCard(blob, `algoria-win-${t.ticket}-${format === 'landscape' ? 'wide' : 'story'}.png`);
-    } finally {
-      setSharing(null);
-    }
-  };
+  // 📤 (01/10/2026) : la feuille de partage commune (aperçu, story ou large, texte + lien, WhatsApp / Telegram).
+  const shareWin = (t: FeedTrade) => setShareTarget({ ticket: t.ticket, symbol: t.symbol, direction: t.direction, refPnl: ref(t), closedAt: t.closed_at });
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   const wins = trades.filter((t) => Number(t.pnl) > 0).length;
@@ -189,9 +177,9 @@ export default function MemberHistory() {
                       )}
                       {/* UN SEUL bouton, texte explicite. Carte paysage ; QR = SON lien de parrainage */}
                       {win && (
-                        <button onClick={() => void shareWin(t, 'landscape')} disabled={sharing === `${t.ticket}-landscape`} title="share this win as a card — the QR is YOUR referral link (10% of every friend’s deposit)"
+                        <button onClick={() => shareWin(t)} title="share this win as a card — the QR is YOUR referral link"
                           style={{ border: '1px solid rgba(43,227,245,.35)', background: 'rgba(43,227,245,.06)', color: 'var(--cyan)', borderRadius: 7, padding: '4px 9px', fontSize: 9.5, fontWeight: 800, letterSpacing: 0.8, cursor: 'pointer', lineHeight: 1, whiteSpace: 'nowrap' }}>
-                          {sharing === `${t.ticket}-landscape` ? '…' : 'SHARE'}
+                          📤 SHARE
                         </button>
                       )}
                     </div>
@@ -238,6 +226,7 @@ export default function MemberHistory() {
         </button>
       ) : null}
       {!unlocked && <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />}
+      <ShareWinSheet win={shareTarget} code={referral?.code ?? null} copying={member.status === 'live' || member.status === 'paused'} rewardRate={referral?.rewardRate ?? null} onClose={() => setShareTarget(null)} />
     </main>
   );
 }
