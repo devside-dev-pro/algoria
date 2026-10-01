@@ -21,6 +21,8 @@ export interface Row {
   locale?: string | null; // marché : 'en' (canal anglais) | 'it' (canal italien) — pilote app, DM et relances
   strategy?: number | null; // S1 / S2 / S3 — le master STH auquel son compte est abonné
   lot?: number | null; // la VRAIE taille de copie (risk_tier n'est qu'un libellé dérivé)
+  pwa_seen_at?: string | null; // 📲 dernière ouverture de l'app INSTALLÉE (icône) — mesure depuis le 01/10/2026
+  pwa_platform?: string | null; // 'ios' | 'android' | 'desktop'
 }
 // SCRIPTS PAR SEGMENT — le message de relance générique ne fonctionne QUE sur des gens à qui on a déjà
 // parlé. Sur les 219 personnes de la file, 196 n'avaient jamais écrit une ligne : leur envoyer « alors, tu

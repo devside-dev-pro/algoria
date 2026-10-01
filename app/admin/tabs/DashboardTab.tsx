@@ -7,7 +7,7 @@ import { useAdmin } from '../_state';
 import { Kpi, RowLine, SCRIPTS, dimP, goldBtn, inp, miniBtn, okBtn, personalise, secH, td, warnBox } from '../_shared';
 
 export function DashboardTab() {
-  const { KIND_LABEL, STEP_LABEL, actions, aff, blastBody, blastText, blastTitle, blastProgress, botActivity, botBlocked, botDrafts, busy, chatCopied, copiedScript, depPending, depTotals, deposits, input, joinSources, leads, legalOf, live, liveNoDeposit, load, monthLabel, nameOf, nudge, nudges, pendingRev, post, rejectedTgIds, relSeg, rows, sendBlast, sendSegmentBlast, sendViaBot, setBlastBody, setBlastText, setBlastTitle, setBotDrafts, setBusy, setChatCopied, setCopiedScript, setRelSeg, setTab, setTgInboxOn, spokeTgIds, tgChats, tgInboxOn, todo } = useAdmin();
+  const { KIND_LABEL, STEP_LABEL, actions, aff, blastBody, blastText, blastTitle, blastProgress, botActivity, botBlocked, botDrafts, busy, chatCopied, copiedScript, depPending, depTotals, deposits, input, joinSources, leads, legalOf, live, liveNoDeposit, load, monthLabel, nameOf, nudge, nudges, pendingRev, post, pushSet, rejectedTgIds, relSeg, rows, sendBlast, sendSegmentBlast, sendViaBot, setBlastBody, setBlastText, setBlastTitle, setBotDrafts, setBusy, setChatCopied, setCopiedScript, setRelSeg, setTab, setTgInboxOn, spokeTgIds, tgChats, tgInboxOn, todo } = useAdmin();
   return (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
@@ -24,6 +24,44 @@ export function DashboardTab() {
             {(aff?.flagged.length ?? 0) > 0 && (
               <div style={{ ...warnBox }}>⚠ negative balances: {aff!.flagged.map((f) => `${f.username ? '@' + f.username : '#' + f.member_no} (${Math.floor(f.balance)}$)`).join(' · ')}</div>
             )}
+            {/* ===== 📲 APP INSTALLÉE (01/10/2026) — combien de membres ont l'app sur leur écran d'accueil.
+                Un navigateur ne dit jamais qu'une PWA a été installée : c'est l'app elle-même qui se signale
+                quand on l'ouvre depuis l'icône (une fois par jour, /api/member/pwa → members.pwa_seen_at).
+                Le compteur part donc de 0 le 01/10 et monte à mesure que les membres déjà équipés rouvrent
+                l'app : les premiers jours, il SOUS-ESTIME le vrai parc. Les alertes push, activables seulement
+                depuis l'app installée sur iPhone, restent l'autre repère. */}
+            {(() => {
+              const now = Date.now();
+              const app = rows.filter((r) => r.pwa_seen_at);
+              const active7 = app.filter((r) => now - Date.parse(r.pwa_seen_at!) < 7 * 86_400_000).length;
+              const plat = (k: string) => app.filter((r) => (r.pwa_platform ?? 'desktop') === k).length;
+              const liveRows = rows.filter((r) => r.status === 'live');
+              const liveApp = liveRows.filter((r) => r.pwa_seen_at).length;
+              const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
+              const cell = (label: string, value: string, col: string, sub?: string) => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 92 }}>
+                  <span className="mono" style={{ fontSize: 19, fontWeight: 800, color: col }}>{value}</span>
+                  <span style={{ fontSize: 10.5, color: 'var(--muted)', letterSpacing: 0.4 }}>{label}</span>
+                  {sub && <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{sub}</span>}
+                </div>
+              );
+              return (
+                <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <h2 style={secH}>📲 APP INSTALLED — members using the home-screen app</h2>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 22px' }}>
+                    {cell('installed', String(app.length), 'var(--cyan)', `${pct(app.length, rows.length)}% of members`)}
+                    {cell('opened last 7 days', String(active7), 'var(--up)')}
+                    {cell('live members with it', `${liveApp}/${liveRows.length}`, 'var(--gold)', `${pct(liveApp, liveRows.length)}%`)}
+                    {cell('iPhone · Android · PC', `${plat('ios')} · ${plat('android')} · ${plat('desktop')}`, 'var(--text)')}
+                    {cell('push alerts on', String(pushSet.size), '#7aa2f7', 'reference')}
+                  </div>
+                  <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+                    Counted since 1 Oct 2026: a member is counted the first time they open the installed app from its icon.
+                    Members who installed earlier appear as they reopen it, so the first days undercount.
+                  </p>
+                </section>
+              );
+            })()}
             {/* ===== ENTONNOIR D'ACTIVATION — où fuit l'argent. Le levier n°1 : la plupart des inscrits ne
                 financent jamais. On voit la marche qui saigne + la relance auto la travaille chaque jour. */}
             {(() => {
