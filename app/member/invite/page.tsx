@@ -1,44 +1,31 @@
-'use client';
-// PAGE D'INVITATION (arrivée des liens de parrainage) — le canal Telegram D'ABORD : c'est là que le prospect
-// voit le process, les lives, parle au support (le closing). L'app ne vient qu'après, quand il est décidé.
-import { tgHref } from '@/lib/telegram';
-// Le cookie d'attribution est déjà posé (30 j) : peu importe le détour, le parrain garde son filleul.
-export default function Invite() {
-  const tg = process.env.NEXT_PUBLIC_TELEGRAM_URL ?? 'https://t.me';
-  return (
-    <main style={{ minHeight: '92vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 22, textAlign: 'center', padding: '0 20px' }}>
-      <img src="/brand/algoria-mark.png" alt="Algoria" width={76} height={76} style={{ objectFit: 'contain', filter: 'drop-shadow(0 0 14px rgba(43,227,245,.5))' }} />
-      <div>
-        <p className="mono goldText" style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, margin: '0 0 8px' }}>YOU&apos;VE BEEN INVITED</p>
-        <h1 style={{ fontSize: 27, margin: 0, letterSpacing: 0.4 }}>
-          A friend got you into <span className="goldText">ALGORIA</span>
-        </h1>
-        <p style={{ color: 'var(--muted)', fontSize: 14.5, lineHeight: 1.65, maxWidth: 400, margin: '12px auto 0' }}>
-          Algoria is an AI that trades gold &amp; Bitcoin, live. Start in the Telegram channel — watch it work in real time, see the results, and talk to the team.
-        </p>
-      </div>
+// PAGE D'INVITATION (arrivée des liens de parrainage /r/<code>).
+// 02/10/2026 — DIRECTION L'APP, plus le canal. Décision Mathieu : « on parraine son ami sur l'app, pas sur un
+// canal Telegram ». L'app est ouverte à tous (gains en clair, Algoria AI, Academy, support) et la confiance,
+// c'est l'ami qui l'apporte : une étape de moins. Le canal reste proposé, en petit, pour qui veut regarder avant.
+// Le prénom du parrain est lu ICI, côté serveur, depuis le cookie posé par /r/ : jamais pris dans l'URL, donc
+// personne ne peut fabriquer un lien « Elon got you into Algoria ».
+import { cookies } from 'next/headers';
+import { sdb, verifySession, SESSION_COOKIE } from '@/lib/member/server';
+import { REF_CODE_RE } from '@/lib/member/login';
+import InviteView from './InviteView';
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 360 }}>
-        <a
-          {...tgHref(tg)}
-          style={{ display: 'block', padding: '15px 20px', borderRadius: 13, textDecoration: 'none', fontWeight: 800, letterSpacing: 0.5, fontSize: 15, color: '#fff', background: 'linear-gradient(90deg,#2AABEE,#229ED9)', boxShadow: '0 0 26px rgba(42,171,238,.35)' }}
-        >
-          ✈️ JOIN THE ALGORIA CHANNEL
-        </a>
-        <div className="panel" style={{ padding: '13px 16px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.4, color: 'var(--dim)' }}>HOW IT WORKS</span>
-          {['Watch the AI trade live in the channel', 'Talk to the team, get your questions answered', 'Ready? Activate your access in the app'].map((s, i) => (
-            <div key={s} style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
-              <span className="mono" style={{ fontSize: 11, fontWeight: 800, color: 'var(--cyan)' }}>{i + 1}</span>
-              <span style={{ fontSize: 13, color: 'var(--text)' }}>{s}</span>
-            </div>
-          ))}
-        </div>
-        <a href="/member/login" style={{ fontSize: 12.5, color: 'var(--dim)', textDecoration: 'underline' }}>
-          Already talked to the team? Sign in to activate →
-        </a>
-      </div>
-      <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', letterSpacing: 1, margin: 0 }}>YOUR INVITATION STAYS LINKED TO YOUR FRIEND — TAKE YOUR TIME</p>
-    </main>
-  );
+export const dynamic = 'force-dynamic';
+
+async function referrerFirstName(code: string): Promise<string | null> {
+  if (!REF_CODE_RE.test(code)) return null;
+  try {
+    const { data } = await sdb().from('members').select('tg_name').eq('referral_code', code).limit(1);
+    const first = String((data?.[0] as { tg_name?: string | null } | undefined)?.tg_name ?? '').trim().split(/\s+/)[0] ?? '';
+    // un prénom, pas un pseudo de 40 caractères ni un nom vide : sinon « A friend »
+    return first.length >= 2 && first.length <= 20 ? first : null;
+  } catch {
+    return null;
+  }
+}
+
+export default async function Invite() {
+  const jar = await cookies();
+  const name = await referrerFirstName((jar.get('alg_ref')?.value ?? '').toLowerCase());
+  const signedIn = !!verifySession(jar.get(SESSION_COOKIE)?.value);
+  return <InviteView name={name} signedIn={signedIn} />;
 }
