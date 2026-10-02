@@ -14,6 +14,7 @@ import { redDayRecoveries } from '@/lib/member/redDays';
 import { isPermanentTelegramFailure } from '@/lib/member/telegramErrors';
 import { personalise } from '@/lib/member/personalise';
 import { TG_ALLOWED_UPDATES } from '@/lib/member/tgWebhook';
+import { publishToChannels } from '@/lib/channel/publish';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -1350,23 +1351,11 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
   // ===== PUBLIER SUR LES CANAUX, AVEC UN BOUTON (16/08/2026) ==========================================
   // Telegram ne permet PAS de poser un bouton inline à la main : un clavier ne peut venir que d'un bot,
   // par l'API. Mathieu ne pouvait donc pas publier un CTA cliquable — seulement un lien nu dans le texte.
-  //
-  // ⚠️ POURQUOI ON PUBLIE SUR LES TROIS CANAUX D'ICI, et pas seulement sur la source.
-  // Première version : publier sur la source et laisser le fan-out habituel (miroir UK + pont italien)
-  // faire le reste. Ça n'a RIEN envoyé ailleurs, et la raison est une règle de fond du Bot API :
-  // UN BOT NE REÇOIT JAMAIS D'UPDATE POUR SES PROPRES MESSAGES. Le fan-out se déclenche sur
-  // `channel_post` ; quand c'est le bot qui publie, cet update n'existe pas. Le relais fonctionne pour
-  // les posts écrits À LA MAIN dans le canal, jamais pour ceux envoyés par l'API.
-  // On diffuse donc explicitement : source telle quelle, miroir UK à l'identique (même langue), canal
-  // italien avec le texte TRADUIT et le même bouton.
-  //
-  // ANTI-DOUBLON : on pose quand même les verrous dans channel_translations. Si un update arrivait
-  // malgré tout, mirrorChannelPost et bridgeChannelPost verraient la ligne déjà là et s'arrêteraient —
-  // c'est l'insert qui gagne la course dans leur logique, pas une lecture.
+  // La diffusion (source + miroir UK + canal italien traduit, et POURQUOI on publie sur les trois d'ici)
+  // vit dans lib/channel/publish.ts depuis le 02/10/2026 : le récap du soir passe par le même chemin.
   if (body.channelPost) {
     const c = body.channelPost as { chatId?: unknown; text?: unknown; buttonText?: unknown; buttonUrl?: unknown };
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (!token) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN missing' }, { status: 500 });
+    if (!process.env.TELEGRAM_BOT_TOKEN) return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN missing' }, { status: 500 });
     const chatId = String(c.chatId ?? '').trim();
     const text = String(c.text ?? '').trim().slice(0, 4000);
     const btnText = String(c.buttonText ?? '').trim().slice(0, 60);
@@ -1375,68 +1364,14 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     // Un bouton EXIGE une URL https — Telegram rejette le message ENTIER sinon, avec un motif opaque.
     if (btnText && !/^https:\/\/\S+$/.test(btnUrl))
       return NextResponse.json({ error: 'the button needs a valid https:// link' }, { status: 400 });
-    const kb = btnText ? { reply_markup: { inline_keyboard: [[{ text: btnText, url: btnUrl }]] } } : {};
-    const send = async (dst: string, body_: string): Promise<{ ok: boolean; messageId: number | null; error: string }> => {
-      try {
-        const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
-          body: JSON.stringify({ chat_id: dst, text: body_, parse_mode: 'HTML', disable_web_page_preview: true, ...kb }),
-        });
-        const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
-        return d.ok ? { ok: true, messageId: d.result?.message_id ?? null, error: '' } : { ok: false, messageId: null, error: d.description ?? 'unknown' };
-      } catch (e) {
-        return { ok: false, messageId: null, error: String((e as { message?: string })?.message ?? e) };
-      }
-    };
-
-    const src = (process.env.TELEGRAM_CHANNEL_EN ?? '').trim();
-    const mirror = (process.env.TELEGRAM_CHANNEL_MIRROR ?? '').trim();
-    const it = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
-    const report: Array<{ channel: string; ok: boolean; error?: string }> = [];
-
-    // 1) le canal demandé
-    const main = await send(chatId, text);
-    report.push({ channel: 'source', ok: main.ok, ...(main.ok ? {} : { error: main.error }) });
-    if (!main.ok) return NextResponse.json({ error: `Telegram refused: ${main.error}`, report }, { status: 400 });
-
-    // 2) les relais — UNIQUEMENT si on vient de publier sur la source (sinon on serait en train de
-    //    rediffuser un post déjà destiné à un canal précis).
-    if (chatId === src) {
-      const lock = async (dst: string, messageId: number | null, kind: string, error?: string) => {
-        try {
-          await db.from('channel_translations').insert({
-            src_chat_id: Number(chatId), src_message_id: Number(main.messageId ?? 0), dst_chat_id: Number(dst),
-            dst_message_id: messageId, status: error ? 'failed' : 'sent', kind, error: error?.slice(0, 200) ?? null,
-          } as never);
-        } catch { /* le verrou est un confort, pas une condition */ }
-      };
-      if (mirror) {
-        const m = await send(mirror, text); // même langue : le miroir UK reçoit le texte tel quel
-        report.push({ channel: 'mirror UK', ok: m.ok, ...(m.ok ? {} : { error: m.error }) });
-        await lock(mirror, m.messageId, 'mirror_api', m.ok ? undefined : m.error);
-      }
-      if (it) {
-        // Le canal italien reçoit une TRADUCTION, avec le même bouton (son libellé reste en anglais :
-        // le traduire demanderait un second appel au modèle pour deux mots, avec le risque de bavardage
-        // documenté dans lib/member/translate.ts).
-        const { translateToItalian } = await import('@/lib/member/translate');
-        const translated = await translateToItalian(text);
-        if (!translated) {
-          report.push({ channel: 'canale IT', ok: false, error: 'translation rejected — post it by hand' });
-          await lock(it, null, 'text_api', 'translation rejected');
-        } else {
-          const i = await send(it, translated);
-          report.push({ channel: 'canale IT', ok: i.ok, ...(i.ok ? {} : { error: i.error }) });
-          await lock(it, i.messageId, 'text_api', i.ok ? undefined : i.error);
-        }
-      }
-    }
+    const out = await publishToChannels(db, { chatId, text, buttonText: btnText, buttonUrl: btnUrl });
+    if (!out.ok) return NextResponse.json({ error: out.error, report: out.report }, { status: 400 });
 
     await db.from('member_actions').insert({
       tg_id: s.tgId, member_no: null, kind: 'channel_post', status: 'done', done_by: who,
-      detail: { chat_id: chatId, message_id: main.messageId, text: text.slice(0, 500), button: btnText || null, url: btnUrl || null, report } as never,
+      detail: { chat_id: chatId, message_id: out.messageId, text: text.slice(0, 500), button: btnText || null, url: btnUrl || null, report: out.report } as never,
     });
-    return NextResponse.json({ ok: true, messageId: main.messageId, report });
+    return NextResponse.json({ ok: true, messageId: out.messageId, report: out.report });
   }
   // 🔄 WIN-BACK (01/10/2026) — les DÉPOSANTS partis puis revenus dans le tunnel (statut onboarding), chacun
   // avec un message PRÉPARÉ selon la façon dont il est parti. Rien n'est envoyé ici : l'écran affiche, Mathieu
