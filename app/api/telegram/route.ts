@@ -6,6 +6,7 @@ import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
+import { handleRecapCallback } from '@/lib/channel/recap';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 25;
@@ -390,6 +391,7 @@ export async function POST(req: Request) {
     };
     try {
       if (await handleBusinessCallback(db, cq)) return NextResponse.json({ ok: true });
+      if (await handleRecapCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 récap du soir (lib/channel/recap.ts)
       const m = /^r([dxu]):([0-9a-f-]{36})$/i.exec(String(cq.data ?? ''));
       if (!m) { await answer(''); return NextResponse.json({ ok: true }); }
       const admins = await adminTgIds();
