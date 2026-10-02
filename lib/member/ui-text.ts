@@ -88,6 +88,9 @@ export const UI: Dict = {
 
   // ===== wizard : étapes 2 (connexion MT) et 3 (stratégie) =====
   'ob.other': { en: 'I\'d rather use another broker', it: 'Preferisco usare un altro broker' },
+  // les NOMS des autres partenaires, visibles sans clic (02/10/2026) : un membre déjà client Xlence a écrit « Xlence is
+  // not on the list » — la liste existait, cachée derrière le lien ci-dessus, qui ne disait pas qu'il y en avait d'autres
+  'ob.otherPartners': { en: 'Other partners:', it: 'Altri partner:' },
   // ARRÊT AVANT LE FORMULAIRE POUR UN BROKER HORS PARTENAIRES (07/09/2026, décision Mathieu). Sur 41 demandes
   // de connexion en deux semaines, 26 refusées, presque toutes « compte non ouvert via le lien » : des
   // identifiants saisis pour rien, des jours perdus, et l'examen à la main pour Mathieu. On le dit AVANT.
