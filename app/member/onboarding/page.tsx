@@ -306,7 +306,12 @@ export default function Onboarding() {
             <p style={{ ...pMuted, margin: 0, fontSize: 11.5, color: 'var(--dim)' }}>{t('ob.min.warn')}</p>
           </div>
           {!othersOpen ? (
-            <button onClick={() => { setShowOthers(true); track('ob_others', 0); }} style={linkBtn}>{t('ob.other')}</button>
+            // LES NOMS, PAS SEULEMENT LE LIEN (02/10/2026) : « I'd rather use another broker » ne disait pas QUI d'autre.
+            // Un membre déjà client Xlence a conclu « Xlence is not on the list » et a écrit au support.
+            <button onClick={() => { setShowOthers(true); track('ob_others', 0); }} style={{ ...linkBtn, textDecoration: 'none', textAlign: 'left', lineHeight: 1.5 }}>
+              <span style={{ textDecoration: 'underline' }}>{t('ob.other')}</span>
+              <br /><span style={{ fontSize: 11.5 }}>{t('ob.otherPartners')} <b style={{ color: 'var(--muted)', fontWeight: 700 }}>{rest.map((b) => b.name).join(', ')}</b> →</span>
+            </button>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>{t('ob.othersLabel')}</span>
