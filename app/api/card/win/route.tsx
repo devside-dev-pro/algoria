@@ -8,6 +8,8 @@ import { atRef, REF_LABEL } from '@/lib/display/scale';
 import { type NextRequest } from 'next/server';
 import QRCode from 'qrcode';
 import { sdb } from '@/lib/member/server';
+import { loadFonts } from '@/lib/cards/ogFonts';
+import { REF_CODE_RE } from '@/lib/member/login';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,31 +24,6 @@ const CARD_NAME = 'ALGORIA 2.0';
 const CARD_DOT = '#2be3f5';
 const symLabel = (s: string) => (s === 'XAUUSD' ? 'GOLD' : s === 'BTCUSD' ? 'BITCOIN' : s);
 const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
-
-// Polices (Satori ne synthétise pas le gras) : chargées une fois par instance, repli police par défaut
-// si unpkg est injoignable — la carte part quand même, jamais d'échec pour une police.
-let fontsCache: Array<{ name: string; data: ArrayBuffer; weight: 400 | 700; style: 'normal' }> | null | undefined;
-async function loadFonts() {
-  if (fontsCache !== undefined) return fontsCache ?? undefined;
-  try {
-    const get = async (url: string) => {
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(`font ${r.status}`);
-      return r.arrayBuffer();
-    };
-    const [bold, reg] = await Promise.all([
-      get('https://unpkg.com/@fontsource/space-grotesk@5.0.16/files/space-grotesk-latin-700-normal.woff'),
-      get('https://unpkg.com/@fontsource/space-grotesk@5.0.16/files/space-grotesk-latin-500-normal.woff'),
-    ]);
-    fontsCache = [
-      { name: 'Grotesk', data: bold, weight: 700, style: 'normal' },
-      { name: 'Grotesk', data: reg, weight: 400, style: 'normal' },
-    ];
-  } catch {
-    fontsCache = null; // repli : police par défaut de Satori
-  }
-  return fontsCache ?? undefined;
-}
 
 export async function GET(req: NextRequest) {
   const ticket = req.nextUrl.searchParams.get('ticket') ?? '';
@@ -64,7 +41,12 @@ export async function GET(req: NextRequest) {
   // à 0.10 lot, ramené avec le lot de CE trade (lib/display/scale.ts) — la base garde le chiffre du maître
   const pnl = Math.round(atRef(t.pnl, (t as { lot?: number | null }).lot));
   const isLong = String(t.direction) === 'long';
-  const qrSvg = await QRCode.toString('https://algoria.tech', { type: 'svg', margin: 1, color: { dark: '#0b0e14', light: '#ffffff' } });
+  // ?ref=<code> (02/10/2026) : la carte sert aussi d'APERÇU DE LIEN quand un membre partage un gain (WhatsApp /
+  // Telegram affichent l'og:image de la page d'invitation) — le QR et le lien sont alors les SIENS.
+  const ref = (req.nextUrl.searchParams.get('ref') ?? '').toLowerCase();
+  const qrTarget = REF_CODE_RE.test(ref) ? `https://app.algoria.tech/r/${ref}` : 'https://algoria.tech';
+  const qrLabel = REF_CODE_RE.test(ref) ? `app.algoria.tech/r/${ref}` : 'algoria.tech';
+  const qrSvg = await QRCode.toString(qrTarget, { type: 'svg', margin: 1, color: { dark: '#0b0e14', light: '#ffffff' } });
   const qrUri = `data:image/svg+xml;base64,${Buffer.from(qrSvg).toString('base64')}`;
   // logo (filigrane + en-tête) — best-effort : la carte se rend sans si l'asset est injoignable
   let markUri: string | null = null;
@@ -116,7 +98,7 @@ export async function GET(req: NextRequest) {
           <div style={{ display: 'flex', flexDirection: 'column', marginLeft: 38, marginTop: 16 }}>
             <span style={{ fontSize: 26, fontWeight: 700, color: '#e8f0ff', lineHeight: 1 }}>Watch the AI trade live — free.</span>
             <span style={{ fontSize: 22, color: 'rgba(147,165,196,.9)', lineHeight: 1, marginTop: 12 }}>Scan to get in.</span>
-            <span style={{ fontSize: 26, fontWeight: 700, color: '#2be3f5', lineHeight: 1, marginTop: 18 }}>algoria.tech</span>
+            <span style={{ fontSize: 26, fontWeight: 700, color: '#2be3f5', lineHeight: 1, marginTop: 18 }}>{qrLabel}</span>
           </div>
         </div>
 
@@ -127,6 +109,8 @@ export async function GET(req: NextRequest) {
             <span style={{ fontSize: 22, fontWeight: 700, color: 'rgba(232,240,255,.85)', letterSpacing: 1, lineHeight: 1, marginLeft: 10 }}>{CARD_NAME}</span>
           </div>
           {t.closed_at && <span style={{ fontSize: 20, color: 'rgba(147,165,196,.7)', lineHeight: 1, marginTop: 12 }}>Closed: {fmtDate(String(t.closed_at))}</span>}
+          {/* l'avertissement vit SUR la carte (02/10/2026) : le texte partagé reste court, l'image porte le rappel */}
+          <span style={{ fontSize: 16, color: 'rgba(147,165,196,.55)', lineHeight: 1, marginTop: 10 }}>Trading involves risk. Past results don&apos;t guarantee future results.</span>
         </div>
       </div>
     ),

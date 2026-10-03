@@ -11,17 +11,17 @@ import { REF_LABEL } from '@/lib/display/scale';
 import { track } from '@/lib/member/funnel';
 
 export type ShareableWin = { ticket: string; symbol: string; direction: string; refPnl: number; closedAt: string };
-const RISK = 'Trading involves risk. Past results don\'t guarantee future results.';
 const asset = (s: string) => (/XAU|GOLD/i.test(s) ? 'gold' : /BTC/i.test(s) ? 'Bitcoin' : s);
 
+// TEXTE COURT (02/10/2026, retour de Mathieu : « le disclaimer en bas ça rend pas super bien ») : le rappel de risque
+// est passé SUR la carte (lib/cards/winCard.ts, /api/card/win) — il suit le chiffre partout où l'image circule.
 export function shareText(w: ShareableWin, link: string, copying: boolean): string {
   const amount = `+$${Math.round(w.refPnl)}`;
   return [
     copying
-      ? `Algoria's AI just closed ${amount} on ${asset(w.symbol)} (at ${REF_LABEL}), copied automatically to my account. I didn't touch a thing.`
-      : `Algoria's AI just closed ${amount} on ${asset(w.symbol)} (at ${REF_LABEL}).`,
-    `Start with my link: ${link}`,
-    RISK,
+      ? `Algoria's AI just closed ${amount} on ${asset(w.symbol)} (at ${REF_LABEL}), copied automatically to my account. I didn't touch a thing 🔥`
+      : `Algoria's AI just closed ${amount} on ${asset(w.symbol)} (at ${REF_LABEL}) 🔥`,
+    `👉 ${link}`,
   ].join('\n\n');
 }
 
@@ -36,7 +36,10 @@ export function ShareWinSheet({ win, code, copying, rewardRate, onClose }: { win
   const [format, setFormat] = useState<CardFormat>('story');
   const [preview, setPreview] = useState<{ url: string; blob: Blob } | null>(null);
   const [copied, setCopied] = useState(false);
-  const link = code ? `https://app.algoria.tech/r/${code}` : 'https://algoria.tech';
+  const refLink = code ? `https://app.algoria.tech/r/${code}` : 'https://algoria.tech';
+  // LE LIEN PORTE LE GAIN (?w=ticket) : la page d'invitation en fait son og:image (la carte, rendue serveur avec
+  // le QR du membre). WhatsApp et Telegram, qui n'envoient qu'un texte par lien, affichent donc la carte en aperçu.
+  const link = code && win ? `${refLink}?w=${encodeURIComponent(win.ticket)}` : refLink;
   const text = win ? shareText(win, link, copying) : '';
 
   useEffect(() => {
@@ -46,10 +49,10 @@ export function ShareWinSheet({ win, code, copying, rewardRate, onClose }: { win
     setPreview(null);
     void drawWinCard({
       symbol: win.symbol, direction: win.direction, pnl: win.refPnl, closedAt: win.closedAt, format,
-      qrUrl: link, qrLabel: link.replace(/^https:\/\//, ''),
+      qrUrl: refLink, qrLabel: refLink.replace(/^https:\/\//, ''),
     }).then((blob) => { if (!alive) return; url = URL.createObjectURL(blob); setPreview({ url, blob }); }).catch(() => {});
     return () => { alive = false; if (url) URL.revokeObjectURL(url); };
-  }, [win, format, link]);
+  }, [win, format, refLink]);
   useEffect(() => { if (win) track('share_open', null, { ticket: win.ticket }); }, [win]);
   if (!win || typeof document === 'undefined') return null;
 
@@ -93,10 +96,10 @@ export function ShareWinSheet({ win, code, copying, rewardRate, onClose }: { win
         <button disabled={!preview} onClick={() => void shareImage()} style={{ ...btn(true), opacity: preview ? 1 : 0.5 }}>📤 SHARE THE CARD</button>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" onClick={() => track('share_done', null, { channel: 'whatsapp' })} style={btn()}>WhatsApp</a>
-          <a href={`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text.replace(`\n\nStart with my link: ${link}`, ''))}`} target="_blank" rel="noreferrer" onClick={() => track('share_done', null, { channel: 'telegram' })} style={btn()}>Telegram</a>
+          <a href={`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text.replace(`\n\n👉 ${link}`, ''))}`} target="_blank" rel="noreferrer" onClick={() => track('share_done', null, { channel: 'telegram' })} style={btn()}>Telegram</a>
         </div>
         <button onClick={() => void copyLink()} style={{ ...btn(), border: '1px solid var(--border)', color: copied ? 'var(--up)' : 'var(--muted)', background: 'transparent' }}>{copied ? '✓ Text + link copied' : '🔗 Copy the text + my link'}</button>
-        <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.5 }}>Amount shown at {REF_LABEL}, never your account size. {RISK}</p>
+        <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.5 }}>WhatsApp and Telegram show your card as the link preview. Amount at {REF_LABEL}, never your account size.</p>
       </div>
     </div>,
     document.body,
