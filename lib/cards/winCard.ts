@@ -138,6 +138,20 @@ function drawStory(d: DrawCtx, o: WinCardOpts): void {
   ctx.font = `700 40px ${mono}`;
   ctx.fillStyle = '#2be3f5';
   ctx.fillText(o.qrLabel, W / 2, 1848);
+  paintRisk(d, W / 2, 1896, 'center');
+}
+
+// L'AVERTISSEMENT VIT SUR LA CARTE (02/10/2026, retour de Mathieu) : dans le texte partagé, la phrase de risque
+// alourdissait le message ; sur l'image, en petit, elle accompagne le chiffre partout où la carte circule.
+const RISK_LINE = "Trading involves risk. Past results don't guarantee future results.";
+function paintRisk(d: DrawCtx, x: number, y: number, align: CanvasTextAlign): void {
+  const { ctx, mono } = d;
+  ctx.save();
+  ctx.textAlign = align;
+  ctx.font = `400 ${align === 'center' ? 22 : 15}px ${mono}`;
+  ctx.fillStyle = 'rgba(147,165,196,.55)';
+  ctx.fillText(RISK_LINE, x, y);
+  ctx.restore();
 }
 
 // ===== LANDSCAPE 1200×675 — la carte Binance : métriques à gauche, QR en bas-gauche,
@@ -208,8 +222,9 @@ function drawLandscape(d: DrawCtx, o: WinCardOpts): void {
     ctx.textAlign = 'right';
     ctx.font = `400 20px ${mono}`;
     ctx.fillStyle = 'rgba(147,165,196,.7)';
-    ctx.fillText(`Closed: ${fmtDate(o.closedAt)}`, W - 48, H - 44);
+    ctx.fillText(`Closed: ${fmtDate(o.closedAt)}`, W - 48, H - 72);
   }
+  paintRisk(d, W - 48, H - 44, 'right');
 }
 
 // ===== CARTE RÉCAP (jour / semaine) — le post de fin de session : « X wins · +$Y banked » =====
@@ -281,6 +296,7 @@ function drawRecapStory(d: DrawCtx, o: RecapCardOpts): void {
   ctx.font = `700 40px ${mono}`;
   ctx.fillStyle = '#2be3f5';
   ctx.fillText(o.qrLabel, W / 2, 1848);
+  paintRisk(d, W / 2, 1896, 'center');
 }
 
 function drawRecapLandscape(d: DrawCtx, o: RecapCardOpts): void {
@@ -341,7 +357,8 @@ function drawRecapLandscape(d: DrawCtx, o: RecapCardOpts): void {
   ctx.textAlign = 'right';
   ctx.font = `400 20px ${mono}`;
   ctx.fillStyle = 'rgba(147,165,196,.7)';
-  ctx.fillText(o.dateLabel, W - 48, H - 44);
+  ctx.fillText(o.dateLabel, W - 48, H - 72);
+  paintRisk(d, W - 48, H - 44, 'right');
 }
 
 /** Prépare canvas + polices + assets, puis délègue au dessinateur voulu. */

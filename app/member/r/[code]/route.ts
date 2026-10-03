@@ -12,11 +12,19 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest, ctx: { params: Promise<{ code: string }> }) {
   const { code: raw } = await ctx.params;
   const code = raw.toLowerCase();
-  const res = NextResponse.redirect(new URL('/member/invite', req.url));
+  // ?w=<ticket> (gain partagé) et le code passent dans l'URL de la page d'invitation : WhatsApp / Telegram suivent
+  // la redirection SANS cookie, et c'est cette URL qui leur donne l'aperçu (la carte du gain, le prénom du parrain).
+  const dest = new URL('/member/invite', req.url);
+  if (REF_CODE_RE.test(code)) dest.searchParams.set('c', code);
+  const w = req.nextUrl.searchParams.get('w') ?? '';
+  if (/^\d{1,20}$/.test(w)) dest.searchParams.set('w', w);
+  const res = NextResponse.redirect(dest);
   if (REF_CODE_RE.test(code)) {
     // CLIC COMPTÉ (panneau 🤝 REFERRALS de l'admin) — une fois par navigateur et par code : le même ami qui
     // rouvre le lien ne gonfle pas le chiffre. Best effort : une mesure perdue ne doit jamais bloquer l'ami.
-    if (req.cookies.get('alg_ref')?.value !== code) {
+    // les robots d'aperçu (WhatsApp, Telegram, Facebook…) ouvrent le lien avant l'ami : ce n'est pas un clic
+    const bot = /bot|crawl|spider|facebookexternalhit|whatsapp|telegram|preview|slack|discord|twitter/i.test(req.headers.get('user-agent') ?? '');
+    if (!bot && req.cookies.get('alg_ref')?.value !== code) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const db = sdb() as any;
