@@ -789,7 +789,11 @@ export function useAdminState() {
     const brokerLabel = BROKERS.find((b) => b.key === brokerKey)?.name ?? (brokerKey || '⚠ broker ?');
     const who = String(a.detail?.broker_name ?? '') || legalOf(a.tg_id) || nameOf(a.tg_id);
     const dep = Number(a.detail?.declared_deposit ?? 0);
-    const text = ['🔔 Nouveau dépôt à vérifier', who, String(a.detail?.login ?? '⚠ login ?'), brokerLabel, dep ? `${dep}$` : '⚠ montant non déclaré'].join('\n');
+    // PAYS (06/10/2026, demande Mathieu) : celui de la fiche s'il a été renseigné, sinon celui déduit de l'IP à
+    // l'inscription (« selon IP » : un VPN peut le fausser), sinon on le signale comme manquant.
+    const geo = m?.country ? null : geoCountryOf(m?.source) ?? (/^geo:([a-z]{2})$/i.exec(String(m?.source ?? ''))?.[1]?.toUpperCase() ?? null);
+    const country = m?.country ? `🌍 ${m.country}` : geo ? `🌍 ${geo} (selon IP)` : '⚠ pays ?';
+    const text = ['🔔 Nouveau dépôt à vérifier', who, String(a.detail?.login ?? '⚠ login ?'), brokerLabel, dep ? `${dep}$` : '⚠ montant non déclaré', country].join('\n');
     void navigator.clipboard?.writeText(text).then(() => {
       setDepInfoCopied(a.id);
       setTimeout(() => setDepInfoCopied((v) => (v === a.id ? null : v)), 1600);
