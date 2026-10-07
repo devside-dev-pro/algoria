@@ -191,14 +191,23 @@ export async function consumeLoginCode(
   }
 
   const patch = { tg_username: row.tg_username, tg_name: row.tg_name, ...(row.photo_url ? { photo_url: row.photo_url } : {}), updated_at: new Date().toISOString() };
-  const { data: existing } = await (db as any).from('members').select('id,locale_chosen_at').eq('tg_id', row.tg_id).limit(1);
+  const { data: existing } = await (db as any).from('members').select('id,locale_chosen_at,referred_by,status,created_at').eq('tg_id', row.tg_id).limit(1);
   // sur un compte EXISTANT on n'écrase la langue que pour la promouvoir en 'it' : si le support l'a
   // corrigée à la main, une vieille demande d'adhésion anglaise ne doit pas la ramener en arrière.
   // LE CHOIX DU MEMBRE GAGNE (03/08) : si la personne a explicitement réglé sa langue dans l'app
   // (locale_chosen_at), aucune déduction automatique ne la réécrit — sinon un Italien qui choisit
   // l'anglais se ferait repasser en italien à sa prochaine demande d'adhésion, sans comprendre pourquoi.
   const chosen = (existing?.[0] as { locale_chosen_at?: string | null } | undefined)?.locale_chosen_at;
-  if (existing?.length) await (db as any).from('members').update({ ...patch, ...(locale !== 'en' && !chosen ? { locale } : {}) }).eq('tg_id', row.tg_id); // referred_by/source ne s'écrivent qu'à la CRÉATION
+  // PARRAIN RATTRAPÉ À UNE CONNEXION SUIVANTE (07/10/2026). Le parrain s'écrivait à la CRÉATION seulement. Vécu :
+  // l'ami de #1491 a cliqué le lien dans un navigateur, s'est inscrit 2 h plus tard depuis un autre (sans cookie),
+  // puis a rouvert le lien le lendemain — trop tard, sa fiche existait déjà sans parrain. On l'accepte donc aussi
+  // à une connexion ultérieure, sous trois conditions : la fiche n'a PAS encore de parrain (on n'écrase jamais),
+  // elle a moins de 14 jours, et le membre n'est pas encore activé (aucune commission n'a pu être calculée).
+  const ex = existing?.[0] as { referred_by?: number | null; status?: string; created_at?: string } | undefined;
+  const lateRef = referrerTg != null && ex != null && ex.referred_by == null
+    && ['onboarding', 'pending_copier'].includes(String(ex.status ?? ''))
+    && Date.now() - Date.parse(String(ex.created_at ?? '')) < 14 * 86_400_000;
+  if (existing?.length) await (db as any).from('members').update({ ...patch, ...(locale !== 'en' && !chosen ? { locale } : {}), ...(lateRef ? { referred_by: referrerTg } : {}) }).eq('tg_id', row.tg_id); // source ne s'écrit qu'à la CRÉATION ; referred_by aussi, sauf le rattrapage ci-dessus
   else await (db as any).from('members').insert({ tg_id: row.tg_id, ...patch, locale, referral_code: newReferralCode(), ...(referrerTg != null ? { referred_by: referrerTg } : {}), ...(source ? { source } : {}) });
 
   return { kind: 'ok', session: signSession({ tgId: row.tg_id, username: row.tg_username, name: row.tg_name ?? String(row.tg_id), iat: Date.now() }) };
