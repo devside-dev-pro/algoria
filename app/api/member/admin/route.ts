@@ -1201,9 +1201,18 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       // accepte un tg_id, un #numéro de membre ou un @pseudo — l'opérateur ne connaît que le dernier
       let ref: number | null = null;
       if (raw) {
-        const key = raw.replace(/^[#@]/, '').toLowerCase();
-        const { data: cand } = await db.from('members').select('tg_id,member_no,tg_username').limit(2000);
-        const hit = (cand ?? []).find((c) => String(c.tg_id) === key || String(c.member_no) === key || String(c.tg_username ?? '').toLowerCase() === key);
+        // RECHERCHE CIBLÉE (07/10/2026). On chargeait « tous » les membres (limit 2000) pour chercher dedans : or
+        // l'API renvoie au plus 1 000 lignes, sans ordre garanti. Passé 1 000 membres, le parrain avait une chance
+        // sur deux de ne pas être dans le lot → « no member matches » sur #1491, @paulcryptogold et son tg id (vécu).
+        const key = raw.trim().replace(/^[#@]/, '').toLowerCase();
+        const isNum = /^\d{1,15}$/.test(key);
+        const { data: cand } = isNum
+          ? await db.from('members').select('tg_id,member_no,tg_username').or(`tg_id.eq.${key},member_no.eq.${key}`).limit(5)
+          : /^[a-z0-9_]{3,40}$/.test(key)
+            ? await db.from('members').select('tg_id,member_no,tg_username').ilike('tg_username', key).limit(5)
+            : { data: [] as Array<{ tg_id: number; member_no: number; tg_username: string | null }> };
+        // un numéro peut être à la fois un #membre et un tg id : le #numéro de membre gagne (c'est ce que tape l'opérateur)
+        const hit = (cand ?? []).find((c) => String(c.member_no) === key) ?? (cand ?? []).find((c) => String(c.tg_id) === key || String(c.tg_username ?? '').toLowerCase() === key);
         if (!hit) return NextResponse.json({ error: `no member matches "${raw}" (try #123, @username or the tg id)` }, { status: 400 });
         if (Number(hit.tg_id) === tg) return NextResponse.json({ error: 'a member cannot refer themselves' }, { status: 400 });
         ref = Number(hit.tg_id);
