@@ -9,7 +9,7 @@
 // taille de compte : des pourcentages de rendement du compte, mois par mois.
 import { APP_URL } from './i18n';
 
-interface TrackDay { d: string; net: number; cash: number; n: number; w: number }
+interface TrackDay { d: string; net: number; cash: number; n: number; w: number; base?: number }
 interface Track { startBalance: number; maxDdPct?: number; updatedAt: string; days: TrackDay[] }
 
 export interface TrackSummary {
@@ -29,6 +29,7 @@ export function summarizeTrack(t: Track): TrackSummary | null {
   for (const day of t.days) {
     const ym = day.d.slice(0, 7);
     const m = months.get(ym) ?? { i0: idx, i1: idx };
+    if (day.base != null && day.base > 0) bal = day.base; // jours du master : son vrai solde du matin
     idx *= 1 + (bal > 0 ? day.net / bal : 0);
     bal += day.net + day.cash;
     m.i1 = idx;

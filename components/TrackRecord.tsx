@@ -1,5 +1,6 @@
 'use client';
 // TRACK RECORD RÉEL (24/09/2026) — l'historique du compte qu'Algoria 2.0 copie, façon Myfxbook.
+// Depuis le 1er octobre 2026 : les jours du MASTER, le compte que les membres copient (voir lib/track/source.ts).
 // Remplace la simulation (ex-lib/backtest/record.ts, retirée) sur l'écran in-app ET sur la page publique /track-record (ex-/backtest).
 //
 // DEUX LECTURES, UN SEUL JEU DE DONNÉES (/api/public/track) :
@@ -13,9 +14,9 @@
 // départ est écrite en clair, avec la raison ; aucune taille de compte n'est suggérée (décision Mathieu :
 // chacun gère son money management) — le % dit seulement que le SIEN dépendra du lot qu'il choisit.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
+import { MASTER_TRACK_FROM_LABEL, SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
 
-type Day = { d: string; u: number; net: number; cash: number; n: number; w: number };
+type Day = { d: string; u: number; net: number; cash: number; n: number; w: number; base?: number };
 type Track = { since: string; updatedAt: string; currency: string; startBalance: number; balance: number; maxDdPct?: number; maxDdU?: number; days: Day[] };
 
 const LOTS = [0.01, 0.02, 0.05, 0.1, 0.5, 1];
@@ -116,6 +117,8 @@ export function TrackRecord() {
     let cumU = 0;
     const months = new Map<string, { idx0: number; idx1: number; u: number; n: number; w: number }>();
     for (const day of data.days) {
+      // jours du master (depuis octobre 2026) : on repart de son VRAI solde du matin, pas du solde chaîné
+      if (day.base != null && day.base > 0) bal = day.base;
       const r = bal > 0 ? day.net / bal : 0;
       const ym = day.d.slice(0, 7);
       const m = months.get(ym) ?? { idx0: idx, idx1: idx, u: 0, n: 0, w: 0 };
@@ -160,7 +163,7 @@ export function TrackRecord() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 13px', borderRadius: 11, border: '1px solid rgba(38,224,166,.34)', background: 'rgba(38,224,166,.06)' }}>
         <span style={{ fontSize: 15 }}>✅</span>
         <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.4 }}>
-          <b className="mono" style={{ color: 'var(--up)', letterSpacing: 0.5, fontSize: 10.5 }}>REAL ACCOUNT</b> — every trade of the MetaTrader 5 account Algoria copies, read directly from the broker. Updated every 6 hours.
+          <b className="mono" style={{ color: 'var(--up)', letterSpacing: 0.5, fontSize: 10.5 }}>REAL ACCOUNTS</b> · From {MASTER_TRACK_FROM_LABEL}: every trade of the Algoria account our members copy, swap included. Before that: the MetaTrader 5 account Algoria copies, read directly from the broker. Updated every 10 minutes.
         </span>
       </div>
 
