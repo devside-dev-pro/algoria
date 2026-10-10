@@ -163,7 +163,7 @@ export function TrackRecord() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 13px', borderRadius: 11, border: '1px solid rgba(38,224,166,.34)', background: 'rgba(38,224,166,.06)' }}>
         <span style={{ fontSize: 15 }}>✅</span>
         <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.4 }}>
-          <b className="mono" style={{ color: 'var(--up)', letterSpacing: 0.5, fontSize: 10.5 }}>REAL ACCOUNTS</b> · From {MASTER_TRACK_FROM_LABEL}: every trade of the Algoria account our members copy, swap included. Before that: the MetaTrader 5 account Algoria copies, read directly from the broker. Updated every 10 minutes.
+          <b className="mono" style={{ color: 'var(--up)', letterSpacing: 0.5, fontSize: 10.5 }}>REAL ACCOUNTS</b> · From {MASTER_TRACK_FROM_LABEL}: every trade of the Algoria account our members copy, swap included. Before that: the MetaTrader 5 account Algoria copied, read directly from the broker. Updated every 10 minutes.
         </span>
       </div>
 

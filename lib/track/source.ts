@@ -7,8 +7,8 @@ export const SOURCE_TRACK_START = '2026-07-01';
 export const SOURCE_TRACK_START_LABEL = 'July 2026';
 
 // À PARTIR D'OCTOBRE 2026 : LE MASTER (décision Mathieu, 10/10/2026).
-// Le compte source est celui qu'Algoria 2.0 copie ; les membres, eux, copient le MASTER, et les deux divergent
-// jour par jour. Octobre l'a montré : −23,3 % au track record, à cause d'une seule journée du source (9 octobre,
+// Le compte source est celui qu'Algoria 2.0 copiait ; le master ne le suit plus depuis le 1er octobre (Mathieu),
+// et les membres, eux, ont toujours copié le MASTER. Octobre l'a montré : −23,3 % au track record, à cause d'une seule journée du source (9 octobre,
 // 18 ventes empilées, −102 874 $ à 1 lot) que le master n'a pas prise, alors que le master finit le mois à
 // −306,84 $ swap compris (au centime près son MetaTrader 5). Juillet à septembre restent sur le compte source ;
 // à partir de cette date, chaque jour est celui du master : ses trades copiés (table trades) et son vrai solde
