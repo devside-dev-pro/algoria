@@ -14,7 +14,7 @@
 // départ est écrite en clair, avec la raison ; aucune taille de compte n'est suggérée (décision Mathieu :
 // chacun gère son money management) — le % dit seulement que le SIEN dépendra du lot qu'il choisit.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MASTER_TRACK_FROM_LABEL, SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
+import { SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
 
 type Day = { d: string; u: number; net: number; cash: number; n: number; w: number; base?: number };
 type Track = { since: string; updatedAt: string; currency: string; startBalance: number; balance: number; maxDdPct?: number; maxDdU?: number; days: Day[] };
@@ -159,14 +159,6 @@ export function TrackRecord() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* étiquette RÉEL — l'inverse exact de l'ancien bandeau « simulation » */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 13px', borderRadius: 11, border: '1px solid rgba(38,224,166,.34)', background: 'rgba(38,224,166,.06)' }}>
-        <span style={{ fontSize: 15 }}>✅</span>
-        <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.4 }}>
-          <b className="mono" style={{ color: 'var(--up)', letterSpacing: 0.5, fontSize: 10.5 }}>REAL ACCOUNTS</b> · From {MASTER_TRACK_FROM_LABEL}: every trade of the Algoria account our members copy, swap included. Before that: the MetaTrader 5 account Algoria copied, read directly from the broker. Updated every 10 minutes.
-        </span>
-      </div>
-
       {/* sélecteurs : % par défaut ; le lot n'a de sens qu'en dollars */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <Seg label="Show results in" value={mode} onChange={setMode} options={[{ v: 'pct', t: '%' }, { v: 'usd', t: '$' }]} />

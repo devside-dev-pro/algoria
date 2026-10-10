@@ -12,6 +12,5 @@ export const SOURCE_TRACK_START_LABEL = 'July 2026';
 // 18 ventes empilées, −102 874 $ à 1 lot) que le master n'a pas prise, alors que le master finit le mois à
 // −306,84 $ swap compris (au centime près son MetaTrader 5). Juillet à septembre restent sur le compte source ;
 // à partir de cette date, chaque jour est celui du master : ses trades copiés (table trades) et son vrai solde
-// (state_snapshots). L'écran l'écrit en clair.
+// (state_snapshots). Pas de bandeau à l'écran (décision Mathieu, 10/10) : la bascule est de la plomberie interne.
 export const MASTER_TRACK_FROM = '2026-10-01';
-export const MASTER_TRACK_FROM_LABEL = 'October 2026';
