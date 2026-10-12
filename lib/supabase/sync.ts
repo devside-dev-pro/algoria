@@ -179,14 +179,34 @@ export async function fetchCandles(symbol: string, timeframe: string, sinceMs: n
 /** Candidats à la RELANCE AUTO : prospects en onboarding depuis 1 à 21 jours, pas touchés (nudge) depuis 3 jours.
  *  Le vocal perso de Mathieu reste l'arme n°1 (file manuelle dans l'admin) — ceci est le FILET pour la longue
  *  traîne qu'il n'a pas le temps de toucher. Cap appliqué par l'appelant. */
+/**
+ * TOUTES LES LIGNES, PAGE PAR PAGE (12/10/2026). Supabase ne rend qu'un nombre plafonné de lignes par requête
+ * (réglage « Max rows » du projet, 1 000 par défaut) et SANS LE SIGNALER : au-delà, la liste est juste coupée.
+ * Vécu : le 01/10 à 10 h 25 UTC, la 1 001ᵉ relance `T…` est entrée en base ; fetchNudgeCandidates ne voyait plus
+ * l'historique des autres, les croyait jamais relancés et leur renvoyait le message CHAQUE JOUR — 408 personnes
+ * relancées 7 jours sur 7 la semaine du 05/10, 4 153 DMs, et deux fois plus de blocages du bot.
+ * Ordre stable obligatoire (sinon une page peut sauter ou répéter des lignes). Une erreur LÈVE : mieux vaut
+ * aucune relance ce jour-là qu'une relance envoyée à tout le monde faute d'avoir pu lire l'historique.
+ */
+async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < 500_000; from += 1000) {
+    const { data, error } = await page(from, from + 999);
+    if (error) throw new Error(error.message);
+    out.push(...((data ?? []) as T[]));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
 /** tg_id → date du dernier refus DÉFINITIF de Telegram (bot bloqué, compte supprimé…). Partagé par les deux
  *  files de relance : voir le commentaire « qui a fermé la porte au bot » dans fetchNudgeCandidates. */
 async function fetchBlockedSince(raw: { from: (t: string) => any }): Promise<Map<number, number>> {
-  const { data: failed } = await raw
+  const failed = await readAll<{ tg_id: number; detail: { error?: string } | null; created_at: string }>((a, b) => raw
     .from('member_actions').select('tg_id,detail,created_at')
-    .eq('kind', 'nudge').eq('status', 'failed');
+    .eq('kind', 'nudge').eq('status', 'failed').order('id', { ascending: true }).range(a, b));
   const blockedSince = new Map<number, number>();
-  for (const f of (failed ?? []) as Array<{ tg_id: number; detail: { error?: string } | null; created_at: string }>) {
+  for (const f of failed) {
     if (!isPermanentTelegramFailure(f.detail?.error)) continue;
     const t = Number(f.tg_id); const at = Date.parse(f.created_at);
     if ((blockedSince.get(t) ?? 0) < at) blockedSince.set(t, at);
@@ -222,21 +242,24 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
   const now = Date.now();
   // tables « membre » hors du schéma typé du runner (comme edge_health) → cast assumé
   const raw = db as unknown as { from: (t: string) => any };
-  const { data: members } = await raw
+  // Les deux lectures dépassent 1 000 lignes : readAll (voir son commentaire, et la boucle du 01/10 au 12/10).
+  const members = await readAll<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string; onboarding_step: number | null; locale: string | null }>((a, b) => raw
     .from('members').select('tg_id,member_no,tg_username,created_at,onboarding_step,locale')
     .eq('status', 'onboarding')
     .gte('created_at', new Date(Math.max(Date.parse(NUDGE_SINCE) || 0, now - 45 * 86_400_000)).toISOString())
-    .lte('created_at', new Date(now - 2 * 86_400_000).toISOString());
-  if (!members?.length) return [];
+    .lte('created_at', new Date(now - 2 * 86_400_000).toISOString())
+    .order('tg_id', { ascending: true }).range(a, b));
+  if (!members.length) return [];
   // Ce que chacun a DÉJÀ reçu : la plus haute relance envoyée (note `T<n>`), envois réussis seulement.
-  const { data: nudges } = await raw
+  const nudges = await readAll<{ tg_id: number; detail: { note?: string } | null }>((a, b) => raw
     .from('member_actions').select('tg_id,detail')
     .eq('kind', 'nudge')
     .eq('status', 'done')
     .gte('created_at', NUDGE_SINCE)
-    .like('detail->>note' as never, 'T%' as never);
+    .like('detail->>note' as never, 'T%' as never)
+    .order('id', { ascending: true }).range(a, b));
   const lastTouch = new Map<number, number>();
-  for (const n of (nudges ?? []) as Array<{ tg_id: number; detail: { note?: string } | null }>) {
+  for (const n of nudges) {
     const m = /^T([1-4])\b/.exec(String(n.detail?.note ?? ''));
     if (!m) continue;
     const t = Number(n.tg_id); const idx = Number(m[1]);
@@ -251,7 +274,7 @@ export async function fetchNudgeCandidates(): Promise<Array<{ tg_id: number; mem
   // Un envoi réussi postérieur au dernier refus rouvre donc le canal, et la personne redevient candidate.
   const blockedSince = await fetchBlockedSince(raw);
   const out: Array<{ tg_id: number; member_no: number | null; tg_username: string | null; locale: 'en' | 'it'; days: number; step: number; touch: 1 | 2 | 3 | 4 }> = [];
-  for (const m of members as Array<{ tg_id: number; member_no: number | null; tg_username: string | null; created_at: string; onboarding_step: number | null; locale: string | null }>) {
+  for (const m of members) {
     const tg = Number(m.tg_id);
     if (blockedSince.has(tg)) continue; // a bloqué le bot : on n'insiste pas (il peut toujours écrire à Mathieu)
     const days = Math.floor((now - Date.parse(m.created_at)) / 86_400_000);
