@@ -14,7 +14,7 @@
 // départ est écrite en clair, avec la raison ; aucune taille de compte n'est suggérée (décision Mathieu :
 // chacun gère son money management) — le % dit seulement que le SIEN dépendra du lot qu'il choisit.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
+import { MASTER_TRACK_FROM, SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
 
 type Day = { d: string; u: number; net: number; cash: number; n: number; w: number; base?: number };
 type Track = { since: string; updatedAt: string; currency: string; startBalance: number; balance: number; maxDdPct?: number; maxDdU?: number; days: Day[] };
@@ -69,6 +69,88 @@ function Curve({ points, unit }: { points: number[]; unit: 'pct' | 'usd' }) {
   return <canvas ref={cv} style={{ width: '100%', height: 170, display: 'block' }} aria-label={unit === 'pct' ? 'Account return over time' : 'Result over time at the selected lot size'} />;
 }
 
+// TRADE PAR TRADE (14/10/2026) — à partir d'octobre 2026 (les mois du master), un mois se déplie : ses jours, et
+// chaque trade (heure, achat ou vente, entrée, sortie, résultat). Chargé au clic (/api/public/track/trades),
+// même calcul que le mois au-dessus. Le bot et nos messages promettaient « chaque trade » : la page le montre.
+type MTrade = { c: string; o: string | null; dir: 'buy' | 'sell'; entry: number | null; exit: number | null; u: number; reason: string | null };
+type MDay = { d: string; fee: number; trades: MTrade[] };
+const DETAIL_FROM = MASTER_TRACK_FROM.slice(0, 7);
+const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+const price = (n: number | null) => (n == null ? '–' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const held = (o: string | null, c: string) => {
+  if (!o) return null;
+  const m = Math.max(0, Math.round((Date.parse(c) - Date.parse(o)) / 60_000));
+  return m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
+};
+const closedBy = (r: string | null) => (!r ? null : /^be$/i.test(r) ? 'Break-even' : /tp|take/i.test(r) ? 'Take profit' : /sl|stop/i.test(r) ? 'Stop loss' : null);
+const NEG = 'rgba(210,150,165,.85)';
+
+function MonthTrades({ ym, atLot }: { ym: string; atLot: number }) {
+  const [days, setDays] = useState<MDay[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [openT, setOpenT] = useState<string | null>(null);
+  useEffect(() => {
+    setDays(null); setFailed(false);
+    void fetch(`/api/public/track/trades?month=${ym}`).then(async (r) => {
+      if (!r.ok) throw new Error(String(r.status));
+      setDays(((await r.json()) as { days: MDay[] }).days);
+    }).catch(() => setFailed(true));
+  }, [ym]);
+  if (failed) return <p style={{ margin: '4px 0 8px', fontSize: 11.5, color: 'var(--dim)' }}>The trades could not be loaded right now. Try again in a minute.</p>;
+  if (!days) return <p style={{ margin: '4px 0 8px', fontSize: 11.5, color: 'var(--dim)' }}>loading the trades…</p>;
+  const amt = (u: number) => fmtUsd(u * atLot);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 0 10px' }}>
+      <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>Every trade, wins and losses · results at <b style={{ color: 'var(--muted)' }}>{atLot.toFixed(2)} lot</b> · times in UTC · tap a trade for its details</span>
+      {days.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>No closed trade yet this month.</span>}
+      {days.map((day) => {
+        const dayU = day.trades.reduce((a, t) => a + t.u, 0) + day.fee;
+        const wins = day.trades.filter((t) => t.u > 0).length;
+        return (
+          <div key={day.d} style={{ display: 'flex', flexDirection: 'column', borderRadius: 10, border: '1px solid rgba(130,152,190,.14)', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: 'rgba(130,152,190,.06)' }}>
+              <span className="mono" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: .6, color: 'var(--muted)' }}>{new Date(`${day.d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).toUpperCase()}</span>
+              <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{day.trades.length} trade{day.trades.length > 1 ? 's' : ''}{day.trades.length ? ` · ${wins} won` : ''}</span>
+              <span style={{ flex: 1 }} />
+              <span className="mono" style={{ fontSize: 12, fontWeight: 800, color: dayU >= 0 ? 'var(--up)' : NEG }}>{amt(dayU)}</span>
+            </div>
+            {day.trades.map((t, i) => {
+              const id = `${day.d}-${i}`, open = openT === id, win = t.u > 0;
+              const by = closedBy(t.reason), dur = held(t.o, t.c);
+              return (
+                <div key={id} onClick={() => setOpenT(open ? null : id)} role="button" style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4, padding: '7px 10px', borderTop: '1px solid rgba(130,152,190,.08)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 36 }}>{hhmm(t.c)}</span>
+                    <span className="mono" style={{ fontSize: 10, fontWeight: 800, letterSpacing: .6, color: t.dir === 'buy' ? 'var(--cyan)' : 'var(--gold)' }}>{t.dir === 'buy' ? '▲ BUY' : '▼ SELL'}</span>
+                    <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>gold</span>
+                    <span style={{ flex: 1 }} />
+                    <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 600, color: win ? 'var(--up)' : t.u < 0 ? NEG : 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>{t.u === 0 ? '$0.00' : amt(t.u)}</span>
+                    <span style={{ fontSize: 10, color: 'var(--dim)' }}>{open ? '▾' : '▸'}</span>
+                  </div>
+                  {open && (
+                    <div className="mono" style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10.5, color: 'var(--muted)', padding: '4px 0 2px 44px' }}>
+                      <span>Entry <b style={{ color: 'var(--text)' }}>{price(t.entry)}</b> → Exit <b style={{ color: 'var(--text)' }}>{price(t.exit)}</b></span>
+                      <span>{t.o ? `Opened ${hhmm(t.o)} · ` : ''}Closed {hhmm(t.c)} UTC{dur ? ` · held ${dur}` : ''}{by ? ` · ${by}` : ''}</span>
+                      <span>Result {fmtUsd(t.u * 0.01)} at 0.01 lot · {fmtUsd(t.u * 0.1)} at 0.10 lot</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {Math.abs(day.fee) >= 0.005 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderTop: '1px solid rgba(130,152,190,.08)' }}>
+                <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>Overnight swap (broker fee for holding positions overnight)</span>
+                <span style={{ flex: 1 }} />
+                <span className="mono" style={{ fontSize: 11.5, color: day.fee >= 0 ? 'var(--up)' : NEG }}>{amt(day.fee)}</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Kpi({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
   return (
     <div style={{ flex: '1 1 92px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -101,6 +183,7 @@ export function TrackRecord() {
   const [failed, setFailed] = useState(false);
   const [mode, setMode] = useState<'pct' | 'usd'>('pct');
   const [lot, setLot] = useState(0.1);
+  const [openMonth, setOpenMonth] = useState<string | null>(null);
 
   useEffect(() => {
     void fetch('/api/public/track').then(async (r) => {
@@ -194,17 +277,23 @@ export function TrackRecord() {
         <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.4, color: 'var(--dim)', fontWeight: 700 }}>MONTH BY MONTH</span>
         {view.monthRows.map((m) => {
           const v = view.val(m), pos = v >= 0;
+          const detail = m.ym >= DETAIL_FROM, open = detail && openMonth === m.ym;
           return (
-            <div key={m.ym} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 0', borderBottom: '1px solid rgba(130,152,190,.09)' }}>
-              <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)', minWidth: 62 }}>{MONTH(m.ym)}</span>
+            <div key={m.ym} style={{ display: 'flex', flexDirection: 'column' }}>
+            <div onClick={detail ? () => setOpenMonth(open ? null : m.ym) : undefined} role={detail ? 'button' : undefined}
+              style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 0', borderBottom: '1px solid rgba(130,152,190,.09)', cursor: detail ? 'pointer' : 'default' }}>
+              <span className="mono" style={{ fontSize: 11.5, color: detail ? 'var(--cyan)' : 'var(--muted)', minWidth: 62 }}>{detail ? (open ? '▾ ' : '▸ ') : ''}{MONTH(m.ym)}</span>
               <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', minWidth: 58 }}>{m.n} trades</span>
               <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{m.win}%</span>
               <span style={{ flex: 1 }} />
               <span style={{ width: Math.round((Math.abs(v) / maxAbs) * 46), height: 5, borderRadius: 3, background: pos ? 'rgba(38,224,166,.45)' : 'rgba(255,111,142,.5)' }} />
               <span className="mono" style={{ fontSize: 12.5, fontWeight: pos ? 800 : 600, color: pos ? 'var(--up)' : 'rgba(210,150,165,.85)', minWidth: 70, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(v)}</span>
             </div>
+            {open && <MonthTrades ym={m.ym} atLot={mode === 'usd' ? lot : 0.1} />}
+            </div>
           );
         })}
+        <span style={{ fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Tap a month from {MONTH(DETAIL_FROM)} to see every trade: time, buy or sell, entry, exit and result.</span>
       </section>
 
       <p style={{ margin: '0 2px', fontSize: 11, color: 'var(--dim)', lineHeight: 1.55 }}>

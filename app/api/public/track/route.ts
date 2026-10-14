@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { MASTER_TRACK_FROM, SOURCE_TRACK_START } from '@/lib/track/source';
-import { isShowTrade } from '@/lib/cockpit/showTrades';
-import { LIVE_STRATEGY } from '@/lib/member/maintenance';
+import { loadMaster } from './master';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,11 +32,9 @@ export const dynamic = 'force-dynamic';
 const EXIT = new Set(['DEAL_ENTRY_OUT', 'DEAL_ENTRY_INOUT']);
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const lotOf = (lot: unknown) => (Number(lot) > 0 ? Number(lot) : 1);
-// Écart de solde non expliqué par les trades d'un jour : du swap tant qu'il reste petit, un dépôt ou un retrait
-// au-delà. En octobre : −192 $ (triple swap), −8,40 $, −6 $ — total −206,40 $, le swap du MetaTrader 5.
-const FEE_MAX_SHARE = 0.02;
+// Le swap du master (absent de la table trades) : voir master.ts. En octobre : −192 $ (triple swap), −8,40 $,
+// −6 $ — total −206,40 $, le swap du MetaTrader 5.
 
-type MasterTrade = { ticket: string; symbol: string; pnl: number; lot: number | null; strategy: number | null; closed_at: string };
 type Day = { d: string; u: number; net: number; cash: number; n: number; w: number; base?: number };
 
 export async function GET() {
@@ -56,25 +53,9 @@ export async function GET() {
   const account = (acc as Array<{ balance: number | null; equity: number | null; currency: string | null; updated_at: string }> | null)?.[0];
   if (!account || account.balance == null) return NextResponse.json({ error: 'no data yet' }, { status: 503 });
 
-  // ── LE MASTER, à partir de MASTER_TRACK_FROM ──────────────────────────────────────────────────────────
-  const masterFrom = `${MASTER_TRACK_FROM}T00:00:00Z`;
-  const allTrades: MasterTrade[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await db.from('trades').select('ticket,symbol,pnl,lot,strategy,closed_at')
-      .not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', masterFrom)
-      .order('closed_at', { ascending: true }).range(from, from + 999);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    allTrades.push(...((data ?? []) as MasterTrade[]));
-    if (!data || data.length < 1000) break;
-  }
-  const { data: sig } = await db.from('signals').select('ticket,rationale').gte('created_at', masterFrom).limit(5000);
-  const rafale = new Set(((sig ?? []) as Array<{ ticket: string; rationale: unknown }>)
-    .filter((x) => { const j = JSON.stringify(x.rationale ?? ''); return j.includes('RAFALE') || j.includes('ACTION mode'); }).map((x) => String(x.ticket)));
-  const copied = (t: MasterTrade) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100' && Number(t.strategy ?? 2) === LIVE_STRATEGY;
-  const { data: balRows, error: balErr } = await db.rpc('master_day_balances', { since: masterFrom });
-  if (balErr) return NextResponse.json({ error: balErr.message }, { status: 500 });
-  const bals = new Map(((balRows ?? []) as Array<{ d: string; b_open: number; b_close: number; last_ts: string }>)
-    .map((b) => [String(b.d).slice(0, 10), { open: Number(b.b_open), close: Number(b.b_close), ts: b.last_ts }]));
+  // ── LE MASTER, à partir de MASTER_TRACK_FROM (voir master.ts) ─────────────────────────────────────────
+  let master: Awaited<ReturnType<typeof loadMaster>>;
+  try { master = await loadMaster(db, MASTER_TRACK_FROM); } catch (e) { return NextResponse.json({ error: String((e as Error).message) }, { status: 500 }); }
 
   const byDay = new Map<string, Day>();
   let sinceNet = 0;
@@ -126,21 +107,11 @@ export async function GET() {
     step(net, net / (Number(d.volume) > 0 ? Number(d.volume) : 1));
   }
 
-  // Jours du master : trades copiés + swap (l'écart de solde que les trades n'expliquent pas), sur son vrai solde.
-  const masterDays = [...new Set([...allTrades.map((t) => t.closed_at.slice(0, 10)), ...bals.keys()])].sort();
-  for (const day of masterDays) {
-    const b = bals.get(day);
-    const mine = allTrades.filter((t) => t.closed_at.slice(0, 10) === day);
-    const kept = mine.filter(copied);
-    const next = bals.get(new Date(Date.parse(`${day}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10));
-    // écart de solde du jour (jusqu'au premier solde du lendemain) moins TOUS les trades clôturés, démonstration comprise
-    const rest = b ? (next?.open ?? b.close) - b.open - mine.reduce((s, t) => s + Number(t.pnl), 0) : 0;
-    const isFee = b != null && Math.abs(rest) <= FEE_MAX_SHARE * b.open;
-    const fee = isFee ? rest : 0;
-    const cash = isFee ? 0 : rest;
-    if (!kept.length && Math.abs(rest) < 0.005) continue;
-    const cur: Day = { d: day, u: 0, net: 0, cash, n: kept.length, w: kept.filter((t) => Number(t.pnl) > 0).length, ...(b ? { base: b.open } : {}) };
-    if (b) bal = b.open;
+  // Jours du master : trades copiés + swap, sur son vrai solde du matin.
+  for (const md of master.days) {
+    const { d: day, fee, cash, trades: kept } = md;
+    const cur: Day = { d: day, u: 0, net: 0, cash, n: kept.length, w: kept.filter((t) => Number(t.pnl) > 0).length, ...(md.base != null ? { base: md.base } : {}) };
+    if (md.base != null) bal = md.base;
     for (const t of kept) {
       const pnl = Number(t.pnl);
       cur.net += pnl; cur.u += pnl / lotOf(t.lot);
@@ -150,7 +121,7 @@ export async function GET() {
     if (fee) { cur.net += fee; cur.u += fee; step(fee, fee); }
     byDay.set(day, cur);
   }
-  const lastBal = [...bals.values()].at(-1);
+  const lastBal = master.last;
 
   const days = [...byDay.values()].sort((a, b) => a.d.localeCompare(b.d))
     .map((v) => ({ d: v.d, u: r2(v.u), net: r2(v.net), cash: r2(v.cash), n: v.n, w: v.w, ...(v.base != null ? { base: r2(v.base) } : {}) }));

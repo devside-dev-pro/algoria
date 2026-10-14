@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic';
 
 // Flux "Algoria Live" pour les MEMBRES (lecture seule) : cartes desk + trades clôturés.
 // Servi côté serveur (service role) car events/trades sont réservés aux sessions authentifiées du cockpit.
-// PROSPECTS (accès non activé) : les TRADES restent en clair (l'historique des gains est l'appât du
-// paywall) mais les analyses du desk sont RÉDIGÉES ICI, côté serveur — le flou client n'est qu'un
+// PROSPECTS (accès non activé) : les TRADES restent en clair, gains ET pertes (14/10/2026), mais les analyses
+// du desk sont RÉDIGÉES ICI, côté serveur — le flou client n'est qu'un
 // habillage, un curieux qui appelle l'API n'obtient que le teaser (3 premiers mots + …).
 export async function GET(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -59,19 +59,20 @@ export async function GET(req: NextRequest) {
   // Les trades des stratégies retirées sont RETIRÉS DE L'AFFICHAGE, pas de la base : le filtre est ici,
   // les lignes restent intactes dans `trades` et reviennent dès qu'on retire l'id de maintenance.ts.
   const clean = (tradesQ.data ?? []).filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100' && !inMaintenance(Number((t as { strategy?: number }).strategy ?? 2)));
-  let trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY);
-  // PROSPECTS : la BANDE-ANNONCE, pas le flux brut — un curieux qui arrive sur 2 SL d'affilée ne rejoint
-  // jamais, même après des semaines vertes. On ne montre que les GAINS (l'UI l'assume : "highlights") ;
-  // l'historique complet, honnête, s'ouvre avec l'accès débloqué.
-  if (!unlocked) trades = trades.filter((t) => Number(t.pnl) > 0);
-  // MEMBRE : on renvoie les 7 JOURS ENTIERS, sans plafond de lignes. Le plafond à 30 créait deux chiffres
+  // PROSPECT : les 7 DERNIERS JOURS, quelle que soit la période demandée (décision Mathieu, 14/10/2026 : l'historique
+  // réel de la semaine, pertes comprises ; le reste s'ouvre avec l'accès). Borne appliquée ici, côté serveur.
+  const prospectFrom = Date.now() - 7 * 86_400_000;
+  const trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY && (unlocked || Date.parse(String(t.closed_at)) >= prospectFrom));
+  // PROSPECTS : LES MÊMES TRADES QUE LES MEMBRES, PERTES COMPRISES (14/10/2026, décision Mathieu). Jusqu'ici le
+  // prospect ne voyait que les 30 derniers GAINS (« bande-annonce ») : biaisé, et contredit par tout ce qu'on dit
+  // (« every single trade is public, wins and losses »). Une prospecte l'a relevé au bot le 14/10. Ce qui évite de
+  // faire fuir n'est plus le filtre mais la présentation (onglet History) : période longue par défaut (depuis 2.0,
+  // nette positive), trades regroupés par journée avec le bilan du jour, pertes en gris et non en rouge, montants
+  // à 0.10 lot, et une ligne qui dit pourquoi une perte reste une perte maîtrisée (stop loss sur chaque trade).
+  // PÉRIODE ENTIÈRE, sans plafond de lignes, pour tout le monde. Le plafond à 30 créait deux chiffres
   // contradictoires sur le même écran — le sélecteur annonçait « 36 trades · −15,27$ » (7 jours complets)
   // pendant que le bloc juste en dessous affichait « 30 trades · −6,72$ » (les 30 derniers seulement).
-  // Les deux étaient exacts, sur des périmètres différents ; pour le membre c'était simplement incohérent,
-  // et un chiffre qu'on ne sait pas lire abîme plus la confiance qu'un chiffre négatif honnête.
-  // Le PROSPECT garde son plafond : sa liste est déjà filtrée aux gains (bande-annonce assumée), la
-  // rallonger n'ajouterait rien et alourdirait la page qui sert à convertir.
-  if (!unlocked) trades = trades.slice(0, 30);
+  // Un chiffre qu'on ne sait pas lire abîme plus la confiance qu'un chiffre négatif honnête.
   const deskFiltered = (desk.data ?? []).filter((e) => (e.data as { symbol?: string })?.symbol !== 'NAS100');
   const deskOut = unlocked
     ? deskFiltered
@@ -105,5 +106,5 @@ export async function GET(req: NextRequest) {
     lastLiveNo: lastLive && lastLiveHours != null && lastLiveHours < 72 ? Number(lastLive.member_no) : null,
     lastLiveHours: lastLive && lastLiveHours != null && lastLiveHours < 72 ? lastLiveHours : null,
   };
-  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, trackSince: TRACK_SINCE, range: range === 'all' || range === '30d' ? range : '7d' });
+  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, trackSince: TRACK_SINCE, range: unlocked && (range === 'all' || range === '30d') ? range : '7d' });
 }
