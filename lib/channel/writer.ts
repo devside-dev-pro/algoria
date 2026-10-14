@@ -120,6 +120,7 @@ HARD RULES (a post that breaks one is thrown away):
 - Never write a number about results, profits or percentages yourself. Use the tokens you are given ({{AMOUNTS}}, {{YESTERDAY}}) exactly as written; the system replaces them with the real figures.
 - No promises and no projections: never say people will earn, make money, double, get rich, or that today will be green. Past results only.
 - Nothing negative in this public channel: no losses, red days, drawdowns, maintenance, pauses, bugs (the only exception is explaining that every trade has a stop loss, when the card is about that).
+- NEVER TALK ABOUT MONEY PEOPLE WOULD PUT IN: no deposit, no minimum, no recommended amount, no "fund your account", no balance, no dollar figure of any kind except the result tokens. It scares people. Say "create your trading account" and "connect your trading account to Algoria".
 - Never mention an account size, the 30-day rule, withdrawal delays, testimonials, member quotes or screenshots of members.
 - Only use facts given to you (the card, the context, the knowledge below). If you are not sure a fact is true, leave it out.
 - Never repeat an opening, a structure or a joke from the RECENT POSTS. Every post must feel written today, for today.
@@ -141,6 +142,8 @@ function contextBlock(c: DayContext): string {
 // ── LES GARDE-FOUS ────────────────────────────────────────────────────────────────────────────────────
 
 const PROMISE = /guarantee|risk[- ]?free|passive income|get rich|easy money|financial freedom|you(?:'ll| will) (?:earn|make|profit)|double your|no risk|life[- ]changing|millionaire/i;
+// l'argent à mettre (Mathieu, 15/10) : aucun de ces mots dans un post public, quel que soit le contexte
+const MONEY_IN = /\b(deposit(?:s|ed|ing)?|fund(?:s|ed|ing)?\b(?! manager)|minimum|balance|top[- ]?up|invest(?:ed|ing|ment)?)\b|\bfund it\b|\bhow much\b/i;
 const NEGATIVE = /\b(loss|losses|losing|lost|red day|drawdown|maintenance|paused?|bug|outage|down day)\b/i;
 
 type GuardOpts = { tokens: Record<string, string>; required?: string[]; allowNegative?: boolean; allowedUsd?: number[]; allowedNumbers?: number[]; maxChars?: number };
@@ -153,6 +156,7 @@ export function check(raw: string, o: GuardOpts): { ok: true; text: string } | {
   if (/https?:\/\/|t\.me\/|\.tech\b|www\./i.test(t)) return { ok: false, why: 'no links in the text, the button is added by the system' };
   if (PROMISE.test(t.replace(RISK, ''))) return { ok: false, why: 'it sounds like a promise of gains' };
   if (!o.allowNegative && NEGATIVE.test(t.replace(/stop[- ]?loss(?:es)?/gi, ''))) return { ok: false, why: 'negative words are not allowed in this public channel' };
+  if (MONEY_IN.test(t)) return { ok: false, why: 'never talk about money to put in (deposit, fund, minimum, balance, invest): say create / connect your trading account' };
   for (const k of o.required ?? []) if (!t.includes(`{{${k}}}`)) return { ok: false, why: `the token {{${k}}} is missing` };
   // aucun montant écrit par le modèle, sauf les faits autorisés (200 $, 500 $…) ; aucun pourcentage
   const allowed = new Set((o.allowedUsd ?? []).map(String));
@@ -246,7 +250,7 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
     : {
         tokens,
         allowNegative: b.kind === 'howto',
-        allowedUsd: b.kind === 'howto' || b.kind === 'cta' ? [200, 500, 400] : [],
+        allowedUsd: [],
         ...(b.kind === 'morning' ? { allowedNumbers: [c.lastSession?.trades ?? -1, c.week?.trades ?? -1, ...dateNums], maxChars: 600 } : { maxChars: 900 }),
       };
   const sys = await systemPrompt();

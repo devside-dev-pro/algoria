@@ -27,6 +27,9 @@
 // Règles de contenu (Mathieu) : anglais, pas de tiret long, une espace avant ? et !, aucune négativité dans le canal
 // public, montants à 0.10 lot (et 0.01), jamais de taille de compte, résultats passés avec la phrase de risque,
 // aucune projection, pas la règle des 30 jours. Les témoignages ne sont pas concernés.
+// JAMAIS D'ARGENT À METTRE EN PUBLIC (Mathieu, 15/10 : « je veux pas faire peur aux gens avec un 500 $ ») : ni dépôt,
+// ni minimum, ni montant conseillé, ni « fund your account ». On dit « create your trading account » et « connect
+// your trading account to Algoria ». Les fiches ci-dessous n'en parlent plus, et le rédacteur refuse ces mots.
 import { liveTrades, type Trade } from './recap';
 import { publishToChannels, sourceChannel } from './publish';
 import { adminTgIds } from '@/lib/member/notifyOwner';
@@ -59,38 +62,35 @@ const HOW = '🔵💙 HOW IT WORKS';
 export const HOWTO: CmPost[] = [
   post('who', [HOW, "<b>Who's really trading ?</b>", '', 'Algoria is 100% driven by AI. 🤖', 'Mathieu built it. He never places a trade by hand.', '', "Every trade you see here is the AI's decision. Zero manual trades."], '🎓 HOW IT WORKS, IN 5 MIN', L.academy),
   post('copy', [HOW, '<b>Do I have to copy the trades myself ?</b>', '', 'No. ❌', '', 'You connect your own MetaTrader 5 account once.', 'After that, every Algoria trade is copied to it automatically, at the size you chose.', '', 'No signals to follow. No charts to watch. You see everything live in the app. 📲'], '🚀 OPEN ALGORIA', L.app),
-  post('money', [HOW, '<b>Where is my money ?</b>', '', 'In YOUR broker account. In YOUR name. 🔐', '', '🤖 Algoria takes the trade', '🔁 The copier sends it to your account', '💼 Your MT5 account: your size, your broker, your name', '', 'Your funds never go through us.'], '🎓 LEARN MORE', L.academy),
-  post('password', [HOW, '<b>What can the trader password do ?</b>', '', 'It connects your account to the copier. That\'s it.', '', '✅ Copy the trades', '❌ Withdraw your money', '❌ Deposit or move funds', '❌ Open your client area', '', 'Deposits and withdrawals stay 100% in your hands. 🙌'], '🎓 LEARN MORE', L.academy),
-  post('start', [HOW, '<b>What do I need to start ?</b>', '', '1️⃣ An account with our partner broker (minimum $200, we recommend $500)', '2️⃣ Connect it in the app: encrypted, 2 minutes', '3️⃣ The team switches the copy on ✅', '', 'Trading involves risk.'], '⚡ START HERE', L.start),
+  post('money', [HOW, '<b>Whose account is it ?</b>', '', 'Yours. In YOUR name, at the broker. 🔐', '', '🤖 Algoria takes the trade', '🔁 The copier sends it to your trading account', '💼 Your account: your size, your broker, your name', '', 'Nothing goes through us.'], '🎓 LEARN MORE', L.academy),
+  post('password', [HOW, '<b>What can the trader password do ?</b>', '', 'It connects your account to the copier. That\'s it.', '', '✅ Copy the trades', '❌ Take anything out of your account', '❌ Open your client area', '', 'Your account stays 100% in your hands. 🙌'], '🎓 LEARN MORE', L.academy),
+  post('start', [HOW, '<b>What do I need to start ?</b>', '', '1️⃣ Create your trading account with our partner broker', '2️⃣ Connect your trading account to Algoria in the app: encrypted, 2 minutes', '3️⃣ The team switches the copy on ✅', '', 'Trading involves risk.'], '⚡ START HERE', L.start),
   post('stoploss', [HOW, '<b>What happens when a trade goes wrong ?</b>', '', '🛑 Every trade has a stop loss.', 'The loss is cut and accepted. Never averaged down, never "held until it comes back".', '', "That's how a bad trade stays a small one. 🧠", '', RISK], '🎓 LEARN MORE', L.academy),
   post('pause', [HOW, '<b>Can I stop the copy ?</b>', '', 'Yes, anytime, by yourself. ⏸', '', 'Open the app, Profile, PAUSE.', 'The copy stops. Tap RESUME when you want it back.', '', 'No message to send, no one to ask. You stay in control.'], '🚀 OPEN ALGORIA', L.app),
   post('quiet', [HOW, '<b>No trade today ?</b>', '', "That's the plan. ✅", '', 'Algoria never forces a trade. It only enters when a clean setup shows up.', '', 'Quiet days are normal. They are part of the strategy, not a bug. 🧘'], '🎓 LEARN MORE', L.academy),
-  post('free', [HOW, '<b>Why is Algoria free ?</b>', '', '💸 You pay $0: no subscription, no fee, never a cut of your profits.', '', 'The partner broker pays Algoria when you open your account through our link.', "That's why the link matters: an account opened without it isn't linked to Algoria. 🔗"], '⚡ START HERE', L.start),
+  post('free', [HOW, '<b>Why is Algoria free ?</b>', '', '💸 No subscription, no fee, never a cut of your profits.', '', 'The partner broker pays Algoria when you create your trading account through our link.', "That's why the link matters: an account created without it isn't linked to Algoria. 🔗"], '⚡ START HERE', L.start),
   post('martingale', [HOW, '<b>Is it a martingale ?</b>', '', 'No. 🙅', '', 'A martingale doubles its size after every loss to win it back.', 'Algoria does the opposite:', '📏 you choose your copy size once', '📏 it stays the same, win or lose', '', 'Your lot never grows after a loss.'], '🎓 LEARN MORE', L.academy),
   post('track', [HOW, '<b>Do they only show the wins ?</b>', '', 'No. 📊', '', 'The track record is the real account: month by month since July 2026, trade by trade since October. Red months included.', '', 'No simulation. No backtest. No screenshots.', '', RISK], '📊 SEE THE TRACK RECORD', L.track),
-  post('deposit', [HOW, '<b>How much should I start with ?</b>', '', '💡 We recommend $500: the copy then runs at 0.01 lot, the size Algoria is built around.', 'The minimum is $200, in any currency.', '', 'The money stays on your own account, in your name.', '', 'Trading involves risk. Only invest what you can afford to lose.'], '⚡ START HERE', L.start),
   post('broker', [HOW, '<b>Which broker should I pick ?</b>', '', '🥇 RaiseFX first: your account runs with the same spreads as the account Algoria trades.', '', 'Already have an account there ? Pick another partner: VT Markets, PU Prime, TradingSphere or Xlence.', '', 'The app gives you the right link for each one. 📲'], '⚡ START HERE', L.start),
-  post('nodeposit', [HOW, '<b>Free access means no deposit ?</b>', '', 'Not quite. 🙂', '', 'The access is free: the broker pays Algoria.', "But the AI can't trade an empty account. You fund your own broker account, and that money stays yours, in your name.", '', 'Minimum $200. We recommend $500.'], '⚡ START HERE', L.start),
-  post('biglot', [HOW, '<b>Bigger lot, faster money ?</b>', '', 'No. ⚠️', '', 'The rule is 0.01 lot per ~$500 of balance.', "A bigger lot doesn't make the strategy better. It just makes every loss bigger too.", '', 'Algoria is built to run calm, not fast. 🧘'], '🎓 LEARN MORE', L.academy),
+  post('biglot', [HOW, '<b>Bigger lot, faster results ?</b>', '', 'No. ⚠️', '', 'Your copy size is set once, in your profile, and it never grows after a loss.', "A bigger lot doesn't make the strategy better. It just makes every move bigger, up and down.", '', 'Algoria is built to run calm, not fast. 🧘'], '🎓 LEARN MORE', L.academy),
   post('existing', [HOW, '<b>Already have an account at the broker ?</b>', '', "You can't open a second one at the same broker: KYC blocks it. 🚫", '', 'Two easy ways in:', 'A️⃣ Attach your account to Algoria: ask their support, the app gives you the exact message to send', 'B️⃣ Open at another partner broker, through the link in the app'], '⚡ START HERE', L.start),
-  post('lot', [HOW, "<b>What's a lot ?</b>", '', 'The size of a trade. 📏', '', '1.00 is a standard lot. 0.01 is a micro lot, 100 times smaller.', 'The bigger the lot, the more each price move is worth, up AND down.', '', 'At Algoria: 0.01 lot per ~$500 of balance, set once in your profile.'], '🎓 THE FULL GLOSSARY', L.academy),
+  post('lot', [HOW, "<b>What's a lot ?</b>", '', 'The size of a trade. 📏', '', '1.00 is a standard lot. 0.01 is a micro lot, 100 times smaller.', 'The bigger the lot, the more each price move is worth, up AND down.', '', 'At Algoria: your lot is set once in your profile, and it never grows after a loss.'], '🎓 THE FULL GLOSSARY', L.academy),
   post('theapp', [HOW, "<b>What's in the app ?</b>", '', '📲 The live AI feed: what Algoria is watching, right now', '✅ Every trade, wins and losses, at your own size', '🔔 A notification when a trade closes in profit', '', 'No App Store. Installs in seconds. Free.'], '📲 INSTALL THE APP', L.install),
-  post('setup', [HOW, '<b>How long does the setup take ?</b>', '', 'About 10 minutes on your side. ⏱', '', '1️⃣ Open your broker account through the app', '2️⃣ Fund it', '3️⃣ Connect it in the app', '', 'Stuck at any step ? Write to Mathieu, he answers himself. 💬'], '💬 MESSAGE MATHIEU', L.me),
-  post('demo', [HOW, '<b>Can I try a demo first ?</b>', '', "The free access runs on a real account: that's how the broker registers it.", 'A demo is possible with the $400 lifetime license.', '', 'Want to judge first ? The track record shows every real trade. 📊'], '📊 SEE THE TRACK RECORD', L.track),
+  post('setup', [HOW, '<b>How long does the setup take ?</b>', '', 'About 10 minutes on your side. ⏱', '', '1️⃣ Create your trading account through the app', '2️⃣ Connect your trading account to Algoria', '', 'Stuck at any step ? Write to Mathieu, he answers himself. 💬'], '💬 MESSAGE MATHIEU', L.me),
 ];
 
 /** Les CTA, en rotation par famille : « app » (ils avancent seuls) et « mathieu » (ils ont besoin d'un humain). */
 export const CTAS: Array<CmPost & { fam: 'app' | 'mathieu' }> = [
   { ...post('results', ['📈 <b>Every Algoria trade is live in the app.</b>', '', 'Every win, every stop, at your own copy size. Nothing hidden, nothing rounded up.', '', 'See what your account would have done this week 👇'], '🚀 OPEN ALGORIA', L.app), fam: 'app' },
-  { ...post('steps', ['🧭 <b>3 steps and the AI trades for you.</b>', '', '1️⃣ Open your account with our partner broker', '2️⃣ Fund it (we recommend $500, minimum $200)', '3️⃣ Connect it in the app', '', 'The app walks you through each one 👇'], '⚡ START NOW', L.start), fam: 'app' },
+  { ...post('steps', ['🧭 <b>3 steps and the AI trades for you.</b>', '', '1️⃣ Create your trading account with our partner broker', '2️⃣ Connect it to Algoria in the app', '3️⃣ The AI trades for you, on your own account', '', 'The app walks you through each one 👇'], '⚡ START NOW', L.start), fam: 'app' },
   { ...post('academy', ['🎓 <b>New here ? Start with this.</b>', '', '5 minutes to understand exactly what Algoria is, how it trades gold, and why your money never leaves your own account.'], '🎓 OPEN THE ACADEMY', L.academy), fam: 'app' },
-  { ...post('copying', ["⚡ <b>The AI trades, your account copies. That's the whole thing.</b>", '', 'Your money stays in <i>your own</i> broker account, in your name. We never touch it.', '', 'We recommend starting with $500. About 10 minutes of setup on your side 👇'], '⚡ START COPYING', L.start), fam: 'app' },
+  { ...post('copying', ["⚡ <b>The AI trades, your account copies. That's the whole thing.</b>", '', 'Everything stays on <i>your own</i> trading account, in your name. We never touch it.', '', 'About 10 minutes to create your trading account and connect it to Algoria 👇'], '⚡ START COPYING', L.start), fam: 'app' },
   { ...post('trackcta', ["📊 <b>Don't trust screenshots. Check the account.</b>", '', 'The real track record: month by month since July 2026, trade by trade since October. Red months included.', '', RISK], '📊 SEE THE TRACK RECORD', L.track), fam: 'app' },
   { ...post('install', ['📲 <b>Algoria on your home screen.</b>', '', 'The live AI feed, every trade at your own size, and a notification when a trade closes in profit.', '', 'No App Store. Installs in seconds. Free.'], '📲 INSTALL THE APP', L.install), fam: 'app' },
-  { ...post('stuck', ['💬 <b>Stuck somewhere in your setup ?</b>', '', 'The broker, the deposit, the MT5 connection: whatever it is, it takes me two minutes to unblock. Write to me directly, I answer myself.', '', "No sales pitch. Just tell me where you're stuck 🙏🏼"], '💬 MESSAGE MATHIEU', L.me), fam: 'mathieu' },
+  { ...post('stuck', ['💬 <b>Stuck somewhere in your setup ?</b>', '', 'The broker, creating your trading account, connecting it to Algoria: whatever it is, it takes me two minutes to unblock. Write to me directly, I answer myself.', '', "No sales pitch. Just tell me where you're stuck 🙏🏼"], '💬 MESSAGE MATHIEU', L.me), fam: 'mathieu' },
   { ...post('brokerq', ['🌍 <b>Not sure which broker to pick ?</b>', '', "Tell me which country you're in and I'll tell you which one to choose. It takes me 30 seconds 🙏🏼"], '💬 ASK MATHIEU', L.me), fam: 'mathieu' },
-  { ...post('question', ['💬 <b>Any question about Algoria ?</b>', '', 'How the copy works, which broker to pick, how much to start with: ask me. A real human answers, I reply myself 🙏🏼'], '💬 ASK MATHIEU', L.me), fam: 'mathieu' },
-  { ...post('call', ['📞 <b>Want to go through it together ?</b>', '', 'A quick call and I walk you through the broker, the deposit and the connection, step by step 🙏🏼'], '📞 BOOK A CALL', L.call), fam: 'mathieu' },
+  { ...post('question', ['💬 <b>Any question about Algoria ?</b>', '', 'How the copy works, which broker to pick, how to connect your trading account: ask me. A real human answers, I reply myself 🙏🏼'], '💬 ASK MATHIEU', L.me), fam: 'mathieu' },
+  { ...post('call', ['📞 <b>Want to go through it together ?</b>', '', 'A quick call and I walk you through it: creating your trading account and connecting it to Algoria, step by step 🙏🏼'], '📞 BOOK A CALL', L.call), fam: 'mathieu' },
 ];
 
 type Slot = { slot: string; at: string; kind: 'morning' | 'howto' | 'cta' | 'tp'; fam?: 'app' | 'mathieu' };
@@ -133,7 +133,7 @@ const CTA_GOAL: Record<string, string> = {
   results: 'make them open the app and look at every real trade at their own size',
   steps: 'show that starting is 3 simple steps and send them to the guided setup',
   academy: 'send newcomers to the 5-minute Academy that explains everything',
-  copying: 'explain the idea in one breath (the AI trades, your account copies, your money stays yours) and send them to start',
+  copying: 'explain the idea in one breath (the AI trades, your trading account copies, everything stays in your name) and send them to start',
   trackcta: 'invite them to check the real track record instead of trusting screenshots',
   install: 'get them to install the app on their home screen',
   stuck: 'invite anyone stuck in their setup to message Mathieu directly',
@@ -449,28 +449,51 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
     await reply(ok ? '🧠 Noté pour tous les prochains posts du canal.' : '⨯ Pas pu l’enregistrer, réessaie.');
     return true;
   }
-  const m = /^([1-9])\s*[:.)-]?\s*([\s\S]+)$/.exec(text);
-  if (!m) { await reply('Pour corriger un post : son numéro puis ce qu’il faut changer, par exemple « 2 plus court ». Pour une règle durable : # + la règle.'); return true; }
+  // PLUSIEURS CORRECTIONS DANS UN MESSAGE (Mathieu, 15/10) : une ligne par numéro (« 2 plus court » ⏎ « 5 enlève
+  // l'emoji »). Une ligne sans numéro prolonge la correction d'au-dessus.
+  const asks: Array<{ n: number; text: string }> = [];
+  for (const line of text.split(/\n+/)) {
+    const m = /^\s*([1-9])\s*[:.)-]?\s+(.+)$/.exec(line) ?? /^\s*([1-9])\s*[:.)-]\s*(.+)$/.exec(line);
+    if (m) asks.push({ n: Number(m[1]), text: m[2].trim() });
+    else if (asks.length && line.trim()) asks[asks.length - 1].text += ` ${line.trim()}`;
+  }
+  if (!asks.length) { await reply('Pour corriger un post : son numéro puis ce qu’il faut changer, par exemple « 2 plus court » (une ligne par post). Pour une règle durable : # + la règle.'); return true; }
   const posts = (await rowsOf(db, day)).filter((r) => POST_KINDS.includes(r.kind));
-  const r = posts[Number(m[1]) - 1];
-  const instruction = m[2].trim();
-  if (!r) { await reply(`Il n’y a pas de post ${m[1]} ce jour-là.`); return true; }
-  const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
-  // la remarque est une leçon pour la suite, que le post puisse encore être réécrit ou non
-  await appendAgentMemory(db, `${todayFr()} · ${label} : « ${instruction.slice(0, 300)} »`, by, 'cm_memory');
-  const brief = briefOf(r);
-  if (!brief) { await reply('🧠 Noté. La carte de gain est choisie à son heure : je ne peux pas la réécrire, mais je retiens la remarque.'); return true; }
-  if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { await reply('🧠 Noté pour la suite. Ce post est déjà parti ou expiré, je ne le réécris pas.'); return true; }
-  await reply(`✍️ Je réécris le post ${m[1]}…`);
+  const todo: Array<{ n: number; r: Row; brief: Brief; instruction: string }> = [];
+  const notes: string[] = [];
+  for (const a of asks) {
+    const r = posts[a.n - 1];
+    if (!r) { notes.push(`${a.n} : pas de post ${a.n} ce jour-là`); continue; }
+    const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
+    // la remarque est une leçon pour la suite, que le post puisse encore être réécrit ou non
+    await appendAgentMemory(db, `${todayFr()} · ${label} : « ${a.text.slice(0, 300)} »`, by, 'cm_memory');
+    const brief = briefOf(r);
+    if (!brief) { notes.push(`${a.n} : la carte de gain est choisie à son heure, je retiens juste la remarque`); continue; }
+    if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { notes.push(`${a.n} : déjà parti ou expiré, je retiens juste la remarque`); continue; }
+    todo.push({ n: a.n, r, brief, instruction: a.text });
+  }
+  if (!todo.length) { await reply(`🧠 Noté.${notes.length ? `\n${notes.join('\n')}` : ''}`); return true; }
+  const nums = todo.map((t) => t.n).join(', ');
+  await reply(`✍️ Je réécris ${todo.length > 1 ? `les posts ${nums}` : `le post ${nums}`}…${notes.length ? `\n${notes.join('\n')}` : ''}`);
   defer(async () => {
     const ctx: DayContext | null = await dayContext(db, day).catch(() => null);
-    const fresh = ctx ? await writePost(ctx, brief, { instruction, previous: r.text ?? '' }).catch(() => null) : null;
-    if (!fresh) { await reply('⨯ Pas réussi à le réécrire proprement (ou la version ne respectait pas les règles du canal). Le post reste tel quel : ❌ pour le retirer. La remarque est notée 🧠'); return; }
-    // le post corrigé redevient un brouillon : il repart seulement après un nouveau ✅
-    await db.from('channel_posts').update({ text: fresh, status: 'draft', report: { writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', r.id);
-    const view = renderPlan(day, await rowsOf(db, day));
-    await tg('editMessageText', { chat_id: chat, message_id: replyTo, text: view.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: view.keyboard } });
-    await reply(`✅ Post ${m[1]} réécrit, je l’ai mis à jour dans le message : revalide-le avec ✅ Tout valider. 🧠 Leçon notée.`);
+    const fresh = await Promise.all(todo.map((t) => (ctx ? writePost(ctx, t.brief, { instruction: t.instruction, previous: t.r.text ?? '' }).catch(() => null) : Promise.resolve(null))));
+    const done: number[] = [], failed: number[] = [];
+    for (let k = 0; k < todo.length; k++) {
+      if (!fresh[k]) { failed.push(todo[k].n); continue; }
+      // le post corrigé redevient un brouillon : il repart seulement après un nouveau ✅
+      await db.from('channel_posts').update({ text: fresh[k], status: 'draft', report: { writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', todo[k].r.id);
+      done.push(todo[k].n);
+    }
+    if (done.length) {
+      const view = renderPlan(day, await rowsOf(db, day));
+      await tg('editMessageText', { chat_id: chat, message_id: replyTo, text: view.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: view.keyboard } });
+    }
+    await reply([
+      done.length ? `✅ ${done.length > 1 ? `Posts ${done.join(', ')} réécrits` : `Post ${done[0]} réécrit`}, mis à jour dans le message : revalide avec ✅ Tout valider.` : '',
+      failed.length ? `⨯ Pas réussi à réécrire proprement ${failed.join(', ')} (ou la version ne respectait pas les règles du canal) : le texte reste tel quel, ❌ pour le retirer.` : '',
+      '🧠 Remarques notées.',
+    ].filter(Boolean).join('\n'));
   });
   return true;
 }
