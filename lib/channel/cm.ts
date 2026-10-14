@@ -18,7 +18,8 @@
 // en RÉPONDANT au message du matin (« 2 plus court », « # jamais d'emoji fusée ») : le post est réécrit et la leçon
 // entre dans la mémoire du CM (agent_docs « cm_memory »), relue à chaque rédaction.
 //
-// RIEN NE PART SANS UN CLIC. À 8h30 (Paris) les admins reçoivent les posts du jour dans un seul message :
+// RIEN NE PART SANS UN CLIC. LA VEILLE À 23h15 (Paris), juste après le brouillon du récap, les admins reçoivent les
+// posts du lendemain dans un seul message (Mathieu, 15/10 : « je me lève pas aussi tôt ») :
 // « ✅ Tout valider », ou ❌ sur un post précis. Un post non validé à son heure expire. Les cartes de gain sont
 // validées comme créneau : leur contenu est choisi à l'heure dite, selon une règle fixe (un vrai trade copié, gagnant,
 // au moins +150 $ à 1 lot comme les cartes du VIP), et le créneau saute s'il n'y en a pas.
@@ -109,8 +110,15 @@ const WEEKEND: Slot[] = [
   { slot: 'cta1', at: '13:00', kind: 'cta', fam: 'app' },
   { slot: 'cta2', at: '20:30', kind: 'cta', fam: 'mathieu' },
 ];
-/** Heure (Paris) à laquelle le plan du jour part aux admins. */
-export const PLAN_AT = '08:30';
+/** Heure (Paris) à laquelle le plan du LENDEMAIN part aux admins : après la fermeture de l'or (23h) et le brouillon du
+ *  récap (23h05). Mathieu valide le soir, la journée tourne seule. Avant cette heure, c'est le plan du jour qui manque
+ *  éventuellement (panne, premier jour) qui est préparé, tout de suite. */
+export const PLAN_AT = '23:15';
+/** Le jour dont le plan doit exister à l'instant `now`. */
+export const planTarget = (now = Date.now()) => {
+  const today = tradingDayOf(now);
+  return now >= tradingTimeMs(today, PLAN_AT) ? new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : today;
+};
 const TP_FROM: Record<string, string | null> = { tp1: null, tp2: '14:00' }; // une carte couvre depuis le créneau précédent
 const TP_MIN_AT_ONE_LOT = 150; // le seuil des cartes de gain du VIP (runner/metaapi/trades.ts, VIP_WIN_MIN_USD)
 const STALE_MS = 90 * 60_000; // un post validé mais raté de plus de 1 h 30 (panne) ne part plus : il serait hors sujet
@@ -251,7 +259,8 @@ async function rowsOf(db: Db, day: string): Promise<Row[]> {
 export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: Array<Array<Record<string, string>>> } {
   const posts = rows.filter((r) => POST_KINDS.includes(r.kind));
   const idea = rows.find((r) => r.kind === 'video')?.text;
-  const parts: string[] = [`📣 <b>Canal public · ${esc(dayLabel(day))}</b>`, '<i>Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>'];
+  const tomorrow = day > tradingDayOf(Date.now());
+  const parts: string[] = [`📣 <b>Canal public · ${tomorrow ? 'demain, ' : ''}${esc(dayLabel(day))}</b>`, tomorrow ? '<i>Valide ce soir : les posts partiront demain à leur heure, même si tu dors. Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>' : '<i>Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>'];
   posts.forEach((r, i) => {
     const head = r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'cta' ? 'CTA' : 'CARTE DE GAIN';
     const by = (r.report as { writer?: string } | null)?.writer;
@@ -267,14 +276,14 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
   });
   if (!isWeekend(day)) parts.push('', '<i>23:05 · le récap du jour garde son brouillon à part, comme d\'habitude.</i>');
   if (idea) parts.push('', `🎥 <b>Idée de bulle vidéo</b> (la question qui revient le plus en support cette semaine) :`, `« ${esc(idea)} »`);
-  parts.push('', '<i>Pour corriger un post : réponds à ce message avec son numéro et ce qu\'il faut changer (« 2 plus court »). Pour une règle durable : # + la règle.</i>');
+  parts.push('', '<i>Pour corriger un post : réponds à ce message avec son numéro et ce qu\'il faut changer (« 2 plus court »). Pour une règle durable : # + la règle. Un post non validé part quand même si tu valides jusqu\'à 1 h après son heure.</i>');
   const text = parts.join('\n').slice(0, 4090);
   const keyboard: Array<Array<Record<string, string>>> = [];
   if (posts.some((r) => r.status === 'draft')) keyboard.push([{ text: '✅ Tout valider', callback_data: `cma:${day}` }]);
   const toggles = posts.map((r, i) => ({ r, i })).filter(({ r }) => ['draft', 'approved', 'skipped'].includes(r.status) && Date.parse(r.scheduled_at) + (r.status === 'approved' ? 0 : GRACE_MS) > Date.now())
     .map(({ r, i }) => ({ text: `${r.status === 'skipped' ? '↩️' : '❌'} ${NUM[i] ?? i + 1}`, callback_data: `cmt:${r.id}` }));
   if (toggles.length) keyboard.push(toggles);
-  if (posts.some((r) => ['draft', 'approved'].includes(r.status))) keyboard.push([{ text: '🚫 Rien aujourd\'hui', callback_data: `cmn:${day}` }]);
+  if (posts.some((r) => ['draft', 'approved'].includes(r.status))) keyboard.push([{ text: tomorrow ? '🚫 Rien demain' : '🚫 Rien aujourd\'hui', callback_data: `cmn:${day}` }]);
   return { text, keyboard };
 }
 
@@ -297,7 +306,7 @@ export async function sendPlan(db: Db, day: string): Promise<number> {
     else console.error('[cm] plan non envoyé:', r?.description ?? 'unknown');
   }
   // la ligne « plan » garde les messages envoyés : une réponse de Mathieu à l'un d'eux est une correction (handleCmReply)
-  if (msgs.length) await db.from('channel_posts').insert({ day, slot: 'plan', kind: 'plan', status: 'info', scheduled_at: new Date(tradingTimeMs(day, PLAN_AT)).toISOString(), report: { msgs } });
+  if (msgs.length) await db.from('channel_posts').insert({ day, slot: 'plan', kind: 'plan', status: 'info', scheduled_at: new Date().toISOString(), report: { msgs } });
   return msgs.length;
 }
 
@@ -317,7 +326,7 @@ export async function handleCmCallback(db: Db, cq: { id: string; data?: string; 
     note = 'Validé ✓ Les posts partiront à leur heure.';
   } else if (m[1] === 'n') {
     await db.from('channel_posts').update({ status: 'skipped', ...decided }).eq('day', day).in('status', ['draft', 'approved']);
-    note = 'OK, rien ne part aujourd\'hui.';
+    note = 'OK, rien ne part ce jour-là.';
   } else {
     const { data } = await db.from('channel_posts').select('id,day,status,scheduled_at').eq('id', Number(day)).limit(1);
     const r = (data ?? [])[0] as { id: number; day: string; status: string; scheduled_at: string } | undefined;
