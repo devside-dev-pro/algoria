@@ -3,6 +3,7 @@
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
 import { atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
+import { TRADING_TZ } from '@/lib/display/tradingDay';
 import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { ShareWinSheet, type ShareableWin } from '@/components/member/ShareWinSheet';
@@ -26,7 +27,7 @@ export default function MemberHistory() {
   useEffect(() => {
     if (loading) return;
     setOpenDays(null);
-    void fetch(unlocked ? `/api/member/feed?range=${range}` : '/api/member/feed').then(async (r) => {
+    void fetch(`/api/member/feed?range=${unlocked ? range : '7d'}`).then(async (r) => {
       if (!r.ok) return;
       const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; trackSince?: string };
       setTrades(d.trades);
@@ -51,16 +52,18 @@ export default function MemberHistory() {
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   const wins = trades.filter((t) => Number(t.pnl) > 0).length;
-  const net = trades.reduce((a, t) => a + ref(t), 0);
-  const winSum = trades.filter((t) => Number(t.pnl) > 0).reduce((a, t) => a + ref(t), 0);
-  const best = trades.reduce((m, t) => Math.max(m, ref(t)), 0);
+  const net = trades.reduce((a, t) => a + ref(t), 0); // période entière, pertes comprises, à 0.10 lot
+  // montant d'une ligne : à SA taille pour un membre, à 0.10 lot pour un prospect (il n'a pas encore de taille)
+  const amount = (t: FeedTrade) => (unlocked ? you(t) : ref(t));
   const sinceLabel = trackSince ? new Date(trackSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase() : '';
-  const rangeTitle = range === 'all' ? `SINCE ALGORIA 2.0${sinceLabel ? ` · ${sinceLabel}` : ''}` : range === '30d' ? 'LAST 30 DAYS' : 'LAST 7 DAYS';
+  // prospect : les 7 derniers jours, sans sélecteur (le serveur borne de toute façon)
+  const shown: Range = unlocked ? range : '7d';
+  const rangeTitle = shown === 'all' ? `SINCE ALGORIA 2.0${sinceLabel ? ` · ${sinceLabel}` : ''}` : shown === '30d' ? 'LAST 30 DAYS' : 'LAST 7 DAYS';
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
       {/* CLOSING EN HAUT (prospects) — la 1re chose qu'un non-membre voit : le manque à gagner + le CTA.
           C'est l'arme de conversion, elle doit être au-dessus de la ligne de flottaison, pas noyée en bas. */}
-      {!unlocked && winSum > 0 && (
+      {!unlocked && net > 0 && (
         <button
           onClick={() => setPaywall(true)}
           className="panel"
@@ -68,7 +71,7 @@ export default function MemberHistory() {
         >
           <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>⚡ YOU WATCHED FROM THE SIDELINES</span>
           <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.25 }}>
-            <span className="goldText" style={{ fontSize: 27 }}>+{winSum.toFixed(0)}$</span> you&rsquo;d have banked following Algoria <span style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600 }}>at {REF_LABEL}</span>
+            <span className="goldText" style={{ fontSize: 27 }}>+{net.toFixed(0)}$</span> you&rsquo;d have banked these last 7 days following Algoria <span style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600 }}>at {REF_LABEL}, losses included</span>
           </span>
           <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
             Every trade below copied straight to members&rsquo; accounts, hands-free — you just watched. Unlock and the next ones land on <b style={{ color: 'var(--text)' }}>yours</b>. <b style={{ color: 'var(--gold)' }}>Unlock my access →</b>
@@ -81,54 +84,54 @@ export default function MemberHistory() {
           et laisser trois pastilles dont deux affichent « no trades yet » ne compare rien : ça donne à un
           moteur arrêté l'apparence d'un moteur qui n'a simplement pas trouvé de trade. */}
 
-      {/* prospect : le serveur n'envoie que les gains → on l'ASSUME (highlight reel) au lieu d'afficher
-          un win rate 100% qui sentirait le faux. L'historique complet arrive avec l'accès. */}
+      {/* PROSPECT (14/10/2026) : fini le « highlight reel » des seuls gains. Il voit les mêmes trades que le
+          membre, pertes comprises, à 0.10 lot, avec une ligne qui dit pourquoi une perte reste maîtrisée. */}
       {/* BANNIÈRE « NEW CHAPTER » RETIRÉE (29/09/2026, Mathieu) : avec 3 mois de track record réel
           (/member/track-record), annoncer un « nouveau départ » n'apporte rien et fait du bruit. */}
-      {unlocked ? (
-        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* MÊME FENÊTRE QUE LE SÉLECTEUR — 7 jours, écrit noir sur blanc. Ces trois chiffres reprennent
-              exactement ceux de la pastille du profil consulté juste au-dessus ; l'étiquette évite qu'on
-              se demande lequel des deux blocs dit vrai. */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-            <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 800 }}>{rangeTitle}</span>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {(['all', '30d', '7d'] as const).map((k) => (
-                <button key={k} onClick={() => setRange(k)} className="mono"
-                  style={{ padding: '4px 9px', borderRadius: 7, fontSize: 10, fontWeight: 800, letterSpacing: 0.6, cursor: 'pointer', border: `1px solid ${range === k ? 'rgba(43,227,245,.55)' : 'var(--border)'}`, background: range === k ? 'rgba(43,227,245,.1)' : 'transparent', color: range === k ? 'var(--cyan)' : 'var(--dim)' }}>
-                  {k === 'all' ? 'SINCE 2.0' : k.toUpperCase()}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 18 }}>
-            <Stat label="TRADES" value={String(trades.length)} />
-            <Stat label="WINS" value={trades.length ? `${Math.round((wins / trades.length) * 100)}%` : '—'} color="var(--up)" />
-            {/* le NET à SON échelle, honnête (rouge inclus) — un « — » qui masque le rouge sent le cache-misère */}
-            <Stat label="NET (YOUR SIZE)" value={trades.length ? fmtYou(trades.reduce((a, t) => a + you(t), 0)) : '—'} gold={trades.reduce((a, t) => a + you(t), 0) > 0} color={trades.reduce((a, t) => a + you(t), 0) > 0 ? undefined : 'var(--muted)'} />
-          </div>
+      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* MÊME FENÊTRE QUE LE SÉLECTEUR, écrite noir sur blanc. Prospect et membre voient les mêmes trades
+            (pertes comprises depuis le 14/10/2026) ; seule l'échelle change : sa taille de copie pour le
+            membre, 0.10 lot pour le prospect. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--dim)', fontWeight: 800 }}>{rangeTitle}</span>
+          {unlocked && <div style={{ display: 'flex', gap: 4 }}>
+            {(['all', '30d', '7d'] as const).map((k) => (
+              <button key={k} onClick={() => setRange(k)} className="mono"
+                style={{ padding: '4px 9px', borderRadius: 7, fontSize: 10, fontWeight: 800, letterSpacing: 0.6, cursor: 'pointer', border: `1px solid ${range === k ? 'rgba(43,227,245,.55)' : 'var(--border)'}`, background: range === k ? 'rgba(43,227,245,.1)' : 'transparent', color: range === k ? 'var(--cyan)' : 'var(--dim)' }}>
+                {k === 'all' ? 'SINCE 2.0' : k.toUpperCase()}
+              </button>
+            ))}
+          </div>}
+        </div>
+        <div style={{ display: 'flex', gap: 18 }}>
+          <Stat label="TRADES" value={String(trades.length)} />
+          <Stat label="WINS" value={trades.length ? `${Math.round((wins / trades.length) * 100)}%` : '—'} color="var(--up)" />
+          {/* le NET, honnête (rouge inclus) — un « — » qui masque le rouge sent le cache-misère */}
+          {(() => { const v = trades.reduce((a, t) => a + amount(t), 0); return (
+            <Stat label={unlocked ? 'NET (YOUR SIZE)' : `NET · ${REF_LABEL.toUpperCase()}`} value={trades.length ? fmtYou(v) : '—'} gold={v > 0} color={v > 0 ? undefined : 'var(--muted)'} />
+          ); })()}
+        </div>
+        {unlocked ? (
           <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
             Algoria trades a <b style={{ color: 'var(--muted)' }}>master account</b> — you copy at <b style={{ color: 'var(--muted)' }}>{clientLot} lot</b>. Amounts below are shown <b style={{ color: 'var(--cyan)' }}>at your size</b>{sameAsRef ? '.' : ` (at ${REF_LABEL} in small).`}
           </p>
-        </section>
-      ) : (
-        <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, borderColor: 'rgba(245,194,74,.3)' }}>
-          <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--gold)', fontWeight: 800 }}>✨ HIGHLIGHT REEL — HER BEST RECENT TRADES · {REF_LABEL.toUpperCase()}</span>
-          <div style={{ display: 'flex', gap: 18 }}>
-            <Stat label="WINS" value={String(wins)} color="var(--up)" />
-            <Stat label="BANKED" value={winSum > 0 ? `+${winSum.toFixed(0)}$` : '—'} gold={winSum > 0} />
-            <Stat label="BEST" value={best > 0 ? `+${best.toFixed(0)}$` : '—'} color="var(--up)" />
-          </div>
-        </section>
-      )}
+        ) : (
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.55 }}>
+            Every trade, <b style={{ color: 'var(--muted)' }}>wins and losses</b>, shown at {REF_LABEL}. Losses are part of trading: every trade has a <b style={{ color: 'var(--muted)' }}>stop loss</b>, so a losing trade is closed, never held hoping it comes back. Members&rsquo; accounts copied every one of them automatically.
+          </p>
+        )}
+      </section>
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {trades.length > 0 && <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>Days and times in Paris time, the clock of the gold session (open 00:00 to 23:00).</span>}
         {/* MEMBRES : trades REGROUPÉS PAR JOURNÉE, bilan du jour en tête — on raconte la journée (souvent
             verte), pas le trade isolé (parfois rouge). Un mur de trades bruts laisse l'œil accrocher les
             3 gros rouges du master et rater le net positif → c'est ça qui a fait fuir un client. */}
         {(() => {
           const groups: { day: string; items: FeedTrade[] }[] = [];
           for (const t of trades) {
-            const day = new Date(t.closed_at).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: '2-digit' });
+            // la journée de Paris, pour tout le monde (14/10/2026, lib/display/tradingDay.ts) : l'heure du téléphone
+            // donnait à un membre anglais un autre bilan du jour que le récap du canal et le VIP
+            const day = new Date(t.closed_at).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: TRADING_TZ });
             const g = groups[groups.length - 1];
             if (g && g.day === day) g.items.push(t);
             else groups.push({ day, items: [t] });
@@ -139,31 +142,29 @@ export default function MemberHistory() {
           return groups.map((g, gi) => {
             // repliées par défaut sauf la plus récente : « depuis 2.0 » = des centaines de lignes, on raconte
             // d'abord les journées (leur bilan), le détail s'ouvre d'un tap
-            const open = !unlocked || (openDays ? openDays.has(g.day) : gi === 0);
+            const open = openDays ? openDays.has(g.day) : gi === 0;
             const toggle = () => setOpenDays((cur) => {
               const next = new Set(cur ?? (groups[0] ? [groups[0].day] : []));
               if (next.has(g.day)) next.delete(g.day); else next.add(g.day);
               return next;
             });
-            const dayYou = g.items.reduce((a, t) => a + you(t), 0);
+            const dayYou = g.items.reduce((a, t) => a + amount(t), 0);
             const dayWins = g.items.filter((t) => Number(t.pnl) > 0).length;
             const dayGreen = dayYou > 0;
             return (
               <div key={g.day} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {unlocked && (
-                  <div onClick={toggle} role="button" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: dayGreen ? 'rgba(38,224,166,.07)' : 'rgba(130,152,190,.06)', border: `1px solid ${dayGreen ? 'rgba(38,224,166,.25)' : 'rgba(130,152,190,.18)'}` }}>
+                <div onClick={toggle} role="button" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: dayGreen ? 'rgba(38,224,166,.07)' : 'rgba(130,152,190,.06)', border: `1px solid ${dayGreen ? 'rgba(38,224,166,.25)' : 'rgba(130,152,190,.18)'}` }}>
                     <span className="mono" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: 'var(--muted)' }}>{open ? '▾' : '▸'} {g.day.toUpperCase()}</span>
                     <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{g.items.length} trades · {Math.round((dayWins / g.items.length) * 100)}% wins</span>
                     <span style={{ flex: 1 }} />
                     <span className="mono" style={{ fontSize: 13.5, fontWeight: 800, color: dayGreen ? 'var(--up)' : 'var(--muted)' }}>{fmtYou(dayYou)}</span>
                   </div>
-                )}
                 {open && g.items.map((t) => {
                   const win = Number(t.pnl) > 0;
                   return (
                     <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 0 7px 10px', borderBottom: '1px solid rgba(130,152,190,.1)', opacity: win ? 1 : 0.55 }}>
-                      <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', minWidth: 34 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
+                      <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', minWidth: 34 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: TRADING_TZ })}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲ BUY' : t.direction === 'short' ? '▼ SELL' : ''}</span>
                       <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol}</span>
                       <span style={{ flex: 1 }} />
                       {t.reason === 'be' && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>BE</span>}
@@ -173,7 +174,7 @@ export default function MemberHistory() {
                           {!sameAsRef && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>{REF_LABEL} {ref(t) > 0 ? '+' : ''}{ref(t).toFixed(0)}$</span>}
                         </span>
                       ) : (
-                        <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ +' : ''}{ref(t).toFixed(0)}$</span>
+                        <span className="mono" style={{ fontSize: 13, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)', minWidth: 58, textAlign: 'right' }}>{win ? '✓ ' : ''}{fmtYou(ref(t))}</span>
                       )}
                       {/* UN SEUL bouton, texte explicite. Carte paysage ; QR = SON lien de parrainage */}
                       {win && (
@@ -210,12 +211,12 @@ export default function MemberHistory() {
       </button>
 
       {/* Le CLOSING prospect vit désormais EN HAUT (bannière « manque à gagner »). Ici, juste un repli
-          si aucun gain n'est encore chargé (winSum 0) — sinon on ne duplique pas le CTA. Membre : la note. */}
+          si la période n'est pas positive (pas de bannière en haut) — sinon on ne duplique pas le CTA. Membre : la note. */}
       {unlocked ? (
         <p style={{ margin: 0, fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.55 }}>
           Algoria&rsquo;s trades, shown at your lot. For your own balance, see <b style={{ color: 'var(--muted)' }}>MY ACCOUNT</b> on the Home tab.
         </p>
-      ) : winSum === 0 ? (
+      ) : net <= 0 ? (
         <button
           onClick={() => setPaywall(true)}
           className="panel"

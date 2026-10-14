@@ -114,7 +114,7 @@ export const ACADEMY: AcademyModule[] = [
       },
       {
         id: 'wins', kicker: 'Myth vs Fact', title: 'Only the wins ?',
-        body: 'The track record is the **real copied account**, trade by trade since July 2026, red months included. No simulation, no backtest.',
+        body: 'The track record is the **real account**, month by month since July 2026 and trade by trade since October, red months included. No simulation, no backtest.',
         facts: [{ ok: false, t: 'They only show the winning trades' }, { ok: true, t: 'Every real trade, red months included' }],
         link: TRACK,
       },

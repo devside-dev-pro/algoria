@@ -5,6 +5,7 @@
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
 import { atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
+import { TRADING_TZ } from '@/lib/display/tradingDay';
 import { AccountCard } from './AccountCard';
 import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount } from './ui';
@@ -62,7 +63,7 @@ export default function MemberHome() {
   if (member.status === 'offboarded') { router.replace('/member/recover'); return null; }
 
   const wins = trades.filter((t) => Number(t.pnl) > 0);
-  const winTotal = wins.reduce((a, t) => a + ref(t), 0);
+  const netRef = trades.reduce((a, t) => a + ref(t), 0); // les derniers trades, pertes comprises (14/10/2026)
   const pendingReview = member.status === 'pending_copier';
 
   return (
@@ -132,7 +133,7 @@ export default function MemberHome() {
               </div>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
                 You&rsquo;re watching from the outside — members&rsquo; accounts copy every one of these trades <b style={{ color: 'var(--text)' }}>automatically</b>.
-                {winTotal > 0 && <> The wins below alone made <b className="goldText">+{winTotal.toFixed(0)}$</b> at {REF_LABEL}.</>}
+                {netRef > 0 && <> The trades below made <b className="goldText">+{netRef.toFixed(0)}$</b> at {REF_LABEL}, losses included.</>}
               </p>
               <button onClick={() => { setPaywall(true); track('unlock_open', member.onboarding_step ?? 0); }} style={ctaGold}>⚡ UNLOCK MY ACCESS</button>
               {/* l'appel = l'arme de closing : 10 min au téléphone avec Mathieu et c'est signé */}
@@ -165,12 +166,12 @@ export default function MemberHome() {
         );
       })()}
 
-      {/* Derniers trades d'Algoria — pour les prospects le serveur n'envoie QUE les gains (bande-annonce
-          assumée : "LATEST WINS") ; le flux complet et honnête arrive avec l'accès débloqué */}
+      {/* Derniers trades d'Algoria — les mêmes pour tous, pertes comprises (14/10/2026 : le prospect ne voyait
+          que les gains, une prospecte l'a relevé). Membre : à sa taille ; prospect : à 0.10 lot. */}
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: unlocked ? 'var(--muted)' : 'var(--gold)' }}>{unlocked ? 'ALGORIA 2.0 — LATEST TRADES' : '✨ ALGORIA 2.0 — LATEST WINS'}</h2>
-          {wins.length > 0 && <span className="mono" style={{ fontSize: 11, color: 'var(--up)' }}>{unlocked ? `✓ ${wins.length}/${trades.length} wins` : `✓ ${wins.length} wins`}</span>}
+          <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: unlocked ? 'var(--muted)' : 'var(--gold)' }}>{unlocked ? 'ALGORIA 2.0 — LATEST TRADES' : '✨ ALGORIA 2.0 — LATEST TRADES'}</h2>
+          {wins.length > 0 && <span className="mono" style={{ fontSize: 11, color: 'var(--up)' }}>✓ {wins.length}/{trades.length} wins</span>}
         </div>
         {/* ÉTAT VIDE — il sera la RÈGLE quelques jours (2.0 vient d'être branché, aucun trade enregistré
             avant sa première séance), et c'est l'écran que voient les inscrits non activés. Il ne doit donc
@@ -199,8 +200,8 @@ export default function MemberHome() {
           const win = Number(t.pnl) > 0;
           return (
             <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 9, opacity: win ? 1 : 0.55 }}>
-              <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 38 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-              <span style={{ fontSize: 10, fontWeight: 700, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲' : '▼'}</span>
+              <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 38 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: TRADING_TZ })}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : ''}</span>
               <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol}</span>
               <span style={{ flex: 1 }} />
               {unlocked ? (
@@ -213,13 +214,13 @@ export default function MemberHome() {
                   )}
                 </span>
               ) : (
-                <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ +' : ''}{ref(t).toFixed(0)}$</span>
+                <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 500, color: win ? 'var(--up)' : 'var(--muted)' }}>{win ? '✓ ' : ''}{fmtYou(ref(t))}</span>
               )}
             </div>
           );
         })}
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
-          {unlocked ? (sameAsRef ? `Shown at your copy size (${clientLot} lot).` : `Shown at your copy size (${clientLot} lot) — at ${REF_LABEL} in brackets.`) : `ALGORIA 2.0’s recent wins, shown at ${REF_LABEL} — members’ accounts copied every one of them automatically. Losses, live positions and the full history unlock with your access.`}
+          {unlocked ? (sameAsRef ? `Shown at your copy size (${clientLot} lot). Times in Paris time.` : `Shown at your copy size (${clientLot} lot), at ${REF_LABEL} in brackets. Times in Paris time.`) : `ALGORIA 2.0’s latest trades, wins and losses, shown at ${REF_LABEL}. Every trade has a stop loss, and members’ accounts copied every one of them automatically. Times in Paris time. The full history is in the History tab.`}
         </p>
       </section>
 

@@ -1,6 +1,7 @@
 // 📣 RÉCAP DU SOIR DANS LE CANAL (02/10/2026) — décisions Mathieu :
-//   · tous les soirs de semaine, un récap de la journée à 21h30 dans le canal source ;
-//   · MODE VALIDATION : à 21h15 le bot envoie le brouillon aux admins avec ✅ PUBLIER / ❌ Pas ce soir, rien
+//   · tous les soirs de semaine, un récap de la journée dans le canal source ;
+//   · MODE VALIDATION : à 23h05 (Paris, après la fermeture de l'or ; 21h15 jusqu'au 14/10/2026) le bot envoie
+//     le brouillon aux admins avec ✅ PUBLIER / ❌ Pas ce soir, rien
 //     ne part sans un clic (lib/channel/publish.ts publie alors source + miroir UK + canal italien traduit) ;
 //   · JOURNÉE ROUGE = option A : pas de chiffres ce soir-là, le post renvoie au track record complet de l'app ;
 //   · montants à 0.01 lot ET à 0.10 lot (lib/display/scale.ts : conversion PAR TRADE, puis somme).
@@ -15,9 +16,11 @@ import { publishToChannels, sourceChannel } from '@/lib/channel/publish';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
-type Trade = { ticket: string; symbol: string; pnl: number; lot: number | null; strategy: number | null; closed_at: string };
+export type Trade = { ticket: string; symbol: string; pnl: number; lot: number | null; strategy: number | null; closed_at: string; direction?: string | null; entry?: number | null; exit?: number | null; reason?: string | null };
 export type RecapKind = 'win' | 'record' | 'week' | 'quiet' | 'red';
-export type Recap = { day: string; kind: RecapKind; text: string; trades: number; net01: number; net10: number };
+export type Recap = { day: string; kind: RecapKind; text: string; trades: number; net01: number; net10: number;
+  /** pour le rédacteur (lib/channel/writer.ts) : la ligne des montants telle qu'elle doit paraître, et les faits du jour */
+  amounts?: string; wins?: number; live?: number[]; weekLabel?: string };
 
 const TZ = 'Europe/Paris';
 /** 'YYYY-MM-DD' du jour à Paris. */
@@ -33,9 +36,10 @@ const amounts = (net10: number) => `✅ ${usd(net10 / 10)} at 0.01 lot · ${usd(
 const RISK = "Trading involves risk. Past results don't guarantee future results.";
 const APP = '👉 app.algoria.tech';
 
-async function liveTrades(db: Db, sinceIso: string): Promise<Trade[]> {
+/** Les trades copiés (stratégie live, sans démonstration ni NAS100), clôturés depuis `sinceIso`. Sert aussi au CM (lib/channel/cm.ts). */
+export async function liveTrades(db: Db, sinceIso: string): Promise<Trade[]> {
   const [tq, sq] = await Promise.all([
-    db.from('trades').select('ticket,symbol,pnl,lot,strategy,closed_at').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', sinceIso).order('closed_at', { ascending: true }).limit(5000),
+    db.from('trades').select('ticket,symbol,pnl,lot,strategy,closed_at,direction,entry,exit,reason').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', sinceIso).order('closed_at', { ascending: true }).limit(5000),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(400),
   ]);
   if (tq.error) throw new Error(tq.error.message);
@@ -68,14 +72,14 @@ export async function buildRecap(db: Db, day = parisDay(new Date())): Promise<Re
   const wins = today.filter((t) => Number(t.pnl) > 0).length;
   const live = await wentLiveToday(db, day);
   const liveLine = live.length ? `\n\n⚡ ${live.slice(0, 3).map((n) => `Member #${n}`).join(', ')} went LIVE today. Welcome to the copy. 🚀` : '';
-  const base = { day, trades: today.length, net01: net10 / 10, net10 };
+  const base = { day, trades: today.length, net01: net10 / 10, net10, wins, live, amounts: amounts(net10) };
 
   // VENDREDI : le récap de la semaine, s'il est vert (il inclut la journée, rouge ou non : c'est un total honnête)
   if (wd === 5) {
     const week = all.filter((t) => { const d = parisDay(t.closed_at); return d >= monday && d <= day; });
     const wNet = week.reduce((s, t) => s + atRef(t.pnl, t.lot), 0);
     if (week.length && wNet > 0) {
-      return { ...base, kind: 'week', text: [
+      return { ...base, trades: week.length, amounts: amounts(wNet), weekLabel: `${shortDate(monday)} to ${shortDate(day)}`, kind: 'week', text: [
         `🔵💙 WEEK RECAP · ${shortDate(monday)} to ${shortDate(day)}`,
         `🤖 ${week.length} trade${week.length > 1 ? 's' : ''} closed on gold this week\n${amounts(wNet)}\n🔁 Copied automatically on every member account`,
         `Have a great weekend, Algoria family. The AI is back Monday. 💙${liveLine}`,
@@ -125,10 +129,15 @@ export async function buildRecap(db: Db, day = parisDay(new Date())): Promise<Re
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** 21h15 : prépare le brouillon du jour (une seule fois) et l'envoie aux admins avec les boutons. */
+/** 23h05 (Paris) : prépare le brouillon du jour (une seule fois) et l'envoie aux admins avec les boutons. */
 export async function draftTonight(db: Db, day = parisDay(new Date())): Promise<{ status: string; recap?: Recap }> {
-  const recap = await buildRecap(db, day);
-  if (!recap) return { status: 'weekend' };
+  const built = await buildRecap(db, day);
+  if (!built) return { status: 'weekend' };
+  // PLUS COURT ET PLUS HUMAIN (15/10/2026, Mathieu : « le bilan est un peu trop long »). Le rédacteur du canal
+  // (lib/channel/writer.ts) réécrit le récap à partir des mêmes faits ; les montants restent ceux calculés ici, insérés
+  // par le code. Modèle absent ou texte refusé : le texte d'avant, tel quel.
+  const { data: done } = await db.from('channel_recaps').select('day').eq('day', day).limit(1);
+  const recap = done?.length ? built : await rewriteRecap(db, built).catch(() => built);
   // le jour est la clé primaire : un second déclenchement le même soir ne recrée rien et ne renvoie rien
   const { error } = await db.from('channel_recaps').insert({ day, kind: recap.kind, text: recap.text, trades: recap.trades, net10: Math.round(recap.net10 * 100) / 100, status: 'draft' });
   if (error) return { status: /duplicate|unique/i.test(error.message) ? 'already drafted' : `error: ${error.message}` };
@@ -171,4 +180,16 @@ export async function handleRecapCallback(db: Db, cq: { id: string; data?: strin
   await stamp(out.ok ? `✅ Publié par ${by} · ${detail}` : `⨯ Telegram a refusé : ${out.error} · réessaie avec ✅`);
   await answer(out.ok ? 'Publié ✓' : 'Échec, voir le message.');
   return true;
+}
+
+/** Le récap réécrit par le rédacteur du canal, ou tel quel si la réécriture échoue. */
+async function rewriteRecap(db: Db, r: Recap): Promise<Recap> {
+  const { dayContext, writePost, CM_RISK } = await import('./writer');
+  const ctx = await dayContext(db, r.day);
+  const out = await writePost(ctx, { kind: 'recap', recapKind: r.kind, trades: r.trades, wins: r.wins ?? 0, liveMembers: r.live ?? [], weekLabel: r.weekLabel });
+  if (!out) return r;
+  const withFigures = ['win', 'record', 'week'].includes(r.kind);
+  // le récap part en texte brut (échappé à la publication) : on retire le gras et on défait l'échappement du garde-fou
+  const body = out.replace(/<\/?(?:b|i)>/g, '').replace(/&amp;/g, '&').replace('{{AMOUNTS}}', r.amounts ?? '').trim(); // « ✅ +$X at 0.01 lot · +$Y at 0.10 lot »
+  return { ...r, text: [body, APP, ...(withFigures ? [CM_RISK] : [])].join('\n\n') };
 }

@@ -104,7 +104,7 @@ export function breakoutSignal(symbol: string, bars: Bar[], cfg: BreakoutConfig,
     riskReward: cfg.tpAtr / cfg.slAtr,
     lot: cfg.lot,
     rationale: [
-      `BREAKOUT ${direction.toUpperCase()} — ${((cfg.N * 5) / 60).toFixed(0)}h ${direction === 'long' ? 'high' : 'low'} ${level.toFixed(1)} broken (+${excess.toFixed(2)}×ATR)`,
+      `BREAKOUT ${direction === 'long' ? 'BUY' : 'SELL'} — ${((cfg.N * 5) / 60).toFixed(0)}h ${direction === 'long' ? 'high' : 'low'} ${level.toFixed(1)} broken (+${excess.toFixed(2)}×ATR)`,
       `SL ${cfg.slAtr}×ATR · TP ${cfg.tpAtr}×ATR · trailing exit ${cfg.trailDist}R after ${cfg.trailActivate}R`,
     ],
     confluence,

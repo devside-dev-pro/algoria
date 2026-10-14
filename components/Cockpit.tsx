@@ -359,8 +359,8 @@ export function Cockpit() {
         <label style={lbl}>lot<input value={lot} onChange={(e) => setLot(e.target.value)} inputMode="decimal" style={inp(52)} /></label>
         <label style={lbl}>SL<input value={slIn} onChange={(e) => setSlIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(64)} /></label>
         <label style={lbl}>TP<input value={tpIn} onChange={(e) => setTpIn(e.target.value)} placeholder="—" inputMode="decimal" style={inp(64)} /></label>
-        <button onClick={() => manualTrade('long')} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="open a LONG at market (SL/TP optional)">▲ LONG</button>
-        <button onClick={() => manualTrade('short')} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="open a SHORT at market (SL/TP optional)">▼ SHORT</button>
+        <button onClick={() => manualTrade('long')} disabled={killed} style={deckBtn('long', lastFire === 'long', killed)} title="open a BUY at market (SL/TP optional)">▲ BUY</button>
+        <button onClick={() => manualTrade('short')} disabled={killed} style={deckBtn('short', lastFire === 'short', killed)} title="open a SELL at market (SL/TP optional)">▼ SELL</button>
         <button onClick={() => fire('flat', () => sendCommand('close_all', { symbol }))} style={deckBtn('flat', lastFire === 'flat', false)} title="close all open positions on the displayed market">✕ CLOSE ALL</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: openPos > 0 ? 'var(--up)' : 'var(--dim)' }}>
@@ -452,7 +452,7 @@ export function Cockpit() {
             const dayTag = recapDay === 'week' ? when.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' }).toUpperCase() + ' ' : '';
             const sym = symSpec(String(t.symbol));
             return (
-              <button key={t.id ?? i} className="cardIn" title={`replay this ${long ? 'long' : 'short'} on the chart`} onClick={() => {
+              <button key={t.id ?? i} className="cardIn" title={`replay this ${long ? 'buy' : 'sell'} on the chart`} onClick={() => {
                 if (t.symbol && t.symbol !== symbol) setSymbol(String(t.symbol));
                 const ms = Date.parse(t.opened_at);
                 if (Number.isFinite(ms)) setFocus(ms);
@@ -703,7 +703,7 @@ function LivePositionHud({ symbol, direction, entry, sl, tp, lot }: { symbol: st
   return (
     <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: long ? 'rgba(31,216,176,.15)' : 'rgba(255,107,138,.15)', color: long ? 'var(--up)' : 'var(--down)' }}>
-        {long ? '▲ LONG' : '▼ SHORT'}
+        {long ? '▲ BUY' : '▼ SELL'}
       </span>
       <span style={{ fontSize: 11, color: 'var(--muted)' }}>{lot.toFixed(2)} @ {entry.toFixed(spec.dp)}</span>
       <span style={{ fontSize: 11, color: 'var(--dim)' }}>→</span>
@@ -804,7 +804,7 @@ function WhyPanel({ direction, conf, rationale, live, closed = false, pnl = null
         <span style={{ fontSize: 9.5, letterSpacing: 1, color: lost ? 'var(--muted)' : 'var(--cyan)', opacity: 0.9 }}>{label}</span>
         {closed
           ? <span style={{ fontSize: 9.5, fontWeight: 700, color: won ? 'var(--up)' : 'rgba(210,150,165,.8)' }}>{won ? '+' : ''}{pnl != null ? pnl.toFixed(0) : '—'}$</span>
-          : <span style={{ fontSize: 9.5, fontWeight: 700, color: long ? 'var(--up)' : 'var(--down)' }}>{long ? '▲ LONG' : '▼ SHORT'}</span>}
+          : <span style={{ fontSize: 9.5, fontWeight: 700, color: long ? 'var(--up)' : 'var(--down)' }}>{long ? '▲ BUY' : '▼ SELL'}</span>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <span style={{ fontSize: 9, color: 'var(--dim)' }}>conf</span>
@@ -912,7 +912,7 @@ function TradeAlerts({ signals, trades, rafaleTickets }: { signals: any[]; trade
       if (s.ticket == null || rafaleTickets.has(String(s.ticket))) continue;
       if (/RAFALE/i.test(Array.isArray(s.rationale) ? s.rationale.join(' ') : '')) continue;
       const long = s.direction === 'long';
-      push({ accent: long ? 'var(--up)' : 'var(--down)', icon: long ? '▲' : '▼', title: long ? 'LONG FILLED' : 'SHORT FILLED', sub: `${fmt(s.lot)} @ ${fmt(s.entry, 1)}` });
+      push({ accent: long ? 'var(--up)' : 'var(--down)', icon: long ? '▲' : '▼', title: long ? 'BUY FILLED' : 'SELL FILLED', sub: `${fmt(s.lot)} @ ${fmt(s.entry, 1)}` });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signals]);

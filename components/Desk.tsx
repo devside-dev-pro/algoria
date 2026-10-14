@@ -17,10 +17,10 @@ function kindColor(m: any): string {
   return m?.direction === 'short' ? 'var(--down)' : m?.direction === 'long' ? 'var(--up)' : 'var(--muted)';
 }
 const glyph = (m: any) => (m?.kind === 'recap' ? '∑' : m?.kind === 'news' ? '⚠' : m?.direction === 'long' ? '▲' : m?.direction === 'short' ? '▼' : m?.kind === 'opportunity' ? '◆' : '●');
-const tag = (m: any) => (m?.kind === 'recap' ? 'RECAP' : m?.kind === 'news' ? 'ECO NEWS' : m?.kind === 'trade' ? (m?.direction === 'long' ? 'LONG' : 'SHORT') : m?.kind === 'opportunity' ? 'WATCH' : 'READ');
+const tag = (m: any) => (m?.kind === 'recap' ? 'RECAP' : m?.kind === 'news' ? 'ECO NEWS' : m?.kind === 'trade' ? (m?.direction === 'long' ? 'BUY' : 'SELL') : m?.kind === 'opportunity' ? 'WATCH' : 'READ');
 const symOf = (m: any) => (m?.symbol as string | undefined) ?? 'XAUUSD'; // legacy (sans symbole) → or
 const levelPrefix = (lk: string) => (lk === 'support' ? 'S' : lk === 'resistance' ? 'R' : '@');
-const STATE_WORD: Record<string, string> = { in_long: 'IN LONG', in_short: 'IN SHORT', stalking_long: 'STALKING LONG', stalking_short: 'STALKING SHORT', aside: 'STANDING ASIDE' };
+const STATE_WORD: Record<string, string> = { in_long: 'IN A BUY', in_short: 'IN A SELL', stalking_long: 'WAITING TO BUY', stalking_short: 'WAITING TO SELL', aside: 'STANDING ASIDE' };
 
 // jauge à 5 segments (armée = pleine, sinon 55% d'opacité)
 function Meter({ conf, threshold, color, seg = 5 }: { conf: number; threshold: number; color: string; seg?: number }) {

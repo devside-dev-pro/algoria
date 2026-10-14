@@ -46,7 +46,7 @@ interface DrawCtx {
   mark: HTMLImageElement | null;
 }
 
-const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }); // heure de Paris, comme partout (lib/display/tradingDay.ts)
 const symLabelOf = (symbol: string) => (symbol === 'XAUUSD' ? 'GOLD' : symbol === 'BTCUSD' ? 'BITCOIN' : symbol);
 
 function paintBackground(ctx: CanvasRenderingContext2D, W: number, H: number, haloAt: { x: number; y: number }, glowAt: { x: number; y: number }) {
@@ -99,7 +99,7 @@ function drawStory(d: DrawCtx, o: WinCardOpts): void {
   const isLong = o.direction === 'long';
   ctx.font = `800 72px ${display}`;
   ctx.fillStyle = isLong ? '#22e0a6' : '#ff6b8a';
-  ctx.fillText(`${isLong ? '▲ LONG' : '▼ SHORT'}  ${symLabelOf(o.symbol)}`, W / 2, 640);
+  ctx.fillText(`${isLong ? '▲ BUY' : '▼ SELL'}  ${symLabelOf(o.symbol)}`, W / 2, 640);
 
   ctx.save();
   ctx.shadowColor = 'rgba(34,224,166,.55)';
@@ -188,7 +188,7 @@ function drawLandscape(d: DrawCtx, o: WinCardOpts): void {
   const isLong = o.direction === 'long';
   ctx.font = `800 46px ${display}`;
   ctx.fillStyle = isLong ? '#22e0a6' : '#ff6b8a';
-  ctx.fillText(`${isLong ? '▲ LONG' : '▼ SHORT'}  ${symLabelOf(o.symbol)}`, 60, 232);
+  ctx.fillText(`${isLong ? '▲ BUY' : '▼ SELL'}  ${symLabelOf(o.symbol)}`, 60, 232);
 
   // le P&L — le héros, aligné à gauche comme le ROI Binance
   ctx.save();

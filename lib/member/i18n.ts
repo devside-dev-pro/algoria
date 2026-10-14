@@ -22,23 +22,30 @@ export const asLocale = (v: unknown): Locale => (v === 'it' ? 'it' : 'en');
 
 /** DM envoyé au moment de la demande d'adhésion — la SEULE fenêtre où Telegram autorise le bot à
  *  écrire à un inconnu, donc le message le plus rentable du funnel. */
+/** Les boutons sous le message de bienvenue (anglais seulement, voir JOIN_DM). */
+export const JOIN_DM_BUTTONS = [
+  [{ text: '📲 CREATE MY FREE ACCOUNT', url: 'https://app.algoria.tech/member' }],
+  [{ text: '🎓 THE ACADEMY, IN 5 MIN', url: 'https://app.algoria.tech/academy' }],
+];
+
 export const JOIN_DM: Record<Locale, string> = {
+  // DE VRAIS BOUTONS (15/10/2026, décision Mathieu : « un vrai bouton c'est mieux qu'un lien ») : les liens en texte
+  // sont devenus les deux boutons de JOIN_DM_BUTTONS. Ceux qui créent leur compte dans les 10 minutes après ce
+  // message font la moitié des passages en copie (1 036 personnes → 26 activations sur 52, depuis le 01/09).
+  // Version italienne inchangée (décision Mathieu : on ne touche pas au bot italien).
   en: [
-    '🎉 <b>Thanks for requesting access to Algoria!</b>',
+    '🎉 <b>Thanks for requesting access to Algoria !</b>',
     '',
-    'You\'ll be let into the channel in <b>just a few minutes</b> — watch for the notification.',
+    "You'll be let into the channel in <b>just a few minutes</b>, watch for the notification.",
     '',
     'While you wait, get a head start 👇',
     '',
-    '🎓 <b>Start with the Academy</b> — what Algoria is and how it works, in a few minutes:',
-    'app.algoria.tech/academy',
+    '📲 <b>Create your free account</b>: get your access ready',
+    '🎓 <b>The Academy</b>: what Algoria is and how it works, in 5 minutes',
     '',
-    '📲 <b>Create your free account</b> — get your access ready:',
-    'app.algoria.tech/member',
+    '💬 <b>A question ?</b> Message Mathieu directly: @mathieu_algoria',
     '',
-    '💬 <b>A question?</b> Message Mathieu directly: @mathieu_algoria',
-    '',
-    'Algoria is <b>completely free</b>: the AI trades gold in <i>your own</i> broker account — your money never leaves it, and you stay in control.',
+    'Algoria is <b>completely free</b>: the AI trades gold in <i>your own</i> broker account. Your money never leaves it, and you stay in control.',
     '',
     'See you inside 🥇',
   ].join('\n'),

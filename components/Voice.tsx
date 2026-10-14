@@ -404,7 +404,7 @@ export function AlgoriaVoice({ deskItems, trades, st, symbol, dayPnl, rafaleTick
         seenOpen.current.add(k);
         if (fresh(t.opened_at)) {
           const swing = String(t.signal_ref ?? '').includes('-swing-');
-          engine().speak(`${swing ? 'Swing position' : 'Position'} opened. ${t.direction === 'long' ? 'Long' : 'Short'} on ${symName(String(t.symbol))} at ${Math.round(Number(t.entry))} dollars.`);
+          engine().speak(`${swing ? 'Swing position' : 'Position'} opened. ${t.direction === 'long' ? 'Buy' : 'Sell'} on ${symName(String(t.symbol))} at ${Math.round(Number(t.entry))} dollars.`);
         }
       }
       if (t.closed_at && !seenClose.current.has(k)) {

@@ -17,6 +17,7 @@ export function ToolsTab() {
             {/* 🧠 le cerveau d'Algoria AI — en tête des outils : c'est lui que Mathieu nourrit le plus souvent */}
             <AgentBrain />
             <AgentBrain docKey="memory" />
+            <AgentBrain docKey="cm_memory" />
             {/* 📣 ANNONCE GROUPÉE — née du basculement S1 → S2 : prévenir 17 membres un par un depuis le
                 fil BOT ACTIVITY, c'est 17 clics et la certitude d'en oublier un. L'audience est résolue
                 CÔTÉ SERVEUR (le navigateur n'envoie qu'un nom de segment), et l'étiquette empêche qu'un
@@ -150,7 +151,7 @@ export function ToolsTab() {
               {feedWins.length === 0 && <p style={dimP}>Recent wins appear here as trades close — each downloads as a ready-to-post story card.</p>}
               {feedWins.map((t) => (
                 <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ LONG' : '▼ SHORT'}</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ BUY' : '▼ SELL'}</span>
                   <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
                   <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--up)' }}>+${atRef(t.pnl, t.lot).toFixed(0)} <span style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600 }}>{REF_LABEL}</span></span>
                   <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{new Date(t.closed_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>

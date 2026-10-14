@@ -140,8 +140,8 @@ export async function manageBreakeven(stream: any, terminal: any, symbol: string
       const clamped = safeSL !== wantSL;
       console.log(`[algoria] stop → pos ${id} SL=${safeSL} (${wantR.toFixed(2)}R · ${gapPosed} du prix${clamped ? ` · ÉLOIGNÉ, voulu ${wantSL}` : ''})${guarded ? ` [news: ${newsGuard}]` : ''}`);
       void updateTradeStop(id, safeSL); // le cockpit fait suivre la zone SL en direct
-      if (firstGuard) void logNote(`🛡️ ${newsGuard} is imminent — stop pulled up on the open ${long ? 'long' : 'short'} (SL → ${safeSL}) · this trade can't lose through the release`, 'order');
-      else if (firstSecure && wantR >= 0) void logNote(`stop secured · ${long ? 'long' : 'short'} · SL → ${safeSL} (+${wantR.toFixed(2)}R · ${gapPosed} from price${clamped ? ' · widened so the copier can follow' : ''}) · trade can't lose now`, 'order');
+      if (firstGuard) void logNote(`🛡️ ${newsGuard} is imminent — stop pulled up on the open ${long ? 'buy' : 'sell'} (SL → ${safeSL}) · this trade can't lose through the release`, 'order');
+      else if (firstSecure && wantR >= 0) void logNote(`stop secured · ${long ? 'buy' : 'sell'} · SL → ${safeSL} (+${wantR.toFixed(2)}R · ${gapPosed} from price${clamped ? ' · widened so the copier can follow' : ''}) · trade can't lose now`, 'order');
     } catch (e) {
       if (firstSecure) done.delete(id); // échec au 1er passage → on réessaiera
       if (newsKey && firstGuard) newsSecured.delete(newsKey); // idem : la protection avant annonce doit repasser
