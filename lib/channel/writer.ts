@@ -1,8 +1,8 @@
 // ✍️ LE RÉDACTEUR DU CANAL PUBLIC (15/10/2026, décision Mathieu : « un CM intelligent, qui comprend et qui s'adapte,
 // pas des copier-coller des mêmes messages chaque jour », et « c'est le côté naturel, la proximité avec moi, qui close
 // les gens »). Claude écrit chaque post du jour à partir de ce qui se passe vraiment :
-//   · le calendrier économique du jour (les annonces USD à fort impact, à l'heure de Paris) ;
-//   · l'humeur du marché vue par le moteur (state_snapshots) ;
+//   · le calendrier économique, mais SEULEMENT les annonces majeures (NFP, décision de taux de la Fed) : 90 % de
+//     l'audience ne trade pas, une annonce de plus ne l'informe pas, elle l'inquiète (décision Mathieu du 15/10) ;
 //   · la veille et la semaine, en chiffres réels, SEULEMENT si elles sont vertes (pas de négativité dans le canal) ;
 //   · les derniers posts du canal, pour ne jamais se répéter ;
 //   · les questions reçues en support cette semaine, pour parler des vrais blocages ;
@@ -38,9 +38,8 @@ export type DayContext = {
   day: string;
   dateLabel: string;
   weekend: boolean;
-  /** les annonces USD à fort impact du jour, heure de Paris */
+  /** les annonces majeures du jour (NFP, décision de la Fed), heure de Paris, en mots simples */
   news: Array<{ at: string; title: string }>;
-  market: string | null;
   /** la dernière séance (vendredi pour un lundi), seulement si elle est verte */
   lastSession: { day: string; trades: number; net10: number } | null;
   /** la semaine en cours jusqu'à hier, seulement si elle est verte */
@@ -48,6 +47,13 @@ export type DayContext = {
   recent: string[];
   questions: string[];
 };
+
+// LES SEULES ANNONCES QUI MÉRITENT UNE LIGNE (Mathieu, 15/10 : « à part un NFP day ou un truc hyper important, je vois
+// pas l'intérêt de leur faire peur »). Nommées en mots simples : l'audience ne sait pas ce qu'est un « NFP ».
+const MAJOR: Array<[RegExp, string]> = [
+  [/^Non-Farm Employment Change$/i, 'the big monthly US jobs report (NFP)'],
+  [/^Federal Funds Rate$/i, "the US central bank's interest rate decision (the Fed)"],
+];
 
 async function ecoNews(day: string): Promise<Array<{ at: string; title: string }>> {
   try {
@@ -59,21 +65,10 @@ async function ecoNews(day: string): Promise<Array<{ at: string; title: string }
     const raw = (await r.json()) as Array<Record<string, unknown>>;
     return raw
       .map((e) => ({ t: Date.parse(String(e.date ?? '')), title: String(e.title ?? '').trim(), country: String(e.country ?? ''), impact: String(e.impact ?? '') }))
-      .filter((e) => Number.isFinite(e.t) && e.title && e.country === 'USD' && e.impact === 'High' && tradingDayOf(e.t) === day)
-      .sort((a, b) => a.t - b.t).slice(0, 4)
-      .map((e) => ({ at: parisHHMM(e.t), title: e.title }));
+      .filter((e) => Number.isFinite(e.t) && e.country === 'USD' && tradingDayOf(e.t) === day && MAJOR.some(([re]) => re.test(e.title)))
+      .sort((a, b) => a.t - b.t).slice(0, 2)
+      .map((e) => ({ at: parisHHMM(e.t), title: MAJOR.find(([re]) => re.test(e.title))?.[1] ?? e.title }));
   } catch { return []; }
-}
-
-async function marketMood(db: Db): Promise<string | null> {
-  try {
-    const { data } = await db.from('state_snapshots').select('regime,atr_percentile,ts').order('ts', { ascending: false }).limit(1);
-    const s = (data ?? [])[0] as { regime?: string; atr_percentile?: number; ts?: string } | undefined;
-    if (!s || Date.now() - Date.parse(String(s.ts)) > 6 * 3_600_000) return null;
-    const vol = Number(s.atr_percentile ?? 0);
-    const regime = String(s.regime ?? '');
-    return `${regime === 'trend' ? 'gold is trending' : regime === 'range' ? 'gold is moving sideways' : `gold regime: ${regime}`}, volatility ${vol >= 70 ? 'high' : vol <= 30 ? 'low' : 'normal'}`;
-  } catch { return null; }
 }
 
 /** Tout ce que le rédacteur sait du jour `day` (Paris). Chaque morceau est facultatif : une source en panne n'empêche rien. */
@@ -83,9 +78,8 @@ export async function dayContext(db: Db, day: string): Promise<DayContext> {
   const last = wd === 1 ? addDays(day, -3) : wd === 0 ? addDays(day, -2) : addDays(day, -1);
   const monday = addDays(day, -((wd + 6) % 7));
   const from = last < monday ? last : monday;
-  const [news, market, trades, recentRows, recaps, qs] = await Promise.all([
+  const [news, trades, recentRows, recaps, qs] = await Promise.all([
     ecoNews(day),
-    marketMood(db),
     liveTrades(db, new Date(Date.parse(`${from}T00:00:00Z`) - 3 * 3_600_000).toISOString()).catch(() => []),
     db.from('channel_posts').select('text').eq('status', 'published').order('scheduled_at', { ascending: false }).limit(12).then((r: { data: unknown }) => r.data ?? []).catch(() => []),
     db.from('channel_recaps').select('text').eq('status', 'published').order('day', { ascending: false }).limit(3).then((r: { data: unknown }) => r.data ?? []).catch(() => []),
@@ -101,7 +95,7 @@ export async function dayContext(db: Db, day: string): Promise<DayContext> {
   const questions = (qs as Array<{ detail: { from?: string; text?: string } | null }>)
     .map((r) => (r.detail?.from === 'client' ? String(r.detail?.text ?? '') : '')).filter((t) => t.length > 8 && !t.startsWith('[')).slice(0, 40).map((t) => t.slice(0, 160).replace(/\s+/g, ' '));
   return {
-    day, dateLabel: longDate(day), weekend: wd === 0 || wd === 6, news, market,
+    day, dateLabel: longDate(day), weekend: wd === 0 || wd === 6, news,
     lastSession: ls.trades && ls.net10 > 0 ? { day: last, ...ls } : null,
     week: wk.trades && wk.net10 > 0 ? wk : null,
     recent: [...(recentRows as Array<{ text: string | null }>), ...(recaps as Array<{ text: string | null }>)].map((r) => String(r.text ?? '').slice(0, 300)).filter(Boolean),
@@ -117,7 +111,7 @@ async function systemPrompt(): Promise<string> {
 
 VOICE: you write AS Mathieu, the founder, in the first person when it is personal ("I", "my"). Warm, direct, simple, like a friend who runs this and talks to his community every day. Never corporate, never hype. The AI is "Algoria" or "the AI".
 
-AUDIENCE: beginners, mostly in South Africa and the UK. Many arrived from an ad and have not created their account yet. They know nothing about trading: no jargon, say BUY and SELL (never long or short).
+AUDIENCE: beginners, mostly in South Africa and the UK. Many arrived from an ad and have not created their account yet. 90% of them are not traders and never will be: they want the AI to do it for them. So no market talk, no charts, no volatility, no macro, no jargon, nothing that could worry them; say BUY and SELL (never long or short). The only market event you may ever mention is one the task explicitly gives you.
 
 HARD RULES (a post that breaks one is thrown away):
 - English only. Telegram HTML only: <b>bold</b> and <i>italic</i>, nothing else. No markdown, no hashtags, no links in the text (the system adds the button).
@@ -136,9 +130,7 @@ ${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu, the source o
 
 function contextBlock(c: DayContext): string {
   const lines = [`TODAY: ${c.dateLabel} (Paris time).${c.weekend ? ' Weekend: the gold market is closed (it closes Friday 23:00 and reopens Monday 00:00, Paris time). Algoria does not trade.' : ''}`];
-  if (c.news.length) lines.push(`HIGH-IMPACT US NEWS TODAY (Paris time): ${c.news.map((n) => `${n.at} ${n.title}`).join(' · ')}. Fact you may use: Algoria stands aside around high-impact news, it doesn't trade the minutes around them.`);
-  else if (!c.weekend) lines.push('No high-impact US news today.');
-  if (c.market && !c.weekend) lines.push(`MARKET (from the engine): ${c.market}.`);
+  if (c.news.length) lines.push(`MAJOR EVENT TODAY (Paris time): ${c.news.map((n) => `${n.at}, ${n.title}`).join(' · ')}. Only the morning post may mention it, in one calm line, in plain words, never as a warning: Algoria simply stands aside around it, members have nothing to do.`);
   lines.push(c.lastSession ? `LAST SESSION (${longDate(c.lastSession.day)}): green, ${c.lastSession.trades} trades. Token {{YESTERDAY}} = its result.` : 'LAST SESSION: do not mention its result.');
   if (c.week) lines.push(`THIS WEEK SO FAR: green, ${c.week.trades} trades. Token {{WEEK}} = its result.`);
   if (c.questions.length) lines.push(`QUESTIONS PEOPLE ASKED MATHIEU THIS WEEK (do not quote them, use them to know what worries people):\n- ${c.questions.slice(0, 25).join('\n- ')}`);
@@ -205,9 +197,9 @@ export type Brief =
   | { kind: 'recap'; recapKind: 'win' | 'record' | 'week' | 'quiet' | 'red'; trades: number; wins: number; liveMembers: number[]; weekLabel?: string };
 
 const BRIEFS: Record<Brief['kind'], (b: Brief) => string> = {
-  morning: () => `Write the MORNING post that kickstarts the day in the channel. 3 to 6 short lines.
-Give people one concrete, true reason to follow today, taken from TODAY: a news event and its Paris time (Algoria stands aside around it), the market mood, or on a weekend the fact that the market is closed and reopens Monday at midnight. If the LAST SESSION is given, you may mention it with the token {{YESTERDAY}} (written exactly like that), never otherwise.
-End with something light that invites them in (open the app with the button below, or say hi). Never a generic "good morning, let's go". No promise about today's results.`,
+  morning: () => `Write the MORNING post that kickstarts the day in the channel. 3 to 6 short lines, warm and human, like Mathieu saying hi to his community.
+Make it feel written for today, not a generic "good morning, let's go": use what is true today. Ideas (pick one or two, vary from the recent posts): the AI is on and working for the members while they live their day; the LAST SESSION result with the token {{YESTERDAY}} (written exactly like that, only if it is given); a one-line answer to a question people asked this week; on a weekend, enjoy it, the AI is back Monday. If a MAJOR EVENT is given, you may add one calm line about it.
+End with something light that invites them in (open the app with the button below, or reply / say hi). No promise about today's results.`,
   howto: (b) => {
     const x = b as Extract<Brief, { kind: 'howto' }>;
     return `Write today's HOW IT WORKS post. First line exactly: 🔵💙 HOW IT WORKS
