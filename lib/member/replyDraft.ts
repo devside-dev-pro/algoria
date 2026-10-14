@@ -55,6 +55,8 @@ function facts(): string {
     `Activation: after connecting, the member places ${legs} on ${ACTIVATION_SYMBOL} in their MT terminal and closes both — a buy and a sell of the same size cancel out, no market risk, only the spread. That volume registers the account with the broker. Then they tap "I've placed both trades" in the app.`,
     `Funds stay ${WITHDRAW_LOCK_DAYS} days after the deposit: withdrawing earlier cancels the broker registration and the Algoria access. After that, the money is theirs to withdraw anytime. Algoria never holds member funds; the money stays on the member's own broker account.`,
     `Copy size: default 0.01 lot per ~$500 of balance, adjustable in the app profile. Members can pause or stop the copy themselves in the app.`,
+    // 14/10/2026 (Mathieu) : beaucoup de membres débutent, « long / short » ne leur parle pas.
+    `Wording: many members are beginners. Always say BUY and SELL (a buy, a sell), never long or short.`,
     // 29/09/2026 : à « je peux tester en démo ? », le bot répondait « pas besoin de risquer de l'argent réel :
     // déposez 200 $ » — contradictoire (200 $ sur un compte réel SONT de l'argent réel) et muet sur les 30 jours.
     `Demo accounts: NOT offered — the free access needs a REAL account opened through the partner link (that is how the broker registers it and how Algoria stays free). To judge BEFORE depositing: the real track record page (month by month since July 2026, every single trade since October 2026, losing months included) and the app History (every closed trade, wins and losses). Whoever wants to start small deposits the minimum and copies at 0.01 lot — that is real money, at real risk, and it must stay ${WITHDRAW_LOCK_DAYS} days.`,

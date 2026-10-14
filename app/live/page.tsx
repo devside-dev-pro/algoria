@@ -195,7 +195,7 @@ export default function LiveStage() {
             boxShadow: `0 10px 34px rgba(2,6,16,.7), 0 0 26px ${(floating ?? 0) >= 0 ? 'rgba(34,224,166,.2)' : 'rgba(130,152,190,.1)'}`,
           }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: openTrade.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>
-              {openTrade.direction === 'long' ? '▲ LONG' : '▼ SHORT'} {hero === 'XAUUSD' ? 'GOLD' : 'BTC'}
+              {openTrade.direction === 'long' ? '▲ BUY' : '▼ SELL'} {hero === 'XAUUSD' ? 'GOLD' : 'BTC'}
             </span>
             <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>in @ {Number(openTrade.entry).toFixed(1)}</span>
             <span className="mono" style={{ fontSize: 26, fontWeight: 800, color: (floating ?? 0) >= 0 ? 'var(--up)' : 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>

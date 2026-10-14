@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
               <polygon points={isLong ? '20,0 40,36 0,36' : '0,0 40,0 20,36'} fill={isLong ? '#22e0a6' : '#ff6b8a'} />
             </svg>
             <span style={{ fontSize: 46, fontWeight: 700, color: isLong ? '#22e0a6' : '#ff6b8a', letterSpacing: 3, lineHeight: 1, marginLeft: 22 }}>
-              {isLong ? 'LONG' : 'SHORT'}  {symLabel(String(t.symbol))}
+              {isLong ? 'BUY' : 'SELL'}  {symLabel(String(t.symbol))}
             </span>
           </div>
           <span style={{ fontSize: 138, fontWeight: 700, color: '#22e0a6', lineHeight: 1, marginTop: 18, textShadow: '0 0 45px rgba(34,224,166,.5)' }}>+${pnl.toLocaleString('en-US')}</span>

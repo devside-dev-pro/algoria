@@ -272,7 +272,7 @@ export function Chart({ signals, activeTrade = null, symbol = 'XAUUSD', wins = [
     if (!a) return;
     const long = a.direction === 'long';
     const lines = tradeLinesRef.current;
-    if (Number.isFinite(a.entry)) lines.push(series.createPriceLine({ price: a.entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'LONG' : 'SHORT'} ${a.entry.toFixed(1)}` }));
+    if (Number.isFinite(a.entry)) lines.push(series.createPriceLine({ price: a.entry, color: '#dce9ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▸ ${long ? 'BUY' : 'SELL'} ${a.entry.toFixed(1)}` }));
     // SL en rose SOURD + pointillés (moins agressif à l'écran en live) ; TP en vert franc (positif).
     // SL SÉCURISÉ (à/au-delà de l'entrée = breakeven ou trailing en profit) → ligne VERTE « 🔒 BE » :
     // le viewer voit d'un coup d'œil que ce trade ne peut plus perdre.

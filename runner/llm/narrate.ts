@@ -19,7 +19,7 @@ export type DeskKind = 'trade' | 'opportunity' | 'analysis' | 'recap';
 
 // Le LLM ne réécrit PLUS les nombres (l'UI les rend) — juste la clause que les chiffres ne montrent pas.
 const SYSTEM = `You are ALGORIA AI, an elite gold/Bitcoin trading desk narrating live for traders. The UI already renders — from structured fields — the direction, kind, every price/level, ADX, EMA, ATR, session, R:R, conviction and the trigger. Your ONLY job is the ONE short clause of interpretation those numbers cannot show: intent, tension, or what would change your mind.
-HARD RULES: never restate a number, price, level, %, session or indicator value; no "I", no "price is", no hedging/"maybe", no markdown, no quotes, no emoji, no leading label, no ending period. Start lowercase. Sharp institutional-desk voice, concrete verbs, zero hype. If there is nothing to add beyond the numbers, say what you are WAITING for.`;
+HARD RULES: never restate a number, price, level, %, session or indicator value; no "I", no "price is", no hedging/"maybe", no markdown, no quotes, no emoji, no leading label, no ending period. Start lowercase. Sharp institutional-desk voice, concrete verbs, zero hype. If there is nothing to add beyond the numbers, say what you are WAITING for. Many readers are beginners: say buy / sell / buyers / sellers, never long / short / longs / shorts.`;
 
 const r1 = (n: number) => n.toFixed(1);
 
@@ -58,7 +58,7 @@ function marketBlock(ctx: MarketContext): string {
 
 function tradePrompt(ctx: MarketContext, s: Signal): string {
   return [
-    `You just FIRED a ${s.direction.toUpperCase()} trade. In ONE clause (max 13 words), present tense, framed as already IN it, state the THESIS not the mechanics.`,
+    `You just FIRED a ${s.direction === 'long' ? 'BUY' : 'SELL'} trade. In ONE clause (max 13 words), present tense, framed as already IN it, state the THESIS not the mechanics.`,
     `Confluence drivers: ${s.rationale.join('; ')}.`,
     `Grounding (do NOT restate any of this): ${marketBlock(ctx)}`,
   ].join(' ');
@@ -67,8 +67,8 @@ function tradePrompt(ctx: MarketContext, s: Signal): string {
 function opportunityPrompt(ctx: MarketContext, cf: Confluence, gated?: boolean): string {
   return [
     gated
-      ? `A ${cf.direction.toUpperCase()} setup is building BUT your EMA trend filter BLOCKS it (trend not aligned — you will NOT chase). ONE clause (max 13 words): own the discipline — what alignment you demand before touching it.`
-      : `A ${cf.direction.toUpperCase()} setup is BUILDING but has NOT triggered. ONE clause (max 13 words): the tension, or precisely what you're waiting for. Do NOT name the trigger level (the UI shows it).`,
+      ? `A ${cf.direction === 'long' ? 'BUY' : 'SELL'} setup is building BUT your EMA trend filter BLOCKS it (trend not aligned — you will NOT chase). ONE clause (max 13 words): own the discipline — what alignment you demand before touching it.`
+      : `A ${cf.direction === 'long' ? 'BUY' : 'SELL'} setup is BUILDING but has NOT triggered. ONE clause (max 13 words): the tension, or precisely what you're waiting for. Do NOT name the trigger level (the UI shows it).`,
     `Grounding (do NOT restate): ${marketBlock(ctx)}`,
   ].join(' ');
 }

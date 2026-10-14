@@ -242,7 +242,7 @@ async function main() {
         takeProfits,
         riskReward: 0,
         lot,
-        rationale: [opts.ultraTight ? 'RAFALE — micro-scalp' : opts.tight ? 'ACTION mode — auto trade' : `MANUAL ${direction.toUpperCase()} trade${custom ? ' (custom SL/TP)' : ' at market'}`],
+        rationale: [opts.ultraTight ? 'RAFALE — micro-scalp' : opts.tight ? 'ACTION mode — auto trade' : `MANUAL ${direction === 'long' ? 'BUY' : 'SELL'} trade${custom ? ' (custom SL/TP)' : ' at market'}`],
         confluence,
       };
     };
@@ -460,7 +460,7 @@ async function main() {
             // anti-spam : un post seulement si la direction change OU 30 min se sont écoulées depuis le dernier
             if (blocked.direction !== lastVipSetup.dir || now - lastVipSetup.at > 30 * 60_000) {
               lastVipSetup = { dir: blocked.direction, at: now };
-              const arrow = blocked.direction === 'long' ? '🔼 LONG' : '🔽 SHORT';
+              const arrow = blocked.direction === 'long' ? '🔼 BUY' : '🔽 SELL';
               void postVip(
                 `🎯 <b>MANUAL SETUP</b> · ${DISPLAY}\n${VIP_RULE}\n${arrow}  ·  conviction <b>${(blocked.confidence * 100) | 0}%</b>\nEntry  <code>~ ${blocked.entry}</code>\n🛑 SL  <code>${blocked.stopLoss}</code>\n🎯 TP  <code>${blocked.takeProfits[0]}</code>\n${VIP_RULE}\n<i>${VIP_TAG} is done for the day (other strategies may still be running) — this one's over to you. Indicative levels, your risk, your call.</i>`,
               );
@@ -584,8 +584,8 @@ async function main() {
               // ⚠️ seuils LUS DE LA CONFIG, jamais écrits en dur : ce texte annonçait « BE at 1R » alors que
               // le breakeven du swing or est passé à 0.5R (#296) — la note du cockpit décrivait un réglage
               // qui n'existait plus, et servait de référence pour juger le comportement du moteur.
-              await logNote(`⚡ SWING ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at ${SW.beTrigger}R, ${SW.trailDist}R trailing)`, 'order');
-              if (vipReady() && !SECONDARY) void postVip(`📈 <b>CORE position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction.toUpperCase()}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n🎯 TP  <code>${sig.takeProfits[0]}</code>\n${VIP_RULE}\n<i>This one can ride for days. Copied to your account.</i>`);
+              await logNote(`⚡ SWING ${sig.direction === 'long' ? 'BUY' : 'SELL'} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · riding for days (BE at ${SW.beTrigger}R, ${SW.trailDist}R trailing)`, 'order');
+              if (vipReady() && !SECONDARY) void postVip(`📈 <b>CORE position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction === 'long' ? 'BUY' : 'SELL'}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n🎯 TP  <code>${sig.takeProfits[0]}</code>\n${VIP_RULE}\n<i>This one can ride for days. Copied to your account.</i>`);
             }
           }
         } catch (e) {
@@ -709,8 +709,8 @@ async function main() {
           const ticket = await executeSignal(sig);
           if (ticket) {
             rememberManagement(ticket, { beTrigger: 0, riskDist, newsGuard: false }); // aucune gestion tick par tick
-            await logNote(`📐 TREND ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} (${TR.slAtr}×ATR, ${(TR.riskPct * 100).toFixed(0)}% of equity = ${lot} lot) · exit on the ${TR.exitN}-day channel — held for weeks`, 'order');
-            if (vipReady() && !SECONDARY) void postVip(`📐 <b>TREND position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction.toUpperCase()}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n${VIP_RULE}\n<i>Daily breakout. Risk 1R = ${(TR.riskPct * 100).toFixed(0)}% of equity. Can ride for weeks — the stop follows the ${TR.exitN}-day channel.</i>`);
+            await logNote(`📐 TREND ${sig.direction === 'long' ? 'BUY' : 'SELL'} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} (${TR.slAtr}×ATR, ${(TR.riskPct * 100).toFixed(0)}% of equity = ${lot} lot) · exit on the ${TR.exitN}-day channel — held for weeks`, 'order');
+            if (vipReady() && !SECONDARY) void postVip(`📐 <b>TREND position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction === 'long' ? 'BUY' : 'SELL'}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n${VIP_RULE}\n<i>Daily breakout. Risk 1R = ${(TR.riskPct * 100).toFixed(0)}% of equity. Can ride for weeks — the stop follows the ${TR.exitN}-day channel.</i>`);
           }
         } catch (e) {
           console.error(`[algoria] trend ${DISPLAY} échoué:`, e);
@@ -777,8 +777,8 @@ async function main() {
           const ticket = await executeSignal(sig);
           if (ticket) {
             rememberManagement(ticket, { beTrigger: 0, riskDist: Math.abs(sig.entry - sig.stopLoss), newsGuard: false });
-            await logNote(`📍 ZONE ${sig.direction.toUpperCase()} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]} (${ZC.slAtr}× / ${ZC.tpAtr}× ATR H1, lot ${ZC.lot}) — yesterday's ${sig.direction === 'long' ? 'high' : 'low'} ${r.entry.level} broken then retested · broker holds SL/TP, no trailing`, 'order');
-            if (vipReady() && !SECONDARY) void postVip(`📍 <b>ZONE position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction.toUpperCase()}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n🎯 TP  <code>${sig.takeProfits[0]}</code>\n${VIP_RULE}\n<i>Yesterday's range broken, then retested. Fixed stop and target held by the broker — no trailing. Can hold overnight.</i>`);
+            await logNote(`📍 ZONE ${sig.direction === 'long' ? 'BUY' : 'SELL'} ${DISPLAY} @ ${sig.entry} · SL ${sig.stopLoss} · TP ${sig.takeProfits[0]} (${ZC.slAtr}× / ${ZC.tpAtr}× ATR H1, lot ${ZC.lot}) — yesterday's ${sig.direction === 'long' ? 'high' : 'low'} ${r.entry.level} broken then retested · broker holds SL/TP, no trailing`, 'order');
+            if (vipReady() && !SECONDARY) void postVip(`📍 <b>ZONE position opened</b> · ${VIP_TAG}\n<i>${DISPLAY} ${sig.direction === 'long' ? 'BUY' : 'SELL'}</i>\n${VIP_RULE}\nEntry  <code>~ ${sig.entry}</code>\n🛑 SL  <code>${sig.stopLoss}</code>\n🎯 TP  <code>${sig.takeProfits[0]}</code>\n${VIP_RULE}\n<i>Yesterday's range broken, then retested. Fixed stop and target held by the broker — no trailing. Can hold overnight.</i>`);
           }
         } catch (e) {
           console.error(`[algoria] zone ${DISPLAY} échoué:`, e);
@@ -1076,9 +1076,9 @@ async function main() {
       const demo = [
         "✅ Algoria VIP channel connected. Here's a preview of what you'll get 👇 (DEMO messages)",
         "🟢 Algoria's working · 24 trades · 83% win today",
-        "📈 Algoria just opened a CORE position — GOLD LONG\nEntry ~ 4021.5 · SL 4009.0 · TP 4085.0\nThis one can ride for days. Copied to your account.",
+        "📈 Algoria just opened a CORE position — GOLD BUY\nEntry ~ 4021.5 · SL 4009.0 · TP 4085.0\nThis one can ride for days. Copied to your account.",
         "✅ Algoria hit its daily target and wrapped up.\nNow in ANALYSIS MODE: the next setups are yours to take manually if you want. 👇",
-        "🎯 MANUAL SETUP — GOLD\n🔽 SHORT · conviction 78%\nEntry ~ 4021.5\n🛑 SL 4028.0\n🎯 TP 4014.0\n\nAlgoria's done for the day — over to you. Indicative levels, your risk, your call.",
+        "🎯 MANUAL SETUP — GOLD\n🔽 SELL · conviction 78%\nEntry ~ 4021.5\n🛑 SL 4028.0\n🎯 TP 4014.0\n\nAlgoria's done for the day — over to you. Indicative levels, your risk, your call.",
         "🛡️ Algoria hit its daily safety limit and stopped for the day.\nWhy: a very volatile session that kept reversing — a cluster of stops, not a drift. The cap did its job: your downside is bounded.\nDays like today's chop are the hardest for any momentum system; we protect capital and never force trades. Fresh start tomorrow. 🔁",
         "📊 DAILY WRAP\n31 trades · 79% win · green day 🟢\nAll copied to your account. See you tomorrow. 👊",
         "— End of demo. Remove VIP_DEMO from Railway variables to go live. —",

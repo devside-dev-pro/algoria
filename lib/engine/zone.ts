@@ -178,7 +178,7 @@ export function zoneSignal(symbol: string, e: { dir: 1 | -1; atr: number; level:
     riskReward: cfg.tpAtr / cfg.slAtr,
     lot: cfg.lot,
     rationale: [
-      `ZONE ${direction.toUpperCase()} — yesterday's ${direction === 'long' ? 'high' : 'low'} ${e.level.toFixed(dec)} broken on M5, then retested · H1 close ${direction === 'long' ? 'above' : 'below'} EMA${cfg.emaFast}/EMA${cfg.emaSlow}`,
+      `ZONE ${direction === 'long' ? 'BUY' : 'SELL'} — yesterday's ${direction === 'long' ? 'high' : 'low'} ${e.level.toFixed(dec)} broken on M5, then retested · H1 close ${direction === 'long' ? 'above' : 'below'} EMA${cfg.emaFast}/EMA${cfg.emaSlow}`,
       `SL ${cfg.slAtr}×ATR(H1,${cfg.atrLen}) = ${(cfg.slAtr * e.atr).toFixed(dec)} · TP ${cfg.tpAtr}×ATR · held by the broker, no trailing`,
     ],
     confluence,

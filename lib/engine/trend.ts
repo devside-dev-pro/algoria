@@ -121,7 +121,7 @@ export function trendSignal(symbol: string, closed: Bar[], cfg: TrendConfig, mod
     riskReward: 0,
     lot: 0,
     rationale: [
-      `TREND ${direction.toUpperCase()} — daily close ${b.close} ${direction === 'long' ? 'above' : 'below'} the ${cfg.N}-day ${direction === 'long' ? 'high' : 'low'} ${(direction === 'long' ? hi : lo).toFixed(dec)}`,
+      `TREND ${direction === 'long' ? 'BUY' : 'SELL'} — daily close ${b.close} ${direction === 'long' ? 'above' : 'below'} the ${cfg.N}-day ${direction === 'long' ? 'high' : 'low'} ${(direction === 'long' ? hi : lo).toFixed(dec)}`,
       `D1 layer · SL ${cfg.slAtr}×ATR(${cfg.atrLen}) = ${(cfg.slAtr * atr).toFixed(dec)} · exit on the ${cfg.exitN}-day channel (stop follows it, never backs off) · held for weeks`,
     ],
     confluence,
