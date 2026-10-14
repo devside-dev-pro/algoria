@@ -3,6 +3,7 @@
 // arrive avec le branchement de l'API du copieur — bannière honnête en attendant.
 import { useEffect, useState } from 'react';
 import { atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
+import { TRADING_TZ } from '@/lib/display/tradingDay';
 import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { ShareWinSheet, type ShareableWin } from '@/components/member/ShareWinSheet';
@@ -121,13 +122,16 @@ export default function MemberHistory() {
         )}
       </section>
       <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {trades.length > 0 && <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>Days and times in Paris time, the clock of the gold session (open 00:00 to 23:00).</span>}
         {/* MEMBRES : trades REGROUPÉS PAR JOURNÉE, bilan du jour en tête — on raconte la journée (souvent
             verte), pas le trade isolé (parfois rouge). Un mur de trades bruts laisse l'œil accrocher les
             3 gros rouges du master et rater le net positif → c'est ça qui a fait fuir un client. */}
         {(() => {
           const groups: { day: string; items: FeedTrade[] }[] = [];
           for (const t of trades) {
-            const day = new Date(t.closed_at).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: '2-digit' });
+            // la journée de Paris, pour tout le monde (14/10/2026, lib/display/tradingDay.ts) : l'heure du téléphone
+            // donnait à un membre anglais un autre bilan du jour que le récap du canal et le VIP
+            const day = new Date(t.closed_at).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: TRADING_TZ });
             const g = groups[groups.length - 1];
             if (g && g.day === day) g.items.push(t);
             else groups.push({ day, items: [t] });
@@ -159,7 +163,7 @@ export default function MemberHistory() {
                   const win = Number(t.pnl) > 0;
                   return (
                     <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 0 7px 10px', borderBottom: '1px solid rgba(130,152,190,.1)', opacity: win ? 1 : 0.55 }}>
-                      <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', minWidth: 34 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', minWidth: 34 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: TRADING_TZ })}</span>
                       <span style={{ fontSize: 10.5, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲ BUY' : t.direction === 'short' ? '▼ SELL' : ''}</span>
                       <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol}</span>
                       <span style={{ flex: 1 }} />

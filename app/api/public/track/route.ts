@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 // À PARTIR DU 1er OCTOBRE 2026 (MASTER_TRACK_FROM, décision Mathieu du 10/10) : chaque jour est celui du MASTER,
 // le compte que les membres copient. Ses trades copiés viennent de la table trades (mêmes exclusions que le
 // récap du canal et l'onglet History : micro-scalps de démonstration, NAS100, autres stratégies) ; son vrai
-// solde, de state_snapshots (le runner l'écrit toutes les 60 s, lu ici jour par jour via master_day_balances).
+// solde, de state_snapshots (le runner l'écrit toutes les 60 s, lu ici jour par jour, à l'heure de Paris, via master_paris_day_balances).
 // Voir lib/track/source.ts pour le pourquoi.
 //
 // Ce que la route renvoie, et pourquoi sous cette forme :

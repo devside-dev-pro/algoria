@@ -1,6 +1,7 @@
 // 📣 RÉCAP DU SOIR DANS LE CANAL (02/10/2026) — décisions Mathieu :
-//   · tous les soirs de semaine, un récap de la journée à 21h30 dans le canal source ;
-//   · MODE VALIDATION : à 21h15 le bot envoie le brouillon aux admins avec ✅ PUBLIER / ❌ Pas ce soir, rien
+//   · tous les soirs de semaine, un récap de la journée dans le canal source ;
+//   · MODE VALIDATION : à 23h05 (Paris, après la fermeture de l'or ; 21h15 jusqu'au 14/10/2026) le bot envoie
+//     le brouillon aux admins avec ✅ PUBLIER / ❌ Pas ce soir, rien
 //     ne part sans un clic (lib/channel/publish.ts publie alors source + miroir UK + canal italien traduit) ;
 //   · JOURNÉE ROUGE = option A : pas de chiffres ce soir-là, le post renvoie au track record complet de l'app ;
 //   · montants à 0.01 lot ET à 0.10 lot (lib/display/scale.ts : conversion PAR TRADE, puis somme).
@@ -125,7 +126,7 @@ export async function buildRecap(db: Db, day = parisDay(new Date())): Promise<Re
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** 21h15 : prépare le brouillon du jour (une seule fois) et l'envoie aux admins avec les boutons. */
+/** 23h05 (Paris) : prépare le brouillon du jour (une seule fois) et l'envoie aux admins avec les boutons. */
 export async function draftTonight(db: Db, day = parisDay(new Date())): Promise<{ status: string; recap?: Recap }> {
   const recap = await buildRecap(db, day);
   if (!recap) return { status: 'weekend' };

@@ -15,6 +15,7 @@
 // chacun gère son money management) — le % dit seulement que le SIEN dépendra du lot qu'il choisit.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MASTER_TRACK_FROM, SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
+import { TRADING_TZ } from '@/lib/display/tradingDay';
 
 type Day = { d: string; u: number; net: number; cash: number; n: number; w: number; base?: number };
 type Track = { since: string; updatedAt: string; currency: string; startBalance: number; balance: number; maxDdPct?: number; maxDdU?: number; days: Day[] };
@@ -75,7 +76,8 @@ function Curve({ points, unit }: { points: number[]; unit: 'pct' | 'usd' }) {
 type MTrade = { c: string; o: string | null; dir: 'buy' | 'sell' | null; entry: number | null; exit: number | null; u: number; reason: string | null };
 type MDay = { d: string; fee: number; trades: MTrade[] };
 const DETAIL_FROM = MASTER_TRACK_FROM.slice(0, 7);
-const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+// jours et heures de Paris (14/10/2026, lib/display/tradingDay.ts) : la même journée que l'app, le VIP et le canal
+const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: TRADING_TZ });
 const price = (n: number | null) => (n == null ? '–' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const held = (o: string | null, c: string) => {
   if (!o) return null;
@@ -101,7 +103,7 @@ function MonthTrades({ ym, atLot }: { ym: string; atLot: number }) {
   const amt = (u: number) => fmtUsd(u * atLot);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 0 10px' }}>
-      <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>Every trade, wins and losses · results at <b style={{ color: 'var(--muted)' }}>{atLot.toFixed(2)} lot</b> · times in UTC · tap a trade for its details</span>
+      <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>Every trade, wins and losses · results at <b style={{ color: 'var(--muted)' }}>{atLot.toFixed(2)} lot</b> · days and times in Paris time · tap a trade for its details</span>
       {days.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>No closed trade yet this month.</span>}
       {days.map((day) => {
         const dayU = day.trades.reduce((a, t) => a + t.u, 0) + day.fee;
@@ -130,7 +132,7 @@ function MonthTrades({ ym, atLot }: { ym: string; atLot: number }) {
                   {open && (
                     <div className="mono" style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10.5, color: 'var(--muted)', padding: '4px 0 2px 44px' }}>
                       <span>Entry <b style={{ color: 'var(--text)' }}>{price(t.entry)}</b> → Exit <b style={{ color: 'var(--text)' }}>{price(t.exit)}</b></span>
-                      <span>{t.o ? `Opened ${hhmm(t.o)} · ` : ''}Closed {hhmm(t.c)} UTC{dur ? ` · held ${dur}` : ''}{by ? ` · ${by}` : ''}</span>
+                      <span>{t.o ? `Opened ${hhmm(t.o)} · ` : ''}Closed {hhmm(t.c)} Paris time{dur ? ` · held ${dur}` : ''}{by ? ` · ${by}` : ''}</span>
                       <span>Result {fmtUsd(t.u * 0.01)} at 0.01 lot · {fmtUsd(t.u * 0.1)} at 0.10 lot</span>
                     </div>
                   )}
@@ -234,7 +236,7 @@ export function TrackRecord() {
   }, [data, mode, lot]);
 
   const fmt = (n: number, sign = true) => (mode === 'pct' ? fmtPct(n, sign) : fmtUsd(n, sign));
-  const updated = data ? new Date(data.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC' : '';
+  const updated = data ? new Date(data.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: TRADING_TZ }) + ' Paris time' : '';
 
   if (failed) return <p style={{ fontSize: 12.5, color: 'var(--dim)' }}>The track record could not be loaded right now — try again in a minute.</p>;
   if (!data || !view) return <p style={{ fontSize: 12.5, color: 'var(--dim)' }}>loading…</p>;

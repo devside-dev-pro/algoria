@@ -4,6 +4,7 @@ import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { inMaintenance, LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { OFFBOARDED } from '@/lib/member/winback';
 import { TRACK_SINCE, TRACK_SINCE_MS } from '@/lib/member/trackSince';
+import { tradingDayOf, tradingDayStartMs } from '@/lib/display/tradingDay';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,11 @@ export async function GET(req: NextRequest) {
   if (!s) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
   const range = req.nextUrl.searchParams.get('range');
-  const rangeFrom = range === 'all' ? 0 : Date.now() - (range === '30d' ? 30 : 7) * 86_400_000;
+  // JOURNÉES ENTIÈRES, À L'HEURE DE PARIS (14/10/2026, voir lib/display/tradingDay.ts) : la période part de minuit à
+  // Paris, il y a 7 ou 30 jours. Une borne glissante coupait la plus ancienne journée en deux, et son bilan ne
+  // correspondait plus à celui annoncé ce soir-là.
+  const daysAgoStart = (n: number) => tradingDayStartMs(tradingDayOf(Date.now() - n * 86_400_000));
+  const rangeFrom = range === 'all' ? 0 : daysAgoStart(range === '30d' ? 30 : 7);
   const [memberQ, desk, tradesQ, signalsQ] = await Promise.all([
     (db as any).from('members').select('status,risk_tier,strategy,lot').eq('tg_id', s.tgId).limit(1) as Promise<{ data: Array<{ status: string; risk_tier: string; strategy: number | null; lot: number | null }> | null }>,
     db.from('events').select('id,ts,msg,data').eq('level', 'ai').order('ts', { ascending: false }).limit(24),
@@ -61,7 +66,7 @@ export async function GET(req: NextRequest) {
   const clean = (tradesQ.data ?? []).filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100' && !inMaintenance(Number((t as { strategy?: number }).strategy ?? 2)));
   // PROSPECT : les 7 DERNIERS JOURS, quelle que soit la période demandée (décision Mathieu, 14/10/2026 : l'historique
   // réel de la semaine, pertes comprises ; le reste s'ouvre avec l'accès). Borne appliquée ici, côté serveur.
-  const prospectFrom = Date.now() - 7 * 86_400_000;
+  const prospectFrom = daysAgoStart(7);
   const trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY && (unlocked || Date.parse(String(t.closed_at)) >= prospectFrom));
   // PROSPECTS : LES MÊMES TRADES QUE LES MEMBRES, PERTES COMPRISES (14/10/2026, décision Mathieu). Jusqu'ici le
   // prospect ne voyait que les 30 derniers GAINS (« bande-annonce ») : biaisé, et contredit par tout ce qu'on dit

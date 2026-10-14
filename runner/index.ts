@@ -40,6 +40,7 @@ import { startSourceHistorySync } from './sourceHistory';
 const COPY_MODE = process.env.ALGORIA_COPY_OBSERVE === '1';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { REF_LABEL, REF_LOT } from '../lib/display/scale';
+import { tradingDayOf, tradingHour } from '../lib/display/tradingDay';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
@@ -1597,6 +1598,9 @@ async function main() {
           else if (h === 14) void postVip(VIP_TIPS[Math.floor(Date.now() / 86_400_000) % VIP_TIPS.length]);
         } catch (e) { console.error('[algoria] contenu VIP programmé échoué:', e); }
       }
+      // LE BILAN DU SOIR SUIT L'HEURE DE PARIS (14/10/2026, voir lib/display/tradingDay.ts) : 23h à Paris, la
+      // fermeture de l'or, toute l'année. Avant : 21h UTC, soit 23h l'été mais 22h l'hiver, sur une journée UTC.
+      const ph = tradingHour();
       try {
         const stats = await fetchDayTradeStats();
         if (!stats || stats.trades === 0) return; // rien à raconter
@@ -1604,11 +1608,11 @@ async function main() {
         const clause = narrationReady() ? await narrateRecap(stats) : null;
         await logNarration(clause ?? '', Date.now(), meta);
         console.log(`[algoria] recap ${h}h : ${stats.trades} trades · ${stats.wins} wins · ${Math.round(stats.net)}$`);
-        // Canal VIP : « pulse » preuve-de-vie toutes les 4 h + bilan du soir (21h UTC). En % / win rate, jamais
+        // Canal VIP : « pulse » preuve-de-vie toutes les 4 h + bilan du soir (23h Paris). En % / win rate, jamais
         // le P&L $ du master (≠ celui du client → éviterait la confusion). Gaté par l'env.
         if (vipReady()) {
           const wr = Math.round((stats.wins / stats.trades) * 100);
-          if (h === 21) {
+          if (ph === 23) {
             // WRAP DE LA FLOTTE : les 3 stratégies côte à côte — un client dont la stratégie est rouge voit
             // que d'autres sont vertes (et inversement) : c'est le portefeuille de stratégies qu'on vend.
             const board = await fetchDayScoreboard().catch(() => null);
@@ -1670,7 +1674,12 @@ async function main() {
             if (COPY_MODE) {
               const net = stats.net;
               // À 0.10 LOT (24/09/2026) — voir lib/display/scale.ts. `stats.net` est déjà converti trade par trade.
-              void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n<i>shown at ${REF_LABEL}</i>\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  ${net >= 0 ? '🟢 +' : '🔴 −'}<b>${usd(net)}</b>\n${VIP_RULE}\n<i>At 0.01 lot, divide by 10. Wins and losses both — open the app to see yours.</i>`);
+              // LES DEUX LOTS ET LA DATE (14/10/2026) : le récap du canal donne 0.01 et 0.10, le bilan VIP ne donnait
+              // que 0.10 : un membre a lu +141 $ d'un côté et +10 $ de l'autre pour la même journée. Mêmes montants,
+              // même format que le récap (centimes sous 100 $), et la journée nommée, à l'heure de Paris.
+              const amt = (v: number) => `${v >= 0 ? '+' : '−'}$${Math.abs(v) >= 100 ? Math.round(Math.abs(v)).toLocaleString('en-US') : Math.abs(v).toFixed(2)}`;
+              const dayLabel = new Date(`${tradingDayOf(new Date())}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
+              void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n<i>${dayLabel} · Paris time</i>\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>\n${net >= 0 ? '🟢' : '🔴'} <b>${amt(net / 10)}</b> at 0.01 lot  ·  <b>${amt(net)}</b> at ${REF_LABEL}\n${VIP_RULE}\n<i>Wins and losses both. Open the app to see yours.</i>`);
             } else if (lines.length)
               void postVip(`📊 <b>DAILY WRAP</b>\n<i>the Algoria fleet · shown at ${REF_LABEL}</i>\n${VIP_RULE}\n${lines.join('\n\n')}\n${VIP_RULE}\n${tagline}${discipline}${proof}`);
             else if (stats.net >= 0) void postVip(`📊 <b>DAILY WRAP</b> · ${VIP_TAG}\n${VIP_RULE}\n${stats.trades} trades  ·  <b>${wr}% win</b>  ·  green day 🟢\n\nAll copied to your account. See you tomorrow. 👊`);
@@ -1712,13 +1721,13 @@ async function main() {
           // journée rouge il tapissait le canal de rouge sans rien apprendre à personne ; sur une verte, le
           // bilan du soir suffit. Un seul DAILY WRAP par jour, vert ou rouge, honnête — et c'est tout.
         }
-        // PUSH recap du soir (21h UTC) vers les membres — 70/30 : uniquement si la journée est VERTE.
+        // PUSH recap du soir (23h Paris) vers les membres — 70/30 : uniquement si la journée est VERTE.
         // JOUR ROUGE : ON PARLE AUSSI (19/08). Jusqu'ici la notification du soir ne partait que si la
         // journée était verte — le membre voyait son compte baisser et n'entendait RIEN de nous. C'est ce
         // silence-là qui fait déconnecter, pas la perte : celui qui vient d'arriver ne peut pas distinguer
         // « mauvaise journée d'un système qui tourne » de « personne aux commandes ». On ne promet pas de
         // rebond, on renvoie vers le bilan où la mécanique du jour est détaillée.
-        if (h === 21) {
+        if (ph === 23) {
           const { pushToAll } = await import('../lib/push/send');
           const wrPct = Math.round((stats.wins / stats.trades) * 100);
           void pushToAll(

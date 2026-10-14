@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { atRef, sumAtRef } from '../display/scale';
+import { tradingDayOf, tradingDayStartMs } from '../display/tradingDay';
+import { isShowTrade } from '../cockpit/showTrades';
 import ws from 'ws';
 import type { Database } from './database.types';
 import type { Bar, EngineEvent, EngineState, MarketContext, Mode, Signal } from '../engine/types';
@@ -704,19 +706,20 @@ export async function reconcileOpenTrades(symbol: string, liveTickets: string[],
   return ghosts.length;
 }
 
-/** Stats des trades CLÔTURÉS aujourd'hui (UTC), hors micro-scalps RAFALE (spam show) — pour le RECAP horaire du desk.
+/** Stats des trades CLÔTURÉS aujourd'hui (journée de Paris), hors micro-scalps RAFALE (spam show) — pour le RECAP horaire du desk.
  *  `net` est À 0.10 LOT : il part tel quel dans le daily wrap, le push du soir et la narration. */
+// LA JOURNÉE DE PARIS (14/10/2026) — voir lib/display/tradingDay.ts : depuis minuit à Paris (et non plus UTC), et
+// les mêmes trades que le récap du canal et l'onglet History (micro-scalps de démonstration et NAS100 exclus).
 export async function fetchDayTradeStats(): Promise<{ trades: number; wins: number; net: number } | null> {
-  const dayStart = new Date();
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const iso = dayStart.toISOString();
+  const iso = new Date(tradingDayStartMs(tradingDayOf(new Date()))).toISOString();
   const [tr, sg] = await Promise.all([
-    db.from('trades').select('ticket,pnl,lot').gte('closed_at', iso).not('pnl', 'is', null).eq('strategy' as never, STRAT_ID as never),
-    db.from('signals').select('ticket,rationale').gte('created_at', iso),
+    db.from('trades').select('ticket,symbol,pnl,lot').gte('closed_at', iso).not('pnl', 'is', null).eq('strategy' as never, STRAT_ID as never),
+    // signaux depuis 3 jours : un trade de démonstration ouvert avant minuit et fermé après doit rester exclu
+    db.from('signals').select('ticket,rationale').gte('created_at', new Date(Date.parse(iso) - 3 * 86_400_000).toISOString()),
   ]);
   if (tr.error || !tr.data) return null;
-  const rafale = new Set((sg.data ?? []).filter((s) => JSON.stringify(s.rationale ?? '').includes('RAFALE')).map((s) => String(s.ticket)));
-  const rows = tr.data.filter((t) => !rafale.has(String(t.ticket)));
+  const rafale = new Set((sg.data ?? []).filter((s) => { const j = JSON.stringify(s.rationale ?? ''); return j.includes('RAFALE') || j.includes('ACTION mode'); }).map((s) => String(s.ticket)));
+  const rows = tr.data.filter((t) => !isShowTrade(t as { ticket?: unknown; lot?: unknown }, rafale) && String((t as { symbol?: string }).symbol) !== 'NAS100');
   const wins = rows.filter((t) => Number(t.pnl) > 0).length;
   const net = sumAtRef(rows as Array<{ pnl: unknown; lot?: unknown }>);
   return { trades: rows.length, wins, net };

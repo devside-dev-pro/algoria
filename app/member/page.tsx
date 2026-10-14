@@ -5,6 +5,7 @@
 // Les gains restent EN CLAIR : c'est l'appât — il voit exactement ce qu'il rate.
 import { useEffect, useState } from 'react';
 import { atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
+import { TRADING_TZ } from '@/lib/display/tradingDay';
 import { AccountCard } from './AccountCard';
 import { useRouter } from 'next/navigation';
 import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount } from './ui';
@@ -199,7 +200,7 @@ export default function MemberHome() {
           const win = Number(t.pnl) > 0;
           return (
             <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 9, opacity: win ? 1 : 0.55 }}>
-              <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 38 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+              <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 38 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: TRADING_TZ })}</span>
               <span style={{ fontSize: 10, fontWeight: 700, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : ''}</span>
               <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol}</span>
               <span style={{ flex: 1 }} />
@@ -219,7 +220,7 @@ export default function MemberHome() {
           );
         })}
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
-          {unlocked ? (sameAsRef ? `Shown at your copy size (${clientLot} lot).` : `Shown at your copy size (${clientLot} lot) — at ${REF_LABEL} in brackets.`) : `ALGORIA 2.0’s latest trades, wins and losses, shown at ${REF_LABEL}. Every trade has a stop loss, and members’ accounts copied every one of them automatically. The full history is in the History tab.`}
+          {unlocked ? (sameAsRef ? `Shown at your copy size (${clientLot} lot). Times in Paris time.` : `Shown at your copy size (${clientLot} lot), at ${REF_LABEL} in brackets. Times in Paris time.`) : `ALGORIA 2.0’s latest trades, wins and losses, shown at ${REF_LABEL}. Every trade has a stop loss, and members’ accounts copied every one of them automatically. Times in Paris time. The full history is in the History tab.`}
         </p>
       </section>
 
