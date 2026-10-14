@@ -160,7 +160,7 @@ export default function MemberHistory() {
                   return (
                     <div key={t.ticket} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 0 7px 10px', borderBottom: '1px solid rgba(130,152,190,.1)', opacity: win ? 1 : 0.55 }}>
                       <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', minWidth: 34 }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲ BUY' : '▼ SELL'}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--muted)' }}>{t.direction === 'long' ? '▲ BUY' : t.direction === 'short' ? '▼ SELL' : ''}</span>
                       <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.symbol}</span>
                       <span style={{ flex: 1 }} />
                       {t.reason === 'be' && <span className="mono" style={{ fontSize: 9, color: 'var(--dim)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>BE</span>}

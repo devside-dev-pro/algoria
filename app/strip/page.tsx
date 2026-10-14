@@ -110,7 +110,7 @@ export default function StreamStrip() {
                 display: 'flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap', padding: '9px 16px', borderRadius: 10,
                 border: '1px solid rgba(34,224,166,.4)', background: 'rgba(34,224,166,.07)', boxShadow: '0 0 12px rgba(34,224,166,.08)',
               }}>
-                <span style={{ fontSize: 12, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ BUY' : '▼ SELL'}</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: t.direction === 'long' ? 'var(--up)' : 'var(--down)' }}>{t.direction === 'long' ? '▲ BUY' : t.direction === 'short' ? '▼ SELL' : ''}</span>
                 <span className="mono" style={{ fontSize: 13, color: 'var(--muted)' }}>{String(t.symbol) === 'XAUUSD' ? 'GOLD' : 'BTC'}</span>
                 <span className="mono" style={{ fontSize: 16, fontWeight: 800, color: 'var(--up)' }}>✓ +{atRef(t.pnl, t.lot).toFixed(atRef(t.pnl, t.lot) >= 100 ? 0 : 2)}$</span>
                 <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{new Date(t.closed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
