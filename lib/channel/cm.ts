@@ -478,9 +478,13 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
   defer(async () => {
     const ctx: DayContext | null = await dayContext(db, day).catch(() => null);
     const fresh = await Promise.all(todo.map((t) => (ctx ? writePost(ctx, t.brief, { instruction: t.instruction, previous: t.r.text ?? '' }).catch(() => null) : Promise.resolve(null))));
-    const done: number[] = [], failed: number[] = [];
+    const done: number[] = [], failed: number[] = [], same: number[] = [];
+    const norm = (x: string) => x.replace(/\s+/g, ' ').trim();
     for (let k = 0; k < todo.length; k++) {
       if (!fresh[k]) { failed.push(todo[k].n); continue; }
+      // version identique (vécu 15/10 : « on dit 106 $ mais la notif a dit 141 $ ») : le rédacteur n'a rien pu changer,
+      // le plus souvent parce que la demande porte sur un chiffre, qui vient du code. On le dit au lieu d'annoncer « réécrit ».
+      if (norm(String(fresh[k])) === norm(todo[k].r.text ?? '')) { same.push(todo[k].n); continue; }
       // le post corrigé redevient un brouillon : il repart seulement après un nouveau ✅
       await db.from('channel_posts').update({ text: fresh[k], status: 'draft', report: { writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', todo[k].r.id);
       done.push(todo[k].n);
@@ -492,6 +496,7 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
     await reply([
       done.length ? `✅ ${done.length > 1 ? `Posts ${done.join(', ')} réécrits` : `Post ${done[0]} réécrit`}, mis à jour dans le message : revalide avec ✅ Tout valider.` : '',
       failed.length ? `⨯ Pas réussi à réécrire proprement ${failed.join(', ')} (ou la version ne respectait pas les règles du canal) : le texte reste tel quel, ❌ pour le retirer.` : '',
+      same.length ? `⚠️ ${same.join(', ')} : rien changé, la nouvelle version était identique. Si ta demande porte sur un chiffre : les chiffres viennent du code (journée de Paris, mêmes trades que le récap et l’app) et ne se modifient pas, mais je peux les retirer du post, dis-le-moi (« 1 enlève les chiffres »).` : '',
       '🧠 Remarques notées.',
     ].filter(Boolean).join('\n'));
   });
