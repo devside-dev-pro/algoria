@@ -30,3 +30,10 @@ export const tradingDayStartMs = (day: string) => {
   const utcMidnight = Date.parse(`${day}T00:00:00Z`);
   return utcMidnight - offsetMin(utcMidnight) * 60_000;
 };
+
+/** Instant (ms) d'une heure de Paris 'HH:MM' le jour `day`, juste aussi les jours de changement d'heure. */
+export const tradingTimeMs = (day: string, hhmm: string) => {
+  const naive = Date.parse(`${day}T${hhmm}:00Z`);
+  const first = naive - offsetMin(naive) * 60_000;
+  return naive - offsetMin(first) * 60_000;
+};

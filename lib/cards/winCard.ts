@@ -46,7 +46,7 @@ interface DrawCtx {
   mark: HTMLImageElement | null;
 }
 
-const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }); // heure de Paris, comme partout (lib/display/tradingDay.ts)
 const symLabelOf = (symbol: string) => (symbol === 'XAUUSD' ? 'GOLD' : symbol === 'BTCUSD' ? 'BITCOIN' : symbol);
 
 function paintBackground(ctx: CanvasRenderingContext2D, W: number, H: number, haloAt: { x: number; y: number }, glowAt: { x: number; y: number }) {

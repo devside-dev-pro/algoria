@@ -16,7 +16,7 @@ import { publishToChannels, sourceChannel } from '@/lib/channel/publish';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
-type Trade = { ticket: string; symbol: string; pnl: number; lot: number | null; strategy: number | null; closed_at: string };
+export type Trade = { ticket: string; symbol: string; pnl: number; lot: number | null; strategy: number | null; closed_at: string; direction?: string | null; entry?: number | null; exit?: number | null; reason?: string | null };
 export type RecapKind = 'win' | 'record' | 'week' | 'quiet' | 'red';
 export type Recap = { day: string; kind: RecapKind; text: string; trades: number; net01: number; net10: number };
 
@@ -34,9 +34,10 @@ const amounts = (net10: number) => `✅ ${usd(net10 / 10)} at 0.01 lot · ${usd(
 const RISK = "Trading involves risk. Past results don't guarantee future results.";
 const APP = '👉 app.algoria.tech';
 
-async function liveTrades(db: Db, sinceIso: string): Promise<Trade[]> {
+/** Les trades copiés (stratégie live, sans démonstration ni NAS100), clôturés depuis `sinceIso`. Sert aussi au CM (lib/channel/cm.ts). */
+export async function liveTrades(db: Db, sinceIso: string): Promise<Trade[]> {
   const [tq, sq] = await Promise.all([
-    db.from('trades').select('ticket,symbol,pnl,lot,strategy,closed_at').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', sinceIso).order('closed_at', { ascending: true }).limit(5000),
+    db.from('trades').select('ticket,symbol,pnl,lot,strategy,closed_at,direction,entry,exit,reason').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', sinceIso).order('closed_at', { ascending: true }).limit(5000),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(400),
   ]);
   if (tq.error) throw new Error(tq.error.message);

@@ -22,20 +22,25 @@ export type PublishResult = { ok: true; messageId: number | null; report: Channe
 export const sourceChannel = () => (process.env.TELEGRAM_CHANNEL_EN ?? '').trim();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function publishToChannels(db: any, p: { chatId: string; text: string; buttonText?: string; buttonUrl?: string }): Promise<PublishResult> {
+// PHOTO (15/10/2026, le CM automatique de lib/channel/cm.ts) : avec `photoUrl`, le post part en sendPhoto et `text`
+// devient la légende (1 024 caractères au plus chez Telegram) — la carte de gain, comme dans le VIP.
+export async function publishToChannels(db: any, p: { chatId: string; text: string; buttonText?: string; buttonUrl?: string; photoUrl?: string }): Promise<PublishResult> {
   const report: ChannelReport = [];
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return { ok: false, error: 'TELEGRAM_BOT_TOKEN missing', report };
   const chatId = p.chatId.trim();
-  const text = p.text.trim().slice(0, 4000);
+  const photo = (p.photoUrl ?? '').trim();
+  const text = p.text.trim().slice(0, photo ? 1024 : 4000);
   const btnText = (p.buttonText ?? '').trim().slice(0, 60);
   const btnUrl = (p.buttonUrl ?? '').trim().slice(0, 300);
   const kb = btnText ? { reply_markup: { inline_keyboard: [[{ text: btnText, url: btnUrl }]] } } : {};
   const send = async (dst: string, body_: string): Promise<{ ok: boolean; messageId: number | null; error: string }> => {
     try {
-      const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
-        body: JSON.stringify({ chat_id: dst, text: body_, parse_mode: 'HTML', disable_web_page_preview: true, ...kb }),
+      const r = await fetch(`https://api.telegram.org/bot${token}/${photo ? 'sendPhoto' : 'sendMessage'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(photo ? 15000 : 8000),
+        body: JSON.stringify(photo
+          ? { chat_id: dst, photo, caption: body_.slice(0, 1024), parse_mode: 'HTML', ...kb }
+          : { chat_id: dst, text: body_, parse_mode: 'HTML', disable_web_page_preview: true, ...kb }),
       });
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
       return d.ok ? { ok: true, messageId: d.result?.message_id ?? null, error: '' } : { ok: false, messageId: null, error: d.description ?? 'unknown' };

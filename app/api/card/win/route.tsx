@@ -23,7 +23,7 @@ export const dynamic = 'force-dynamic';
 const CARD_NAME = 'ALGORIA 2.0';
 const CARD_DOT = '#2be3f5';
 const symLabel = (s: string) => (s === 'XAUUSD' ? 'GOLD' : s === 'BTCUSD' ? 'BITCOIN' : s);
-const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }); // heure de Paris, comme partout (lib/display/tradingDay.ts)
 
 export async function GET(req: NextRequest) {
   const ticket = req.nextUrl.searchParams.get('ticket') ?? '';
