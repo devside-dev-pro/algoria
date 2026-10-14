@@ -449,28 +449,51 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
     await reply(ok ? '🧠 Noté pour tous les prochains posts du canal.' : '⨯ Pas pu l’enregistrer, réessaie.');
     return true;
   }
-  const m = /^([1-9])\s*[:.)-]?\s*([\s\S]+)$/.exec(text);
-  if (!m) { await reply('Pour corriger un post : son numéro puis ce qu’il faut changer, par exemple « 2 plus court ». Pour une règle durable : # + la règle.'); return true; }
+  // PLUSIEURS CORRECTIONS DANS UN MESSAGE (Mathieu, 15/10) : une ligne par numéro (« 2 plus court » ⏎ « 5 enlève
+  // l'emoji »). Une ligne sans numéro prolonge la correction d'au-dessus.
+  const asks: Array<{ n: number; text: string }> = [];
+  for (const line of text.split(/\n+/)) {
+    const m = /^\s*([1-9])\s*[:.)-]?\s+(.+)$/.exec(line) ?? /^\s*([1-9])\s*[:.)-]\s*(.+)$/.exec(line);
+    if (m) asks.push({ n: Number(m[1]), text: m[2].trim() });
+    else if (asks.length && line.trim()) asks[asks.length - 1].text += ` ${line.trim()}`;
+  }
+  if (!asks.length) { await reply('Pour corriger un post : son numéro puis ce qu’il faut changer, par exemple « 2 plus court » (une ligne par post). Pour une règle durable : # + la règle.'); return true; }
   const posts = (await rowsOf(db, day)).filter((r) => POST_KINDS.includes(r.kind));
-  const r = posts[Number(m[1]) - 1];
-  const instruction = m[2].trim();
-  if (!r) { await reply(`Il n’y a pas de post ${m[1]} ce jour-là.`); return true; }
-  const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
-  // la remarque est une leçon pour la suite, que le post puisse encore être réécrit ou non
-  await appendAgentMemory(db, `${todayFr()} · ${label} : « ${instruction.slice(0, 300)} »`, by, 'cm_memory');
-  const brief = briefOf(r);
-  if (!brief) { await reply('🧠 Noté. La carte de gain est choisie à son heure : je ne peux pas la réécrire, mais je retiens la remarque.'); return true; }
-  if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { await reply('🧠 Noté pour la suite. Ce post est déjà parti ou expiré, je ne le réécris pas.'); return true; }
-  await reply(`✍️ Je réécris le post ${m[1]}…`);
+  const todo: Array<{ n: number; r: Row; brief: Brief; instruction: string }> = [];
+  const notes: string[] = [];
+  for (const a of asks) {
+    const r = posts[a.n - 1];
+    if (!r) { notes.push(`${a.n} : pas de post ${a.n} ce jour-là`); continue; }
+    const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
+    // la remarque est une leçon pour la suite, que le post puisse encore être réécrit ou non
+    await appendAgentMemory(db, `${todayFr()} · ${label} : « ${a.text.slice(0, 300)} »`, by, 'cm_memory');
+    const brief = briefOf(r);
+    if (!brief) { notes.push(`${a.n} : la carte de gain est choisie à son heure, je retiens juste la remarque`); continue; }
+    if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { notes.push(`${a.n} : déjà parti ou expiré, je retiens juste la remarque`); continue; }
+    todo.push({ n: a.n, r, brief, instruction: a.text });
+  }
+  if (!todo.length) { await reply(`🧠 Noté.${notes.length ? `\n${notes.join('\n')}` : ''}`); return true; }
+  const nums = todo.map((t) => t.n).join(', ');
+  await reply(`✍️ Je réécris ${todo.length > 1 ? `les posts ${nums}` : `le post ${nums}`}…${notes.length ? `\n${notes.join('\n')}` : ''}`);
   defer(async () => {
     const ctx: DayContext | null = await dayContext(db, day).catch(() => null);
-    const fresh = ctx ? await writePost(ctx, brief, { instruction, previous: r.text ?? '' }).catch(() => null) : null;
-    if (!fresh) { await reply('⨯ Pas réussi à le réécrire proprement (ou la version ne respectait pas les règles du canal). Le post reste tel quel : ❌ pour le retirer. La remarque est notée 🧠'); return; }
-    // le post corrigé redevient un brouillon : il repart seulement après un nouveau ✅
-    await db.from('channel_posts').update({ text: fresh, status: 'draft', report: { writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', r.id);
-    const view = renderPlan(day, await rowsOf(db, day));
-    await tg('editMessageText', { chat_id: chat, message_id: replyTo, text: view.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: view.keyboard } });
-    await reply(`✅ Post ${m[1]} réécrit, je l’ai mis à jour dans le message : revalide-le avec ✅ Tout valider. 🧠 Leçon notée.`);
+    const fresh = await Promise.all(todo.map((t) => (ctx ? writePost(ctx, t.brief, { instruction: t.instruction, previous: t.r.text ?? '' }).catch(() => null) : Promise.resolve(null))));
+    const done: number[] = [], failed: number[] = [];
+    for (let k = 0; k < todo.length; k++) {
+      if (!fresh[k]) { failed.push(todo[k].n); continue; }
+      // le post corrigé redevient un brouillon : il repart seulement après un nouveau ✅
+      await db.from('channel_posts').update({ text: fresh[k], status: 'draft', report: { writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', todo[k].r.id);
+      done.push(todo[k].n);
+    }
+    if (done.length) {
+      const view = renderPlan(day, await rowsOf(db, day));
+      await tg('editMessageText', { chat_id: chat, message_id: replyTo, text: view.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: view.keyboard } });
+    }
+    await reply([
+      done.length ? `✅ ${done.length > 1 ? `Posts ${done.join(', ')} réécrits` : `Post ${done[0]} réécrit`}, mis à jour dans le message : revalide avec ✅ Tout valider.` : '',
+      failed.length ? `⨯ Pas réussi à réécrire proprement ${failed.join(', ')} (ou la version ne respectait pas les règles du canal) : le texte reste tel quel, ❌ pour le retirer.` : '',
+      '🧠 Remarques notées.',
+    ].filter(Boolean).join('\n'));
   });
   return true;
 }
