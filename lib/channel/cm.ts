@@ -4,10 +4,19 @@
 // soir, et rien sur ce que l'audience demande (26 votes sur 34 : « automation explanations »). Les trois quarts de ce
 // qui marche, c'est Mathieu : ses bulles vidéo, ses CTA envoyés depuis l'admin, ses transferts des gains du VIP.
 // Le bot reprend tout ça, sauf les bulles vidéo (il propose seulement la question du jour) :
-//   · 10h00  un post « How it works » (une banque de posts, en rotation, faits de l'Academy uniquement) ;
+//   · 9h00   le bonjour qui lance la journée, écrit avec ce qui se passe vraiment ce jour-là ;
+//   · 11h00  un post « How it works » (une banque de fiches, en rotation, faits de l'Academy uniquement) ;
 //   · 12h30, 17h30, 20h30  trois CTA (deux le week-end), en rotation, vers l'app ou vers Mathieu ;
 //   · 14h00 et 19h00 (semaine)  la carte du meilleur gain depuis le créneau précédent, comme dans le VIP ;
 //   · 23h05  le récap du jour, qui garde son propre brouillon (lib/channel/recap.ts).
+// Les heures bougent de quelques minutes d'un jour à l'autre : un canal qui poste à 12:30:00 pile tous les jours
+// sent l'automate.
+//
+// ÉCRIT PAR CLAUDE, PAS COPIÉ-COLLÉ (15/10/2026, Mathieu : « un CM intelligent, qui comprend et qui s'adapte »).
+// Le bonjour, les How it works et les CTA sont rédigés chaque matin par lib/channel/writer.ts à partir du contexte
+// du jour ; la banque ci-dessous sert de fiches de faits et de texte de secours si le modèle échoue. Mathieu corrige
+// en RÉPONDANT au message du matin (« 2 plus court », « # jamais d'emoji fusée ») : le post est réécrit et la leçon
+// entre dans la mémoire du CM (agent_docs « cm_memory »), relue à chaque rédaction.
 //
 // RIEN NE PART SANS UN CLIC. À 8h30 (Paris) les admins reçoivent les posts du jour dans un seul message :
 // « ✅ Tout valider », ou ❌ sur un post précis. Un post non validé à son heure expire. Les cartes de gain sont
@@ -20,6 +29,8 @@
 import { liveTrades, type Trade } from './recap';
 import { publishToChannels, sourceChannel } from './publish';
 import { adminTgIds } from '@/lib/member/notifyOwner';
+import { appendAgentMemory } from '@/lib/member/agentDocs';
+import { dayContext, writePost, type Brief, type DayContext } from './writer';
 import { atOneLot, atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs, tradingTimeMs } from '@/lib/display/tradingDay';
 import { APP_URL, SUPPORT_TG_URL } from '@/lib/member/i18n';
@@ -81,10 +92,11 @@ export const CTAS: Array<CmPost & { fam: 'app' | 'mathieu' }> = [
   { ...post('call', ['📞 <b>Want to go through it together ?</b>', '', 'A quick call and I walk you through the broker, the deposit and the connection, step by step 🙏🏼'], '📞 BOOK A CALL', L.call), fam: 'mathieu' },
 ];
 
-type Slot = { slot: string; at: string; kind: 'howto' | 'cta' | 'tp'; fam?: 'app' | 'mathieu' };
+type Slot = { slot: string; at: string; kind: 'morning' | 'howto' | 'cta' | 'tp'; fam?: 'app' | 'mathieu' };
 // heures de Paris. Le soir compte : l'audience (Afrique du Sud, Royaume-Uni) a fini sa journée.
 const WEEKDAY: Slot[] = [
-  { slot: 'howto', at: '10:00', kind: 'howto' },
+  { slot: 'morning', at: '09:00', kind: 'morning' },
+  { slot: 'howto', at: '11:00', kind: 'howto' },
   { slot: 'cta1', at: '12:30', kind: 'cta', fam: 'app' },
   { slot: 'tp1', at: '14:00', kind: 'tp' },
   { slot: 'cta2', at: '17:30', kind: 'cta', fam: 'mathieu' },
@@ -92,8 +104,9 @@ const WEEKDAY: Slot[] = [
   { slot: 'cta3', at: '20:30', kind: 'cta', fam: 'app' },
 ];
 const WEEKEND: Slot[] = [
-  { slot: 'howto', at: '10:00', kind: 'howto' },
-  { slot: 'cta1', at: '12:30', kind: 'cta', fam: 'app' },
+  { slot: 'morning', at: '10:00', kind: 'morning' },
+  { slot: 'howto', at: '11:30', kind: 'howto' },
+  { slot: 'cta1', at: '13:00', kind: 'cta', fam: 'app' },
   { slot: 'cta2', at: '20:30', kind: 'cta', fam: 'mathieu' },
 ];
 /** Heure (Paris) à laquelle le plan du jour part aux admins. */
@@ -101,6 +114,25 @@ export const PLAN_AT = '08:30';
 const TP_FROM: Record<string, string | null> = { tp1: null, tp2: '14:00' }; // une carte couvre depuis le créneau précédent
 const TP_MIN_AT_ONE_LOT = 150; // le seuil des cartes de gain du VIP (runner/metaapi/trades.ts, VIP_WIN_MIN_USD)
 const STALE_MS = 90 * 60_000; // un post validé mais raté de plus de 1 h 30 (panne) ne part plus : il serait hors sujet
+const GRACE_MS = 60 * 60_000; // un brouillon validé jusqu'à 1 h après son heure part tout de suite ; au-delà il expire
+/** Décalage de -10 à +10 minutes, fixe pour un jour et un créneau donnés. */
+const jitter = (day: string, slot: string) => {
+  let h = 0;
+  for (const ch of `${day}:${slot}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return ((h % 21) - 10) * 60_000;
+};
+const CTA_GOAL: Record<string, string> = {
+  results: 'make them open the app and look at every real trade at their own size',
+  steps: 'show that starting is 3 simple steps and send them to the guided setup',
+  academy: 'send newcomers to the 5-minute Academy that explains everything',
+  copying: 'explain the idea in one breath (the AI trades, your account copies, your money stays yours) and send them to start',
+  trackcta: 'invite them to check the real track record instead of trusting screenshots',
+  install: 'get them to install the app on their home screen',
+  stuck: 'invite anyone stuck in their setup to message Mathieu directly',
+  brokerq: 'offer to tell them which broker to pick if they say their country',
+  question: 'invite questions to Mathieu, a real human who answers himself',
+  call: 'offer a quick call with Mathieu to set up their access together',
+};
 const VIDEO_AT = '19:30';
 
 const isWeekend = (day: string) => [0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay());
@@ -138,14 +170,21 @@ export async function planDay(db: Db, day: string): Promise<number> {
   };
   const now = Date.now();
   const rows: Array<Record<string, unknown>> = [];
+  const briefs: Array<Brief | null> = [];
   for (const s of slots) {
-    const at = tradingTimeMs(day, s.at);
+    const at = tradingTimeMs(day, s.at) + jitter(day, s.slot);
     if (at <= now) continue; // créneau déjà passé (plan préparé en retard)
     const base = { day, slot: s.slot, kind: s.kind, scheduled_at: new Date(at).toISOString(), status: 'draft' };
+    if (s.kind === 'morning') {
+      rows.push({ ...base, ref: 'morning', text: null, button_text: '🚀 OPEN ALGORIA', button_url: L.app });
+      briefs.push({ kind: 'morning' });
+      continue;
+    }
     if (s.kind === 'howto') {
       hi = nextIn(HOWTO, hi, () => true);
       const p = HOWTO[hi];
       rows.push({ ...base, ref: p.id, text: p.text, button_text: p.btn, button_url: p.url });
+      briefs.push({ kind: 'howto', card: p.text, button: p.btn });
     } else if (s.kind === 'cta') {
       const fam = s.fam ?? 'app';
       const i = nextIn(CTAS, ci[fam], (c) => c.fam === fam);
@@ -153,7 +192,18 @@ export async function planDay(db: Db, day: string): Promise<number> {
       ci[fam] = i;
       const c = CTAS[i];
       rows.push({ ...base, ref: c.id, text: c.text, button_text: c.btn, button_url: c.url });
-    } else rows.push(base); // carte de gain : choisie à l'heure dite
+      briefs.push({ kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn });
+    } else { rows.push(base); briefs.push(null); } // carte de gain : choisie à l'heure dite
+  }
+  if (!rows.length) return 0;
+  // LA RÉDACTION : tous les posts du jour en parallèle (un appel chacun). Échec ou texte refusé par les garde-fous →
+  // le texte de la banque ; pour le bonjour, pas de post (un bonjour en conserve, c'est ce qu'on veut éviter).
+  const ctx = await dayContext(db, day).catch(() => null);
+  const written = ctx ? await Promise.all(briefs.map((b) => (b ? writePost(ctx, b).catch(() => null) : Promise.resolve(null)))) : briefs.map(() => null);
+  for (let k = rows.length - 1; k >= 0; k--) {
+    if (written[k]) { rows[k].text = written[k]; rows[k].report = { writer: 'ai' }; }
+    else if (rows[k].kind === 'morning') rows.splice(k, 1);
+    else if (rows[k].kind !== 'tp') rows[k].report = { writer: 'bank' };
   }
   if (!rows.length) return 0;
   // une seule requête : si un autre passage a créé le plan entre-temps, l'unicité fait tout échouer, et un seul
@@ -187,6 +237,7 @@ async function videoIdea(db: Db): Promise<string | null> {
 
 // ── LE MESSAGE AUX ADMINS ─────────────────────────────────────────────────────────────────────────────
 
+const POST_KINDS = ['morning', 'howto', 'cta', 'tp'];
 const STATUS: Record<string, string> = { draft: '⏳ à valider', approved: '✅ validé', publishing: '📤 en cours', published: '📣 publié', skipped: '❌ pas publié', expired: '⌛ expiré' };
 const NUM = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'];
 const parisHHMM = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
@@ -198,12 +249,14 @@ async function rowsOf(db: Db, day: string): Promise<Row[]> {
 
 /** Le message du matin, régénéré depuis la base à chaque clic : il dit toujours l'état réel. */
 export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: Array<Array<Record<string, string>>> } {
-  const posts = rows.filter((r) => r.kind !== 'video');
+  const posts = rows.filter((r) => POST_KINDS.includes(r.kind));
   const idea = rows.find((r) => r.kind === 'video')?.text;
   const parts: string[] = [`📣 <b>Canal public · ${esc(dayLabel(day))}</b>`, '<i>Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>'];
   posts.forEach((r, i) => {
-    const head = r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'cta' ? 'CTA' : 'CARTE DE GAIN';
-    parts.push('', `<b>${NUM[i] ?? i + 1}  ${parisHHMM(r.scheduled_at)} · ${head}</b> · ${STATUS[r.status] ?? r.status}`);
+    const head = r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'cta' ? 'CTA' : 'CARTE DE GAIN';
+    const by = (r.report as { writer?: string } | null)?.writer;
+    const tag = by === 'ai' ? ' · ✍️ IA' : by === 'fixed' ? ' · ✏️ corrigé' : by === 'bank' ? ' · 📄 banque' : '';
+    parts.push('', `<b>${NUM[i] ?? i + 1}  ${parisHHMM(r.scheduled_at)} · ${head}</b>${tag} · ${STATUS[r.status] ?? r.status}`);
     if (r.kind === 'tp') {
       const rep = r.report as { reason?: string } | null;
       parts.push(r.text ? `<blockquote>${esc(plain(r.text).slice(0, 300))}</blockquote>` : `<i>Le meilleur gain copié ${TP_FROM[r.slot] ? `depuis ${TP_FROM[r.slot]}` : 'depuis minuit'} (au moins +$15 à 0.10 lot), avec sa carte, comme dans le VIP. Rien s'il n'y en a pas.${rep?.reason ? ` · ${esc(rep.reason)}` : ''}</i>`);
@@ -214,10 +267,11 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
   });
   if (!isWeekend(day)) parts.push('', '<i>23:05 · le récap du jour garde son brouillon à part, comme d\'habitude.</i>');
   if (idea) parts.push('', `🎥 <b>Idée de bulle vidéo</b> (la question qui revient le plus en support cette semaine) :`, `« ${esc(idea)} »`);
+  parts.push('', '<i>Pour corriger un post : réponds à ce message avec son numéro et ce qu\'il faut changer (« 2 plus court »). Pour une règle durable : # + la règle.</i>');
   const text = parts.join('\n').slice(0, 4090);
   const keyboard: Array<Array<Record<string, string>>> = [];
   if (posts.some((r) => r.status === 'draft')) keyboard.push([{ text: '✅ Tout valider', callback_data: `cma:${day}` }]);
-  const toggles = posts.map((r, i) => ({ r, i })).filter(({ r }) => ['draft', 'approved', 'skipped'].includes(r.status) && Date.parse(r.scheduled_at) > Date.now())
+  const toggles = posts.map((r, i) => ({ r, i })).filter(({ r }) => ['draft', 'approved', 'skipped'].includes(r.status) && Date.parse(r.scheduled_at) + (r.status === 'approved' ? 0 : GRACE_MS) > Date.now())
     .map(({ r, i }) => ({ text: `${r.status === 'skipped' ? '↩️' : '❌'} ${NUM[i] ?? i + 1}`, callback_data: `cmt:${r.id}` }));
   if (toggles.length) keyboard.push(toggles);
   if (posts.some((r) => ['draft', 'approved'].includes(r.status))) keyboard.push([{ text: '🚫 Rien aujourd\'hui', callback_data: `cmn:${day}` }]);
@@ -236,13 +290,15 @@ const tg = async (method: string, payload: Record<string, unknown>) => {
 /** Envoie le plan du jour à chaque admin. */
 export async function sendPlan(db: Db, day: string): Promise<number> {
   const { text, keyboard } = renderPlan(day, await rowsOf(db, day));
-  let sent = 0;
+  const msgs: Array<{ chat: number; id: number }> = [];
   for (const chat_id of await adminTgIds()) {
-    const r = await tg('sendMessage', { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard } });
-    if (r?.ok) sent++;
+    const r = await tg('sendMessage', { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard } }) as { ok?: boolean; description?: string; result?: { message_id?: number } } | null;
+    if (r?.ok && r.result?.message_id) msgs.push({ chat: chat_id, id: r.result.message_id });
     else console.error('[cm] plan non envoyé:', r?.description ?? 'unknown');
   }
-  return sent;
+  // la ligne « plan » garde les messages envoyés : une réponse de Mathieu à l'un d'eux est une correction (handleCmReply)
+  if (msgs.length) await db.from('channel_posts').insert({ day, slot: 'plan', kind: 'plan', status: 'info', scheduled_at: new Date(tradingTimeMs(day, PLAN_AT)).toISOString(), report: { msgs } });
+  return msgs.length;
 }
 
 /** Boutons du message du matin (webhook Telegram). Renvoie false si le bouton n'est pas le nôtre. */
@@ -314,11 +370,12 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
   let published = 0, skipped = 0, expired = 0;
-  const { data: late } = await db.from('channel_posts').update({ status: 'expired' }).eq('status', 'draft').lte('scheduled_at', nowIso).select('id');
+  const { data: late } = await db.from('channel_posts').update({ status: 'expired' }).eq('status', 'draft').lte('scheduled_at', new Date(now - GRACE_MS).toISOString()).select('id');
   expired += (late ?? []).length;
   const { data: due } = await db.from('channel_posts').select('*').eq('status', 'approved').lte('scheduled_at', nowIso).order('scheduled_at', { ascending: true }).limit(5);
   const src = sourceChannel();
   for (const r of (due ?? []) as Row[]) {
+    // un brouillon validé dans le délai de grâce part tout de suite ; au-delà de STALE_MS (cron en panne), plus rien
     if (now - Date.parse(r.scheduled_at) > STALE_MS) {
       const { data: x } = await db.from('channel_posts').update({ status: 'expired', report: { reason: 'cron en retard' } }).eq('id', r.id).eq('status', 'approved').select('id');
       expired += (x ?? []).length;
@@ -343,4 +400,68 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
     if (out.ok) published++;
   }
   return { published, skipped, expired };
+}
+
+// ── LES CORRECTIONS DE MATHIEU ────────────────────────────────────────────────────────────────────────
+
+const addDaysCm = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const todayFr = () => new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Paris' });
+
+function briefOf(r: Row): Brief | null {
+  if (r.kind === 'morning') return { kind: 'morning' };
+  if (r.kind === 'howto') { const p = HOWTO.find((x) => x.id === r.ref); return p ? { kind: 'howto', card: p.text, button: p.btn } : null; }
+  if (r.kind === 'cta') { const c = CTAS.find((x) => x.id === r.ref); return c ? { kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn } : null; }
+  return null;
+}
+
+/** RÉPONSE DE MATHIEU AU MESSAGE DU MATIN. « 2 plus court » : le post 2 est réécrit par le rédacteur (puis à revalider)
+ *  et la remarque entre dans la mémoire du CM. « # règle » : la règle entre dans la mémoire, rien n'est réécrit.
+ *  `defer` repousse la réécriture après la réponse au webhook (Telegram n'attend pas un modèle).
+ *  Renvoie false si le message ne répond pas à un message du matin : le webhook poursuit alors son traitement. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<void>) => void): Promise<boolean> {
+  const text = typeof msg?.text === 'string' ? msg.text.trim() : '';
+  const replyTo = Number(msg?.reply_to_message?.message_id) || 0;
+  if (!text || !replyTo || msg?.chat?.type !== 'private' || msg?.business_connection_id) return false;
+  const chat = Number(msg.chat.id);
+  const { data: plans } = await db.from('channel_posts').select('day,report').eq('kind', 'plan').gte('day', addDaysCm(tradingDayOf(new Date()), -3)).limit(10);
+  const plan = ((plans ?? []) as Array<{ day: string; report: { msgs?: Array<{ chat: number; id: number }> } | null }>)
+    .find((p) => (p.report?.msgs ?? []).some((m) => Number(m.chat) === chat && Number(m.id) === replyTo));
+  if (!plan) return false;
+  if (!(await adminTgIds()).includes(Number(msg.from?.id))) return true;
+  const by = msg.from?.username ? `@${msg.from.username}` : String(msg.from?.id ?? 'admin');
+  const reply = (t: string) => tg('sendMessage', { chat_id: chat, text: t, reply_to_message_id: msg.message_id });
+  const day = String(plan.day).slice(0, 10);
+
+  if (text.startsWith('#')) {
+    const rule = text.replace(/^#+\s*/, '');
+    if (!rule) return true;
+    const ok = await appendAgentMemory(db, `${todayFr()} · ${rule.slice(0, 400)}`, by, 'cm_memory');
+    await reply(ok ? '🧠 Noté pour tous les prochains posts du canal.' : '⨯ Pas pu l’enregistrer, réessaie.');
+    return true;
+  }
+  const m = /^([1-9])\s*[:.)-]?\s*([\s\S]+)$/.exec(text);
+  if (!m) { await reply('Pour corriger un post : son numéro puis ce qu’il faut changer, par exemple « 2 plus court ». Pour une règle durable : # + la règle.'); return true; }
+  const posts = (await rowsOf(db, day)).filter((r) => POST_KINDS.includes(r.kind));
+  const r = posts[Number(m[1]) - 1];
+  const instruction = m[2].trim();
+  if (!r) { await reply(`Il n’y a pas de post ${m[1]} ce jour-là.`); return true; }
+  const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
+  // la remarque est une leçon pour la suite, que le post puisse encore être réécrit ou non
+  await appendAgentMemory(db, `${todayFr()} · ${label} : « ${instruction.slice(0, 300)} »`, by, 'cm_memory');
+  const brief = briefOf(r);
+  if (!brief) { await reply('🧠 Noté. La carte de gain est choisie à son heure : je ne peux pas la réécrire, mais je retiens la remarque.'); return true; }
+  if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { await reply('🧠 Noté pour la suite. Ce post est déjà parti ou expiré, je ne le réécris pas.'); return true; }
+  await reply(`✍️ Je réécris le post ${m[1]}…`);
+  defer(async () => {
+    const ctx: DayContext | null = await dayContext(db, day).catch(() => null);
+    const fresh = ctx ? await writePost(ctx, brief, { instruction, previous: r.text ?? '' }).catch(() => null) : null;
+    if (!fresh) { await reply('⨯ Pas réussi à le réécrire proprement (ou la version ne respectait pas les règles du canal). Le post reste tel quel : ❌ pour le retirer. La remarque est notée 🧠'); return; }
+    // le post corrigé redevient un brouillon : il repart seulement après un nouveau ✅
+    await db.from('channel_posts').update({ text: fresh, status: 'draft', report: { writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', r.id);
+    const view = renderPlan(day, await rowsOf(db, day));
+    await tg('editMessageText', { chat_id: chat, message_id: replyTo, text: view.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: view.keyboard } });
+    await reply(`✅ Post ${m[1]} réécrit, je l’ai mis à jour dans le message : revalide-le avec ✅ Tout valider. 🧠 Leçon notée.`);
+  });
+  return true;
 }

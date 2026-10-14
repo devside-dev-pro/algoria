@@ -1,0 +1,274 @@
+// ✍️ LE RÉDACTEUR DU CANAL PUBLIC (15/10/2026, décision Mathieu : « un CM intelligent, qui comprend et qui s'adapte,
+// pas des copier-coller des mêmes messages chaque jour », et « c'est le côté naturel, la proximité avec moi, qui close
+// les gens »). Claude écrit chaque post du jour à partir de ce qui se passe vraiment :
+//   · le calendrier économique du jour (les annonces USD à fort impact, à l'heure de Paris) ;
+//   · l'humeur du marché vue par le moteur (state_snapshots) ;
+//   · la veille et la semaine, en chiffres réels, SEULEMENT si elles sont vertes (pas de négativité dans le canal) ;
+//   · les derniers posts du canal, pour ne jamais se répéter ;
+//   · les questions reçues en support cette semaine, pour parler des vrais blocages ;
+//   · le knowledge de Mathieu (les faits) et la mémoire du CM (ses corrections, agent_docs « cm_memory »).
+//
+// LES CHIFFRES NE PASSENT JAMAIS PAR LE MODÈLE. Il écrit des jetons ({{AMOUNTS}}, {{YESTERDAY}}) que le code remplace
+// par les montants calculés (mêmes trades que le récap et l'app). Un texte qui contient un montant inventé, une
+// promesse, une balise inconnue ou un tiret long ne part pas : on retombe sur le texte de la banque (lib/channel/cm.ts),
+// ou sur rien pour le bonjour du matin. Et rien ne part sans le clic de Mathieu.
+import Anthropic from '@anthropic-ai/sdk';
+import { getAgentDoc } from '@/lib/member/agentDocs';
+import { humanize } from '@/lib/member/replyDraft';
+import { atRef } from '@/lib/display/scale';
+import { tradingDayOf } from '@/lib/display/tradingDay';
+import { liveTrades } from './recap';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Db = any;
+
+export const CM_MODEL = () => process.env.ALGORIA_CM_MODEL ?? 'claude-opus-5-5';
+const RISK = "Trading involves risk. Past results don't guarantee future results.";
+
+const usd = (v: number) => `${v >= 0 ? '+' : '−'}$${Math.abs(v) >= 100 ? Math.round(Math.abs(v)).toLocaleString('en-US') : Math.abs(v).toFixed(2)}`;
+export const amountsLine = (net10: number) => `${usd(net10 / 10)} at 0.01 lot · ${usd(net10)} at 0.10 lot`;
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const weekday = (day: string) => new Date(`${day}T12:00:00Z`).getUTCDay();
+const longDate = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+const parisHHMM = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+
+// ── LE CONTEXTE DU JOUR ───────────────────────────────────────────────────────────────────────────────
+
+export type DayContext = {
+  day: string;
+  dateLabel: string;
+  weekend: boolean;
+  /** les annonces USD à fort impact du jour, heure de Paris */
+  news: Array<{ at: string; title: string }>;
+  market: string | null;
+  /** la dernière séance (vendredi pour un lundi), seulement si elle est verte */
+  lastSession: { day: string; trades: number; net10: number } | null;
+  /** la semaine en cours jusqu'à hier, seulement si elle est verte */
+  week: { trades: number; net10: number } | null;
+  recent: string[];
+  questions: string[];
+};
+
+async function ecoNews(day: string): Promise<Array<{ at: string; title: string }>> {
+  try {
+    const r = await fetch(process.env.ECO_CALENDAR_URL ?? 'https://nfs.faireconomy.media/ff_calendar_thisweek.json', {
+      signal: AbortSignal.timeout(5000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', Accept: 'application/json' },
+    });
+    if (!r.ok) return [];
+    const raw = (await r.json()) as Array<Record<string, unknown>>;
+    return raw
+      .map((e) => ({ t: Date.parse(String(e.date ?? '')), title: String(e.title ?? '').trim(), country: String(e.country ?? ''), impact: String(e.impact ?? '') }))
+      .filter((e) => Number.isFinite(e.t) && e.title && e.country === 'USD' && e.impact === 'High' && tradingDayOf(e.t) === day)
+      .sort((a, b) => a.t - b.t).slice(0, 4)
+      .map((e) => ({ at: parisHHMM(e.t), title: e.title }));
+  } catch { return []; }
+}
+
+async function marketMood(db: Db): Promise<string | null> {
+  try {
+    const { data } = await db.from('state_snapshots').select('regime,atr_percentile,ts').order('ts', { ascending: false }).limit(1);
+    const s = (data ?? [])[0] as { regime?: string; atr_percentile?: number; ts?: string } | undefined;
+    if (!s || Date.now() - Date.parse(String(s.ts)) > 6 * 3_600_000) return null;
+    const vol = Number(s.atr_percentile ?? 0);
+    const regime = String(s.regime ?? '');
+    return `${regime === 'trend' ? 'gold is trending' : regime === 'range' ? 'gold is moving sideways' : `gold regime: ${regime}`}, volatility ${vol >= 70 ? 'high' : vol <= 30 ? 'low' : 'normal'}`;
+  } catch { return null; }
+}
+
+/** Tout ce que le rédacteur sait du jour `day` (Paris). Chaque morceau est facultatif : une source en panne n'empêche rien. */
+export async function dayContext(db: Db, day: string): Promise<DayContext> {
+  const wd = weekday(day);
+  // la dernière séance : la veille, ou le vendredi pour un samedi, un dimanche ou un lundi
+  const last = wd === 1 ? addDays(day, -3) : wd === 0 ? addDays(day, -2) : addDays(day, -1);
+  const monday = addDays(day, -((wd + 6) % 7));
+  const from = last < monday ? last : monday;
+  const [news, market, trades, recentRows, recaps, qs] = await Promise.all([
+    ecoNews(day),
+    marketMood(db),
+    liveTrades(db, new Date(Date.parse(`${from}T00:00:00Z`) - 3 * 3_600_000).toISOString()).catch(() => []),
+    db.from('channel_posts').select('text').eq('status', 'published').order('scheduled_at', { ascending: false }).limit(12).then((r: { data: unknown }) => r.data ?? []).catch(() => []),
+    db.from('channel_recaps').select('text').eq('status', 'published').order('day', { ascending: false }).limit(3).then((r: { data: unknown }) => r.data ?? []).catch(() => []),
+    db.from('member_actions').select('detail').eq('kind', 'biz_msg').gte('created_at', new Date(Date.now() - 7 * 86_400_000).toISOString()).order('created_at', { ascending: false }).limit(200)
+      .then((r: { data: unknown }) => r.data ?? []).catch(() => []),
+  ]);
+  const sum = (pred: (d: string) => boolean) => {
+    const t = (trades as Array<{ pnl: number; lot: number | null; closed_at: string }>).filter((x) => pred(tradingDayOf(x.closed_at)));
+    return { trades: t.length, net10: t.reduce((s, x) => s + atRef(x.pnl, x.lot), 0) };
+  };
+  const ls = sum((d) => d === last);
+  const wk = wd >= 2 && wd <= 5 ? sum((d) => d >= monday && d < day) : wd === 6 || wd === 0 ? sum((d) => d >= addDays(monday, 0) && d <= addDays(monday, 4)) : { trades: 0, net10: 0 };
+  const questions = (qs as Array<{ detail: { from?: string; text?: string } | null }>)
+    .map((r) => (r.detail?.from === 'client' ? String(r.detail?.text ?? '') : '')).filter((t) => t.length > 8 && !t.startsWith('[')).slice(0, 40).map((t) => t.slice(0, 160).replace(/\s+/g, ' '));
+  return {
+    day, dateLabel: longDate(day), weekend: wd === 0 || wd === 6, news, market,
+    lastSession: ls.trades && ls.net10 > 0 ? { day: last, ...ls } : null,
+    week: wk.trades && wk.net10 > 0 ? wk : null,
+    recent: [...(recentRows as Array<{ text: string | null }>), ...(recaps as Array<{ text: string | null }>)].map((r) => String(r.text ?? '').slice(0, 300)).filter(Boolean),
+    questions,
+  };
+}
+
+// ── LES RÈGLES ────────────────────────────────────────────────────────────────────────────────────────
+
+async function systemPrompt(): Promise<string> {
+  const [knowledge, memory] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('cm_memory')]);
+  return `You write the posts of Algoria's public Telegram channel. Algoria is an AI that trades gold; members copy it automatically on their own broker account (MetaTrader 5), at their own size. Mathieu built it and runs the community.
+
+VOICE: you write AS Mathieu, the founder, in the first person when it is personal ("I", "my"). Warm, direct, simple, like a friend who runs this and talks to his community every day. Never corporate, never hype. The AI is "Algoria" or "the AI".
+
+AUDIENCE: beginners, mostly in South Africa and the UK. Many arrived from an ad and have not created their account yet. They know nothing about trading: no jargon, say BUY and SELL (never long or short).
+
+HARD RULES (a post that breaks one is thrown away):
+- English only. Telegram HTML only: <b>bold</b> and <i>italic</i>, nothing else. No markdown, no hashtags, no links in the text (the system adds the button).
+- Never an em dash or an en dash. Put a space before "?" and "!" (that's how Mathieu writes).
+- Short: every line short, the whole post easy to read on a phone. Emojis: a few, never a wall.
+- Never write a number about results, profits or percentages yourself. Use the tokens you are given ({{AMOUNTS}}, {{YESTERDAY}}) exactly as written; the system replaces them with the real figures.
+- No promises and no projections: never say people will earn, make money, double, get rich, or that today will be green. Past results only.
+- Nothing negative in this public channel: no losses, red days, drawdowns, maintenance, pauses, bugs (the only exception is explaining that every trade has a stop loss, when the card is about that).
+- Never mention an account size, the 30-day rule, withdrawal delays, testimonials, member quotes or screenshots of members.
+- Only use facts given to you (the card, the context, the knowledge below). If you are not sure a fact is true, leave it out.
+- Never repeat an opening, a structure or a joke from the RECENT POSTS. Every post must feel written today, for today.
+
+OUTPUT: only a JSON object {"text": "..."} with the post (use \\n for line breaks). No comment before or after.
+${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu, the source of truth for facts):\n${knowledge.slice(0, 12000)}` : ''}${memory ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS ON CHANNEL POSTS (in French; they win over everything except the hard rules; the later one wins):\n${memory.slice(0, 6000)}` : ''}`;
+}
+
+function contextBlock(c: DayContext): string {
+  const lines = [`TODAY: ${c.dateLabel} (Paris time).${c.weekend ? ' Weekend: the gold market is closed (it closes Friday 23:00 and reopens Monday 00:00, Paris time). Algoria does not trade.' : ''}`];
+  if (c.news.length) lines.push(`HIGH-IMPACT US NEWS TODAY (Paris time): ${c.news.map((n) => `${n.at} ${n.title}`).join(' · ')}. Fact you may use: Algoria stands aside around high-impact news, it doesn't trade the minutes around them.`);
+  else if (!c.weekend) lines.push('No high-impact US news today.');
+  if (c.market && !c.weekend) lines.push(`MARKET (from the engine): ${c.market}.`);
+  lines.push(c.lastSession ? `LAST SESSION (${longDate(c.lastSession.day)}): green, ${c.lastSession.trades} trades. Token {{YESTERDAY}} = its result.` : 'LAST SESSION: do not mention its result.');
+  if (c.week) lines.push(`THIS WEEK SO FAR: green, ${c.week.trades} trades. Token {{WEEK}} = its result.`);
+  if (c.questions.length) lines.push(`QUESTIONS PEOPLE ASKED MATHIEU THIS WEEK (do not quote them, use them to know what worries people):\n- ${c.questions.slice(0, 25).join('\n- ')}`);
+  if (c.recent.length) lines.push(`RECENT POSTS (never repeat their openings or structure):\n---\n${c.recent.join('\n---\n')}`);
+  return lines.join('\n\n');
+}
+
+// ── LES GARDE-FOUS ────────────────────────────────────────────────────────────────────────────────────
+
+const PROMISE = /guarantee|risk[- ]?free|passive income|get rich|easy money|financial freedom|you(?:'ll| will) (?:earn|make|profit)|double your|no risk|life[- ]changing|millionaire/i;
+const NEGATIVE = /\b(loss|losses|losing|lost|red day|drawdown|maintenance|paused?|bug|outage|down day)\b/i;
+
+type GuardOpts = { tokens: Record<string, string>; required?: string[]; allowNegative?: boolean; allowedUsd?: number[]; allowedNumbers?: number[]; maxChars?: number };
+
+/** Nettoie et contrôle un texte du modèle : le texte prêt, ou la raison du refus (renvoyée au modèle pour un 2e essai). */
+export function check(raw: string, o: GuardOpts): { ok: true; text: string } | { ok: false; why: string } {
+  // humanize : tiret long → virgule, gras markdown retiré ; puis l'espace de Mathieu avant ? et !, même collés à du gras
+  let t = humanize(raw.replace(/\r/g, ''), true).replace(/([^\s?!])([?!]+)(?=<\/[bi]>)/g, '$1 $2');
+  if (/<(?!\/?(?:b|i)>)[^>]*>/i.test(t)) return { ok: false, why: 'only <b> and <i> tags are allowed' };
+  if (/https?:\/\/|t\.me\/|\.tech\b|www\./i.test(t)) return { ok: false, why: 'no links in the text, the button is added by the system' };
+  if (PROMISE.test(t.replace(RISK, ''))) return { ok: false, why: 'it sounds like a promise of gains' };
+  if (!o.allowNegative && NEGATIVE.test(t.replace(/stop[- ]?loss(?:es)?/gi, ''))) return { ok: false, why: 'negative words are not allowed in this public channel' };
+  for (const k of o.required ?? []) if (!t.includes(`{{${k}}}`)) return { ok: false, why: `the token {{${k}}} is missing` };
+  // aucun montant écrit par le modèle, sauf les faits autorisés (200 $, 500 $…) ; aucun pourcentage
+  const allowed = new Set((o.allowedUsd ?? []).map(String));
+  for (const m of t.matchAll(/\$\s?([\d][\d,.]*)/g)) if (!allowed.has(m[1].replace(/,/g, ''))) return { ok: false, why: `you wrote the amount $${m[1]} yourself: use the tokens` };
+  if (/\d\s?%/.test(t.replace(/\b100\s?%/g, ''))) return { ok: false, why: 'no percentages' };
+  // LES NOMBRES : dans le bonjour et le récap, seulement ceux qu'on a donnés (nombre de trades, date). Les heures,
+  // les numéros de membre, les tailles de lot et les puces 1️⃣ ne comptent pas.
+  if (o.allowedNumbers) {
+    const okN = new Set(o.allowedNumbers.map(String));
+    const scrub = t.replace(/\{\{\w+\}\}/g, '').replace(/\b\d{1,2}[:h]\d{2}\b/g, '').replace(/#\d+/g, '').replace(/\b0\.(?:01|10|1)\b/g, '').replace(/\d\uFE0F?\u20E3/g, '').replace(/\b100\s?%/g, '');
+    for (const m of scrub.matchAll(/\d+(?:[.,]\d+)?/g)) if (!okN.has(m[0])) return { ok: false, why: `the number ${m[0]} is not one of the figures you were given` };
+  }
+  const unknown = [...t.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in o.tokens));
+  if (unknown.length) return { ok: false, why: `unknown token {{${unknown[0]}}}` };
+  for (const [k, v] of Object.entries(o.tokens)) t = t.split(`{{${k}}}`).join(v);
+  t = t.replace(/&(?!amp;|lt;|gt;|quot;)/g, '&amp;');
+  if (t.length > (o.maxChars ?? 900) || t.split('\n').length > 16) return { ok: false, why: 'too long' };
+  return { ok: true, text: t.trim() };
+}
+export const guard = (raw: string, o: GuardOpts): string | null => { const r = check(raw, o); return r.ok ? r.text : null; };
+
+// ── L'APPEL ───────────────────────────────────────────────────────────────────────────────────────────
+
+async function ask(system: string, user: string): Promise<string | null> {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const res = await new Anthropic().messages.create({ model: CM_MODEL(), max_tokens: 1200, system, messages: [{ role: 'user', content: user }] }, { timeout: 30_000, maxRetries: 0 });
+    const out = res.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('').trim();
+    const j = out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1);
+    const text = (JSON.parse(j) as { text?: unknown }).text;
+    return typeof text === 'string' && text.trim() ? text.trim() : null;
+  } catch (e) {
+    console.error('[cm writer] échec:', (e as { message?: string })?.message ?? e);
+    return null;
+  }
+}
+
+export type Brief =
+  | { kind: 'morning' }
+  | { kind: 'howto'; card: string; button: string }
+  | { kind: 'cta'; goal: string; reference: string; button: string }
+  | { kind: 'recap'; recapKind: 'win' | 'record' | 'week' | 'quiet' | 'red'; trades: number; wins: number; liveMembers: number[]; weekLabel?: string };
+
+const BRIEFS: Record<Brief['kind'], (b: Brief) => string> = {
+  morning: () => `Write the MORNING post that kickstarts the day in the channel. 3 to 6 short lines.
+Give people one concrete, true reason to follow today, taken from TODAY: a news event and its Paris time (Algoria stands aside around it), the market mood, or on a weekend the fact that the market is closed and reopens Monday at midnight. If the LAST SESSION is given, you may mention it with the token {{YESTERDAY}} (written exactly like that), never otherwise.
+End with something light that invites them in (open the app with the button below, or say hi). Never a generic "good morning, let's go". No promise about today's results.`,
+  howto: (b) => {
+    const x = b as Extract<Brief, { kind: 'howto' }>;
+    return `Write today's HOW IT WORKS post. First line exactly: 🔵💙 HOW IT WORKS
+Rewrite this fact card in fresh words, with a new hook. Keep exactly its facts, add no other fact. 4 to 9 short lines. If the card ends with the risk sentence, keep it word for word as the last line.
+The button "${x.button}" is added below by the system: you may point to it with 👇.
+FACT CARD:
+${x.card}`;
+  },
+  cta: (b) => {
+    const x = b as Extract<Brief, { kind: 'cta' }>;
+    return `Write a short CALL TO ACTION post. 2 to 5 short lines. Goal: ${x.goal}
+The button "${x.button}" is added below by the system: end by pointing to it (👇).
+You may tie it lightly to TODAY if it is natural. Facts you may use are in this reference version (rewrite it, don't copy it):
+${x.reference}`;
+  },
+  recap: (b) => {
+    const x = b as Extract<Brief, { kind: 'recap' }>;
+    const live = x.liveMembers.length ? `New members who went live today (you may welcome them, exactly as written): ${x.liveMembers.slice(0, 3).map((n) => `Member #${n}`).join(', ')}.` : 'No new member went live today: do not mention it.';
+    const head: Record<string, string> = {
+      win: `First line: 🔵💙 DAY RECAP. Algoria closed ${x.trades} trade${x.trades > 1 ? 's' : ''} on gold today (${x.wins} won). Put the token {{AMOUNTS}} on its own line, exactly once.`,
+      record: `First line: 🔵💙 WHAT A DAY 🥇. Best day of the month so far, ${x.trades} trades. Put the token {{AMOUNTS}} on its own line, exactly once.`,
+      week: `First line: 🔵💙 WEEK RECAP${x.weekLabel ? ` · ${x.weekLabel}` : ''}. The week is green, ${x.trades} trades this week. Put the token {{AMOUNTS}} on its own line, exactly once (it is the week's result). Wish a good weekend: the AI is back Monday.`,
+      quiet: 'First line: 🔵💙 DAY RECAP. No clean setup on gold today, so no trade: that is the plan, Algoria never forces a trade. No amount, no token.',
+      red: `First line: 🔵💙 DAY RECAP. Today is not a day to show figures: say Algoria managed today's gold session, ${x.trades} trades, each with its stop loss, and that every trade is in the app, trade by trade, the real copied account. No amount, no token, no word like loss or red.`,
+    };
+    return `Write tonight's RECAP post, shorter and more human than usual: 3 to 6 short lines, Mathieu's voice.
+${head[x.recapKind]}
+${live}
+Last line exactly: 👉 app.algoria.tech
+Do not write the risk sentence, the system adds it.`;
+  },
+};
+
+/** Écrit un post. `tokens` = les montants réels que le code substitue. Renvoie null si le modèle est absent ou si le
+ *  texte ne passe pas les garde-fous : l'appelant garde alors son texte de secours. */
+export async function writePost(c: DayContext, b: Brief, extra?: { instruction?: string; previous?: string }): Promise<string | null> {
+  const tokens: Record<string, string> = {};
+  if (c.lastSession) tokens.YESTERDAY = amountsLine(c.lastSession.net10);
+  if (c.week) tokens.WEEK = amountsLine(c.week.net10);
+  const user = `${contextBlock(c)}\n\nTASK:\n${BRIEFS[b.kind](b)}${extra?.previous ? `\n\nTHE CURRENT VERSION OF THIS POST:\n${extra.previous}` : ''}${extra?.instruction ? `\n\nMATHIEU ASKS (in French) FOR THIS CHANGE, apply it while keeping the rules:\n${extra.instruction}` : ''}`;
+  const dateNums = [Number(c.day.slice(8, 10)), Number(c.day.slice(0, 4))];
+  const opts: GuardOpts = b.kind === 'recap'
+    ? { tokens: { AMOUNTS: '{{AMOUNTS}}' }, required: ['win', 'record', 'week'].includes(b.recapKind) ? ['AMOUNTS'] : [], allowedNumbers: [b.trades, b.wins, ...dateNums], maxChars: 700 }
+    : {
+        tokens,
+        allowNegative: b.kind === 'howto',
+        allowedUsd: b.kind === 'howto' || b.kind === 'cta' ? [200, 500, 400] : [],
+        ...(b.kind === 'morning' ? { allowedNumbers: [c.lastSession?.trades ?? -1, c.week?.trades ?? -1, ...dateNums], maxChars: 600 } : { maxChars: 900 }),
+      };
+  const sys = await systemPrompt();
+  // deux essais : un texte refusé par les garde-fous repart au modèle avec la raison du refus
+  let prompt = user;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await ask(sys, prompt);
+    if (!raw) return null;
+    const r = check(b.kind === 'recap' ? raw.replace(/\n*👉\s*app\.algoria\.tech\s*$/i, '') : raw, opts);
+    if (r.ok) return r.text;
+    console.error(`[cm writer] ${b.kind} refusé (${r.why})`);
+    prompt = `${user}\n\nYOUR PREVIOUS DRAFT WAS REJECTED BECAUSE ${r.why.toUpperCase()}. Write it again and fix that.\nPrevious draft:\n${raw}`;
+  }
+  return null;
+}
+
+export { RISK as CM_RISK };

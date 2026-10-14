@@ -11,7 +11,7 @@ import { dimP, inp, miniBtn, okBtn, secH } from '../_shared';
 interface Version { id: number; created_at: string; created_by: string | null; size: number }
 interface Doc { content: string; updated_at: string | null; updated_by: string | null; versions: Version[]; max: number }
 
-type DocKey = 'knowledge' | 'memory' | 'ads_memory';
+type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory';
 const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?: string }> = {
   knowledge: {
     title: '🧠 ALGORIA AI — KNOWLEDGE',
@@ -22,6 +22,11 @@ const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?
     title: '📝 ALGORIA AI — MEMORY',
     intro: 'What the bot learned from your corrections in Telegram (reply to a proposal with your version, or with # + a remark). One lesson per line, the latest wins. Clean it up here: delete a wrong line, or move a lasting rule into the knowledge.',
     empty: 'Empty: no correction yet. Reply to a proposal in Telegram to teach the bot.',
+  },
+  cm_memory: {
+    title: '📣 CHANNEL CM — MEMORY',
+    intro: 'What the channel writer learned from your corrections: reply to the morning plan with the post number and what to change (« 2 plus court »), or with # + a rule. One lesson per line, the latest wins. Fix or delete a line here.',
+    empty: 'Empty: no correction yet. Reply to the morning plan in Telegram to teach the channel writer.',
   },
   ads_memory: {
     title: '🧠 ADS STUDIO — WHAT CLAUDE LEARNED',

@@ -4,6 +4,7 @@ import { buildRecap, draftTonight, parisDay, parisHour } from '@/lib/channel/rec
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // la réécriture du récap appelle le modèle (lib/channel/writer.ts)
 
 // 📣 RÉCAP DU SOIR (02/10/2026) — voir lib/channel/recap.ts.
 // Appelé par pg_cron (migration 0023) à 21:05 ET 22:05 UTC : l'un des deux tombe à 23h05 à Paris selon l'heure

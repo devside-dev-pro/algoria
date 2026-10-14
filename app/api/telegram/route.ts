@@ -1,16 +1,16 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { JOIN_DM, INBOX_ACK, INBOX_ACK_BTN, SUPPORT_TG_URL, SIGNED_IN, SIGNED_IN_BTN, SIGNED_IN_CODE_HINT, LOGIN_CODE_MSG, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
+import { JOIN_DM, JOIN_DM_BUTTONS, INBOX_ACK, INBOX_ACK_BTN, SUPPORT_TG_URL, SIGNED_IN, SIGNED_IN_BTN, SIGNED_IN_CODE_HINT, LOGIN_CODE_MSG, localeForChat, asLocale, type Locale } from '@/lib/member/i18n';
 import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 import { handleRecapCallback } from '@/lib/channel/recap';
-import { handleCmCallback } from '@/lib/channel/cm';
+import { handleCmCallback, handleCmReply } from '@/lib/channel/cm';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
-export const maxDuration = 25;
+export const maxDuration = 60; // 25 s jusqu'au 15/10/2026 : la réécriture d'un post du canal (lib/channel/cm.ts) appelle le modèle après la réponse
 
 // Webhook Telegram (bot admin du canal) → alimente la WAITLIST du widget /join.
 // Flux : un viewer clique le lien d'invitation "demander à rejoindre" → Telegram POSTe un chat_join_request ici
@@ -78,7 +78,7 @@ async function sendJoinDm(userId: number, locale: Locale): Promise<'sent' | 'fai
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(5000),
-      body: JSON.stringify({ chat_id: userId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: userId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...(locale === 'en' ? { reply_markup: { inline_keyboard: JOIN_DM_BUTTONS } } : {}) }),
     });
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
     if (!d.ok) console.error('[telegram] join DM refused:', d.description ?? 'unknown');
@@ -446,6 +446,10 @@ export async function POST(req: Request) {
   }
 
   const msg = update?.message;
+  // 📣 Mathieu corrige un post du canal en répondant au message du matin (lib/channel/cm.ts). AVANT la correction du
+  // bot de support : un « # règle » en réponse au plan du canal va dans la mémoire du CM, pas dans celle du support.
+  if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message
+    && (await handleCmReply(db, msg, (fn) => after(fn)).catch(() => false))) return NextResponse.json({ ok: true });
   // 🧠 Mathieu forme l'agent : réponse à une carte de proposition (sa version ou « # remarque »), ou « # leçon » seule.
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (msg.reply_to_message || msg.text.trim().startsWith('#'))
     && (await handleBusinessCorrection(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
