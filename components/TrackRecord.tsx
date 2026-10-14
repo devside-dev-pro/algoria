@@ -72,7 +72,7 @@ function Curve({ points, unit }: { points: number[]; unit: 'pct' | 'usd' }) {
 // TRADE PAR TRADE (14/10/2026) — à partir d'octobre 2026 (les mois du master), un mois se déplie : ses jours, et
 // chaque trade (heure, achat ou vente, entrée, sortie, résultat). Chargé au clic (/api/public/track/trades),
 // même calcul que le mois au-dessus. Le bot et nos messages promettaient « chaque trade » : la page le montre.
-type MTrade = { c: string; o: string | null; dir: 'buy' | 'sell'; entry: number | null; exit: number | null; u: number; reason: string | null };
+type MTrade = { c: string; o: string | null; dir: 'buy' | 'sell' | null; entry: number | null; exit: number | null; u: number; reason: string | null };
 type MDay = { d: string; fee: number; trades: MTrade[] };
 const DETAIL_FROM = MASTER_TRACK_FROM.slice(0, 7);
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
@@ -121,7 +121,7 @@ function MonthTrades({ ym, atLot }: { ym: string; atLot: number }) {
                 <div key={id} onClick={() => setOpenT(open ? null : id)} role="button" style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4, padding: '7px 10px', borderTop: '1px solid rgba(130,152,190,.08)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 36 }}>{hhmm(t.c)}</span>
-                    <span className="mono" style={{ fontSize: 10, fontWeight: 800, letterSpacing: .6, color: t.dir === 'buy' ? 'var(--cyan)' : 'var(--gold)' }}>{t.dir === 'buy' ? '▲ BUY' : '▼ SELL'}</span>
+                    {t.dir && <span className="mono" style={{ fontSize: 10, fontWeight: 800, letterSpacing: .6, color: t.dir === 'buy' ? 'var(--cyan)' : 'var(--gold)' }}>{t.dir === 'buy' ? '▲ BUY' : '▼ SELL'}</span>}
                     <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>gold</span>
                     <span style={{ flex: 1 }} />
                     <span className="mono" style={{ fontSize: 12.5, fontWeight: win ? 800 : 600, color: win ? 'var(--up)' : t.u < 0 ? NEG : 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>{t.u === 0 ? '$0.00' : amt(t.u)}</span>

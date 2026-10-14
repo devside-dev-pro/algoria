@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     d: d.d,
     fee: r2(d.fee),
     trades: d.trades.map((t) => ({
-      c: t.closed_at, o: t.opened_at, dir: t.direction === 'short' ? 'sell' : 'buy',
+      c: t.closed_at, o: t.opened_at, dir: t.direction === 'short' ? 'sell' : t.direction === 'long' ? 'buy' : null, // null : ligne de clôture seule, sens inconnu
       entry: t.entry == null ? null : Number(t.entry), exit: t.exit == null ? null : Number(t.exit),
       u: r2(Number(t.pnl) / lotOf(t.lot)), reason: t.reason ?? null,
     })).reverse(),
