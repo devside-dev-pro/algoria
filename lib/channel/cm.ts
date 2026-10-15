@@ -600,7 +600,7 @@ async function swapImage(db: Db, r: Row): Promise<string> {
 /** UNE PHOTO ENVOYÉE AU BOT PAR UN ADMIN, en privé et pas en réponse à un message : elle entre dans la banque du
  *  bonjour. Un album entier fonctionne (une confirmation par album). Renvoie false si ce n'est pas pour nous. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function handleCmPhoto(db: Db, msg: any): Promise<boolean> {
+export async function handleCmPhoto(db: Db, msg: any, defer?: (fn: () => Promise<void>) => void): Promise<boolean> {
   if (msg?.chat?.type !== 'private' || !Array.isArray(msg.photo) || !msg.photo.length || msg.reply_to_message || msg.business_connection_id) return false;
   if (!(await adminTgIds()).includes(Number(msg.from?.id))) return false;
   const best = msg.photo[msg.photo.length - 1] as { file_id: string; file_unique_id: string };
@@ -609,16 +609,25 @@ export async function handleCmPhoto(db: Db, msg: any): Promise<boolean> {
   const { error } = await db.from('cm_photos').insert({ file_id: best.file_id, file_unique_id: best.file_unique_id, chat_id: Number(msg.chat.id), message_id: Number(msg.message_id), media_group_id: group, added_by: by });
   const dup = error && /duplicate|unique/i.test(error.message);
   if (error && !dup) { await tg('sendMessage', { chat_id: msg.chat.id, text: `⨯ Photo pas enregistrée (${error.message.slice(0, 80)}), renvoie-la.`, reply_to_message_id: msg.message_id }); return true; }
-  // un album arrive en plusieurs messages : une seule confirmation, sur la première photo du groupe
-  if (group) {
-    const { data: same } = await db.from('cm_photos').select('message_id').eq('media_group_id', group).order('message_id', { ascending: true }).limit(1);
-    if (Number(same?.[0]?.message_id) !== Number(msg.message_id)) return true;
-  }
-  const { data: all } = await db.from('cm_photos').select('id').eq('active', true).limit(1000);
-  await tg('sendMessage', {
-    chat_id: msg.chat.id, reply_to_message_id: msg.message_id,
-    text: `${dup ? '📸 Déjà dans la banque.' : `📸 Ajoutée${group ? 's' : ''} à la banque du bonjour du matin.`} ${(all ?? []).length} photo${(all ?? []).length > 1 ? 's' : ''} au total.\nPour en retirer une : réponds « retire » sur la photo.`,
-  });
+  const confirm = async () => {
+    const { data: all } = await db.from('cm_photos').select('id').eq('active', true).limit(1000);
+    const total = (all ?? []).length;
+    let head = dup ? '📸 Déjà dans la banque.' : '📸 Ajoutée à la banque du bonjour du matin.';
+    if (group) {
+      const { data: g } = await db.from('cm_photos').select('id').eq('media_group_id', group).limit(20);
+      const n = (g ?? []).length;
+      head = `📸 ${n} photo${n > 1 ? 's' : ''} de cet album ajoutée${n > 1 ? 's' : ''} à la banque du bonjour du matin (une photo déjà présente n'est pas comptée deux fois).`;
+    }
+    await tg('sendMessage', { chat_id: msg.chat.id, reply_to_message_id: msg.message_id, text: `${head} ${total} photo${total > 1 ? 's' : ''} au total.\nPour en retirer une : réponds « retire » sur la photo.` });
+  };
+  if (!group) { await confirm(); return true; }
+  // UN ALBUM arrive en autant de messages que de photos, une par une (~0,7 s chacune, jusqu'à 10). Une seule
+  // confirmation, sur la première photo du groupe, et APRÈS l'arrivée des autres : compter tout de suite affichait
+  // « 11 au total » alors que 19 étaient en cours d'enregistrement (vécu le 15/10).
+  const { data: same } = await db.from('cm_photos').select('message_id').eq('media_group_id', group).order('message_id', { ascending: true }).limit(1);
+  if (Number(same?.[0]?.message_id) !== Number(msg.message_id)) return true;
+  const later = async () => { await new Promise((r) => setTimeout(r, 12_000)); await confirm(); };
+  if (defer) defer(later); else await later();
   return true;
 }
 
