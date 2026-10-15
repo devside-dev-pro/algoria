@@ -214,6 +214,13 @@ export async function planDay(db: Db, day: string): Promise<number> {
     else if (rows[k].kind !== 'tp') rows[k].report = { writer: 'bank' };
   }
   if (!rows.length) return 0;
+  // LE BONJOUR AVEC UNE PHOTO DE MATHIEU (15/10/2026), prise dans la banque qu'il remplit en envoyant ses photos au bot.
+  // Banque vide : le bonjour part avec une bannière, comme les autres posts.
+  const morning = rows.find((r) => r.kind === 'morning');
+  if (morning) {
+    const ph = await pickPhoto(db).catch(() => null);
+    if (ph) { morning.photo_url = ph.file_id; morning.report = { ...(morning.report as object ?? {}), photo_id: ph.id }; }
+  }
   // une seule requête : si un autre passage a créé le plan entre-temps, l'unicité fait tout échouer, et un seul
   // message part aux admins
   const { error } = await db.from('channel_posts').insert(rows);
@@ -265,7 +272,8 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
     const head = r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'cta' ? 'CTA' : 'CARTE DE GAIN';
     const by = (r.report as { writer?: string } | null)?.writer;
     const tag = by === 'ai' ? ' · ✍️ IA' : by === 'fixed' ? ' · ✏️ corrigé' : by === 'bank' ? ' · 📄 banque' : '';
-    parts.push('', `<b>${NUM[i] ?? i + 1}  ${parisHHMM(r.scheduled_at)} · ${head}</b>${tag} · ${STATUS[r.status] ?? r.status}`);
+    const img = r.kind === 'tp' ? '' : r.photo_url ? ' · 📸 photo' : ' · 🖼 bannière';
+    parts.push('', `<b>${NUM[i] ?? i + 1}  ${parisHHMM(r.scheduled_at)} · ${head}</b>${tag}${img} · ${STATUS[r.status] ?? r.status}`);
     if (r.kind === 'tp') {
       const rep = r.report as { reason?: string } | null;
       parts.push(r.text ? `<blockquote>${esc(plain(r.text).slice(0, 300))}</blockquote>` : `<i>Le meilleur gain copié ${TP_FROM[r.slot] ? `depuis ${TP_FROM[r.slot]}` : 'depuis minuit'} (au moins +$15 à 0.10 lot), avec sa carte, comme dans le VIP. Rien s'il n'y en a pas.${rep?.reason ? ` · ${esc(rep.reason)}` : ''}</i>`);
@@ -276,7 +284,7 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
   });
   if (!isWeekend(day)) parts.push('', '<i>23:05 · le récap du jour garde son brouillon à part, comme d\'habitude.</i>');
   if (idea) parts.push('', `🎥 <b>Idée de bulle vidéo</b> (la question qui revient le plus en support cette semaine) :`, `« ${esc(idea)} »`);
-  parts.push('', '<i>Pour corriger un post : réponds à ce message avec son numéro et ce qu\'il faut changer (« 2 plus court »). Pour une règle durable : # + la règle. Un post non validé part quand même si tu valides jusqu\'à 1 h après son heure.</i>');
+  parts.push('', '<i>Pour corriger un post : réponds à ce message avec son numéro et ce qu\'il faut changer (« 2 plus court », « 1 change la photo »). Pour une règle durable : # + la règle. Un post non validé part quand même si tu valides jusqu\'à 1 h après son heure.</i>');
   const text = parts.join('\n').slice(0, 4090);
   const keyboard: Array<Array<Record<string, string>>> = [];
   if (posts.some((r) => r.status === 'draft')) keyboard.push([{ text: '✅ Tout valider', callback_data: `cma:${day}` }]);
@@ -298,9 +306,14 @@ const tg = async (method: string, payload: Record<string, unknown>) => {
 
 /** Envoie le plan du jour à chaque admin. */
 export async function sendPlan(db: Db, day: string): Promise<number> {
-  const { text, keyboard } = renderPlan(day, await rowsOf(db, day));
+  const rows = await rowsOf(db, day);
+  const { text, keyboard } = renderPlan(day, rows);
+  const album = albumOf(rows);
   const msgs: Array<{ chat: number; id: number }> = [];
   for (const chat_id of await adminTgIds()) {
+    // les images d'abord (photo du bonjour, bannières), numérotées comme dans le plan : ce qui part, on le voit
+    if (album.length === 1) await tg('sendPhoto', { chat_id, photo: album[0].media, caption: album[0].caption });
+    else if (album.length > 1) await tg('sendMediaGroup', { chat_id, media: album.slice(0, 10).map((m) => ({ type: 'photo', media: m.media, caption: m.caption })) });
     const r = await tg('sendMessage', { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard } }) as { ok?: boolean; description?: string; result?: { message_id?: number } } | null;
     if (r?.ok && r.result?.message_id) msgs.push({ chat: chat_id, id: r.result.message_id });
     else console.error('[cm] plan non envoyé:', r?.description ?? 'unknown');
@@ -400,7 +413,7 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
       const w = await pickWin(db, r).catch((e) => ({ reason: String((e as Error).message).slice(0, 120) }));
       if ('reason' in w) { await db.from('channel_posts').update({ status: 'skipped', report: { reason: w.reason } }).eq('id', r.id); skipped++; continue; }
       text = w.text; photo = w.photo; ref = w.ticket; btnText = '📲 SEE EVERY TRADE'; btnUrl = L.history;
-    }
+    } else if (!photo) photo = bannerUrl(r); // How it works, CTA, bonjour sans photo : la bannière
     let out = await publishToChannels(db, { chatId: src, text, buttonText: btnText, buttonUrl: btnUrl, ...(photo ? { photoUrl: photo } : {}) });
     // la carte n'a pas pu être rendue ou récupérée par Telegram : le gain part en texte, il ne se perd pas
     if (!out.ok && photo) { photo = ''; out = await publishToChannels(db, { chatId: src, text, buttonText: btnText, buttonUrl: btnUrl }); }
@@ -461,9 +474,16 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
   const posts = (await rowsOf(db, day)).filter((r) => POST_KINDS.includes(r.kind));
   const todo: Array<{ n: number; r: Row; brief: Brief; instruction: string }> = [];
   const notes: string[] = [];
+  const swaps: Array<{ n: number; r: Row }> = [];
   for (const a of asks) {
     const r = posts[a.n - 1];
     if (!r) { notes.push(`${a.n} : pas de post ${a.n} ce jour-là`); continue; }
+    // « 1 change la photo », « 3 autre image » : on change l'image, pas le texte (et ce n'est pas une leçon d'écriture)
+    if (IMAGE_ASK.test(a.text) && r.kind !== 'tp') {
+      if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { notes.push(`${a.n} : déjà parti ou expiré`); continue; }
+      swaps.push({ n: a.n, r });
+      continue;
+    }
     const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
     // la remarque est une leçon pour la suite, que le post puisse encore être réécrit ou non
     await appendAgentMemory(db, `${todayFr()} · ${label} : « ${a.text.slice(0, 300)} »`, by, 'cm_memory');
@@ -472,7 +492,15 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
     if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { notes.push(`${a.n} : déjà parti ou expiré, je retiens juste la remarque`); continue; }
     todo.push({ n: a.n, r, brief, instruction: a.text });
   }
-  if (!todo.length) { await reply(`🧠 Noté.${notes.length ? `\n${notes.join('\n')}` : ''}`); return true; }
+  for (const sw of swaps) {
+    const img = await swapImage(db, sw.r);
+    await tg('sendPhoto', { chat_id: chat, photo: img, caption: `${NUM[sw.n - 1] ?? sw.n} nouvelle image, à revalider avec ✅ Tout valider`, reply_to_message_id: msg.message_id });
+  }
+  if (swaps.length) {
+    const view = renderPlan(day, await rowsOf(db, day));
+    await tg('editMessageText', { chat_id: chat, message_id: replyTo, text: view.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: view.keyboard } });
+  }
+  if (!todo.length) { if (!swaps.length || notes.length) await reply(`${swaps.length ? '📸 Image changée.' : '🧠 Noté.'}${notes.length ? `\n${notes.join('\n')}` : ''}`); return true; }
   const nums = todo.map((t) => t.n).join(', ');
   await reply(`✍️ Je réécris ${todo.length > 1 ? `les posts ${nums}` : `le post ${nums}`}…${notes.length ? `\n${notes.join('\n')}` : ''}`);
   defer(async () => {
@@ -486,7 +514,7 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
       // le plus souvent parce que la demande porte sur un chiffre, qui vient du code. On le dit au lieu d'annoncer « réécrit ».
       if (norm(String(fresh[k])) === norm(todo[k].r.text ?? '')) { same.push(todo[k].n); continue; }
       // le post corrigé redevient un brouillon : il repart seulement après un nouveau ✅
-      await db.from('channel_posts').update({ text: fresh[k], status: 'draft', report: { writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', todo[k].r.id);
+      await db.from('channel_posts').update({ text: fresh[k], status: 'draft', report: { ...((todo[k].r.report as object) ?? {}), writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', todo[k].r.id);
       done.push(todo[k].n);
     }
     if (done.length) {
@@ -500,5 +528,107 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
       '🧠 Remarques notées.',
     ].filter(Boolean).join('\n'));
   });
+  return true;
+}
+
+// ── LES IMAGES (15/10/2026, Mathieu : « ça manque de couleurs, de bannières, ça fait très texte et robot ») ─────
+// · le bonjour part avec une photo de Mathieu, tirée de sa banque (table cm_photos) : il l'alimente en envoyant ses
+//   photos au bot, en privé. Jamais la même deux jours de suite : la moins récemment utilisée d'abord ;
+// · How it works, CTA et bonjour sans photo partent avec une bannière aux couleurs d'Algoria (/api/card/banner),
+//   rendue à partir du post lui-même ;
+// · les cartes de gain gardent leur carte (/api/card/win).
+
+const IMAGE_ASK = /\b(photo|image|visuel|banni[eè]re|picture)\b/i;
+const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/[^\p{L}\p{N}\s,.'’?!:&$+%()\/-]/gu, '').replace(/\s+/g, ' ').trim();
+
+/** L'étiquette et le titre de la bannière d'un post (lus par /api/card/banner). */
+export function bannerParts(r: { kind: string; text: string | null; button_text: string | null; day?: string }): { kicker: string; title: string } {
+  const text = r.text ?? '';
+  const bold = /<b>([\s\S]+?)<\/b>/.exec(text)?.[1];
+  const firstLine = text.split('\n').map((l) => l.trim()).find((l) => l && !/HOW IT WORKS/i.test(l)) ?? '';
+  let title = strip(bold ?? firstLine);
+  if (title.length > 90) title = `${title.slice(0, 87).replace(/\s+\S*$/, '')}…`;
+  if (r.kind === 'howto') return { kicker: 'HOW IT WORKS', title: title || 'How Algoria works' };
+  if (r.kind === 'morning') {
+    const d = r.day ? new Date(`${String(r.day).slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).toUpperCase() : '';
+    return { kicker: 'GOOD MORNING, ALGORIA FAMILY', title: d || title };
+  }
+  const kicker = strip(r.button_text ?? '').toUpperCase() || 'ALGORIA AI';
+  return { kicker, title: title || 'Algoria AI trades gold for you' };
+}
+
+const hash = (s: string) => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h.toString(36); };
+/** L'URL de la bannière d'un post ; `v` change avec le texte et la variante, pour que Telegram ne garde pas l'ancienne. */
+export const bannerUrl = (r: { id: number; text: string | null; report: unknown }) =>
+  `${APP_URL}/api/card/banner?post=${r.id}&v=${hash(`${r.text ?? ''}#${Number((r.report as { variant?: number } | null)?.variant ?? 0)}`)}`;
+
+/** Les images du plan, dans l'ordre et avec les numéros du message. */
+function albumOf(rows: Row[]): Array<{ media: string; caption: string }> {
+  const posts = rows.filter((r) => POST_KINDS.includes(r.kind));
+  return posts.map((r, i) => ({ r, i })).filter(({ r }) => r.kind !== 'tp' && ['draft', 'approved', 'skipped'].includes(r.status))
+    .map(({ r, i }) => ({ media: r.photo_url || bannerUrl(r), caption: `${NUM[i] ?? i + 1} ${parisHHMM(r.scheduled_at)} · ${r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : 'CTA'}` }));
+}
+
+/** La photo du bonjour : la moins récemment utilisée (parmi les 3 plus anciennes, au hasard), puis marquée utilisée. */
+async function pickPhoto(db: Db, exclude?: number): Promise<{ id: number; file_id: string } | null> {
+  const { data } = await db.from('cm_photos').select('id,file_id,last_used_at').eq('active', true).limit(500);
+  const all = ((data ?? []) as Array<{ id: number; file_id: string; last_used_at: string | null }>).filter((p) => p.id !== exclude);
+  if (!all.length) return null;
+  all.sort((a, b) => (a.last_used_at ? Date.parse(a.last_used_at) : 0) - (b.last_used_at ? Date.parse(b.last_used_at) : 0));
+  const pick = all[Math.floor(Math.random() * Math.min(3, all.length))];
+  await db.from('cm_photos').update({ last_used_at: new Date().toISOString() }).eq('id', pick.id);
+  return pick;
+}
+
+/** « 1 change la photo » : une autre photo de la banque pour le bonjour, sinon une autre ambiance de bannière.
+ *  Le post redevient un brouillon. Renvoie l'image à montrer. */
+async function swapImage(db: Db, r: Row): Promise<string> {
+  const rep = (r.report as { photo_id?: number; variant?: number } | null) ?? {};
+  if (r.kind === 'morning') {
+    const ph = await pickPhoto(db, rep.photo_id).catch(() => null);
+    if (ph) {
+      await db.from('channel_posts').update({ photo_url: ph.file_id, status: 'draft', report: { ...rep, photo_id: ph.id } }).eq('id', r.id);
+      return ph.file_id;
+    }
+  }
+  const next = { ...rep, variant: Number(rep.variant ?? 0) + 1 };
+  await db.from('channel_posts').update({ photo_url: null, status: 'draft', report: next }).eq('id', r.id);
+  return bannerUrl({ id: r.id, text: r.text, report: next });
+}
+
+/** UNE PHOTO ENVOYÉE AU BOT PAR UN ADMIN, en privé et pas en réponse à un message : elle entre dans la banque du
+ *  bonjour. Un album entier fonctionne (une confirmation par album). Renvoie false si ce n'est pas pour nous. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function handleCmPhoto(db: Db, msg: any): Promise<boolean> {
+  if (msg?.chat?.type !== 'private' || !Array.isArray(msg.photo) || !msg.photo.length || msg.reply_to_message || msg.business_connection_id) return false;
+  if (!(await adminTgIds()).includes(Number(msg.from?.id))) return false;
+  const best = msg.photo[msg.photo.length - 1] as { file_id: string; file_unique_id: string };
+  const by = msg.from?.username ? `@${msg.from.username}` : String(msg.from?.id ?? 'admin');
+  const group = msg.media_group_id ? String(msg.media_group_id) : null;
+  const { error } = await db.from('cm_photos').insert({ file_id: best.file_id, file_unique_id: best.file_unique_id, chat_id: Number(msg.chat.id), message_id: Number(msg.message_id), media_group_id: group, added_by: by });
+  const dup = error && /duplicate|unique/i.test(error.message);
+  if (error && !dup) { await tg('sendMessage', { chat_id: msg.chat.id, text: `⨯ Photo pas enregistrée (${error.message.slice(0, 80)}), renvoie-la.`, reply_to_message_id: msg.message_id }); return true; }
+  // un album arrive en plusieurs messages : une seule confirmation, sur la première photo du groupe
+  if (group) {
+    const { data: same } = await db.from('cm_photos').select('message_id').eq('media_group_id', group).order('message_id', { ascending: true }).limit(1);
+    if (Number(same?.[0]?.message_id) !== Number(msg.message_id)) return true;
+  }
+  const { data: all } = await db.from('cm_photos').select('id').eq('active', true).limit(1000);
+  await tg('sendMessage', {
+    chat_id: msg.chat.id, reply_to_message_id: msg.message_id,
+    text: `${dup ? '📸 Déjà dans la banque.' : `📸 Ajoutée${group ? 's' : ''} à la banque du bonjour du matin.`} ${(all ?? []).length} photo${(all ?? []).length > 1 ? 's' : ''} au total.\nPour en retirer une : réponds « retire » sur la photo.`,
+  });
+  return true;
+}
+
+/** « retire » en réponse à une photo de la banque : elle n'est plus proposée. Renvoie false si ce n'est pas pour nous. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function handleCmPhotoRemove(db: Db, msg: any): Promise<boolean> {
+  const text = typeof msg?.text === 'string' ? msg.text.trim() : '';
+  if (msg?.chat?.type !== 'private' || !msg?.reply_to_message?.photo || !/^(retire|supprime|enl[eè]ve|remove|delete)\b/i.test(text)) return false;
+  if (!(await adminTgIds()).includes(Number(msg.from?.id))) return false;
+  const { data } = await db.from('cm_photos').update({ active: false }).eq('chat_id', Number(msg.chat.id)).eq('message_id', Number(msg.reply_to_message.message_id)).select('id');
+  await tg('sendMessage', { chat_id: msg.chat.id, reply_to_message_id: msg.message_id, text: (data ?? []).length ? '🗑 Retirée de la banque.' : 'Cette photo n’est pas dans la banque.' });
   return true;
 }
