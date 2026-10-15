@@ -452,7 +452,7 @@ export async function POST(req: Request) {
     && (await handleCmReply(db, msg, (fn) => after(fn)).catch(() => false))) return NextResponse.json({ ok: true });
   // 📸 la banque de photos du bonjour (lib/channel/cm.ts) : une photo envoyée au bot par un admin y entre ; « retire »
   // en réponse à l'une d'elles l'en sort. Avant tout le reste : sinon l'accusé « ce message n'est parti chez personne ».
-  if (db && msg?.chat?.type === 'private' && (await handleCmPhoto(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
+  if (db && msg?.chat?.type === 'private' && (await handleCmPhoto(db, msg, (fn) => after(fn)).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && msg.reply_to_message && (await handleCmPhotoRemove(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 🧠 Mathieu forme l'agent : réponse à une carte de proposition (sa version ou « # remarque »), ou « # leçon » seule.
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (msg.reply_to_message || msg.text.trim().startsWith('#'))
