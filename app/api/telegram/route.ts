@@ -7,7 +7,7 @@ import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 import { handleRecapCallback } from '@/lib/channel/recap';
-import { handleCmCallback, handleCmReply } from '@/lib/channel/cm';
+import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 60; // 25 s jusqu'au 15/10/2026 : la réécriture d'un post du canal (lib/channel/cm.ts) appelle le modèle après la réponse
@@ -450,6 +450,10 @@ export async function POST(req: Request) {
   // bot de support : un « # règle » en réponse au plan du canal va dans la mémoire du CM, pas dans celle du support.
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message
     && (await handleCmReply(db, msg, (fn) => after(fn)).catch(() => false))) return NextResponse.json({ ok: true });
+  // 📸 la banque de photos du bonjour (lib/channel/cm.ts) : une photo envoyée au bot par un admin y entre ; « retire »
+  // en réponse à l'une d'elles l'en sort. Avant tout le reste : sinon l'accusé « ce message n'est parti chez personne ».
+  if (db && msg?.chat?.type === 'private' && (await handleCmPhoto(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
+  if (db && msg?.chat?.type === 'private' && msg.reply_to_message && (await handleCmPhotoRemove(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 🧠 Mathieu forme l'agent : réponse à une carte de proposition (sa version ou « # remarque »), ou « # leçon » seule.
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (msg.reply_to_message || msg.text.trim().startsWith('#'))
     && (await handleBusinessCorrection(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
