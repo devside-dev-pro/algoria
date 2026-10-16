@@ -11,7 +11,7 @@ import { dimP, inp, miniBtn, okBtn, secH } from '../_shared';
 interface Version { id: number; created_at: string; created_by: string | null; size: number }
 interface Doc { content: string; updated_at: string | null; updated_by: string | null; versions: Version[]; max: number }
 
-type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory';
+type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory' | 'live_welcome';
 const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?: string }> = {
   knowledge: {
     title: '🧠 ALGORIA AI — KNOWLEDGE',
@@ -27,6 +27,12 @@ const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?
     title: '📣 CHANNEL CM — MEMORY',
     intro: 'What the channel writer learned from your corrections: reply to the morning plan with the post number and what to change (« 2 plus court »), or with # + a rule. One lesson per line, the latest wins. Fix or delete a line here.',
     empty: 'Empty: no correction yet. Reply to the morning plan in Telegram to teach the channel writer.',
+  },
+  live_welcome: {
+    title: '🎉 GO-LIVE MESSAGE',
+    intro: 'Sent automatically, once, to a member the moment you set them LIVE (✓ DONE or GO LIVE): from your Telegram account if they wrote to you in the last 24 h, otherwise by the Algoria bot. Several messages: put a line with only --- between them. {name} = their first name. If it cannot be sent, you get a Telegram alert.',
+    empty: 'Empty: nothing is sent at go-live.',
+    saved: 'Saved — sent to the next member you set live.',
   },
   ads_memory: {
     title: '🧠 ADS STUDIO — WHAT CLAUDE LEARNED',
