@@ -70,48 +70,79 @@ export async function cancelPendingJobs(db: Db, tgId: number, reason: string): P
 
 // ── L'ACCUEIL ──────────────────────────────────────────────────────────────────────────────────────────
 
-const cleanName = (n: unknown) => {
-  const s = String(n ?? '').replace(/[^\p{L}\p{M}' -]/gu, '').trim().split(/\s+/)[0] ?? '';
-  return s.length >= 2 && s.length <= 20 ? s[0].toUpperCase() + s.slice(1) : '';
+// Le prénom Telegram de la personne (« Hey Paul »). Ce qu'elle a mis n'est pas toujours un prénom : emojis, pseudo
+// (« Crypto King »), civilité (« Mr Smith »). Dans ces cas, juste « Hey ». « PAUL » ou « paul » deviennent « Paul ».
+const NOT_A_NAME = /^(mr|mrs|ms|miss|dr|sir|mister|the|crypto|trader|trading|forex|fx|gold|btc|bitcoin|money|rich|king|queen|boss|official|admin|investor|invest|bot|vip|signal|signals|team|support|user|deleted|account|business)$/i;
+export const cleanName = (n: unknown) => {
+  const s = String(n ?? '').replace(/[^\p{L}\p{M}' -]/gu, ' ').trim().split(/\s+/)[0] ?? '';
+  if (s.length < 2 || s.length > 20 || NOT_A_NAME.test(s)) return '';
+  const fix = s === s.toUpperCase() || s === s.toLowerCase() ? s.toLowerCase().replace(/(^|[-'])(\p{L})/gu, (_m, a, b) => a + b.toUpperCase()) : s;
+  return fix[0].toUpperCase() + fix.slice(1);
 };
+
+// La langue d'un prospect sans compte (on n'a pas encore sa langue dans l'app) : ses premiers messages.
+const ITALIAN = /\b(ciao|salve|buongiorno|buonasera|grazie|vorrei|voglio|posso|sono|come funziona|informazioni|quanto|conto|ho visto|perch[eé])\b/i;
 
 type MemberRow = { member_no: number | null; status: string | null; broker: string | null; locale: string | null; strategy?: number | null; tg_name?: string | null; tg_username?: string | null };
 
 /** Le message d'accueil, selon ce qu'on sait déjà de la personne. Le style de Mathieu : une espace avant ? et !,
  *  pas de tiret long, un emoji. */
-export function welcomeText(member: MemberRow | null, firstName: string | null): string {
+export function welcomeText(member: MemberRow | null, firstName: string | null, lang?: 'en' | 'it'): string {
   const name = cleanName(firstName);
-  const it = member?.locale === 'it';
+  const it = (lang ?? member?.locale) === 'it'; // en italien : formules neutres (« piacere »), pas « benvenuto/a »
   const hi = it ? (name ? `Ciao ${name}` : 'Ciao') : (name ? `Hey ${name}` : 'Hey');
   const app = `${APP_URL}/member`;
   const broker = PARTNER_BROKERS.find((b) => b.key === member?.broker)?.name ?? member?.broker ?? '';
   const st = member?.status ?? null;
   if (!member) return it
-    ? `${hi}, benvenuto ! Ecco il tuo accesso all'app: ${app}\nAccedi con il tuo Telegram, un tocco, nessuna password. Dimmi quando sei dentro e ti guido io 🙏🏼`
+    ? `${hi}, piacere ! Ecco il tuo accesso all'app: ${app}\nAccedi con il tuo Telegram, un tocco, nessuna password. Dimmi quando sei dentro e ti guido io 🙏🏼`
     : `${hi}, welcome ! Here's your access to the app: ${app}\nYou log in with your Telegram, one tap, no password. Tell me when you're in and I'll guide you 🙏🏼`;
   if (st === 'live' || st === 'paused') return it ? `${hi} ! Che piacere, come posso aiutarti ? 🙏🏼` : `${hi} ! Good to see you, how can I help ? 🙏🏼`;
   if (st === 'pending_copier') return it
     ? `${hi} ! Vedo che il tuo conto è collegato nell'app, lo stiamo verificando. Ti scrivo appena la copia è attiva 🙏🏼`
     : `${hi} ! I see your account is connected in the app, we're checking it now. I'll tell you as soon as the copy is on 🙏🏼`;
   if (st === 'onboarding' && broker) return it
-    ? `${hi}, benvenuto ! Vedo che sei già nell'app e hai scelto ${broker}. Il conto è aperto ? Dimmi a che punto sei e lo finiamo insieme 🙏🏼`
+    ? `${hi}, piacere ! Vedo che sei già nell'app e hai scelto ${broker}. Il conto è aperto ? Dimmi a che punto sei e lo finiamo insieme 🙏🏼`
     : `${hi}, welcome ! I see you're already in the app and you picked ${broker}. Is your account open ? Tell me where you're at and we finish it together 🙏🏼`;
   if (st === 'onboarding') return it
-    ? `${hi}, benvenuto ! Vedo che hai già l'app. Prossimo passo, il broker: in che paese vivi ? Ti dico quale scegliere 🙏🏼`
+    ? `${hi}, piacere ! Vedo che hai già l'app. Prossimo passo, il broker: in che paese vivi ? Ti dico quale scegliere 🙏🏼`
     : `${hi}, welcome ! I see you already have the app. Next step is your broker: which country do you live in ? I'll tell you which one to pick 🙏🏼`;
   return it
-    ? `${hi}, bentornato ! Rientri nell'app da qui: ${app}\nDimmi a che punto sei 🙏🏼`
+    ? `${hi}, che bello risentirti ! Rientri nell'app da qui: ${app}\nDimmi a che punto sei 🙏🏼`
     : `${hi}, welcome back ! You can log back in the app here: ${app}\nTell me where you're at 🙏🏼`;
 }
 
-/** La bulle vidéo d'accueil : la moins récemment envoyée (parmi les 2 plus anciennes, au hasard). */
-async function pickAsset(db: Db, kind: string): Promise<{ id: number; file_id: string } | null> {
-  const { data } = await db.from('support_assets').select('id,file_id,last_used_at').eq('kind', kind).eq('active', true).limit(100);
-  const all = ((data ?? []) as Array<{ id: number; file_id: string; last_used_at: string | null }>)
-    .sort((a, b) => (a.last_used_at ? Date.parse(a.last_used_at) : 0) - (b.last_used_at ? Date.parse(b.last_used_at) : 0));
-  if (!all.length) return null;
-  const pick = all[Math.floor(Math.random() * Math.min(2, all.length))];
-  await db.from('support_assets').update({ last_used_at: iso(Date.now()) }).eq('id', pick.id);
+// ── LA BIBLIOTHÈQUE DE BULLES ──────────────────────────────────────────────────────────────────────────
+// Chaque bulle a un public (situation) et une langue, choisis par Mathieu avec les boutons sous la bulle. À l'accueil,
+// on prend la bulle de sa situation et de sa langue ; à défaut une bulle « tout le monde » ; à défaut l'autre langue.
+// Parmi les bulles qui conviennent, la moins récemment envoyée (au hasard entre les 2 plus anciennes) : pas toujours la même.
+export const SITUATIONS = { new: '🆕 Pas encore l’app', app: '📲 Déjà dans l’app', all: '🌍 Tout le monde' } as const;
+export const LANGS = { en: '🇬🇧 Anglais', it: '🇮🇹 Italien' } as const;
+type Situation = keyof typeof SITUATIONS;
+type Lang = keyof typeof LANGS;
+type Asset = { id: number; file_id: string; situation: string | null; lang: string | null; uses: number | null; last_used_at: string | null };
+
+/** La situation de la personne pour le choix de la bulle (null = pas de bulle). */
+export function situationOf(member: MemberRow | null): Situation | null {
+  if (!member) return 'new';
+  if (member.status === 'pending_copier' || NO_WELCOME.has(member.status ?? '')) return null;
+  return 'app';
+}
+
+async function pickAsset(db: Db, situation: Situation, lang: Lang): Promise<Asset | null> {
+  const { data } = await db.from('support_assets').select('id,file_id,situation,lang,uses,last_used_at').eq('kind', 'welcome_video').eq('active', true).limit(200);
+  const all = (data ?? []) as Asset[];
+  const sit = (a: Asset) => a.situation ?? 'all';
+  const lg = (a: Asset) => a.lang ?? 'en';
+  const tiers = [
+    all.filter((a) => sit(a) === situation && lg(a) === lang),
+    all.filter((a) => sit(a) === 'all' && lg(a) === lang),
+    all.filter((a) => (sit(a) === situation || sit(a) === 'all') && lg(a) !== lang),
+  ];
+  const pool = (tiers.find((t) => t.length) ?? []).sort((a, b) => (a.last_used_at ? Date.parse(a.last_used_at) : 0) - (b.last_used_at ? Date.parse(b.last_used_at) : 0));
+  if (!pool.length) return null;
+  const pick = pool[Math.floor(Math.random() * Math.min(2, pool.length))];
+  await db.from('support_assets').update({ last_used_at: iso(Date.now()), uses: Number(pick.uses ?? 0) + 1 }).eq('id', pick.id);
   return pick;
 }
 
@@ -164,10 +195,17 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   const { data: sent } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', 'welcome').limit(5);
   const already = ((sent ?? []) as Array<{ detail: Record<string, unknown> }>).map((r) => String(r.detail?.text ?? ''));
   if (already.some((t) => t !== '[video bubble]')) return { status: 'done', result: { outcome: 'welcome', resumed: true } };
-  const text = welcomeText(member, String(job.payload?.firstName ?? '') || null);
+  // sa langue : celle de l'app s'il a un compte, sinon celle de ses premiers messages
+  let lang: Lang = member?.locale === 'it' ? 'it' : 'en';
+  if (!member?.locale) {
+    const { data: first } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').order('created_at', { ascending: true }).limit(5);
+    if (((first ?? []) as Array<{ detail: Record<string, unknown> }>).some((r) => ITALIAN.test(String(r.detail?.text ?? '')))) lang = 'it';
+  }
+  const text = welcomeText(member, String(job.payload?.firstName ?? '') || null, lang);
   const base = { business_connection_id: job.conn, chat_id: job.tg_id };
-  // la bulle : pour les nouveaux (prospect, inscription en cours), pas pour un compte déjà en vérification
-  const video = member?.status === 'pending_copier' || already.includes('[video bubble]') ? null : await pickAsset(db, 'welcome_video');
+  // la bulle de sa situation et de sa langue (pas de bulle pour un compte déjà en vérification)
+  const situation = situationOf(member);
+  const video = !situation || already.includes('[video bubble]') ? null : await pickAsset(db, situation, lang);
   let videoSent = false;
   if (video) {
     await tg('sendChatAction', { ...base, action: 'record_video_note' });
@@ -181,7 +219,7 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   const r = await tg('sendMessage', { ...base, text, disable_web_page_preview: true });
   if (!r.ok) return { status: 'failed', result: { error: r.description ?? 'refusé', video: videoSent } };
   await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'welcome', text, conn: job.conn } });
-  return { status: 'done', result: { outcome: 'welcome', video: videoSent, state: member?.status ?? 'no account' } };
+  return { status: 'done', result: { outcome: 'welcome', video: videoSent ? video?.id : false, situation, lang, state: member?.status ?? 'no account' } };
 }
 
 async function doReply(db: Db, job: Job): Promise<JobResult> {
@@ -257,7 +295,31 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
 
 // ── LES BULLES D'ACCUEIL DE MATHIEU ────────────────────────────────────────────────────────────────────
 
-/** Une bulle vidéo envoyée au bot en privé par un admin : elle devient une bulle d'accueil. */
+/** Les boutons sous une bulle : à qui elle va, sa langue, la retirer. La coche ✓ montre le choix actuel. */
+export function assetKeyboard(a: { id: number; situation?: string | null; lang?: string | null; active?: boolean | null }) {
+  if (a.active === false) return { inline_keyboard: [[{ text: '↩️ Remettre dans les bulles', callback_data: `sa:${a.id}:on` }]] };
+  const sit = a.situation ?? 'all', lg = a.lang ?? 'en';
+  return {
+    inline_keyboard: [
+      (Object.keys(SITUATIONS) as Situation[]).map((k) => ({ text: `${sit === k ? '✓ ' : ''}${SITUATIONS[k]}`, callback_data: `sa:${a.id}:s:${k}` })),
+      [...(Object.keys(LANGS) as Lang[]).map((k) => ({ text: `${lg === k ? '✓ ' : ''}${LANGS[k]}`, callback_data: `sa:${a.id}:l:${k}` })), { text: '🗑 Retirer', callback_data: `sa:${a.id}:x` }],
+    ],
+  };
+}
+
+async function libraryLine(db: Db): Promise<string> {
+  const { data } = await db.from('support_assets').select('situation,lang').eq('kind', 'welcome_video').eq('active', true).limit(200);
+  const all = (data ?? []) as Array<{ situation: string | null; lang: string | null }>;
+  if (!all.length) return '📚 Aucune bulle pour l’instant.';
+  const by = (Object.keys(SITUATIONS) as Situation[]).map((k) => {
+    const n = all.filter((a) => (a.situation ?? 'all') === k);
+    return n.length ? `${SITUATIONS[k]} : ${n.length}${n.some((a) => a.lang === 'it') ? ` (dont ${n.filter((a) => a.lang === 'it').length} 🇮🇹)` : ''}` : null;
+  }).filter(Boolean);
+  return `📚 ${all.length} bulle${all.length > 1 ? 's' : ''} · ${by.join(' · ')}`;
+}
+
+/** Une bulle vidéo envoyée au bot en privé par un admin : elle entre dans la bibliothèque (pour tout le monde, en
+ *  anglais, tant que Mathieu ne choisit pas autre chose avec les boutons). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleSupportVideo(db: Db, msg: any): Promise<boolean> {
   if (msg?.chat?.type !== 'private' || !msg?.video_note || msg.reply_to_message || msg.business_connection_id) return false;
@@ -268,13 +330,52 @@ export async function handleSupportVideo(db: Db, msg: any): Promise<boolean> {
   const dup = error && /duplicate|unique/i.test(error.message);
   // renvoyée après un « retire » : elle revient dans la rotation
   if (dup) await db.from('support_assets').update({ active: true }).eq('file_unique_id', v.file_unique_id);
-  const { data: all } = await db.from('support_assets').select('id').eq('kind', 'welcome_video').eq('active', true).limit(100);
-  const n = (all ?? []).length;
+  if (error && !dup) {
+    await tg('sendMessage', { chat_id: msg.chat.id, reply_to_message_id: msg.message_id, text: `⨯ Pas enregistrée (${error.message.slice(0, 80)}), renvoie-la.` });
+    return true;
+  }
+  const { data: row } = await db.from('support_assets').select('id,situation,lang,active').eq('file_unique_id', v.file_unique_id).limit(1);
+  const a = row?.[0];
   await tg('sendMessage', {
     chat_id: msg.chat.id, reply_to_message_id: msg.message_id,
-    text: error && !dup ? `⨯ Pas enregistrée (${error.message.slice(0, 80)}), renvoie-la.`
-      : `🎥 ${dup ? 'Déjà enregistrée (remise dans la rotation si tu l’avais retirée).' : 'Bulle d’accueil enregistrée.'} ${n} bulle${n > 1 ? 's' : ''} au total, envoyée${n > 1 ? 's à tour de rôle' : ''} 3 à 4 min après le premier message d’un nouveau contact.\nPour en retirer une : réponds « retire » sur la bulle.`,
+    text: `🎥 ${dup ? 'Déjà dans tes bulles (remise dans la rotation si tu l’avais retirée).' : 'Bulle d’accueil enregistrée.'}\nPour qui ? Touche en dessous (sinon : tout le monde, en anglais).\n\n${await libraryLine(db)}\nÉcris « bulles » pour revoir toute ta bibliothèque.`,
+    ...(a ? { reply_markup: assetKeyboard(a) } : {}),
   });
+  return true;
+}
+
+/** « bulles » écrit au bot par un admin : la bibliothèque, chaque bulle avec ses boutons. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function handleSupportLibrary(db: Db, msg: any): Promise<boolean> {
+  const text = typeof msg?.text === 'string' ? msg.text.trim() : '';
+  if (msg?.chat?.type !== 'private' || msg.reply_to_message || !/^\/?(bulles?|biblioth[eè]que)$/i.test(text)) return false;
+  if (!(await adminTgIds()).includes(Number(msg.from?.id))) return false;
+  const { tg } = await import('./businessInbox');
+  const { data } = await db.from('support_assets').select('id,file_id,situation,lang,active,uses').eq('kind', 'welcome_video').eq('active', true).order('id', { ascending: true }).limit(20);
+  const all = (data ?? []) as Array<Asset & { active: boolean }>;
+  await tg('sendMessage', {
+    chat_id: msg.chat.id,
+    text: `${await libraryLine(db)}\n\nÀ l’accueil, je prends une bulle de sa situation et de sa langue, sinon une « tout le monde », et je les fais tourner.\nSous chaque bulle : à qui elle va, sa langue, 🗑 pour la retirer. Pour en ajouter une : envoie-la-moi.`,
+  });
+  for (const a of all) await tg('sendVideoNote', { chat_id: msg.chat.id, video_note: a.file_id, reply_markup: assetKeyboard(a) });
+  return true;
+}
+
+/** Les boutons sous une bulle (sa:<id>:s:<situation> · sa:<id>:l:<langue> · sa:<id>:x · sa:<id>:on). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function handleSupportAssetCallback(db: Db, cq: any): Promise<boolean> {
+  const m = /^sa:(\d+):(s:(new|app|all)|l:(en|it)|x|on)$/.exec(String(cq?.data ?? ''));
+  if (!m) return false;
+  const { tg } = await import('./businessInbox');
+  const answer = (text: string) => tg('answerCallbackQuery', { callback_query_id: cq.id, text });
+  if (!(await adminTgIds()).includes(Number(cq.from?.id))) { await answer('Réservé aux admins.'); return true; }
+  const id = Number(m[1]);
+  const patch = m[3] ? { situation: m[3] } : m[4] ? { lang: m[4] } : { active: m[2] === 'on' };
+  const { data } = await db.from('support_assets').update(patch).eq('id', id).select('id,situation,lang,active');
+  const a = data?.[0];
+  if (!a) { await answer('Bulle introuvable.'); return true; }
+  await tg('editMessageReplyMarkup', { chat_id: cq.message?.chat?.id, message_id: cq.message?.message_id, reply_markup: assetKeyboard(a) });
+  await answer(m[3] ? `✓ ${SITUATIONS[m[3] as Situation]}` : m[4] ? `✓ ${LANGS[m[4] as Lang]}` : a.active ? '↩️ Remise dans les bulles' : '🗑 Retirée');
   return true;
 }
 
@@ -286,6 +387,6 @@ export async function handleSupportVideoRemove(db: Db, msg: any): Promise<boolea
   if (!(await adminTgIds()).includes(Number(msg.from?.id))) return false;
   const { tg } = await import('./businessInbox');
   const { data } = await db.from('support_assets').update({ active: false }).eq('chat_id', Number(msg.chat.id)).eq('message_id', Number(msg.reply_to_message.message_id)).select('id');
-  await tg('sendMessage', { chat_id: msg.chat.id, reply_to_message_id: msg.message_id, text: (data ?? []).length ? '🗑 Bulle retirée.' : 'Cette bulle n’est pas dans les bulles d’accueil.' });
+  await tg('sendMessage', { chat_id: msg.chat.id, reply_to_message_id: msg.message_id, text: (data ?? []).length ? '🗑 Bulle retirée.' : 'Cette bulle n’est pas dans les bulles d’accueil (sous les bulles de « bulles », utilise 🗑).' });
   return true;
 }
