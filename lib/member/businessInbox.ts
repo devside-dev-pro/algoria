@@ -5,18 +5,17 @@
 // (Premium) permet de brancher un bot à ce compte : le bot VOIT les messages reçus. C'est l'API officielle prévue
 // pour ça — aucun « userbot », donc aucun risque pour le compte.
 //
-// Le flux — COPIER-COLLER, le bot n'envoie jamais rien au client :
-//   1. un client écrit à Mathieu → business_message → on l'enregistre (member_actions kind='biz_msg') ;
-//   2. on rédige un brouillon COMME Mathieu (replyDraft, mode 'business' : ses liens, ses codes, pas de signature) ;
-//   3. le brouillon arrive dans la conversation de Mathieu avec le bot, dans un bloc à copier (+ bouton 📋 Copier
-//      quand il tient dans la limite Telegram de 256 caractères) ;
-//   4. Mathieu colle, ajuste, envoie LUI-MÊME. Sa réponse réelle nous revient (business_message sortant) : la carte
-//      passe à « ✅ Tu as répondu » et le couple brouillon → réponse envoyée est gardé (owner_reply), matière de la
-//      future mémoire de l'agent.
-// ✅ Envoyer existe aussi (le bot envoie au nom de Mathieu, sendMessage + business_connection_id) : Telegram étiquette
-// ces messages « ALGORIA AI BOT 🤖 » chez Mathieu — on a remis le bouton le 29/09 pour vérifier avec un compte test si
-// le CLIENT voit aussi l'étiquette. S'il la voit, on retire ✅ Envoyer et on reste en copier-coller.
-// Le premier « hello » d'un prospect n'a pas de brouillon : sa vidéo d'accueil et ses 3 questions restent à la main.
+// Le flux, depuis le 16/10/2026 : PILOTE AUTOMATIQUE (lib/member/supportAuto.ts, décision Mathieu « Auto s'il est sûr ») :
+//   1. un client écrit à Mathieu → business_message → on l'enregistre (member_actions kind='biz_msg') et on PRÉVOIT
+//      (support_jobs) : l'accueil (premier contact : sa bulle vidéo + un message adapté à sa situation, 3 à 4 min
+//      après) et la réponse (~75 s après son DERNIER message, pour répondre à tout d'un coup) ;
+//   2. la cron (/api/cron/support-jobs, chaque minute) rédige COMME Mathieu (replyDraft, mode 'business') ;
+//   3. Claude est sûr et rien n'est sensible → la réponse part seule depuis son compte ; sinon la carte « ⏳ À toi »
+//      arrive dans sa conversation avec le bot (📋 Copier / ✅ Envoyer / ❌ Écarter, ou il répond lui-même) ;
+//   4. Mathieu écrit lui-même dans une conversation → ce qui y était prévu est annulé, et rien n'y part seul pendant
+//      2 h. Sa réponse réelle nous revient (business_message sortant) : la carte passe à « ✅ Tu as répondu » et le
+//      couple proposition → réponse envoyée est gardé (owner_reply), matière de la mémoire de l'agent.
+// Coupe-circuits (env Vercel) : SUPPORT_WELCOME=off, SUPPORT_AUTOPILOT=off (tout redevient des cartes à valider).
 //
 // FORMER L'AGENT — Mathieu RÉPOND à une carte (ou écrit au bot) :
 //   · avec sa version → elle part depuis son compte, et la paire question → bonne réponse entre dans la mémoire ;
@@ -26,8 +25,8 @@
 // SÉCURITÉ : n'importe quel compte Premium peut brancher n'importe quel bot à son compte. On n'accepte QUE les
 // connexions dont le propriétaire est un admin (adminTgIds) — sinon on ignore tout, sans rédiger ni rien envoyer.
 import { adminTgIds } from './notifyOwner';
-import { draftReply } from './replyDraft';
 import { appendAgentMemory } from './agentDocs';
+import { cancelPendingJobs, scheduleOnClientMessage } from './supportAuto';
 
 export const BIZ_KIND = 'biz_msg';
 
@@ -36,7 +35,7 @@ type Db = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TgResult = { ok: boolean; result?: any; description?: string };
 
-async function tg(method: string, payload: Record<string, unknown>): Promise<TgResult> {
+export async function tg(method: string, payload: Record<string, unknown>): Promise<TgResult> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return { ok: false, description: 'TELEGRAM_BOT_TOKEN missing' };
   try {
@@ -47,7 +46,7 @@ async function tg(method: string, payload: Record<string, unknown>): Promise<TgR
   }
 }
 
-interface Conn { ownerId: number; userChatId: number; canReply: boolean; enabled: boolean }
+export interface Conn { ownerId: number; userChatId: number; canReply: boolean; enabled: boolean }
 const conns = new Map<string, { at: number; conn: Conn | null }>();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +57,7 @@ function toConn(c: any): Conn | null {
 }
 
 /** La connexion, SI son propriétaire est un admin. Mémorisée 10 min (une erreur réseau n'est pas mémorisée). */
-async function connection(id: string): Promise<Conn | null> {
+export async function connection(id: string): Promise<Conn | null> {
   const hit = conns.get(id);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.conn;
   const d = await tg('getBusinessConnection', { business_connection_id: id });
@@ -85,7 +84,7 @@ function messageText(m: any): string {
 const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Met à jour la carte du brouillon chez Mathieu (et retire ses boutons). Best effort. */
-async function stamp(detail: Record<string, unknown>, line: string): Promise<void> {
+export async function stamp(detail: Record<string, unknown>, line: string): Promise<void> {
   const chat_id = Number(detail.draft_chat_id), message_id = Number(detail.draft_msg_id);
   if (!chat_id || !message_id) return;
   await tg('editMessageText', { chat_id, message_id, parse_mode: 'HTML', text: `${String(detail.draft_notice ?? '')}\n\n${esc(line)}`.slice(0, 4000), disable_web_page_preview: true });
@@ -105,16 +104,17 @@ export async function handleBusinessConnection(bc: any): Promise<void> {
     ? [
         '✅ Algoria AI est branché à ton compte support.',
         '',
-        'Quand un client t’écrit, je te propose ici une réponse, prête à copier :',
-        '📋 touche le bloc (ou le bouton Copier), colle-la dans la conversation, ajuste si besoin, envoie',
-        '✅ Envoyer : je l’envoie depuis ton compte',
-        '❌ Écarter : je range la proposition',
+        'Quand un client t’écrit :',
+        '🎥 premier message → 3 à 4 min après, ta bulle vidéo d’accueil + un message adapté à sa situation (app, broker, copie…)',
+        '🤖 question de routine → je réponds seul depuis ton compte',
+        '⏳ question sensible ou si j’hésite → je te la mets ici : ✅ Envoyer, ❌ Écarter, ou tu réponds toi-même',
+        '✋ tu écris toi-même dans une conversation → je n’y envoie plus rien seul pendant 2 h',
         '',
         'Pour me former : réponds à ma proposition',
         '✏️ avec ta version → elle part depuis ton compte et je retiens la bonne réponse',
         '🧠 avec # + une remarque (ex. « # la démo, c’est seulement avec la licence ») → rien ne part, je retiens',
         '',
-        'Rien ne part sans toi. Le premier « hello » d’un prospect, c’est toi (vidéo + 3 questions).',
+        '🎥 Tes bulles d’accueil : envoie-moi une bulle vidéo ici, elle entre dans la rotation (« retire » en réponse pour la sortir).',
       ].join('\n')
     : '⏸ Algoria AI est débranché de ton compte support : plus aucune proposition.';
   await tg('sendMessage', { chat_id: conn.userChatId, text });
@@ -138,6 +138,8 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
   // garde ce qu'il a VRAIMENT envoyé à côté du brouillon (la leçon).
   if (Number(m.from?.id) === conn.ownerId) {
     await db.from('member_actions').insert({ tg_id: chatId, kind: BIZ_KIND, status: 'done', done_by: 'mathieu', detail: { from: 'owner', text, conn: connId } });
+    // Mathieu a écrit lui-même : il a repris la main, l'accueil et la réponse prévus n'ont plus lieu d'être
+    await cancelPendingJobs(db, chatId, 'owner wrote');
     if (text.startsWith('[')) return;
     const { data: pend } = await db.from('member_actions').select('id,detail').eq('tg_id', chatId).eq('kind', BIZ_KIND)
       .gte('created_at', new Date(Date.now() - 24 * 3_600_000).toISOString()).order('created_at', { ascending: false }).limit(10);
@@ -150,26 +152,22 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
   }
   if (m.from?.is_bot) return;
 
-  // Contexte lu AVANT d'insérer le message courant : les 10 derniers échanges de cette conversation.
-  const { data: past } = await db.from('member_actions').select('detail').eq('tg_id', chatId).eq('kind', BIZ_KIND).order('created_at', { ascending: false }).limit(10);
-  const { data: mrow } = await db.from('members').select('member_no,locale,status,strategy,broker,tg_name,tg_username').eq('tg_id', chatId).limit(1);
-  const member = mrow?.[0] ?? null;
+  // LE PILOTE AUTOMATIQUE (16/10/2026, lib/member/supportAuto.ts) : on enregistre le message et on PLANIFIE. Le premier
+  // message d'une conversation programme l'accueil (bulle vidéo + message adapté) 3 à 4 min plus tard ; chaque message
+  // repousse la réponse à ~75 s après le dernier (on attend que la personne ait fini d'écrire). C'est la cron
+  // /api/cron/support-jobs qui rédige, puis envoie seule si le modèle est sûr, ou montre la carte à Mathieu sinon.
+  const { data: past } = await db.from('member_actions').select('id').eq('tg_id', chatId).eq('kind', BIZ_KIND).limit(1);
+  const { data: mrow } = await db.from('members').select('member_no,status').eq('tg_id', chatId).limit(1);
   const base = { from: 'client', text, conn: connId, name, username };
-  const { data: ins } = await db.from('member_actions').insert({ tg_id: chatId, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'telegram', detail: base }).select('id');
-  const rowId = String(ins?.[0]?.id ?? '');
-  if (!rowId || text.startsWith('[')) return; // un vocal, une photo… : rien à rédiger, Mathieu voit le message dans son Telegram
+  await db.from('member_actions').insert({ tg_id: chatId, member_no: mrow?.[0]?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'telegram', detail: base });
+  await scheduleOnClientMessage(db, { tgId: chatId, conn: connId, firstContact: !(past ?? []).length, firstName: m.chat.first_name ?? null, status: mrow?.[0]?.status ?? null });
+}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const history = ((past ?? []) as Array<{ detail: any }>).reverse()
-    .map((h) => ({ from: h.detail?.from === 'owner' ? 'algoria' as const : 'member' as const, text: String(h.detail?.text ?? '') }))
-    .filter((h) => h.text);
-  const draft = await draftReply({ text, locale: member?.locale ?? null, member, history, mode: 'business' });
-  if (!draft || draft.spam || draft.skip) {
-    await db.from('member_actions').update({ detail: { ...base, draft_intent: draft?.spam ? 'spam' : draft?.skip ? 'skip' : 'none' } }).eq('id', rowId);
-    return;
-  }
-
-  // Le client a réécrit : la proposition précédente de cette conversation n'est plus la bonne.
+/** La carte « à toi » chez Mathieu : la proposition, avec 📋 Copier / ✅ Envoyer / ❌ Écarter, pour un message client
+ *  (`rowId` = sa ligne member_actions). `why` dit pourquoi elle n'est pas partie seule. */
+export async function reviewCard(db: Db, conn: Conn, rowId: string, base: Record<string, unknown>, member: { member_no?: number | null; status?: string | null } | null, draftText: string | null, why: string): Promise<void> {
+  const chatId = Number((await db.from('member_actions').select('tg_id').eq('id', rowId).limit(1)).data?.[0]?.tg_id ?? 0);
+  // le client a réécrit : la proposition précédente de cette conversation n'est plus la bonne
   const { data: older } = await db.from('member_actions').select('id,detail').eq('tg_id', chatId).eq('kind', BIZ_KIND).neq('id', rowId)
     .gte('created_at', new Date(Date.now() - 24 * 3_600_000).toISOString()).order('created_at', { ascending: false }).limit(10);
   for (const o of (older ?? []) as Array<{ id: string; detail: Record<string, unknown> }>) {
@@ -178,25 +176,25 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
     await db.from('member_actions').update({ detail: { ...d, draft_superseded_at: new Date().toISOString() } }).eq('id', o.id);
     await stamp(d, '↪️ Remplacée : il a réécrit, nouvelle proposition plus bas.');
   }
-
-  const who = username ? `@${username}` : name ?? 'Client';
+  const who = base.username ? `@${String(base.username)}` : String(base.name ?? 'Client');
   const tag = member?.member_no != null ? ` · #${member.member_no} ${member.status ?? ''}`.trimEnd() : ' · prospect';
-  // Le bloc <pre> se copie d'un toucher dans Telegram ; le bouton 📋 copie en un tap, mais Telegram le limite à 256 caractères.
-  const notice = `💬 <b>${esc(who)}</b>${esc(tag)}\n« ${esc(text.slice(0, 500))} »\n\n✍️ Proposition :\n<pre>${esc(draft.text)}</pre>`;
+  const text = String(base.text ?? '');
+  const notice = `⏳ <b>À toi</b> · ${esc(why)}\n💬 <b>${esc(who)}</b>${esc(tag)}\n« ${esc(text.slice(0, 500))} »${draftText ? `\n\n✍️ Proposition :\n<pre>${esc(draftText)}</pre>` : ''}`;
+  const buttons = draftText
+    ? [[...(draftText.length <= 256 ? [{ text: '📋 Copier', copy_text: { text: draftText } }] : []), { text: '✅ Envoyer', callback_data: `bs:${rowId}` }, { text: '❌ Écarter', callback_data: `bx:${rowId}` }]]
+    : [];
   const card = await tg('sendMessage', {
-    chat_id: conn.userChatId,
-    parse_mode: 'HTML',
-    text: `${notice}\n\n<i>✏️ Réponds à ce message avec ta version pour l’envoyer, ou avec # + une remarque pour me corriger.</i>`,
-    disable_web_page_preview: true,
-    reply_markup: { inline_keyboard: [[...(draft.text.length <= 256 ? [{ text: '📋 Copier', copy_text: { text: draft.text } }] : []), { text: '✅ Envoyer', callback_data: `bs:${rowId}` }, { text: '❌ Écarter', callback_data: `bx:${rowId}` }]] },
+    chat_id: conn.userChatId, parse_mode: 'HTML', disable_web_page_preview: true,
+    text: `${notice}\n\n<i>${draftText ? '✏️ Réponds à ce message avec ta version pour l’envoyer, ou avec # + une remarque pour me corriger.' : 'Réponds-lui directement dans la conversation.'}</i>`,
+    ...(buttons.length ? { reply_markup: { inline_keyboard: buttons } } : {}),
   });
-  await db.from('member_actions').update({ detail: { ...base, draft: draft.text, draft_intent: 'draft', draft_notice: notice, draft_chat_id: conn.userChatId, draft_msg_id: card.result?.message_id ?? null } }).eq('id', rowId);
+  await db.from('member_actions').update({ detail: { ...base, ...(draftText ? { draft: draftText } : {}), draft_intent: 'review', review_reason: why, draft_notice: notice, draft_chat_id: conn.userChatId, draft_msg_id: card.result?.message_id ?? null } }).eq('id', rowId);
 }
 
-type Row = { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> };
+export type Row = { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> };
 
 /** Envoie `text` au client DEPUIS le compte de Mathieu (Telegram n'étiquette le bot que chez lui). null = parti. */
-async function sendAsOwner(db: Db, row: Row, text: string, via: 'draft' | 'corrected', by: string): Promise<string | null> {
+export async function sendAsOwner(db: Db, row: Row, text: string, via: 'draft' | 'corrected' | 'auto', by: string): Promise<string | null> {
   const d = row.detail ?? {};
   const r = await tg('sendMessage', { business_connection_id: d.conn, chat_id: row.tg_id, text, disable_web_page_preview: true });
   // Refus typiques : conversation inactive depuis plus de 24 h, ou « Reply to Messages » décoché dans Chat Automation.
