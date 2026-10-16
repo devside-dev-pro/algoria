@@ -6,11 +6,11 @@
 // plus de 6 h. Décisions de Mathieu : « Auto s'il est sûr » et « un accueil adapté à sa situation ».
 //
 // LE NOUVEAU PROCESS, depuis le compte de Mathieu (Telegram Business), sans rien d'autre à faire pour lui :
-//   1. ACCUEIL, 3 à 4 min après le premier message : sa bulle vidéo (support_assets, il les envoie au bot) puis un
-//      message court qui dépend de ce qu'on sait déjà grâce à son Telegram : pas de compte → l'accès à l'app ; compte
-//      sans broker → le choix du broker ; broker choisi → où il en est ; en vérification → on le prévient (sans bulle).
-//      Un client déjà en copie (live, en pause) n'a pas d'accueil : il connaît Mathieu, on lui répond directement.
-//      Plus de 3 questions, plus de pavé.
+//   1. ACCUEIL, 3 à 4 min après le premier message : sa bulle vidéo (support_assets, il les envoie au bot) puis UNE
+//      question, « Where are you from ? ». Jamais ce qu'on sait déjà de lui (16/10, Mathieu : « on sait que tu as
+//      installé l'app, que tu es du UK, que tu es bloqué au broker… ça fait un peu peur ») : on lui demande, comme
+//      Mathieu le faisait. Un compte déjà en copie ou en vérification n'a pas d'accueil : on lui répond directement.
+//      Plus de 3 questions, plus de pavé, le budget n'est plus demandé.
 //   2. RÉPONSES : ~75 s après le DERNIER message (on attend qu'il ait fini d'écrire), Claude rédige. S'il est sûr
 //      (question de routine couverte par le knowledge) et que rien n'est sensible, la réponse part seule. Sinon, la
 //      carte « ⏳ À toi » arrive chez Mathieu comme avant : il envoie d'un tap, corrige en répondant (le bot retient), ou
@@ -23,7 +23,7 @@
 import { draftReply } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { APP_URL } from './i18n';
-import { PARTNER_BROKERS } from './brokers';
+import { detectCountry } from './countries';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -38,7 +38,7 @@ const MAX_AUTO_PER_HOUR = 6;
 const BIZ_KIND = 'biz_msg';
 const STALE_RUNNING_MS = 5 * 60_000;
 // déjà clients : pas d'accueil (ni bulle ni message), la réponse part directement
-const NO_WELCOME = new Set(['live', 'paused']);
+const NO_WELCOME = new Set(['live', 'paused', 'pending_copier']);
 
 // Ce qui ne part JAMAIS seul, quoi qu'en pense le modèle : l'argent, les plaintes, les doutes, ce que Mathieu doit
 // vérifier lui-même (un dépôt annoncé), ce qu'il vend lui-même (la licence), les rendez-vous.
@@ -85,31 +85,17 @@ const ITALIAN = /\b(ciao|salve|buongiorno|buonasera|grazie|vorrei|voglio|posso|s
 
 type MemberRow = { member_no: number | null; status: string | null; broker: string | null; locale: string | null; strategy?: number | null; tg_name?: string | null; tg_username?: string | null };
 
-/** Le message d'accueil, selon ce qu'on sait déjà de la personne. Le style de Mathieu : une espace avant ? et !,
- *  pas de tiret long, un emoji. */
-export function welcomeText(member: MemberRow | null, firstName: string | null, lang?: 'en' | 'it'): string {
+/** Le message d'accueil : bonjour et UNE question, d'où il vient. Le même pour tous : on ne lui montre jamais ce qu'on
+ *  sait déjà (app, broker, étape). Le style de Mathieu : une espace avant ? et !, pas de tiret long, un emoji.
+ *  En italien : formules neutres (« piacere »), pas « benvenuto/a ». */
+export function welcomeText(member: MemberRow | null, firstName: string | null, lang?: 'en' | 'it', countryKnown = false): string {
   const name = cleanName(firstName);
-  const it = (lang ?? member?.locale) === 'it'; // en italien : formules neutres (« piacere »), pas « benvenuto/a »
-  const hi = it ? (name ? `Ciao ${name}` : 'Ciao') : (name ? `Hey ${name}` : 'Hey');
-  const app = `${APP_URL}/member`;
-  const broker = PARTNER_BROKERS.find((b) => b.key === member?.broker)?.name ?? member?.broker ?? '';
-  const st = member?.status ?? null;
-  if (!member) return it
-    ? `${hi}, piacere ! Ecco il tuo accesso all'app: ${app}\nAccedi con il tuo Telegram, un tocco, nessuna password. Dimmi quando sei dentro e ti guido io 🙏🏼`
-    : `${hi}, welcome ! Here's your access to the app: ${app}\nYou log in with your Telegram, one tap, no password. Tell me when you're in and I'll guide you 🙏🏼`;
-  if (st === 'live' || st === 'paused') return it ? `${hi} ! Che piacere, come posso aiutarti ? 🙏🏼` : `${hi} ! Good to see you, how can I help ? 🙏🏼`;
-  if (st === 'pending_copier') return it
-    ? `${hi} ! Vedo che il tuo conto è collegato nell'app, lo stiamo verificando. Ti scrivo appena la copia è attiva 🙏🏼`
-    : `${hi} ! I see your account is connected in the app, we're checking it now. I'll tell you as soon as the copy is on 🙏🏼`;
-  if (st === 'onboarding' && broker) return it
-    ? `${hi}, piacere ! Vedo che sei già nell'app e hai scelto ${broker}. Il conto è aperto ? Dimmi a che punto sei e lo finiamo insieme 🙏🏼`
-    : `${hi}, welcome ! I see you're already in the app and you picked ${broker}. Is your account open ? Tell me where you're at and we finish it together 🙏🏼`;
-  if (st === 'onboarding') return it
-    ? `${hi}, piacere ! Vedo che hai già l'app. Prossimo passo, il broker: in che paese vivi ? Ti dico quale scegliere 🙏🏼`
-    : `${hi}, welcome ! I see you already have the app. Next step is your broker: which country do you live in ? I'll tell you which one to pick 🙏🏼`;
+  const it = (lang ?? member?.locale) === 'it';
+  // il l'a déjà dit dans son premier message (« I'm from UK… ») : on ne le redemande pas
+  if (countryKnown) return it ? `${name ? `Ciao ${name}` : 'Ciao'}, piacere ! 🙏🏼` : `${name ? `Hey ${name}` : 'Hey'}, welcome ! 🙏🏼`;
   return it
-    ? `${hi}, che bello risentirti ! Rientri nell'app da qui: ${app}\nDimmi a che punto sei 🙏🏼`
-    : `${hi}, welcome back ! You can log back in the app here: ${app}\nTell me where you're at 🙏🏼`;
+    ? `${name ? `Ciao ${name}` : 'Ciao'}, piacere ! Di dove sei ? 🙏🏼`
+    : `${name ? `Hey ${name}` : 'Hey'}, welcome ! Where are you from ? 🙏🏼`;
 }
 
 // ── LA BIBLIOTHÈQUE DE BULLES ──────────────────────────────────────────────────────────────────────────
@@ -197,11 +183,11 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   if (already.some((t) => t !== '[video bubble]')) return { status: 'done', result: { outcome: 'welcome', resumed: true } };
   // sa langue : celle de l'app s'il a un compte, sinon celle de ses premiers messages
   let lang: Lang = member?.locale === 'it' ? 'it' : 'en';
-  if (!member?.locale) {
-    const { data: first } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').order('created_at', { ascending: true }).limit(5);
-    if (((first ?? []) as Array<{ detail: Record<string, unknown> }>).some((r) => ITALIAN.test(String(r.detail?.text ?? '')))) lang = 'it';
-  }
-  const text = welcomeText(member, String(job.payload?.firstName ?? '') || null, lang);
+  const { data: first } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').order('created_at', { ascending: true }).limit(5);
+  const firstTexts = ((first ?? []) as Array<{ detail: Record<string, unknown> }>).map((r) => String(r.detail?.text ?? ''));
+  if (!member?.locale && firstTexts.some((t) => ITALIAN.test(t))) lang = 'it';
+  const said = firstTexts.map(detectCountry).find(Boolean) ?? null;
+  const text = welcomeText(member, String(job.payload?.firstName ?? '') || null, lang, !!said);
   const base = { business_connection_id: job.conn, chat_id: job.tg_id };
   // la bulle de sa situation et de sa langue (pas de bulle pour un compte déjà en vérification)
   const situation = situationOf(member);
@@ -219,7 +205,7 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   const r = await tg('sendMessage', { ...base, text, disable_web_page_preview: true });
   if (!r.ok) return { status: 'failed', result: { error: r.description ?? 'refusé', video: videoSent } };
   await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'welcome', text, conn: job.conn } });
-  return { status: 'done', result: { outcome: 'welcome', video: videoSent ? video?.id : false, situation, lang, state: member?.status ?? 'no account' } };
+  return { status: 'done', result: { outcome: 'welcome', video: videoSent ? video?.id : false, situation, lang, country_said: said, state: member?.status ?? 'no account' } };
 }
 
 async function doReply(db: Db, job: Job): Promise<JobResult> {
