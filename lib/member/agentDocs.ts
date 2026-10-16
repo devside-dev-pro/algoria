@@ -4,6 +4,8 @@
 //               ajoutée automatiquement, relisible et modifiable dans l'admin comme le knowledge.
 // `cm_memory` = LE CM DU CANAL PUBLIC (15/10/2026) : ce que le rédacteur des posts du canal a appris des corrections de
 //               Mathieu (réponses au message du matin). Lu par lib/channel/writer.ts ; le bot de support ne le lit pas.
+// `live_welcome` = LE MESSAGE DE PASSAGE EN LIVE (16/10/2026) : envoyé au membre quand Mathieu le passe live
+//               (lib/member/liveWelcome.ts) : les 30 jours, le lien du VIP. Messages séparés par une ligne « --- ».
 // `ads_memory` = ADS STUDIO (01/10/2026) : ce que Claude a appris des avis de Mathieu sur les ads (⭐ / 👎 + raisons).
 //               Lu par Claude AVANT d'écrire de nouvelles ads ; modifiable dans l'onglet ADS STUDIO → 🧠 Memory.
 //               Le bot Telegram ne le lit pas.
@@ -11,7 +13,7 @@
 // base à chaque message.
 import { sdb } from './server';
 
-export const AGENT_DOC_KEYS = ['knowledge', 'memory', 'ads_memory', 'cm_memory'] as const;
+export const AGENT_DOC_KEYS = ['knowledge', 'memory', 'ads_memory', 'cm_memory', 'live_welcome'] as const;
 export type AgentDocKey = (typeof AGENT_DOC_KEYS)[number];
 /** Plafond d'un document : au-delà, le prompt s'alourdit (coût, lenteur) et l'agent s'y perd. */
 export const AGENT_DOC_MAX = 20_000;

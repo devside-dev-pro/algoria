@@ -68,6 +68,15 @@ export async function connection(id: string): Promise<Conn | null> {
   return conn;
 }
 
+/** La capture d'écran du message (photo, ou image envoyée en fichier) : son file_id, pour que le pilote automatique la
+ *  lise (lib/member/supportAuto.ts). Seul l'identifiant Telegram est gardé, jamais l'image. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function photoId(m: any): string | null {
+  if (Array.isArray(m?.photo) && m.photo.length) return String(m.photo[m.photo.length - 1].file_id ?? '') || null;
+  if (m?.document && /^image\//.test(String(m.document.mime_type ?? '')) && Number(m.document.file_size ?? 0) <= 5_000_000) return String(m.document.file_id ?? '') || null;
+  return null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function messageText(m: any): string {
   if (typeof m?.text === 'string') return m.text;
@@ -76,7 +85,7 @@ function messageText(m: any): string {
   if (m?.video_note) return '[video bubble]';
   if (m?.photo) return '[photo]';
   if (m?.video) return '[video]';
-  if (m?.document) return '[file]';
+  if (m?.document) return /^image\//.test(String(m.document.mime_type ?? '')) ? '[photo]' : '[file]';
   if (m?.sticker) return `[sticker ${m.sticker.emoji ?? ''}]`.trim();
   return '[media]';
 }
@@ -105,16 +114,18 @@ export async function handleBusinessConnection(bc: any): Promise<void> {
         '✅ Algoria AI est branché à ton compte support.',
         '',
         'Quand un client t’écrit :',
-        '🎥 premier message → 3 à 4 min après, ta bulle vidéo d’accueil + un message adapté à sa situation (app, broker, copie…)',
-        '🤖 question de routine → je réponds seul depuis ton compte',
+        '🎥 premier message → 3 à 4 min après, ta bulle vidéo + « Where are you from ? »',
+        '🎙 il dit son pays → ton vocal de ce pays, puis la suite (pas de réponse en 2 h → le lien de l’app quand même)',
+        '🤖 question de routine, même avec une capture d’écran → je réponds seul depuis ton compte',
         '⏳ question sensible ou si j’hésite → je te la mets ici : ✅ Envoyer, ❌ Écarter, ou tu réponds toi-même',
+        '🔥 gros budget ou trader expérimenté → je te préviens, pour un vocal de toi',
         '✋ tu écris toi-même dans une conversation → je n’y envoie plus rien seul pendant 2 h',
         '',
         'Pour me former : réponds à ma proposition',
         '✏️ avec ta version → elle part depuis ton compte et je retiens la bonne réponse',
         '🧠 avec # + une remarque (ex. « # la démo, c’est seulement avec la licence ») → rien ne part, je retiens',
         '',
-        '🎥 Tes bulles d’accueil : envoie-moi une bulle vidéo ici, elle entre dans la rotation (« retire » en réponse pour la sortir).',
+        '📚 Ta bibliothèque : envoie-moi une bulle vidéo (accueil) ou un vocal (par pays). « bulles » pour tout voir, « pays » pour le tableau par pays.',
       ].join('\n')
     : '⏸ Algoria AI est débranché de ton compte support : plus aucune proposition.';
   await tg('sendMessage', { chat_id: conn.userChatId, text });
@@ -158,7 +169,8 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
   // /api/cron/support-jobs qui rédige, puis envoie seule si le modèle est sûr, ou montre la carte à Mathieu sinon.
   const { data: past } = await db.from('member_actions').select('id').eq('tg_id', chatId).eq('kind', BIZ_KIND).limit(1);
   const { data: mrow } = await db.from('members').select('member_no,status').eq('tg_id', chatId).limit(1);
-  const base = { from: 'client', text, conn: connId, name, username };
+  const photo = photoId(m);
+  const base = { from: 'client', text, conn: connId, name, username, ...(photo ? { photo } : {}) };
   await db.from('member_actions').insert({ tg_id: chatId, member_no: mrow?.[0]?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'telegram', detail: base });
   await scheduleOnClientMessage(db, { tgId: chatId, conn: connId, firstContact: !(past ?? []).length, firstName: m.chat.first_name ?? null, status: mrow?.[0]?.status ?? null });
 }

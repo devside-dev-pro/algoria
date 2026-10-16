@@ -15,6 +15,7 @@ import { isPermanentTelegramFailure } from '@/lib/member/telegramErrors';
 import { personalise } from '@/lib/member/personalise';
 import { TG_ALLOWED_UPDATES } from '@/lib/member/tgWebhook';
 import { publishToChannels } from '@/lib/channel/publish';
+import { sendLiveWelcome } from '@/lib/member/liveWelcome';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -1678,6 +1679,8 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
         url: '/member',
         tag: 'algoria-connect',
       });
+      // 🎉 le message de passage en live (les 30 jours, le lien du VIP), une fois par membre — lib/member/liveWelcome.ts
+      await sendLiveWelcome(db, Number(act[0].tg_id), s.username ?? String(s.tgId));
       // PARRAINAGE : filleul approuvé → commission créée en PENDING (elle ne devient retirable que quand
       // TU confirmes avoir reçu la commission broker — c'est le verrou anti dépôt-retrait éclair).
       // Montant : 10% du dépôt plafonné à 200$, 15%/300$ après le palier 10 (lib/member/affiliate.ts).
