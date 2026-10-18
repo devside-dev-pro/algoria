@@ -1,6 +1,6 @@
 import * as Sdk from 'metaapi.cloud-sdk/esm-node';
-import { recordTradeClose, SECONDARY, STRAT_ID } from '../../lib/supabase/sync';
-import { pushToAll } from '../../lib/push/send';
+import { membersCopyingTrade, recordTradeClose, SECONDARY, STRAT_ID } from '../../lib/supabase/sync';
+import { pushToUsers } from '../../lib/push/send';
 import { postVip, postVipPhoto, VIP_TAG, usd } from '../telegram';
 import type { Signal } from '../../lib/engine/types';
 import { atOneLot, atRef, REF_LABEL } from '../../lib/display/scale';
@@ -16,16 +16,18 @@ const WIN_PUSH_COOLDOWN_MS = 20 * 60_000;
 let lastWinPush = 0;
 // À 0.10 LOT (24/09/2026, lib/display/scale.ts) : le SEUIL reste en dollars à 1 lot — il décide QUAND on
 // notifie, et ce choix ne change pas — mais le MONTANT affiché est ramené à 0.10 lot, avec son libellé.
-function maybePushWin(displaySymbol: string, pnl: number, lot: number | null) {
+// SEULEMENT À CEUX QUI L'AVAIENT (18/10/2026, décision Mathieu) : « copied to your account » partait à tous les
+// appareils, prospects compris, même pour un trade ouvert avant leur arrivée (Monero ouvert le 22/09, fermé le 18/10).
+function maybePushWin(ticket: string, displaySymbol: string, pnl: number, lot: number | null) {
   if (atOneLot(pnl, lot) < WIN_PUSH_MIN || Date.now() - lastWinPush < WIN_PUSH_COOLDOWN_MS) return;
   lastWinPush = Date.now();
   const shown = Math.round(atRef(pnl, lot));
-  void pushToAll({
+  void membersCopyingTrade(ticket).then((ids) => pushToUsers(ids, {
     title: `✓ +$${shown} on ${displaySymbol} · ${REF_LABEL}`,
     body: 'Algoria just cashed a win — copied to your account at your own size.',
     url: '/member',
     tag: 'algoria-win',
-  }).then((n) => n && console.log(`[algoria] push win +$${shown} (${REF_LABEL}) → ${n} appareil(s)`)).catch(() => {});
+  })).then((n) => n && console.log(`[algoria] push win +$${shown} (${REF_LABEL}) → ${n} appareil(s)`)).catch(() => {});
 }
 
 // ===== ANNONCES VIP PAR TRADE — le canal VIT : chaque runner poste SES GAINS (3 verts d'un coup = rassurant).
@@ -157,7 +159,7 @@ export class DealRecorder extends Base {
     // (Cause du bug 24/07 : mêmes gains postés 2× dans le VIP — onDealAdded se déclenchait plusieurs fois.)
     const fresh = await recordTradeClose(ticket, display, { exit, pnl, r, reason, closedAt: when });
     if (!fresh) return;
-    if (pnl > 0) maybePushWin(display, pnl, lot);
+    if (pnl > 0) maybePushWin(ticket, display, pnl, lot);
     vipTradeClose(display, pnl, reason, c?.entry, exit, ticket, lot);
   }
 

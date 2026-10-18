@@ -73,6 +73,8 @@ export function startCopyObserver({ terminal, label = 'copie' }: ObserverDeps): 
     const positions = (terminal.positions ?? []) as Array<Record<string, unknown>>;
     if (!positions.length) return;
     const known = await listOpenTickets();
+    // base injoignable : on ne sait pas ce qui est déjà enregistré, on repassera (sinon tout serait réécrit en double)
+    if (!known) return;
     const now = Date.now();
     for (const p of positions) {
       const ticket = String(p.id ?? '');
