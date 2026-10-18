@@ -117,6 +117,8 @@ export async function recordTradeOpen(t: TradeOpen) {
     opened_at: new Date(t.openedAt).toISOString(),
     ...(t.sl && t.sl > 0 ? { sl: t.sl } : {}),
   });
+  // doublon refusé par la base (index unique sur le ticket ouvert, migration 0031) : déjà enregistré, rien à faire
+  if (error && /duplicate key|unique/i.test(error.message)) { console.log(`[sync] recordTradeOpen : ticket ${t.ticket} déjà en base, ignoré`); return; }
   if (error) console.error('[sync] recordTradeOpen échoué:', error.message);
 }
 
@@ -656,10 +658,34 @@ export async function latestCandleTime(symbol: string, timeframe = 'M5'): Promis
  *  Algoria ne sait qu'elles existent. La question n'est plus « quelles positions de MON symbole » mais
  *  « lesquelles de ce compte me sont inconnues », et la réponse ne peut pas être filtrée par symbole : le
  *  compte source trade ce qu'il veut. */
-export async function listOpenTickets(): Promise<Set<string>> {
+/** Les tickets ouverts en base. null si la base n'a pas répondu : l'appelant NE DOIT PAS en déduire « aucun ticket
+ *  connu » (18/10/2026 : un Set vide sur erreur faisait réenregistrer chaque position ouverte → le Monero du 22/09
+ *  en double, compté deux fois à sa clôture). */
+export async function listOpenTickets(): Promise<Set<string> | null> {
   const { data, error } = await db.from('trades').select('ticket').eq('strategy' as never, STRAT_ID as never).is('closed_at', null);
-  if (error) { console.error('[sync] listOpenTickets échoué:', error.message); return new Set(); }
+  if (error) { console.error('[sync] listOpenTickets échoué:', error.message); return null; }
   return new Set((data ?? []).map((t) => String(t.ticket)));
+}
+
+/** Les membres EN COPIE qui avaient ce trade sur leur compte : en copie aujourd'hui, et déjà connectés quand il s'est
+ *  ouvert (18/10/2026, décision Mathieu : un trade ouvert avant l'arrivée d'un membre n'est pas le sien — le Monero
+ *  du 22/09, fermé le 18/10, avait été annoncé « copied to your account » à tout le monde). Ouverture inconnue →
+ *  tous les membres en copie. */
+export async function membersCopyingTrade(ticket: string): Promise<number[]> {
+  const [{ data: t }, { data: live }] = await Promise.all([
+    db.from('trades').select('opened_at').eq('ticket', ticket).eq('strategy' as never, STRAT_ID as never).order('closed_at', { ascending: false }).limit(1),
+    (db as any).from('members').select('tg_id').eq('status', 'live'),
+  ]);
+  const ids = ((live ?? []) as Array<{ tg_id: number }>).map((m) => Number(m.tg_id));
+  const openedAt = t?.[0]?.opened_at ? Date.parse(String(t[0].opened_at)) : NaN;
+  if (!ids.length || !Number.isFinite(openedAt)) return ids;
+  const { data: starts } = await (db as any).from('member_actions').select('tg_id,done_at').eq('kind', 'connect').eq('status', 'done').not('done_at', 'is', null).in('tg_id', ids);
+  const first = new Map<number, number>();
+  for (const s of (starts ?? []) as Array<{ tg_id: number; done_at: string }>) {
+    const at = Date.parse(s.done_at);
+    if (!first.has(Number(s.tg_id)) || at < first.get(Number(s.tg_id))!) first.set(Number(s.tg_id), at);
+  }
+  return ids.filter((id) => (first.get(id) ?? Infinity) <= openedAt);
 }
 
 export async function listGhostOpenTrades(symbol: string, liveTickets: string[], graceMs = 120_000): Promise<string[]> {

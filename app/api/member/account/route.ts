@@ -71,15 +71,16 @@ export async function GET(req: NextRequest) {
   // NAS100 jamais copié par STH), stratégie du membre. Pas de borne TRACK_SINCE ici : le compte du membre,
   // lui, a vécu tout ce qui s'est passé depuis SON départ — l'estimation doit coller à son MetaTrader.
   const sinceIso = new Date(baseline.since).toISOString();
-  const rows: Array<{ ticket: string; symbol: string; pnl: number; lot: number | null; strategy: number | null; closed_at: string }> = [];
+  const rows: Array<{ ticket: string; symbol: string; pnl: number; lot: number | null; strategy: number | null; opened_at: string | null; closed_at: string }> = [];
   for (let from = 0; from < 20_000; from += 1000) {
-    const { data } = await db.from('trades').select('ticket,symbol,pnl,lot,strategy,closed_at').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', sinceIso).order('closed_at', { ascending: true }).range(from, from + 999);
+    const { data } = await db.from('trades').select('ticket,symbol,pnl,lot,strategy,opened_at,closed_at').not('closed_at', 'is', null).not('pnl', 'is', null).gte('closed_at', sinceIso).order('closed_at', { ascending: true }).range(from, from + 999);
     rows.push(...((data ?? []) as typeof rows));
     if (!data || data.length < 1000) break;
   }
   const { data: sig } = await db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(2000);
   const rafale = new Set((sig ?? []).filter((x) => { const j = JSON.stringify(x.rationale ?? ''); return j.includes('RAFALE') || j.includes('ACTION mode'); }).map((x) => String(x.ticket)));
-  const copied = rows.filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100' && (Number(t.strategy ?? 2) || 2) === strategy);
+  // un trade ouvert AVANT son départ n'est pas sur son compte (18/10/2026 : le Monero du 22/09 fermé le 18/10)
+  const copied = rows.filter((t) => !isShowTrade(t, rafale) && String(t.symbol) !== 'NAS100' && (Number(t.strategy ?? 2) || 2) === strategy && (!t.opened_at || Date.parse(t.opened_at) >= Date.parse(sinceIso)));
 
   let pnl = 0, wins = 0, peak = baseline.balance, maxDd = 0, bal = baseline.balance;
   const days = new Map<string, number>();

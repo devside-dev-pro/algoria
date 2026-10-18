@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   // correspondait plus à celui annoncé ce soir-là.
   const daysAgoStart = (n: number) => tradingDayStartMs(tradingDayOf(Date.now() - n * 86_400_000));
   const rangeFrom = range === 'all' ? 0 : daysAgoStart(range === '30d' ? 30 : 7);
-  const [memberQ, desk, tradesQ, signalsQ] = await Promise.all([
+  const [memberQ, desk, tradesQ, signalsQ, startQ] = await Promise.all([
     (db as any).from('members').select('status,risk_tier,strategy,lot').eq('tg_id', s.tgId).limit(1) as Promise<{ data: Array<{ status: string; risk_tier: string; strategy: number | null; lot: number | null }> | null }>,
     db.from('events').select('id,ts,msg,data').eq('level', 'ai').order('ts', { ascending: false }).limit(24),
     // MULTI-STRATÉGIES : le membre voit les trades de SA stratégie (défaut 2 = Balanced), et peut consulter
@@ -48,6 +48,8 @@ export async function GET(req: NextRequest) {
       return { data: out as Array<{ ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; opened_at: string; closed_at: string; lot: number | null; strategy: number | null }> };
     })(),
     db.from('signals').select('ticket,rationale').order('created_at', { ascending: false }).limit(200),
+    // le début de SA copie : son premier passage en live
+    db.from('member_actions').select('done_at').eq('tg_id', s.tgId).eq('kind', 'connect').eq('status', 'done').not('done_at', 'is', null).order('done_at', { ascending: true }).limit(1),
   ]);
   // même règle que /api/member/me : admin OU copie activée OU whitelist VIP/équipe (CM…)
   // même règle que /api/member/me, y compris la priorité de l'off-board sur la whitelist VIP : le retrait
@@ -67,7 +69,12 @@ export async function GET(req: NextRequest) {
   // PROSPECT : les 7 DERNIERS JOURS, quelle que soit la période demandée (décision Mathieu, 14/10/2026 : l'historique
   // réel de la semaine, pertes comprises ; le reste s'ouvre avec l'accès). Borne appliquée ici, côté serveur.
   const prospectFrom = daysAgoStart(7);
-  const trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY && (unlocked || Date.parse(String(t.closed_at)) >= prospectFrom));
+  // SES TRADES, PAS CEUX D'AVANT LUI (18/10/2026, décision Mathieu). Un membre en copie ne voit et ne compte que les
+  // trades OUVERTS après le début de sa copie : le Monero ouvert le 22/09 et fermé le 18/10 s'affichait en gain du jour
+  // chez des membres arrivés après, qui ne l'avaient pas sur leur compte. Admins et prospects voient tout l'historique.
+  const copyStart = (startQ.data?.[0] as { done_at?: string } | undefined)?.done_at ? Date.parse(String((startQ.data?.[0] as { done_at: string }).done_at)) : NaN;
+  const mine = (t: { opened_at?: string | null }) => !Number.isFinite(copyStart) || isAdmin(s.username) || !['live', 'paused'].includes(feedStatus) || !t.opened_at || Date.parse(String(t.opened_at)) >= copyStart;
+  const trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY && (unlocked || Date.parse(String(t.closed_at)) >= prospectFrom) && mine(t));
   // PROSPECTS : LES MÊMES TRADES QUE LES MEMBRES, PERTES COMPRISES (14/10/2026, décision Mathieu). Jusqu'ici le
   // prospect ne voyait que les 30 derniers GAINS (« bande-annonce ») : biaisé, et contredit par tout ce qu'on dit
   // (« every single trade is public, wins and losses »). Une prospecte l'a relevé au bot le 14/10. Ce qui évite de
