@@ -24,7 +24,7 @@
 //
 // Coupe-circuits (env Vercel, sans redéploiement de code) : SUPPORT_WELCOME=off (plus d'accueil auto),
 // SUPPORT_AUTOPILOT=off (plus d'envoi seul : toutes les réponses redeviennent des cartes à valider).
-import { draftReply } from './replyDraft';
+import { draftReply, lastDraftIssue } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
@@ -32,8 +32,19 @@ import { detectCountry } from './countries';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
 
-const WELCOME_ON = () => (process.env.SUPPORT_WELCOME ?? 'on').trim().toLowerCase() !== 'off';
-const AUTOPILOT_ON = () => (process.env.SUPPORT_AUTOPILOT ?? 'on').trim().toLowerCase() !== 'off';
+// LES INTERRUPTEURS (19/10/2026, migration 0033) : table support_settings ('welcome', 'autopilot' : 'on' | 'off'),
+// relue toutes les 30 s ; ligne absente = coupé. La variable Vercel à 'off' coupe quoi qu'il y ait en base.
+const settingsCache = new Map<string, { at: number; on: boolean }>();
+async function flag(db: Db, key: 'welcome' | 'autopilot'): Promise<boolean> {
+  const env = process.env[key === 'welcome' ? 'SUPPORT_WELCOME' : 'SUPPORT_AUTOPILOT'];
+  if ((env ?? '').trim().toLowerCase() === 'off') return false;
+  const hit = settingsCache.get(key);
+  if (hit && Date.now() - hit.at < 30_000) return hit.on;
+  const { data } = await db.from('support_settings').select('value').eq('key', key).limit(1);
+  const on = String(data?.[0]?.value ?? 'off').trim().toLowerCase() === 'on';
+  settingsCache.set(key, { at: Date.now(), on });
+  return on;
+}
 const DEBOUNCE_MS = 75_000;
 const WELCOME_MIN_MS = 180_000;
 const WELCOME_SPREAD_MS = 60_000;
@@ -44,7 +55,7 @@ const STALE_RUNNING_MS = 5 * 60_000;
 // déjà clients : pas d'accueil (ni bulle ni message), la réponse part directement
 const NO_WELCOME = new Set(['live', 'paused', 'pending_copier']);
 // ce que le bot envoie de lui-même et qui ne RÉPOND à rien : l'accueil, le vocal du pays, le lien différé
-const NOT_AN_ANSWER = new Set(['welcome', 'country_voice', 'link', 'live_welcome']);
+const NOT_AN_ANSWER = new Set(['welcome', 'country_voice', 'intro', 'link', 'live_welcome']);
 const LINK_AFTER_MS = 2 * 3_600_000;
 // 🔥 un montant de 1 000 ou plus en $, £, € (pas en rands : 1 000 ZAR ≈ 50 $)
 const AMOUNT = /(?:[$£€]\s?(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)|(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)\s?(?:[$£€]|usd|usdt|eur|euros?|gbp|pounds?|dollars?|aud|nzd|chf)(?![a-z]))/gi;
@@ -69,7 +80,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Un client vient d'écrire : accueil (premier contact) et réponse, repoussée à ~75 s après son dernier message. */
 export async function scheduleOnClientMessage(db: Db, o: { tgId: number; conn: string; firstContact: boolean; firstName: string | null; status: string | null }): Promise<void> {
   const now = Date.now();
-  if (o.firstContact && WELCOME_ON() && !NO_WELCOME.has(o.status ?? '')) {
+  if (o.firstContact && (await flag(db, 'welcome')) && !NO_WELCOME.has(o.status ?? '')) {
     const { data: w } = await db.from('support_jobs').select('id').eq('tg_id', o.tgId).eq('kind', 'welcome').limit(1);
     if (!w?.length) await db.from('support_jobs').insert({ tg_id: o.tgId, conn: o.conn, kind: 'welcome', due_at: iso(now + WELCOME_MIN_MS + Math.floor(Math.random() * WELCOME_SPREAD_MS)), payload: { firstName: o.firstName } });
   }
@@ -105,15 +116,38 @@ type MemberRow = { member_no: number | null; status: string | null; broker: stri
 /** Le message d'accueil : bonjour et UNE question, d'où il vient. Le même pour tous : on ne lui montre jamais ce qu'on
  *  sait déjà (app, broker, étape). Le style de Mathieu : une espace avant ? et !, pas de tiret long, un emoji.
  *  En italien : formules neutres (« piacere »), pas « benvenuto/a ». */
-export function welcomeText(member: MemberRow | null, firstName: string | null, lang?: 'en' | 'it', countryKnown = false): string {
+// 19/10/2026, Mathieu : « une bulle avec juste "Where are you from ?" derrière, c'est vraiment pas super… je demande
+// moi directement dans la bulle, et en dessous on écrit : au cas où tu ne puisses pas regarder la vidéo, je voulais
+// simplement te souhaiter la bienvenue et savoir d'où tu viens ». Le texte anglais est modifiable dans l'admin
+// (TOOLS → 👋 SUPPORT WELCOME, agent_docs 'support_welcome', {name} = prénom) ; l'italien reste ici.
+export const WELCOME_EN = "Hey {name}, welcome to Algoria ! 🙏🏼\nIn case you can't watch the video right now: I just wanted to welcome you personally and ask you where you're from ?";
+const WELCOME_IT = 'Ciao {name}, piacere ! 🙏🏼\nSe non puoi guardare il video adesso: volevo solo darti il benvenuto di persona e chiederti di dove sei ?';
+export function welcomeText(member: MemberRow | null, firstName: string | null, lang?: 'en' | 'it', doc?: string | null): string {
   const name = cleanName(firstName);
   const it = (lang ?? member?.locale) === 'it';
-  // il l'a déjà dit dans son premier message (« I'm from UK… ») : on ne le redemande pas
-  if (countryKnown) return it ? `${name ? `Ciao ${name}` : 'Ciao'}, piacere ! 🙏🏼` : `${name ? `Hey ${name}` : 'Hey'}, welcome ! 🙏🏼`;
-  return it
-    ? `${name ? `Ciao ${name}` : 'Ciao'}, piacere ! Di dove sei ? 🙏🏼`
-    : `${name ? `Hey ${name}` : 'Hey'}, welcome ! Where are you from ? 🙏🏼`;
+  const tpl = it ? WELCOME_IT : (doc?.trim() || WELCOME_EN);
+  return tpl.replace(/\{name\}/g, name).replace(/ +,/g, ',').replace(/ {2,}/g, ' ');
 }
+
+// LE MESSAGE APRÈS LE PAYS (19/10/2026) : celui que Mathieu envoyait à la main (118 fois depuis le 29/09), juste après son
+// vocal, avec la fin qui donne directement le lien de l'app au lieu de « Can I give you an access ? ». Modifiable dans
+// l'admin (TOOLS → 💬 SUPPORT INTRO, agent_docs 'support_intro') ; l'italien reste ici.
+export const INTRO_EN = `ALGORIA is an AI that trades gold every day. As a member, your broker account gets connected to her and every trade she takes is copied to your account automatically. You don't touch anything.
+
+Algoria AI is normally at 400$ lifetime price, but you will have it for completely free. 🆓
+
+You never pay me a cent. The only thing you do is open your trading account with our partner broker (takes 5 min) and fund it, on your own account, minimum $200 to 1000$ depending the strategy you want to follow, so the position sizing works.🤝
+
+Here's your access to the app so you can see everything first: ${APP_URL}/member
+You log in with your Telegram, one tap, and I'm here to help you anyway 🙏🏼`;
+const INTRO_IT = `ALGORIA è un'IA che fa trading sull'oro ogni giorno. Da membro, il tuo conto broker viene collegato a lei e ogni trade che apre viene copiato sul tuo conto in automatico. Tu non tocchi niente.
+
+Algoria AI costa normalmente 400$ a vita, ma per te è completamente gratis. 🆓
+
+Non mi paghi mai niente. L'unica cosa da fare è aprire il tuo conto di trading con il nostro broker partner (5 minuti) e alimentarlo, sul tuo conto personale, minimo 200$ fino a 1000$ in base alla strategia che vuoi seguire, così la dimensione delle posizioni funziona.🤝
+
+Ecco il tuo accesso all'app per vedere tutto prima: ${APP_URL}/member
+Accedi con il tuo Telegram, un tocco, e io sono qui per aiutarti comunque 🙏🏼`;
 
 // ── LA BIBLIOTHÈQUE DE BULLES ──────────────────────────────────────────────────────────────────────────
 // Chaque bulle a un public (situation) et une langue, choisis par Mathieu avec les boutons sous la bulle. À l'accueil,
@@ -189,6 +223,7 @@ type JobResult = { status: 'done' | 'failed' | 'canceled' | 'later'; result?: Re
 
 async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   const { connection, tg } = await import('./businessInbox');
+  if (!(await flag(db, 'welcome'))) return { status: 'canceled', result: { reason: 'accueil coupé' } };
   const conn = await connection(job.conn);
   if (!conn || !conn.enabled) return { status: 'failed', result: { error: 'connexion Business absente ou coupée' } };
   if (!conn.canReply) return { status: 'failed', result: { error: 'droit « Reply to messages » coupé dans Telegram Business' } };
@@ -204,28 +239,33 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   const { data: first } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').order('created_at', { ascending: true }).limit(5);
   const firstTexts = ((first ?? []) as Array<{ detail: Record<string, unknown> }>).map((r) => String(r.detail?.text ?? ''));
   if (!member?.locale && firstTexts.some((t) => ITALIAN.test(t))) lang = 'it';
+  // il a déjà dit d'où il vient (« I'm from UK… ») : pas de bulle qui le lui redemande, on passe à son vocal et au
+  // message d'après (c'est la réponse qui s'en charge)
   const said = firstTexts.map(detectCountry).find(Boolean) ?? null;
-  const text = welcomeText(member, String(job.payload?.firstName ?? '') || null, lang, !!said);
-  const base = { business_connection_id: job.conn, chat_id: job.tg_id };
-  // la bulle de sa situation et de sa langue (pas de bulle pour un compte déjà en vérification)
+  if (said) return { status: 'done', result: { outcome: 'skip', reason: 'pays déjà dit', country_said: said } };
+  // JAMAIS D'ACCUEIL EN TEXTE SEUL (19/10/2026, Mathieu) : pas de bulle enregistrée, ou Telegram la refuse → rien ne
+  // part, la réponse arrive chez Mathieu en carte
   const situation = situationOf(member);
-  const video = !situation || already.includes('[video bubble]') ? null : await pickAsset(db, situation, lang);
-  let videoSent = false;
-  if (video) {
+  const video = !situation ? null : await pickAsset(db, situation, lang);
+  if (!video) return { status: 'done', result: { outcome: 'skip', reason: 'aucune bulle d’accueil enregistrée' } };
+  const base = { business_connection_id: job.conn, chat_id: job.tg_id };
+  if (!already.includes('[video bubble]')) {
     await tg('sendChatAction', { ...base, action: 'record_video_note' });
     const v = await tg('sendVideoNote', { ...base, video_note: video.file_id });
-    videoSent = v.ok;
-    if (v.ok) await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'welcome', text: '[video bubble]', conn: job.conn } });
+    if (!v.ok) return { status: 'failed', result: { error: `bulle refusée par Telegram : ${v.description ?? '?'}` } };
+    await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'welcome', text: '[video bubble]', conn: job.conn } });
     await sleep(2500);
   }
+  const { getAgentDoc } = await import('./agentDocs');
+  const text = welcomeText(member, String(job.payload?.firstName ?? '') || null, lang, await getAgentDoc('support_welcome'));
   await tg('sendChatAction', { ...base, action: 'typing' });
   await sleep(2000);
   const r = await tg('sendMessage', { ...base, text, disable_web_page_preview: true });
-  if (!r.ok) return { status: 'failed', result: { error: r.description ?? 'refusé', video: videoSent } };
+  if (!r.ok) return { status: 'failed', result: { error: r.description ?? 'refusé', video: video.id } };
   await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'welcome', text, conn: job.conn } });
-  // pas de compte et la question posée : s'il ne répond pas en 2 h, le lien de l'app part quand même
-  if (!member && !said) await db.from('support_jobs').insert({ tg_id: job.tg_id, conn: job.conn, kind: 'link', due_at: iso(Date.now() + LINK_AFTER_MS), payload: { lang } });
-  return { status: 'done', result: { outcome: 'welcome', video: videoSent ? video?.id : false, situation, lang, country_said: said, state: member?.status ?? 'no account' } };
+  // pas de compte : s'il ne répond pas en 2 h, le lien de l'app part quand même
+  if (!member) await db.from('support_jobs').insert({ tg_id: job.tg_id, conn: job.conn, kind: 'link', due_at: iso(Date.now() + LINK_AFTER_MS), payload: { lang } });
+  return { status: 'done', result: { outcome: 'welcome', video: video.id, situation, lang, state: member?.status ?? 'no account' } };
 }
 
 async function doReply(db: Db, job: Job): Promise<JobResult> {
@@ -265,26 +305,53 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const joined = texts.join('\n');
   // Mathieu a écrit lui-même ici il y a moins de 2 h : c'est sa conversation
   const manual = rows.some((r) => r.detail?.from === 'owner' && r.done_by === 'mathieu' && Date.now() - Date.parse(r.created_at) < HUMAN_HOLD_MS);
-  const canSend = AUTOPILOT_ON() && !manual && conn.canReply;
+  const autopilot = await flag(db, 'autopilot');
+  const canSend = autopilot && !manual && conn.canReply;
+  const newbie = !NO_WELCOME.has(member?.status ?? '');
+  const ownerSpoke = rows.some((r) => r.detail?.from === 'owner');
+  const welcomed = rows.some((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]');
 
-  // 🌍 IL DIT D'OÙ IL VIENT (réponse à l'accueil) : le vocal de Mathieu pour son pays, une fois, avant la réponse écrite
+  // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
+  // broker, le lien de l'app), une seule fois par conversation. Après l'accueil (bulle), ou dès son premier message
+  // s'il l'y a dit — mais alors seulement si un vocal existe : jamais de premier contact en texte seul (Mathieu, 19/10).
   const said = detectCountry(joined);
   let note: string | null = null;
   let voiced = false;
-  if (said && canSend && !NO_WELCOME.has(member?.status ?? '') && rows.some((r) => r.detail?.via === 'welcome') && !rows.some((r) => r.detail?.via === 'country_voice')) {
+  let introduced = false;
+  const stepDone = rows.some((r) => r.detail?.via === 'country_voice' || r.detail?.via === 'intro');
+  if (said && canSend && newbie && !stepDone && (welcomed || !ownerSpoke)) {
     const v = await pickVoice(db, said);
-    if (v) {
-      await tg('sendChatAction', { business_connection_id: job.conn, chat_id: job.tg_id, action: 'record_voice' });
-      await sleep(3000);
-      const r = await tg('sendVoice', { business_connection_id: job.conn, chat_id: job.tg_id, voice: v.file_id });
-      if (r.ok) {
-        voiced = true;
-        note = `Mathieu's personal voice note about their country (${countryName(said, 'en')}) was just sent from his account, right before your reply.`;
-        await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'country_voice', text: '[voice note about their country]', country: said, voice: v.id, conn: job.conn } });
-        await sleep(1500);
+    if (v || welcomed) {
+      const biz = { business_connection_id: job.conn, chat_id: job.tg_id };
+      if (v) {
+        await tg('sendChatAction', { ...biz, action: 'record_voice' });
+        await sleep(3000);
+        const r = await tg('sendVoice', { ...biz, voice: v.file_id });
+        if (r.ok) {
+          voiced = true;
+          await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'country_voice', text: '[voice note about their country]', country: said, voice: v.id, conn: job.conn } });
+          await sleep(2000);
+        }
       }
+      if (voiced || welcomed) {
+        const { getAgentDoc } = await import('./agentDocs');
+        const it = member?.locale === 'it' || ITALIAN.test(joined);
+        const intro = it ? INTRO_IT : ((await getAgentDoc('support_intro'))?.trim() || INTRO_EN);
+        await tg('sendChatAction', { ...biz, action: 'typing' });
+        await sleep(4000);
+        const r = await tg('sendMessage', { ...biz, text: intro, disable_web_page_preview: true });
+        if (r.ok) {
+          introduced = true;
+          await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'intro', text: intro, conn: job.conn } });
+        }
+      }
+      if (voiced || introduced) note = `Mathieu's ${voiced ? `personal voice note about their country (${countryName(said, 'en')}) and his ` : ''}intro message (what Algoria is, free access, the partner broker, the app link) were just sent from his account. Do not repeat any of it: if their message asks nothing else, intent "skip"; otherwise answer only what is left.`;
     }
   }
+
+  // PREMIER CONTACT SANS ACCUEIL (pas de bulle enregistrée, ou l'accueil coupé) : pas de réponse en texte seul à un
+  // nouveau venu, la carte va à Mathieu (19/10/2026)
+  const firstNoWelcome = newbie && !ownerSpoke && !introduced;
 
   const draft = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note });
   // le pays (stats, fiche) et le lead chaud
@@ -299,10 +366,10 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     await hotAlert(conn.userChatId, base, member, joined, country);
   }
   if (country || base.hot_at) await db.from('member_actions').update({ detail: base }).eq('id', last.id);
-  const extra = { country, voiced, hot, images: images.length };
+  const extra = { country, voiced, introduced, hot, images: images.length };
 
   if (!draft) {
-    await reviewCard(db, conn, last.id, base, member, null, 'pas de proposition (modèle indisponible ou réponse refusée par les garde-fous)');
+    await reviewCard(db, conn, last.id, base, member, null, `pas de proposition (${lastDraftIssue() ?? 'modèle indisponible ou réponse refusée'})`);
     return { status: 'done', result: { outcome: 'review', reason: 'no draft', ...extra } };
   }
   if (draft.spam || draft.skip) {
@@ -311,8 +378,9 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   }
 
   const { data: recentAuto } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', 'auto').gte('created_at', iso(Date.now() - 3_600_000)).limit(MAX_AUTO_PER_HOUR + 1);
-  const why = !AUTOPILOT_ON() ? 'pilote automatique coupé'
+  const why = !autopilot ? 'pilote automatique coupé'
     : manual ? 'tu as écrit dans cette conversation il y a moins de 2 h'
+    : firstNoWelcome ? 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir'
     : !draft.auto ? 'Claude n’est pas sûr'
     : SENSITIVE.test(joined) ? 'sujet sensible (argent, plainte, licence, appel…)'
     : HOLDING.test(draft.text) ? 'réponse d’attente'
@@ -340,7 +408,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
 /** Pas de réponse 2 h après l'accueil et pas de compte : le lien de l'app part quand même (une fois). */
 async function doLink(db: Db, job: Job): Promise<JobResult> {
   const { connection, tg } = await import('./businessInbox');
-  if (!WELCOME_ON() || !AUTOPILOT_ON()) return { status: 'canceled', result: { reason: 'coupé' } };
+  if (!(await flag(db, 'welcome')) || !(await flag(db, 'autopilot'))) return { status: 'canceled', result: { reason: 'coupé' } };
   const { data: mrow } = await db.from('members').select('member_no').eq('tg_id', job.tg_id).limit(1);
   if (mrow?.length) return { status: 'done', result: { outcome: 'skip', reason: 'a un compte' } };
   const { data } = await db.from('member_actions').select('created_at,detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).order('created_at', { ascending: true }).limit(60);

@@ -11,7 +11,7 @@ import { dimP, inp, miniBtn, okBtn, secH } from '../_shared';
 interface Version { id: number; created_at: string; created_by: string | null; size: number }
 interface Doc { content: string; updated_at: string | null; updated_by: string | null; versions: Version[]; max: number }
 
-type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory' | 'live_welcome';
+type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory' | 'live_welcome' | 'support_welcome' | 'support_intro';
 const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?: string }> = {
   knowledge: {
     title: '🧠 ALGORIA AI — KNOWLEDGE',
@@ -33,6 +33,16 @@ const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?
     intro: 'Sent automatically, once, to a member the moment you set them LIVE (✓ DONE or GO LIVE): from your Telegram account if they wrote to you in the last 24 h, otherwise by the Algoria bot. Several messages: put a line with only --- between them. {name} = their first name. If it cannot be sent, you get a Telegram alert.',
     empty: 'Empty: nothing is sent at go-live.',
     saved: 'Saved — sent to the next member you set live.',
+  },
+  support_welcome: {
+    title: '👋 SUPPORT — TEXT UNDER THE WELCOME BUBBLE',
+    intro: 'Sent from your Telegram account right after your welcome video bubble, 3-4 min after a new contact’s first message. {name} = their first name (removed when it is not a real name). Italian contacts get the Italian version.',
+    empty: 'Empty: the default text is used (« Hey {name}, welcome to Algoria ! … where you’re from ? »).',
+  },
+  support_intro: {
+    title: '💬 SUPPORT — MESSAGE AFTER THE COUNTRY',
+    intro: 'Sent from your Telegram account when a new contact says where they are from, right after your voice note for that country. Your usual “ALGORIA is an AI…” message, ending with the app link.',
+    empty: 'Empty: the default text is used (your “ALGORIA is an AI…” message with the app link).',
   },
   ads_memory: {
     title: '🧠 ADS STUDIO — WHAT CLAUDE LEARNED',
