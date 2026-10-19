@@ -132,22 +132,24 @@ export function welcomeText(member: MemberRow | null, firstName: string | null, 
 // LE MESSAGE APRÈS LE PAYS (19/10/2026) : celui que Mathieu envoyait à la main (118 fois depuis le 29/09), juste après son
 // vocal, avec la fin qui donne directement le lien de l'app au lieu de « Can I give you an access ? ». Modifiable dans
 // l'admin (TOOLS → 💬 SUPPORT INTRO, agent_docs 'support_intro') ; l'italien reste ici.
-export const INTRO_EN = `ALGORIA is an AI that trades gold every day. As a member, your broker account gets connected to her and every trade she takes is copied to your account automatically. You don't touch anything.
+// 19/10/2026, Mathieu : « le plus important de ce message : que la personne comprenne qu'elle a 400 $ de valeur aujourd'hui
+// qu'elle peut avoir gratuitement… la façon dont je l'expliquais était un peu trop compliquée, simplifie ».
+export const INTRO_EN = `So Algoria in a few words : it's an AI that trades gold for you. You connect your own trading account once, and every trade the AI takes is copied on it automatically. You don't touch anything, and your money stays on your account.
 
-Algoria AI is normally at 400$ lifetime price, but you will have it for completely free. 🆓
+The Algoria access is normally $400 (lifetime). Today you can have it completely free 🆓 The only condition : open your trading account with one of our partner brokers. They pay for your access, so you never pay me a cent.
 
-You never pay me a cent. The only thing you do is open your trading account with our partner broker (takes 5 min) and fund it, on your own account, minimum $200 to 1000$ depending the strategy you want to follow, so the position sizing works.🤝
+Here's your access to the app : ${APP_URL}/member
+You log in with your Telegram in one tap. Inside, the app shows you step by step : pick the partner broker, open your account (5 min), fund it (minimum $200), and connect it to Algoria.
 
-Here's your access to the app so you can see everything first: ${APP_URL}/member
-You log in with your Telegram, one tap, and I'm here to help you anyway 🙏🏼`;
-const INTRO_IT = `ALGORIA è un'IA che fa trading sull'oro ogni giorno. Da membro, il tuo conto broker viene collegato a lei e ogni trade che apre viene copiato sul tuo conto in automatico. Tu non tocchi niente.
+Any question, I'm here 🙏🏼`;
+const INTRO_IT = `Allora, Algoria in poche parole : è un'IA che fa trading sull'oro per te. Colleghi una volta il tuo conto di trading, e ogni trade dell'IA viene copiato sul tuo conto in automatico. Tu non tocchi niente, e i tuoi soldi restano sul tuo conto.
 
-Algoria AI costa normalmente 400$ a vita, ma per te è completamente gratis. 🆓
+L'accesso ad Algoria costa normalmente 400$ (a vita). Oggi puoi averlo completamente gratis 🆓 L'unica condizione : aprire il tuo conto di trading con uno dei nostri broker partner. Sono loro a pagare il tuo accesso, quindi non mi paghi mai niente.
 
-Non mi paghi mai niente. L'unica cosa da fare è aprire il tuo conto di trading con il nostro broker partner (5 minuti) e alimentarlo, sul tuo conto personale, minimo 200$ fino a 1000$ in base alla strategia che vuoi seguire, così la dimensione delle posizioni funziona.🤝
+Ecco il tuo accesso all'app : ${APP_URL}/member
+Accedi con il tuo Telegram in un tocco. Dentro, l'app ti guida passo dopo passo : scegli il broker partner, apri il conto (5 minuti), alimentalo (minimo 200$) e collegalo ad Algoria.
 
-Ecco il tuo accesso all'app per vedere tutto prima: ${APP_URL}/member
-Accedi con il tuo Telegram, un tocco, e io sono qui per aiutarti comunque 🙏🏼`;
+Per qualsiasi domanda sono qui 🙏🏼`;
 
 // ── LA BIBLIOTHÈQUE DE BULLES ──────────────────────────────────────────────────────────────────────────
 // Chaque bulle a un public (situation) et une langue, choisis par Mathieu avec les boutons sous la bulle. À l'accueil,
