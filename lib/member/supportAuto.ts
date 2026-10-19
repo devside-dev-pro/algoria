@@ -372,7 +372,9 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     base = { ...base, country };
     if (member?.member_no != null && !member.country) await db.from('members').update({ country: countryLabel(country) }).eq('tg_id', job.tg_id);
   }
-  const hot = hotAmount(joined) || !!draft?.hot;
+  // 🔥 un PROSPECT qui n'a pas encore commencé, jamais un membre déjà en copie ni une plainte (19/10/2026 : Chris,
+  // membre live, « my balance on the app is 1061 but on my MT5 it's 978 » était sorti en lead chaud)
+  const hot = newbie && !SENSITIVE.test(joined) && (hotAmount(joined) || !!draft?.hot);
   if (hot && !rows.some((r) => r.detail?.hot_at)) {
     base = { ...base, hot_at: iso(Date.now()) };
     await hotAlert(conn.userChatId, base, member, joined, country);
