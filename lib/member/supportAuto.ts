@@ -57,6 +57,12 @@ const NO_WELCOME = new Set(['live', 'paused', 'pending_copier']);
 // ce que le bot envoie de lui-même et qui ne RÉPOND à rien : l'accueil, le vocal du pays, le lien différé
 const NOT_AN_ANSWER = new Set(['welcome', 'country_voice', 'intro', 'link', 'live_welcome']);
 const LINK_AFTER_MS = 2 * 3_600_000;
+// LES CONVERSATIONS DU COMPTE SUPPORT NE SONT ENREGISTRÉES QUE DEPUIS LE 29/09/2026 (10 h 47 UTC). 19/10/2026 : Ben (compte
+// de l'app depuis le 12/08, bulle et questions de Mathieu le 05/09) a reçu la bulle d'accueil « welcome to Algoria » comme
+// un inconnu. Un compte de l'app créé avant cette date sans aucun message enregistré = peut-être un ancien contact : pas
+// d'accueil, on lui répond comme à quelqu'un qu'on connaît.
+const LOGGED_SINCE = Date.parse('2026-09-29T10:47:00Z');
+const legacyContact = (m: { created_at?: string | null } | null) => !!m?.created_at && Date.parse(m.created_at) < LOGGED_SINCE;
 // 🔥 un montant de 1 000 ou plus en $, £, € (pas en rands : 1 000 ZAR ≈ 50 $)
 const AMOUNT = /(?:[$£€]\s?(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)|(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)\s?(?:[$£€]|usd|usdt|eur|euros?|gbp|pounds?|dollars?|aud|nzd|chf)(?![a-z]))/gi;
 export function hotAmount(text: string): boolean {
@@ -120,7 +126,7 @@ export const cleanName = (n: unknown) => {
 // La langue d'un prospect sans compte (on n'a pas encore sa langue dans l'app) : ses premiers messages.
 const ITALIAN = /\b(ciao|salve|buongiorno|buonasera|grazie|vorrei|voglio|posso|sono|come funziona|informazioni|quanto|conto|ho visto|perch[eé])\b/i;
 
-type MemberRow = { member_no: number | null; status: string | null; broker: string | null; locale: string | null; strategy?: number | null; tg_name?: string | null; tg_username?: string | null; country?: string | null; connected_at?: string | null };
+type MemberRow = { member_no: number | null; status: string | null; broker: string | null; locale: string | null; strategy?: number | null; tg_name?: string | null; tg_username?: string | null; country?: string | null; connected_at?: string | null; created_at?: string | null };
 
 /** Le message d'accueil : bonjour et UNE question, d'où il vient. Le même pour tous : on ne lui montre jamais ce qu'on
  *  sait déjà (app, broker, étape). Le style de Mathieu : une espace avant ? et !, pas de tiret long, un emoji.
@@ -238,9 +244,10 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   const conn = await connection(job.conn);
   if (!conn || !conn.enabled) return { status: 'failed', result: { error: 'connexion Business absente ou coupée' } };
   if (!conn.canReply) return { status: 'failed', result: { error: 'droit « Reply to messages » coupé dans Telegram Business' } };
-  const { data: mrow } = await db.from('members').select('member_no,status,broker,locale').eq('tg_id', job.tg_id).limit(1);
+  const { data: mrow } = await db.from('members').select('member_no,status,broker,locale,created_at').eq('tg_id', job.tg_id).limit(1);
   const member = (mrow?.[0] ?? null) as MemberRow | null;
   if (NO_WELCOME.has(member?.status ?? '')) return { status: 'done', result: { outcome: 'skip', reason: `déjà client (${member?.status})` } };
+  if (legacyContact(member)) return { status: 'done', result: { outcome: 'skip', reason: 'ancien contact (compte de l’app d’avant le 29/09)' } };
   // déjà parti (passage repris après une coupure) : on ne renvoie rien deux fois
   const { data: sent } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', 'welcome').limit(5);
   const already = ((sent ?? []) as Array<{ detail: Record<string, unknown> }>).map((r) => String(r.detail?.text ?? ''));
@@ -304,7 +311,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const images = (await Promise.all(photoIds.map(downloadPhoto))).filter((x): x is Img => !!x);
   const media = batch.map((b) => String(b.detail?.text ?? '')).filter((t) => t.startsWith('[') && !t.startsWith('[sticker') && !(t === '[photo]' && images.length));
 
-  const { data: mrow } = await db.from('members').select('member_no,locale,status,strategy,broker,tg_name,tg_username,country').eq('tg_id', job.tg_id).limit(1);
+  const { data: mrow } = await db.from('members').select('member_no,locale,status,strategy,broker,tg_name,tg_username,country,created_at').eq('tg_id', job.tg_id).limit(1);
   const member = (mrow?.[0] ?? null) as MemberRow | null;
   // « je suis connecté ? » : le modèle répond depuis le statut, avec la date de mise en copie (19/10/2026)
   if (member && NO_WELCOME.has(member.status ?? '')) {
@@ -342,6 +349,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const newbie = !NO_WELCOME.has(member?.status ?? '');
   const ownerSpoke = rows.some((r) => r.detail?.from === 'owner');
   const welcomed = rows.some((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]');
+  // rien d'enregistré de Mathieu, mais un compte de l'app d'avant le 29/09 : sans doute un ancien contact
+  const legacy = !ownerSpoke && !welcomed && legacyContact(member);
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
   // broker, le lien de l'app), une seule fois par conversation. Après l'accueil (bulle), ou dès son premier message
@@ -351,7 +360,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   let voiced = false;
   let introduced = false;
   const stepDone = rows.some((r) => r.detail?.via === 'country_voice' || r.detail?.via === 'intro');
-  if (said && canSend && newbie && !stepDone && (welcomed || !ownerSpoke)) {
+  if (said && canSend && newbie && !stepDone && (welcomed || (!ownerSpoke && !legacy))) {
     const v = await pickVoice(db, said);
     if (v || welcomed) {
       const biz = { business_connection_id: job.conn, chat_id: job.tg_id };
@@ -393,7 +402,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
 
   // PREMIER CONTACT SANS ACCUEIL (pas de bulle enregistrée, ou l'accueil coupé) : pas de réponse en texte seul à un
   // nouveau venu, la carte va à Mathieu (19/10/2026)
-  const firstNoWelcome = newbie && !ownerSpoke && !introduced;
+  const firstNoWelcome = newbie && !ownerSpoke && !introduced && !legacy;
+  if (legacy) note = 'This person probably already talked with Mathieu before (those older messages are not in the Recent exchange): never welcome them as a newcomer and never ask where they are from, answer their message directly.';
 
   const draft = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note });
   // le pays (stats, fiche) et le lead chaud
@@ -417,6 +427,10 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     return { status: 'done', result: { outcome: 'review', reason: 'no draft', ...extra } };
   }
   // un nouveau venu qui n'a reçu AUCUN accueil ne reste jamais sans rien, même pour un simple « hello »
+  if (draft.skip && legacy) {
+    await reviewCard(db, conn, last.id, base, member, null, 'ancien contact (compte de l’app d’avant le 29/09), rien d’enregistré avec toi : à toi de voir');
+    return { status: 'done', result: { outcome: 'review', reason: 'ancien contact', ...extra } };
+  }
   if (draft.skip && firstNoWelcome) {
     await reviewCard(db, conn, last.id, base, member, null, 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir');
     return { status: 'done', result: { outcome: 'review', reason: 'premier contact sans accueil', ...extra } };

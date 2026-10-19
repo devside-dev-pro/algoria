@@ -7,6 +7,7 @@ import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
+import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
 
@@ -396,6 +397,7 @@ export async function POST(req: Request) {
       if (await handleRecapCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 récap du soir (lib/channel/recap.ts)
       if (await handleCmCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 posts du jour du canal (lib/channel/cm.ts)
       if (await handleSupportAssetCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles d'accueil (lib/member/supportAuto.ts)
+      if (await handleDigestCallback(db, cq)) return NextResponse.json({ ok: true }); // 🌙 règles du récap du soir (lib/member/supportDigest.ts)
       const m = /^r([dxu]):([0-9a-f-]{36})$/i.exec(String(cq.data ?? ''));
       if (!m) { await answer(''); return NextResponse.json({ ok: true }); }
       const admins = await adminTgIds();
@@ -463,6 +465,8 @@ export async function POST(req: Request) {
   if (db && msg?.chat?.type === 'private' && (msg.reply_to_message?.video_note || msg.reply_to_message?.voice) && (await handleSupportVideoRemove(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message?.reply_markup && (await handleSupportAssetReply(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (await handleSupportLibrary(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
+  // 🌙 le récap du soir (lib/member/supportDigest.ts) : « 3 sa version » / « 3 # remarque », ou sa version d'une règle.
+  if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message && (await handleDigestReply(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 🧠 Mathieu forme l'agent : réponse à une carte de proposition (sa version ou « # remarque »), ou « # leçon » seule.
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (msg.reply_to_message || msg.text.trim().startsWith('#'))
     && (await handleBusinessCorrection(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
