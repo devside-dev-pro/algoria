@@ -351,6 +351,16 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     }
   }
 
+  // L'ACCUEIL VIENT DE PARTIR ET IL N'A PAS ENCORE RÉPONDU (19/10/2026, Rahma : « Hi how is work?? » → bulle + « where
+  // you're from ? », puis une 2e réponse qui redemandait d'où elle venait). L'accueil a répondu à ses premiers messages :
+  // on attend sa réponse. Quand il dira son pays, son vocal + le message d'après répondent à « comment ça marche », et une
+  // question précise de son 1er message est reprise à ce moment-là (elle fait partie du même lot).
+  const welcomeAt = rows.filter((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]').map((r) => Date.parse(r.created_at)).pop();
+  if (welcomeAt != null && newbie && !stepDone && !introduced && batch.every((b) => Date.parse(b.created_at) < welcomeAt)) {
+    await markRead(conn, job.conn, job.tg_id, last);
+    return { status: 'done', result: { outcome: 'skip', reason: 'attend sa réponse à l’accueil' } };
+  }
+
   // PREMIER CONTACT SANS ACCUEIL (pas de bulle enregistrée, ou l'accueil coupé) : pas de réponse en texte seul à un
   // nouveau venu, la carte va à Mathieu (19/10/2026)
   const firstNoWelcome = newbie && !ownerSpoke && !introduced;
