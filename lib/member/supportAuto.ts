@@ -374,8 +374,14 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     await reviewCard(db, conn, last.id, base, member, null, `pas de proposition (${lastDraftIssue() ?? 'modèle indisponible ou réponse refusée'})`);
     return { status: 'done', result: { outcome: 'review', reason: 'no draft', ...extra } };
   }
+  // un nouveau venu qui n'a reçu AUCUN accueil ne reste jamais sans rien, même pour un simple « hello »
+  if (draft.skip && firstNoWelcome) {
+    await reviewCard(db, conn, last.id, base, member, null, 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir');
+    return { status: 'done', result: { outcome: 'review', reason: 'premier contact sans accueil', ...extra } };
+  }
   if (draft.spam || draft.skip) {
     await db.from('member_actions').update({ detail: { ...base, draft_intent: draft.spam ? 'spam' : 'skip' } }).eq('id', last.id);
+    await markRead(conn, job.conn, job.tg_id, last);
     return { status: 'done', result: { outcome: draft.spam ? 'spam' : 'skip', ...extra } };
   }
 
@@ -404,6 +410,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     await reviewCard(db, conn, last.id, base, member, draft.text, `envoi refusé par Telegram : ${err}`);
     return { status: 'done', result: { outcome: 'review', reason: err, ...extra } };
   }
+  await markRead(conn, job.conn, job.tg_id, last);
   return { status: 'done', result: { outcome: 'auto', chars: draft.text.length, ...extra } };
 }
 
@@ -431,6 +438,18 @@ async function doLink(db: Db, job: Job): Promise<JobResult> {
   if (!r.ok) return { status: 'failed', result: { error: r.description ?? 'refusé' } };
   await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'link', text, conn: job.conn } });
   return { status: 'done', result: { outcome: 'link' } };
+}
+
+// ── « LU » CHEZ MATHIEU ────────────────────────────────────────────────────────────────────────────────
+// 19/10/2026, Mathieu : « le bot est actif mais j'ai encore plus de 20 messages non lus ». Telegram laissait en « non lu »
+// les conversations auxquelles le bot avait répondu seul. On marque lu ce que le bot a traité SANS lui (réponse partie
+// seule, rien à répondre, spam) : ses non-lus = ce qui a besoin de lui. Les cartes, elles, restent non lues.
+// Il faut le droit « can_read_messages » du bot dans Telegram Business ; sans lui, rien ne se passe.
+async function markRead(conn: { canRead?: boolean } | null, connId: string, tgId: number, row: { detail?: Record<string, unknown> } | undefined): Promise<void> {
+  const msgId = Number(row?.detail?.msg_id ?? 0);
+  if (!conn?.canRead || !msgId) return;
+  const { tg } = await import('./businessInbox');
+  await tg('readBusinessMessage', { business_connection_id: connId, chat_id: tgId, message_id: msgId }).catch(() => null);
 }
 
 // ── LES CAPTURES, LE PAYS, LE LEAD CHAUD ───────────────────────────────────────────────────────────────

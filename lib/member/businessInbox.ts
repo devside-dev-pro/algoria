@@ -46,14 +46,14 @@ export async function tg(method: string, payload: Record<string, unknown>): Prom
   }
 }
 
-export interface Conn { ownerId: number; userChatId: number; canReply: boolean; enabled: boolean }
+export interface Conn { ownerId: number; userChatId: number; canReply: boolean; enabled: boolean; canRead: boolean }
 const conns = new Map<string, { at: number; conn: Conn | null }>();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toConn(c: any): Conn | null {
   if (!c?.user?.id) return null;
   // Bot API 9.0 : rights.can_reply ; avant : can_reply (déprécié) — on accepte les deux.
-  return { ownerId: Number(c.user.id), userChatId: Number(c.user_chat_id), canReply: Boolean(c.rights?.can_reply ?? c.can_reply), enabled: c.is_enabled !== false };
+  return { ownerId: Number(c.user.id), userChatId: Number(c.user_chat_id), canReply: Boolean(c.rights?.can_reply ?? c.can_reply), enabled: c.is_enabled !== false, canRead: Boolean(c.rights?.can_read_messages) };
 }
 
 /** La connexion, SI son propriétaire est un admin. Mémorisée 10 min (une erreur réseau n'est pas mémorisée). */
@@ -170,7 +170,8 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
   const { data: past } = await db.from('member_actions').select('id').eq('tg_id', chatId).eq('kind', BIZ_KIND).limit(1);
   const { data: mrow } = await db.from('members').select('member_no,status').eq('tg_id', chatId).limit(1);
   const photo = photoId(m);
-  const base = { from: 'client', text, conn: connId, name, username, ...(photo ? { photo } : {}) };
+  // msg_id : pour marquer la conversation comme lue quand le bot l'a traitée seul (lib/member/supportAuto.ts)
+  const base = { from: 'client', text, conn: connId, name, username, msg_id: Number(m.message_id) || null, ...(photo ? { photo } : {}) };
   await db.from('member_actions').insert({ tg_id: chatId, member_no: mrow?.[0]?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'telegram', detail: base });
   await scheduleOnClientMessage(db, { tgId: chatId, conn: connId, firstContact: !(past ?? []).length, firstName: m.chat.first_name ?? null, status: mrow?.[0]?.status ?? null });
 }
