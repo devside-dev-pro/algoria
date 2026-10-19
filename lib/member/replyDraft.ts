@@ -125,9 +125,9 @@ ${brokerLinks()}
 Track record: https://algoria.tech/track-record · App: ${APP_URL}
 
 MATHIEU'S PROCESS (since 16/10/2026: no more 3 questions, no more long pitch)
-1. First contact: an AUTOMATIC WELCOME already went out a few minutes after their first message: Mathieu's welcome video + "Hey <name>, welcome ! Where are you from ?". Never repeat it.
+1. First contact: an AUTOMATIC WELCOME may already have gone out a few minutes after their first message: Mathieu's welcome video bubble + "Hey <name>, welcome to Algoria ! In case you can't watch the video right now: I just wanted to welcome you personally and ask you where you're from ?". When they answer with their country, Mathieu's voice note about their country and his intro message (what Algoria is, free, the partner broker, the app link) go out automatically. Never repeat any of it.
 2. NEVER SHOW WHAT WE KNOW about them from the system (Mathieu: "it feels like we already have your info, it's scary"): never "I see you have the app", "I see you picked <broker>", "you're stuck at the broker step", "your account is pending", "I see you're from <country>". The Status below only helps YOU choose the right help; let THEM tell you where they are, like Mathieu does ("Let's go, you have the app ?").
-3. When they say where they are from: a warm, short, personal word about it (no number of members from their country, never "you'd be one of the first"; if the Note says Mathieu's voice note about their country was just sent, just a few words), then the next step: no account yet → the app (${APP_URL}/member, log in with Telegram, one tap, everything is explained there); already in the app → the broker for their country.
+3. When they say where they are from (and the Note does not say the intro already went): a warm, short, personal word about it (no number of members from their country, never "you'd be one of the first"), then the next step: no account yet → the app (${APP_URL}/member, log in with Telegram, one tap, everything is explained there); already in the app → the broker for their country.
 4. Then: open the account through the link, deposit, connect it in the app, the activation trades; "text me as soon as your account is open". Connected / live: reassure, the lot rule, the 30 days.
 5. NEVER ASK their budget or whether they traded before. When it matters (choosing the broker, the deposit) or when they ask: minimum $200, recommended $500.
 6. THE ${WITHDRAW_LOCK_DAYS} DAYS (the money must stay on the account): NEVER bring it up before they are live (Status live or paused). Mathieu explains it himself at go-live, "for the system to work properly". Before that, only if they ask directly about withdrawing: answer honestly in one short sentence.
@@ -224,8 +224,15 @@ export function humanize(text: string, biz: boolean): string {
 }
 
 /** Le brouillon, ou null si la clé manque, si le modèle traîne (> 8 s) ou si sa sortie ne passe pas les gardes. */
+// POURQUOI LE DERNIER BROUILLON N'A PAS ÉTÉ PRODUIT (19/10/2026) : la carte de Mathieu disait seulement « pas de
+// proposition » — impossible de savoir si le modèle avait échoué ou si un garde-fou l'avait arrêté (Daljinder, 16/10).
+let lastIssue: string | null = null;
+export const lastDraftIssue = () => lastIssue;
+const fail = (why: string): null => { lastIssue = why; return null; };
+
 export async function draftReply(i: DraftInput): Promise<Draft | null> {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
+  lastIssue = null;
+  if (!process.env.ANTHROPIC_API_KEY) return fail('clé du modèle absente');
   const statusLine = (() => {
     if (!i.member) return 'no account in the app yet';
     const st = i.member?.status ?? 'unknown';
@@ -269,25 +276,28 @@ export async function draftReply(i: DraftInput): Promise<Draft | null> {
     if (biz && intent === 'skip') return { text: '', auto: false, skip: true, country, hot };
     out = humanize(out.trim().replace(/^["“«]\s*|\s*["”»]$/g, ''), biz);
     // GARDES DE SORTIE : un modèle qui parle de lui-même, qui garantit, ou qui s'étale n'envoie rien.
-    if (!out || out.length > (biz ? 1400 : 900)) return null;
+    if (!out) return fail('réponse vide ou illisible du modèle');
+    if (out.length > (biz ? 1400 : 900)) return fail('réponse trop longue');
     // 29/09/2026 : le bot SIGNE « Algoria AI » (décision Mathieu) — il peut dire qu'il est une IA ; il ne doit
     // toujours pas se prendre pour Mathieu ni nommer le modèle / la société derrière. En mode business, c'est
     // Mathieu qui parle : seul le nom du modèle reste interdit.
-    if (/\b(language model|chatgpt|openai|anthropic|claude)\b/i.test(out)) return null;
-    if (!biz && /\b(i am mathieu|i'm mathieu|sono mathieu)\b/i.test(out)) return null;
-    if (/\b(guarantee|garantit|garantisc|guaranteed|monthly fee|subscription fee|per month)\b/i.test(out)) return null;
+    if (/\b(language model|chatgpt|openai|anthropic|claude)\b/i.test(out)) return fail('nomme le modèle');
+    if (!biz && /\b(i am mathieu|i'm mathieu|sono mathieu)\b/i.test(out)) return fail('se prend pour Mathieu');
+    // l'avertissement obligatoire (« past results don't guarantee future results ») n'est PAS une garantie : retiré avant le test
+    const noDisclaimer = out.replace(/(past|previous) (results?|performance)[^.!?\n]*?(do not|don't|does not|doesn't|never|can't|cannot) (guarantee|predict)[^.!?\n]*/gi, '');
+    if (/\b(guarantee|garantit|garantisc|guaranteed|monthly fee|subscription fee|per month)\b/i.test(noDisclaimer)) return fail('promesse ou abonnement (« guarantee », « per month »)');
     // RÉSULTATS PASSÉS AUTORISÉS (30/09/2026), JAMAIS INVENTÉS : tout pourcentage de la réponse doit exister tel
     // quel dans ce qu'on a donné au modèle (bloc REAL PAST RESULTS, knowledge, faits). Un % introuvable = un
     // chiffre inventé → pas d'envoi. Et rien qui parle de ce que quelqu'un VA gagner.
     const known = new Set((sys.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map((x) => x.replace(/\s/g, '').replace(',', '.')));
-    if ((out.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).some((x) => !known.has(x.replace(/\s/g, '').replace(',', '.')))) return null;
-    if (/\b(you(?:'ll| will| could| can) (?:make|earn|get|expect)|expected (?:return|profit)|per (?:day|week) on average|on average per (?:day|week))\b/i.test(out)) return null;
+    if ((out.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).some((x) => !known.has(x.replace(/\s/g, '').replace(',', '.')))) return fail('pourcentage introuvable dans les faits');
+    if (/\b(you(?:'ll| will| could| can) (?:make|earn|get|expect)|expected (?:return|profit)|per (?:day|week) on average|on average per (?:day|week))\b/i.test(out)) return fail('parle de gains futurs');
     if (biz) return { text: out, auto: intent === 'auto', country, hot };
     // SIGNATURE (29/09/2026, décision Mathieu) : chaque message part signé Algoria AI, avec le contact de
     // Mathieu — ajoutée ICI, par le code, jamais laissée au modèle (elle ne peut ni manquer ni varier).
     return { text: `${out}\n\n${SIGNATURE[(i.locale ?? 'en') === 'it' ? 'it' : 'en']}`, auto: intent === 'simple' };
   } catch (e) {
     console.error('[replyDraft] failed:', (e as { message?: string })?.message ?? e);
-    return null;
+    return fail(`modèle indisponible (${String((e as { message?: string })?.message ?? e).slice(0, 80)})`);
   }
 }
