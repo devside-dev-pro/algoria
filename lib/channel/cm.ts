@@ -51,7 +51,6 @@ const L = {
   history: `${APP_URL}/member/history`,
   track: 'https://algoria.tech/track-record',
   me: SUPPORT_TG_URL,
-  call: `${SUPPORT_TG_URL}?text=${encodeURIComponent("Hey Mathieu ! I'd like a quick call to set up my Algoria access 📞")}`,
 };
 
 export type CmPost = { id: string; text: string; btn: string; url: string };
@@ -90,7 +89,6 @@ export const CTAS: Array<CmPost & { fam: 'app' | 'mathieu' }> = [
   { ...post('stuck', ['💬 <b>Stuck somewhere in your setup ?</b>', '', 'The broker, creating your trading account, connecting it to Algoria: whatever it is, it takes me two minutes to unblock. Write to me directly, I answer myself.', '', "No sales pitch. Just tell me where you're stuck 🙏🏼"], '💬 MESSAGE MATHIEU', L.me), fam: 'mathieu' },
   { ...post('brokerq', ['🌍 <b>Not sure which broker to pick ?</b>', '', "Tell me which country you're in and I'll tell you which one to choose. It takes me 30 seconds 🙏🏼"], '💬 ASK MATHIEU', L.me), fam: 'mathieu' },
   { ...post('question', ['💬 <b>Any question about Algoria ?</b>', '', 'How the copy works, which broker to pick, how to connect your trading account: ask me. A real human answers, I reply myself 🙏🏼'], '💬 ASK MATHIEU', L.me), fam: 'mathieu' },
-  { ...post('call', ['📞 <b>Want to go through it together ?</b>', '', 'A quick call and I walk you through it: creating your trading account and connecting it to Algoria, step by step 🙏🏼'], '📞 BOOK A CALL', L.call), fam: 'mathieu' },
 ];
 
 type Slot = { slot: string; at: string; kind: 'morning' | 'howto' | 'cta' | 'tp'; fam?: 'app' | 'mathieu' };
@@ -139,7 +137,6 @@ const CTA_GOAL: Record<string, string> = {
   stuck: 'invite anyone stuck in their setup to message Mathieu directly',
   brokerq: 'offer to tell them which broker to pick if they say their country',
   question: 'invite questions to Mathieu, a real human who answers himself',
-  call: 'offer a quick call with Mathieu to set up their access together',
 };
 const VIDEO_AT = '19:30';
 
