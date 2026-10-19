@@ -62,7 +62,11 @@ const LINK_AFTER_MS = 2 * 3_600_000;
 // un inconnu. Un compte de l'app créé avant cette date sans aucun message enregistré = peut-être un ancien contact : pas
 // d'accueil, on lui répond comme à quelqu'un qu'on connaît.
 const LOGGED_SINCE = Date.parse('2026-09-29T10:47:00Z');
-const legacyContact = (m: { created_at?: string | null } | null) => !!m?.created_at && Date.parse(m.created_at) < LOGGED_SINCE;
+// 19/10/2026, Nkosinathi (compte du 29/09 au matin) : le message du bouton de l'app (« book a quick call… », « skip the
+// waiting list… ») est un PREMIER contact qui vient de l'app, il a toujours la bulle. L'exception « ancien contact » ne
+// vaut que pour un message écrit à la main (Ben : « whats the minimum to start ? »).
+const APP_BUTTON = /book a quick call to activate|skip the waiting list/i;
+const legacyContact = (m: { created_at?: string | null } | null, firstText: string) => !!m?.created_at && Date.parse(m.created_at) < LOGGED_SINCE && !APP_BUTTON.test(firstText);
 // 🔥 un montant de 1 000 ou plus en $, £, € (pas en rands : 1 000 ZAR ≈ 50 $)
 const AMOUNT = /(?:[$£€]\s?(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)|(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)\s?(?:[$£€]|usd|usdt|eur|euros?|gbp|pounds?|dollars?|aud|nzd|chf)(?![a-z]))/gi;
 export function hotAmount(text: string): boolean {
@@ -247,7 +251,6 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   const { data: mrow } = await db.from('members').select('member_no,status,broker,locale,created_at').eq('tg_id', job.tg_id).limit(1);
   const member = (mrow?.[0] ?? null) as MemberRow | null;
   if (NO_WELCOME.has(member?.status ?? '')) return { status: 'done', result: { outcome: 'skip', reason: `déjà client (${member?.status})` } };
-  if (legacyContact(member)) return { status: 'done', result: { outcome: 'skip', reason: 'ancien contact (compte de l’app d’avant le 29/09)' } };
   // déjà parti (passage repris après une coupure) : on ne renvoie rien deux fois
   const { data: sent } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', 'welcome').limit(5);
   const already = ((sent ?? []) as Array<{ detail: Record<string, unknown> }>).map((r) => String(r.detail?.text ?? ''));
@@ -256,6 +259,7 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   let lang: Lang = member?.locale === 'it' ? 'it' : 'en';
   const { data: first } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').order('created_at', { ascending: true }).limit(5);
   const firstTexts = ((first ?? []) as Array<{ detail: Record<string, unknown> }>).map((r) => String(r.detail?.text ?? ''));
+  if (legacyContact(member, firstTexts[0] ?? '')) return { status: 'done', result: { outcome: 'skip', reason: 'ancien contact (compte de l’app d’avant le 29/09, message écrit à la main)' } };
   if (!member?.locale && firstTexts.some((t) => ITALIAN.test(t))) lang = 'it';
   // il a déjà dit d'où il vient (« I'm from UK… ») : pas de bulle qui le lui redemande, on passe à son vocal et au
   // message d'après (c'est la réponse qui s'en charge)
@@ -350,7 +354,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const ownerSpoke = rows.some((r) => r.detail?.from === 'owner');
   const welcomed = rows.some((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]');
   // rien d'enregistré de Mathieu, mais un compte de l'app d'avant le 29/09 : sans doute un ancien contact
-  const legacy = !ownerSpoke && !welcomed && legacyContact(member);
+  const legacy = !ownerSpoke && !welcomed && legacyContact(member, String(rows.find((r) => r.detail?.from === 'client')?.detail?.text ?? ''));
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
   // broker, le lien de l'app), une seule fois par conversation. Après l'accueil (bulle), ou dès son premier message
@@ -390,15 +394,13 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     }
   }
 
-  // L'ACCUEIL VIENT DE PARTIR ET IL N'A PAS ENCORE RÉPONDU (19/10/2026, Rahma : « Hi how is work?? » → bulle + « where
-  // you're from ? », puis une 2e réponse qui redemandait d'où elle venait). L'accueil a répondu à ses premiers messages :
-  // on attend sa réponse. Quand il dira son pays, son vocal + le message d'après répondent à « comment ça marche », et une
-  // question précise de son 1er message est reprise à ce moment-là (elle fait partie du même lot).
+  // L'ACCUEIL VIENT DE PARTIR, EN RÉPONSE À SES PREMIERS MESSAGES. Un simple bonjour ou le message du bouton de l'app :
+  // rien de plus, on attend qu'il dise d'où il vient (19/10/2026, Rahma : la 2e réponse redemandait son pays). Une VRAIE
+  // question (« how are you ? », « what's the minimum ? ») : la réponse part sous l'accueil, sans redemander le pays
+  // (Mathieu, 19/10 : « on lui envoie la bulle, l'explication, et en dessous on répond quand même »).
   const welcomeAt = rows.filter((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]').map((r) => Date.parse(r.created_at)).pop();
-  if (welcomeAt != null && newbie && !stepDone && !introduced && batch.every((b) => Date.parse(b.created_at) < welcomeAt)) {
-    await markRead(conn, job.conn, job.tg_id, last);
-    return { status: 'done', result: { outcome: 'skip', reason: 'attend sa réponse à l’accueil' } };
-  }
+  const justWelcomed = welcomeAt != null && newbie && !stepDone && !introduced && batch.every((b) => Date.parse(b.created_at) < welcomeAt);
+  if (justWelcomed) note = 'Mathieu\'s welcome (his video bubble + "Hey <name>, welcome to Algoria ! … ask you where you\'re from ?") was JUST sent in answer to these first messages. Only a plain hello ("hi", "hello") or the app\'s ready-made message ("book a quick call…", "skip the waiting list…") → intent "skip". A question, even "how are you ?" ("All good thanks, and you ? 🙏🏼"), "what\'s the minimum ?", "how does it work ?" → answer it briefly, under the welcome ("auto" when it is routine), WITHOUT asking where they are from again and without welcoming them again.';
 
   // PREMIER CONTACT SANS ACCUEIL (pas de bulle enregistrée, ou l'accueil coupé) : pas de réponse en texte seul à un
   // nouveau venu, la carte va à Mathieu (19/10/2026)
@@ -448,6 +450,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     : !draft.auto ? 'Claude n’est pas sûr'
     : SENSITIVE.test(joined) ? 'sujet sensible (argent, plainte, paiement…)'
     : HOLDING.test(draft.text) ? 'réponse d’attente'
+    : justWelcomed && /where (are|r) (you|u) from|which country|what country/i.test(draft.text) ? 'redemande son pays juste après l’accueil'
     : media.length ? `il a aussi envoyé ${media.join(', ')}`
     : (recentAuto ?? []).length >= MAX_AUTO_PER_HOUR ? 'beaucoup de réponses automatiques dans l’heure'
     : !conn.canReply ? 'droit « Reply to messages » coupé dans Telegram Business'
