@@ -87,11 +87,6 @@ export const CTA_TEMPLATES: Array<{ id: string; label: string; target: 'app' | '
     btn: '💬 ASK MATHIEU', url: 'https://t.me/mathieu_algoria',
   },
   {
-    id: 'call', label: '📞 Réserver un appel → toi', target: 'mathieu',
-    text: "📞 <b>Want to go through it together?</b>\n\nTen minutes on a call and your account is live. I walk you through the broker, the deposit and the connection, step by step.",
-    btn: '📞 BOOK A CALL', url: "https://t.me/mathieu_algoria?text=" + encodeURIComponent("Hey Mathieu! I'd like to book a quick call to activate my Algoria access 📞"),
-  },
-  {
     id: 'bonus', label: '🎁 Code bonus ALGORIA100 → toi', target: 'mathieu',
     text: "🎁 <b>100% deposit bonus at RaiseFX — code ALGORIA100.</b>\n\nDeposit $300, the AI trades with $600 of buying power. The bonus is broker trading credit — <i>your</i> deposit stays yours, withdrawable anytime.\n\nWrite to me and I'll set it up with you 👇",
     btn: '🎁 CLAIM THE BONUS', url: 'https://t.me/mathieu_algoria',

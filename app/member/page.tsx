@@ -8,7 +8,7 @@ import { atRef, REF_LABEL, REF_LOT } from '@/lib/display/scale';
 import { TRADING_TZ } from '@/lib/display/tradingDay';
 import { AccountCard } from './AccountCard';
 import { useRouter } from 'next/navigation';
-import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, BOOK_CALL_URL, type Member, type MemberAccount } from './ui';
+import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, CONTACT_URL, type Member, type MemberAccount } from './ui';
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { track, trackOnce } from '@/lib/member/funnel';
@@ -136,9 +136,8 @@ export default function MemberHome() {
                 {netRef > 0 && <> The trades below made <b className="goldText">+{netRef.toFixed(0)}$</b> at {REF_LABEL}, losses included.</>}
               </p>
               <button onClick={() => { setPaywall(true); track('unlock_open', member.onboarding_step ?? 0); }} style={ctaGold}>⚡ UNLOCK MY ACCESS</button>
-              {/* l'appel = l'arme de closing : 10 min au téléphone avec Mathieu et c'est signé */}
-              <a {...tgHref(BOOK_CALL_URL)} rel="noreferrer" style={ctaGhost}>📞 BOOK A CALL WITH MATHIEU</a>
-              <a {...tgHref(SUPPORT_TG)} rel="noreferrer" style={{ ...ctaGhost, border: 'none', background: 'transparent', fontSize: 12, color: 'var(--muted)' }}>💬 or just message @mathieu_algoria</a>
+              {/* plus d'appel (19/10/2026) : le contact avec Mathieu, message pré-rempli (ui.tsx CONTACT_URL) */}
+              <a {...tgHref(CONTACT_URL)} rel="noreferrer" style={ctaGhost}>💬 CONTACT MATHIEU</a>
             </>
           )}
         </section>

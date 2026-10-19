@@ -65,7 +65,9 @@ const LOGGED_SINCE = Date.parse('2026-09-29T10:47:00Z');
 // 19/10/2026, Nkosinathi (compte du 29/09 au matin) : le message du bouton de l'app (« book a quick call… », « skip the
 // waiting list… ») est un PREMIER contact qui vient de l'app, il a toujours la bulle. L'exception « ancien contact » ne
 // vaut que pour un message écrit à la main (Ben : « whats the minimum to start ? »).
-const APP_BUTTON = /book a quick call to activate|skip the waiting list/i;
+// (19/10/2026 : le bouton devient « Contact Mathieu », « I already have the app, how do I get connected now ? » ; les anciens
+// messages restent reconnus, des liens publiés avant circulent encore)
+const APP_BUTTON = /book a quick call to activate|quick call to set up my algoria|skip the waiting list|already have the app, how do i get connected/i;
 const legacyContact = (m: { created_at?: string | null } | null, firstText: string) => !!m?.created_at && Date.parse(m.created_at) < LOGGED_SINCE && !APP_BUTTON.test(firstText);
 // 🔥 un montant de 1 000 ou plus en $, £, € (pas en rands : 1 000 ZAR ≈ 50 $)
 const AMOUNT = /(?:[$£€]\s?(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)|(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)\s?(?:[$£€]|usd|usdt|eur|euros?|gbp|pounds?|dollars?|aud|nzd|chf)(?![a-z]))/gi;
@@ -400,7 +402,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // (Mathieu, 19/10 : « on lui envoie la bulle, l'explication, et en dessous on répond quand même »).
   const welcomeAt = rows.filter((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]').map((r) => Date.parse(r.created_at)).pop();
   const justWelcomed = welcomeAt != null && newbie && !stepDone && !introduced && batch.every((b) => Date.parse(b.created_at) < welcomeAt);
-  if (justWelcomed) note = 'Mathieu\'s welcome (his video bubble + "Hey <name>, welcome to Algoria ! … ask you where you\'re from ?") was JUST sent in answer to these first messages. Only a plain hello ("hi", "hello") or the app\'s ready-made message ("book a quick call…", "skip the waiting list…") → intent "skip". A question, even "how are you ?" ("All good thanks, and you ? 🙏🏼"), "what\'s the minimum ?", "how does it work ?" → answer it briefly, under the welcome ("auto" when it is routine), WITHOUT asking where they are from again and without welcoming them again.';
+  if (justWelcomed) note = 'Mathieu\'s welcome (his video bubble + "Hey <name>, welcome to Algoria ! … ask you where you\'re from ?") was JUST sent in answer to these first messages. Only a plain hello ("hi", "hello") or the app\'s ready-made message ("I already have the app, how do I get connected now ?", "book a quick call…", "skip the waiting list…") → intent "skip". A question, even "how are you ?" ("All good thanks, and you ? 🙏🏼"), "what\'s the minimum ?", "how does it work ?" → answer it briefly, under the welcome ("auto" when it is routine), WITHOUT asking where they are from again and without welcoming them again.';
 
   // PREMIER CONTACT SANS ACCUEIL (pas de bulle enregistrée, ou l'accueil coupé) : pas de réponse en texte seul à un
   // nouveau venu, la carte va à Mathieu (19/10/2026)
