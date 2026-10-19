@@ -69,8 +69,17 @@ export function hotAmount(text: string): boolean {
 }
 
 // Ce qui ne part JAMAIS seul, quoi qu'en pense le modèle : l'argent, les plaintes, les doutes, ce que Mathieu doit
-// vérifier lui-même (un dépôt annoncé), ce qu'il vend lui-même (la licence), les rendez-vous.
-const SENSITIVE = /\b(withdraw\w*|refund\w*|money back|lost|losing|loss(es)?|scam\w*|fraud\w*|fake|stolen|hack\w*|police|lawyer|complain\w*|angry|disappointed|cheat\w*|liar|chargeback|licen[cs]e|prop ?firm|partner(ship)?|collab\w*|call|deposited|funded|paid|payment|invoice|ritir\w*|truffa|rimbors\w*|pers[oi])\b/i;
+// vérifier lui-même (un dépôt annoncé), quelqu'un prêt à PAYER la licence, les partenariats.
+// 19/10/2026 (benchmark : 8 cartes sur 28 avaient une bonne réponse bloquée) : la demande d'appel (« book a quick call »
+// préremplie par l'app), la QUESTION sur la licence ou la prop firm, et « partner broker » partent seules.
+const SENSITIVE = /\b(withdraw\w*|refund\w*|money back|lost|losing|loss(es)?|scam\w*|fraud\w*|fake|stolen|hack\w*|police|lawyer|complain\w*|angry|disappointed|cheat\w*|liar|chargeback|partnership|collab\w*|deposited|funded|paid|payment|invoice|purchase\w*|(?:want|ready|like|how) to (?:pay|buy)|ritir\w*|truffa|rimbors\w*|pers[oi])\b/i;
+// 🔁 UNE RELANCE (« Hi », « any update ? », « Mathieu ? ») : rien de nouveau à répondre, la question d'avant attend
+const PING_WORDS = new Set(['hi', 'hii', 'hiii', 'hello', 'helo', 'hey', 'yo', 'bro', 'brother', 'mate', 'dear', 'mathieu', 'sir', 'any', 'update', 'updates', 'news', 'answer', 'reply', 'still', 'waiting', 'wait', 'i', 'im', "i'm", 'am', 'are', 'you', 'u', 'there', 'please', 'pls', 'plz', 'again', 'did', 'check', 'checked', 'it', 'so', 'what', 'about', 'good', 'morning', 'afternoon', 'evening', 'ciao', 'buongiorno']);
+export function isPing(text: string): boolean {
+  const words = text.toLowerCase().replace(/[’]/g, "'").replace(/[^\p{L}\p{N}'\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  if (!words.length) return /\?/.test(text);
+  return words.length <= 6 && words.every((w) => PING_WORDS.has(w));
+}
 const HOLDING = /\b(let me check|i'?ll check|come back to you|get back to you|i'?ll look|look into it|i'?ll ask)\b/i;
 const iso = (ms: number) => new Date(ms).toISOString();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -111,7 +120,7 @@ export const cleanName = (n: unknown) => {
 // La langue d'un prospect sans compte (on n'a pas encore sa langue dans l'app) : ses premiers messages.
 const ITALIAN = /\b(ciao|salve|buongiorno|buonasera|grazie|vorrei|voglio|posso|sono|come funziona|informazioni|quanto|conto|ho visto|perch[eé])\b/i;
 
-type MemberRow = { member_no: number | null; status: string | null; broker: string | null; locale: string | null; strategy?: number | null; tg_name?: string | null; tg_username?: string | null; country?: string | null };
+type MemberRow = { member_no: number | null; status: string | null; broker: string | null; locale: string | null; strategy?: number | null; tg_name?: string | null; tg_username?: string | null; country?: string | null; connected_at?: string | null };
 
 /** Le message d'accueil : bonjour et UNE question, d'où il vient. Le même pour tous : on ne lui montre jamais ce qu'on
  *  sait déjà (app, broker, étape). Le style de Mathieu : une espace avant ? et !, pas de tiret long, un emoji.
@@ -271,7 +280,7 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
 }
 
 async function doReply(db: Db, job: Job): Promise<JobResult> {
-  const { connection, reviewCard, sendAsOwner, tg } = await import('./businessInbox');
+  const { connection, reviewCard, sendAsOwner, stamp, tg } = await import('./businessInbox');
   // l'accueil d'abord
   const { data: wp } = await db.from('support_jobs').select('id').eq('tg_id', job.tg_id).eq('kind', 'welcome').in('status', ['pending', 'running']).limit(1);
   if (wp?.length) return { status: 'later' };
@@ -297,7 +306,28 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
 
   const { data: mrow } = await db.from('members').select('member_no,locale,status,strategy,broker,tg_name,tg_username,country').eq('tg_id', job.tg_id).limit(1);
   const member = (mrow?.[0] ?? null) as MemberRow | null;
+  // « je suis connecté ? » : le modèle répond depuis le statut, avec la date de mise en copie (19/10/2026)
+  if (member && NO_WELCOME.has(member.status ?? '')) {
+    const { data: c } = await db.from('member_actions').select('done_at').eq('tg_id', job.tg_id).eq('kind', 'connect').eq('status', 'done').order('done_at', { ascending: true }).limit(1);
+    member.connected_at = (c?.[0] as { done_at?: string } | undefined)?.done_at ?? null;
+  }
   let base: Record<string, unknown> = { ...(last.detail ?? {}) };
+
+  // 🔁 IL RELANCE (19/10/2026 : 4 cartes sur 28 étaient des « Hi », « Hello!!! », « Mathieu ? » de gens qui attendaient
+  // déjà Mathieu) : sa carte ouverte de cette conversation redescend en bas de son fil, avec la relance, au lieu d'une
+  // nouvelle proposition. La conversation reste non lue chez lui.
+  const open = [...batch].reverse().find((r) => r.detail?.draft_msg_id && !r.detail.answered_at && !r.detail.draft_dismissed_at && !r.detail.draft_superseded_at);
+  if (open && open.id !== last.id && !images.length && !media.length) {
+    const after = batch.filter((b) => Date.parse(b.created_at) > Date.parse(open.created_at)).map((b) => String(b.detail?.text ?? '').trim()).filter(Boolean);
+    if (after.length && after.every(isPing)) {
+      const od = open.detail;
+      const del = await tg('deleteMessage', { chat_id: Number(od.draft_chat_id), message_id: Number(od.draft_msg_id) });
+      if (!del.ok) await stamp(od, '🔁 Il relance : carte redescendue plus bas.');
+      const was = String(od.review_reason ?? 'à toi').replace(/^il relance .*?, toujours : /, '');
+      await reviewCard(db, conn, open.id, od, member, od.draft ? String(od.draft) : null, `il relance (« ${after.join(' / ').slice(0, 60)} »), toujours : ${was}`);
+      return { status: 'done', result: { outcome: 'review', reason: 'relance' } };
+    }
+  }
 
   if (!texts.length && !images.length) {
     if (!media.length) return { status: 'done', result: { outcome: 'skip', reason: 'sticker' } };
@@ -402,7 +432,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     : manual ? 'tu as écrit dans cette conversation il y a moins de 2 h'
     : firstNoWelcome ? 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir'
     : !draft.auto ? 'Claude n’est pas sûr'
-    : SENSITIVE.test(joined) ? 'sujet sensible (argent, plainte, licence, appel…)'
+    : SENSITIVE.test(joined) ? 'sujet sensible (argent, plainte, paiement…)'
     : HOLDING.test(draft.text) ? 'réponse d’attente'
     : media.length ? `il a aussi envoyé ${media.join(', ')}`
     : (recentAuto ?? []).length >= MAX_AUTO_PER_HOUR ? 'beaucoup de réponses automatiques dans l’heure'
