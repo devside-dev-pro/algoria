@@ -8,6 +8,8 @@
 //               (lib/member/liveWelcome.ts) : les 30 jours, le lien du VIP. Messages séparés par une ligne « --- ».
 // `support_welcome` / `support_intro` = LE SUPPORT AUTOMATIQUE (19/10/2026, lib/member/supportAuto.ts) : le texte sous
 //               la bulle d'accueil ({name}), et le message qui suit le vocal du pays. Vides = textes par défaut du code.
+// `support_followup` = LA RELANCE (20/10/2026) : trois textes séparés par « --- » (après l'accueil, après l'intro ou le
+//               lien de l'app, après autre chose), envoyés ~23 h après le dernier message d'un client resté sans réponse.
 // `ads_memory` = ADS STUDIO (01/10/2026) : ce que Claude a appris des avis de Mathieu sur les ads (⭐ / 👎 + raisons).
 //               Lu par Claude AVANT d'écrire de nouvelles ads ; modifiable dans l'onglet ADS STUDIO → 🧠 Memory.
 //               Le bot Telegram ne le lit pas.
@@ -15,7 +17,7 @@
 // base à chaque message.
 import { sdb } from './server';
 
-export const AGENT_DOC_KEYS = ['knowledge', 'memory', 'ads_memory', 'cm_memory', 'live_welcome', 'support_welcome', 'support_intro'] as const;
+export const AGENT_DOC_KEYS = ['knowledge', 'memory', 'ads_memory', 'cm_memory', 'live_welcome', 'support_welcome', 'support_intro', 'support_followup'] as const;
 export type AgentDocKey = (typeof AGENT_DOC_KEYS)[number];
 /** Plafond d'un document : au-delà, le prompt s'alourdit (coût, lenteur) et l'agent s'y perd. */
 export const AGENT_DOC_MAX = 20_000;
