@@ -93,6 +93,8 @@ export function isPing(text: string): boolean {
   return words.length <= 6 && words.every((w) => PING_WORDS.has(w));
 }
 const HOLDING = /\b(let me check|i'?ll check|come back to you|get back to you|i'?ll look|look into it|i'?ll ask)\b/i;
+// un lien broker ou un montant de dépôt : jamais avant l'intro de Mathieu (20/10/2026)
+const BEFORE_INTRO = /partners\.raisefx|vtaffiliates|puprime\.partners|tradingsphere|xlence|\bdeposit\b|\$\s?\d{3}|\d{3}\s?\$/i;
 const iso = (ms: number) => new Date(ms).toISOString();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -392,17 +394,18 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
           await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'intro', text: intro, conn: job.conn } });
         }
       }
-      if (voiced || introduced) note = `Mathieu's ${voiced ? `personal voice note about their country (${countryName(said, 'en')}) and his ` : ''}intro message (what Algoria is, free access, the partner broker, the app link) were just sent from his account. Do not repeat any of it: if their message asks nothing else, intent "skip"; otherwise answer only what is left.`;
+      if (voiced || introduced) note = `Mathieu's ${voiced ? `personal voice note about their country (${countryName(said, 'en')}) and his ` : ''}intro message (what Algoria is, free access, the partner broker, the app link) were just sent from his account. Do not repeat any of it: it already answers how it works, how to start and the steps (the app walks them through the broker, the deposit and the connection), so no broker link and no deposit amount on top of it. If their message asks nothing else, intent "skip"; otherwise answer only what is left.`;
     }
   }
 
   // L'ACCUEIL VIENT DE PARTIR, EN RÉPONSE À SES PREMIERS MESSAGES. Un simple bonjour ou le message du bouton de l'app :
-  // rien de plus, on attend qu'il dise d'où il vient (19/10/2026, Rahma : la 2e réponse redemandait son pays). Une VRAIE
-  // question (« how are you ? », « what's the minimum ? ») : la réponse part sous l'accueil, sans redemander le pays
-  // (Mathieu, 19/10 : « on lui envoie la bulle, l'explication, et en dessous on répond quand même »).
+  // rien de plus, on attend qu'il dise d'où il vient (19/10/2026, Rahma : la 2e réponse redemandait son pays). Seule la
+  // politesse a sa réponse sous l'accueil (« how are you ? » → « all good, and you ? », Mathieu 19/10). Tout ce qui
+  // touche au fonctionnement, au broker, au dépôt, aux étapes attend son pays : c'est son intro qui y répond (20/10,
+  // Riyaz : « guide me through the steps » → lien RaiseFX et « deposit $500 » juste sous la bulle, « en pleine figure »).
   const welcomeAt = rows.filter((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]').map((r) => Date.parse(r.created_at)).pop();
   const justWelcomed = welcomeAt != null && newbie && !stepDone && !introduced && batch.every((b) => Date.parse(b.created_at) < welcomeAt);
-  if (justWelcomed) note = 'Mathieu\'s welcome (his video bubble + "Hey <name>, welcome to Algoria ! … ask you where you\'re from ?") was JUST sent in answer to these first messages. Only a plain hello ("hi", "hello") or the app\'s ready-made message ("I already have the app, how do I get connected now ?", "book a quick call…", "skip the waiting list…") → intent "skip". A question, even "how are you ?" ("All good thanks, and you ? 🙏🏼"), "what\'s the minimum ?", "how does it work ?" → answer it briefly, under the welcome ("auto" when it is routine), WITHOUT asking where they are from again and without welcoming them again.';
+  if (justWelcomed) note = 'Mathieu\'s welcome (his video bubble + "Hey <name>, welcome to Algoria ! … ask you where you\'re from ?") was JUST sent in answer to these first messages. Only a plain hello ("hi", "hello") or the app\'s ready-made message ("I already have the app, how do I get connected now ?", "book a quick call…", "skip the waiting list…") → intent "skip". Small talk only ("how are you ?", "how is work ?") → a short friendly answer ("All good thanks, and you ? 🙏🏼"), WITHOUT asking where they are from again and without welcoming them again. ANY question about how it works, the steps, creating an account, the broker, depositing, the minimum, the price → intent "skip": Mathieu\'s intro (what Algoria is, free with a partner broker, the app) goes out as soon as they say where they are from, and it answers that. Never a broker link, a deposit amount or the setup steps now.';
 
   // PREMIER CONTACT SANS ACCUEIL (pas de bulle enregistrée, ou l'accueil coupé) : pas de réponse en texte seul à un
   // nouveau venu, la carte va à Mathieu (19/10/2026)
@@ -453,6 +456,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     : SENSITIVE.test(joined) ? 'sujet sensible (argent, plainte, paiement…)'
     : HOLDING.test(draft.text) ? 'réponse d’attente'
     : justWelcomed && /where (are|r) (you|u) from|which country|what country/i.test(draft.text) ? 'redemande son pays juste après l’accueil'
+    // entre l'accueil et son intro : jamais de lien broker ni de montant de dépôt (20/10/2026, Riyaz)
+    : welcomed && !stepDone && !introduced && BEFORE_INTRO.test(draft.text) ? 'lien broker ou dépôt avant son intro (il n’a pas encore dit d’où il vient)'
     : media.length ? `il a aussi envoyé ${media.join(', ')}`
     : (recentAuto ?? []).length >= MAX_AUTO_PER_HOUR ? 'beaucoup de réponses automatiques dans l’heure'
     : !conn.canReply ? 'droit « Reply to messages » coupé dans Telegram Business'
@@ -464,6 +469,11 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // part seule, depuis le compte de Mathieu, après un « en train d'écrire… » réaliste
   await tg('sendChatAction', { business_connection_id: job.conn, chat_id: job.tg_id, action: 'typing' });
   await sleep(Math.min(6000, 1500 + draft.text.length * 25));
+  // IL A RÉÉCRIT PENDANT QU'ON RÉDIGEAIT (20/10/2026, Riyaz : « I am from UK » arrivé 6 s avant l'envoi, la réponse est
+  // partie sans en tenir compte, et son pays est passé pour « répondu » : ni vocal ni intro). On n'envoie pas : son
+  // nouveau message a déjà programmé la réponse suivante, qui reprend tout le fil.
+  const { data: newer } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', last.created_at).limit(1);
+  if (newer?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...extra } };
   const detail = { ...base, draft: draft.text, draft_intent: 'auto' };
   await db.from('member_actions').update({ detail }).eq('id', last.id);
   const err = await sendAsOwner(db, { id: last.id, tg_id: job.tg_id, member_no: member?.member_no ?? null, detail }, draft.text, 'auto', 'algoria-ai');
