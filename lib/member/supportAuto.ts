@@ -55,7 +55,7 @@ const STALE_RUNNING_MS = 5 * 60_000;
 // déjà clients : pas d'accueil (ni bulle ni message), la réponse part directement
 const NO_WELCOME = new Set(['live', 'paused', 'pending_copier']);
 // ce que le bot envoie de lui-même et qui ne RÉPOND à rien : l'accueil, le vocal du pays, le lien différé
-const NOT_AN_ANSWER = new Set(['welcome', 'country_voice', 'intro', 'link', 'live_welcome']);
+const NOT_AN_ANSWER = new Set(['welcome', 'country_voice', 'intro', 'link', 'live_welcome', 'followup']);
 const LINK_AFTER_MS = 2 * 3_600_000;
 // LES CONVERSATIONS DU COMPTE SUPPORT NE SONT ENREGISTRÉES QUE DEPUIS LE 29/09/2026 (10 h 47 UTC). 19/10/2026 : Ben (compte
 // de l'app depuis le 12/08, bulle et questions de Mathieu le 05/09) a reçu la bulle d'accueil « welcome to Algoria » comme
@@ -222,6 +222,8 @@ export async function runSupportJobs(db: Db): Promise<{ done: number; review: nu
   const { data } = await db.from('support_jobs').select('*').eq('status', 'pending').lte('due_at', iso(Date.now())).order('due_at', { ascending: true }).limit(12);
   // les conversations en parallèle (un jour de pub, 20 contacts arrivent en 10 min) ; dans une même conversation,
   // la réponse attend l'accueil (« later » tant qu'il est en cours)
+  // 🔁 les relances (24 h), toutes les 5 minutes
+  if (new Date().getUTCMinutes() % 5 === 0) await runFollowups(db).catch((e) => console.error('[support] relances :', (e as Error).message));
   await Promise.all(((data ?? []) as Job[]).map(async (job) => {
     // verrou : un seul passage traite une ligne donnée
     const { data: locked } = await db.from('support_jobs').update({ status: 'running', updated_at: iso(Date.now()) }).eq('id', job.id).eq('status', 'pending').select('id');
@@ -509,6 +511,82 @@ async function doLink(db: Db, job: Job): Promise<JobResult> {
   if (!r.ok) return { status: 'failed', result: { error: r.description ?? 'refusé' } };
   await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'link', text, conn: job.conn } });
   return { status: 'done', result: { outcome: 'link' } };
+}
+
+// ── LA RELANCE ─────────────────────────────────────────────────────────────────────────────────────────
+// 20/10/2026, Mathieu : « peu importe notre dernier message, s'il attend une réponse et n'en a pas eu, on le relance 24 h
+// après ». Telegram ne laisse le bot écrire depuis son compte que dans les 24 h qui suivent le dernier message du client :
+// la relance part entre 23 h et 23 h 50 après ce message, une seule fois par silence. « Attend une réponse » : notre
+// dernier message est l'accueil, l'intro, le lien de l'app, un vocal ou une bulle de Mathieu, ou contient « ? ». Pas de
+// relance quand c'est lui qui attend (sa carte est chez Mathieu) ni quand le pilote est coupé. Le texte anglais est
+// modifiable dans l'admin (TOOLS → 🔁 SUPPORT FOLLOW-UP, agent_docs 'support_followup', trois textes séparés par « --- ») ;
+// l'italien reste ici.
+const FOLLOW_AFTER_MS = 23 * 3_600_000;
+const FOLLOW_UNTIL_MS = 23 * 3_600_000 + 50 * 60_000;
+export const FOLLOWUP_EN = [
+  "Hey {name}, did you get a chance to watch my video ? Where are you from ? 🙏🏼",
+  "Hey {name}, did you get a chance to check the app ? Any question, I'm here 🙏🏼",
+  "Hey {name}, did you see my last message ? 🙏🏼",
+];
+const FOLLOWUP_IT = [
+  'Ciao {name}, hai avuto modo di guardare il mio video ? Di dove sei ? 🙏🏼',
+  "Ciao {name}, hai avuto modo di dare un'occhiata all'app ? Per qualsiasi domanda sono qui 🙏🏼",
+  'Ciao {name}, hai visto il mio ultimo messaggio ? 🙏🏼',
+];
+/** stage 0 = après l'accueil, 1 = après l'intro ou le lien de l'app, 2 = après autre chose. */
+export function followupText(stage: 0 | 1 | 2, firstName: string | null, it: boolean, doc?: string | null): string {
+  const parts = (doc ?? '').split(/^\s*---\s*$/m).map((p) => p.trim());
+  const tpl = it ? FOLLOWUP_IT[stage] : (parts[stage] || FOLLOWUP_EN[stage]);
+  return tpl.replace(/\{name\}/g, cleanName(firstName)).replace(/ +,/g, ',').replace(/ {2,}/g, ' ');
+}
+const WAITS_VIA = new Set(['welcome', 'intro', 'link', 'country_voice']);
+
+export async function runFollowups(db: Db): Promise<number> {
+  if (!(await flag(db, 'autopilot'))) return 0;
+  const now = Date.now();
+  const { data } = await db.from('member_actions').select('tg_id,created_at,detail').eq('kind', BIZ_KIND).gte('created_at', iso(now - 24 * 3_600_000)).order('created_at', { ascending: true }).limit(3000);
+  const chats = new Map<number, Array<{ created_at: string; detail: Record<string, unknown> }>>();
+  for (const r of (data ?? []) as Array<{ tg_id: number; created_at: string; detail: Record<string, unknown> }>) {
+    const k = Number(r.tg_id);
+    if (!chats.has(k)) chats.set(k, []);
+    chats.get(k)!.push(r);
+  }
+  const { connection, tg } = await import('./businessInbox');
+  const { getAgentDoc } = await import('./agentDocs');
+  let sent = 0;
+  for (const [tgId, rows] of chats) {
+    const clients = rows.filter((r) => r.detail?.from === 'client');
+    const lastClient = clients[clients.length - 1];
+    if (!lastClient) continue;
+    const tc = Date.parse(lastClient.created_at);
+    if (now - tc < FOLLOW_AFTER_MS || now - tc > FOLLOW_UNTIL_MS) continue;
+    const owners = rows.filter((r) => r.detail?.from === 'owner' && Date.parse(r.created_at) > tc);
+    const lastOwner = owners[owners.length - 1];
+    if (!lastOwner) continue; // c'est lui qui attend : sa carte est chez Mathieu
+    const via = String(lastOwner.detail?.via ?? '');
+    const text = String(lastOwner.detail?.text ?? '');
+    if (!(WAITS_VIA.has(via) || text.startsWith('[') || text.includes('?'))) continue;
+    // une seule relance par silence (réussie ou refusée par Telegram)
+    const { data: done } = await db.from('support_jobs').select('id').eq('tg_id', tgId).eq('kind', 'followup').gte('created_at', iso(tc)).limit(1);
+    if (done?.length) continue;
+    const connId = String(lastClient.detail?.conn ?? lastOwner.detail?.conn ?? '');
+    const conn = await connection(connId);
+    if (!conn || !conn.enabled || !conn.canReply) continue;
+    const { data: mrow } = await db.from('members').select('member_no,locale,banned_at').eq('tg_id', tgId).limit(1);
+    const member = (mrow?.[0] ?? null) as { member_no?: number | null; locale?: string | null; banned_at?: string | null } | null;
+    if (member?.banned_at) continue;
+    const it = member?.locale === 'it' || clients.some((c) => ITALIAN.test(String(c.detail?.text ?? '')));
+    const stage: 0 | 1 | 2 = via === 'welcome' ? 0 : WAITS_VIA.has(via) ? 1 : 2;
+    const msg = followupText(stage, String(lastClient.detail?.name ?? '') || null, it, it ? null : await getAgentDoc('support_followup'));
+    await tg('sendChatAction', { business_connection_id: connId, chat_id: tgId, action: 'typing' });
+    await sleep(2000);
+    const r = await tg('sendMessage', { business_connection_id: connId, chat_id: tgId, text: msg, disable_web_page_preview: true });
+    await db.from('support_jobs').insert({ tg_id: tgId, conn: connId, kind: 'followup', due_at: iso(now), status: r.ok ? 'done' : 'failed', payload: { stage, after: via || 'mathieu' }, result: r.ok ? { outcome: 'followup' } : { error: r.description ?? 'refusé' } });
+    if (!r.ok) continue;
+    await db.from('member_actions').insert({ tg_id: tgId, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: 'followup', text: msg, conn: connId } });
+    sent++;
+  }
+  return sent;
 }
 
 // ── « LU » CHEZ MATHIEU ────────────────────────────────────────────────────────────────────────────────

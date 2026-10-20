@@ -103,7 +103,7 @@ export async function runSupportDigest(db: Db, opts: { force?: boolean } = {}): 
   // les chiffres du jour (le pilote)
   const { data: jobs } = await db.from('support_jobs').select('kind,status,result').gte('updated_at', since).limit(1000);
   const count = (o: string) => ((jobs ?? []) as Array<{ result?: { outcome?: string } }>).filter((j) => j.result?.outcome === o).length;
-  const cards = count('review'), welcomes = count('welcome'), skips = count('skip');
+  const cards = count('review'), welcomes = count('welcome'), skips = count('skip'), followups = count('followup');
   if (!autos.length && !pairs.length && !cards && !welcomes) {
     await db.from('member_actions').insert({ tg_id: chat, kind: KIND, status: 'done', done_by: 'algoria-ai', detail: { day, items: [], msgs: [], rules: [] } });
     return { sent: 0, reason: 'journée vide' };
@@ -114,7 +114,7 @@ export async function runSupportDigest(db: Db, opts: { force?: boolean } = {}): 
   const { data: ins } = await db.from('member_actions').insert({ tg_id: chat, kind: KIND, status: 'done', done_by: 'algoria-ai', detail: { day, items: [], msgs: [], rules: [] } }).select('id');
   const digestId = String((ins?.[0] as { id?: string } | undefined)?.id ?? '');
 
-  const head = `🌙 <b>Récap du support · ${day}</b>\n🤖 Réponses parties seules : <b>${autos.length}</b> · 🎥 accueils : ${welcomes} · ⏳ cartes pour toi : ${cards} · 🙈 ignorés (ok, merci…) : ${skips}`;
+  const head = `🌙 <b>Récap du support · ${day}</b>\n🤖 Réponses parties seules : <b>${autos.length}</b> · 🎥 accueils : ${welcomes} · ⏳ cartes pour toi : ${cards} · 🙈 ignorés (ok, merci…) : ${skips}${followups ? ` · 🔁 relances : ${followups}` : ''}`;
   const items = autos.map((r, k) => ({ n: k + 1, id: r.id }));
   const lines = autos.map((r, k) => `<b>${k + 1}.</b> ${esc(who(r.detail))} : « ${esc(short(r.detail.text, 140))} »\n→ ${esc(short(r.detail.draft, 260))}`);
   const foot = autos.length

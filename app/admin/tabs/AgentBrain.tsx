@@ -11,7 +11,7 @@ import { dimP, inp, miniBtn, okBtn, secH } from '../_shared';
 interface Version { id: number; created_at: string; created_by: string | null; size: number }
 interface Doc { content: string; updated_at: string | null; updated_by: string | null; versions: Version[]; max: number }
 
-type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory' | 'live_welcome' | 'support_welcome' | 'support_intro';
+type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory' | 'live_welcome' | 'support_welcome' | 'support_intro' | 'support_followup';
 const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?: string }> = {
   knowledge: {
     title: '🧠 ALGORIA AI — KNOWLEDGE',
@@ -43,6 +43,11 @@ const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?
     title: '💬 SUPPORT — MESSAGE AFTER THE COUNTRY',
     intro: 'Sent from your Telegram account when a new contact says where they are from, right after your voice note for that country. Your usual “ALGORIA is an AI…” message, ending with the app link.',
     empty: 'Empty: the default text is used (your “ALGORIA is an AI…” message with the app link).',
+  },
+  support_followup: {
+    title: '🔁 SUPPORT — FOLLOW-UP',
+    intro: 'Sent from your Telegram account about 23 h after a contact’s last message, when your last message was waiting for an answer and they never replied (once per silence: Telegram blocks automatic messages after 24 h). Three texts, separated by a line with only ---: after the welcome bubble, after your intro or the app link, after anything else. {name} = their first name. Italian contacts get the Italian version.',
+    empty: 'Empty: the default texts are used (« did you get a chance to watch my video ? Where are you from ? », « did you get a chance to check the app ? », « did you see my last message ? »).',
   },
   ads_memory: {
     title: '🧠 ADS STUDIO — WHAT CLAUDE LEARNED',

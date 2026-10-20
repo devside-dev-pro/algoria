@@ -21,6 +21,7 @@ export function ToolsTab() {
             <AgentBrain docKey="live_welcome" />
             <AgentBrain docKey="support_welcome" />
             <AgentBrain docKey="support_intro" />
+            <AgentBrain docKey="support_followup" />
             {/* 📣 ANNONCE GROUPÉE — née du basculement S1 → S2 : prévenir 17 membres un par un depuis le
                 fil BOT ACTIVITY, c'est 17 clics et la certitude d'en oublier un. L'audience est résolue
                 CÔTÉ SERVEUR (le navigateur n'envoie qu'un nom de segment), et l'étiquette empêche qu'un
