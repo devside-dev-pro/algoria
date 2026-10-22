@@ -48,7 +48,7 @@ export function renderBanner(o: { kicker: string; title: string; theme: number; 
           <div style={{ display: 'flex', flexDirection: 'column', marginLeft: 30, marginTop: 12 }}>
             <span style={{ fontSize: 24, fontWeight: 700, color: '#e8f0ff', lineHeight: 1 }}>Watch the AI trade live, free.</span>
             <span style={{ fontSize: 20, color: 'rgba(147,165,196,.9)', lineHeight: 1, marginTop: 10 }}>Scan to get in.</span>
-            <span style={{ fontSize: 24, fontWeight: 700, color: th.a, lineHeight: 1, marginTop: 14 }}>algoria.tech</span>
+            <span style={{ fontSize: 24, fontWeight: 700, color: th.a, lineHeight: 1, marginTop: 14 }}>getalgoria.com</span>
           </div>
         </div>
         <div style={{ position: 'absolute', right: 48, bottom: 48, display: 'flex', alignItems: 'center' }}>

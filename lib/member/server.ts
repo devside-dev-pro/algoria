@@ -1,4 +1,4 @@
-// Cœur SERVEUR de l'espace membre (app.algoria.tech) — n'importer QUE depuis des routes/API server-side.
+// Cœur SERVEUR de l'espace membre (app.getalgoria.com) — n'importer QUE depuis des routes/API server-side.
 // 3 responsabilités : client Supabase service-role, session signée (cookie), chiffrement des identifiants MT5.
 //
 // Env Vercel (server-only) :

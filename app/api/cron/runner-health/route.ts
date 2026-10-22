@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   await pushToAdmins({
     title: '🚨 ALGORIA RUNNER DOWN',
     body: `No candle written for ${staleMin === Infinity ? '∞' : staleMin} min — the runner looks dead or frozen. Check Railway.`,
-    url: adminLink('/'), // absolu : sur app.algoria.tech, '/admin' est réécrit en '/member/admin' (page morte)
+    url: adminLink('/'), // absolu : sur app.getalgoria.com, '/admin' est réécrit en '/member/admin' (page morte)
     tag: 'runner-watchdog',
   }).catch(() => {});
   return NextResponse.json({ ok: false, staleMin, alerted: true });

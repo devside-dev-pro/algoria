@@ -59,22 +59,22 @@ export const CTA_TEMPLATES: Array<{ id: string; label: string; target: 'app' | '
   {
     id: 'results', label: '📈 Résultats du jour → app', target: 'app',
     text: "📈 <b>Algoria has been trading all day.</b>\n\nEvery trade, every win, every stop — live in the app, at your own copy size. Nothing hidden, nothing rounded up.\n\nSee what your account would have done today 👇",
-    btn: '🚀 OPEN ALGORIA', url: 'https://app.algoria.tech/member',
+    btn: '🚀 OPEN ALGORIA', url: 'https://app.getalgoria.com/member',
   },
   {
     id: 'start', label: '⚡ Commencer à copier → wizard', target: 'app',
     text: "⚡ <b>The AI trades, your account copies. That's the whole thing.</b>\n\nYou keep your money in <i>your own</i> broker account — we never touch it. Withdraw whenever you want. We recommend starting with $500.\n\nSetup takes about 5 minutes 👇",
-    btn: '⚡ START COPYING', url: 'https://app.algoria.tech/member/onboarding',
+    btn: '⚡ START COPYING', url: 'https://app.getalgoria.com/member/onboarding',
   },
   {
     id: 'install', label: '📲 Installer l\'app → download', target: 'app',
     text: "📲 <b>Algoria on your home screen.</b>\n\nThe live AI feed, your copying status, and a notification the moment a trade closes green. No App Store, installs in seconds, free forever.",
-    btn: '📲 INSTALL THE APP', url: 'https://app.algoria.tech/download',
+    btn: '📲 INSTALL THE APP', url: 'https://app.getalgoria.com/download',
   },
   {
     id: 'proof', label: '🎓 Comprendre en 5 min → academy', target: 'app',
     text: "🎓 <b>New here? Start with this.</b>\n\nA few minutes to understand exactly what Algoria is, how it trades gold and crypto, and why your money never leaves your own account.",
-    btn: '🎓 OPEN THE ACADEMY', url: 'https://app.algoria.tech/academy',
+    btn: '🎓 OPEN THE ACADEMY', url: 'https://app.getalgoria.com/academy',
   },
   {
     id: 'stuck', label: '💬 Bloqué dans ton inscription → toi', target: 'mathieu',
@@ -94,7 +94,7 @@ export const CTA_TEMPLATES: Array<{ id: string; label: string; target: 'app' | '
   {
     id: 'referral', label: '💸 Parrainage 10% → app', target: 'app',
     text: "💸 <b>Bring a friend, earn 10% of what they deposit.</b>\n\nUp to $200 per friend, paid in USDT straight to your wallet. They fund their account, you get paid — and they get the same AI you're running.\n\nYour personal link is in the app 👇",
-    btn: '💸 GET MY LINK', url: 'https://app.algoria.tech/member/profile',
+    btn: '💸 GET MY LINK', url: 'https://app.getalgoria.com/member/profile',
   },
 ];
 

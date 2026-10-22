@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { MemberChrome } from './ui';
 import { THEME_BOOT } from '@/lib/member/theme';
 
-// Espace MEMBRE (PWA app.algoria.tech) — back-office des membres : statut de copie, risque, flux IA, académie.
+// Espace MEMBRE (PWA app.getalgoria.com) — back-office des membres : statut de copie, risque, flux IA, académie.
 // Rien ici ne touche au cockpit opérateur (/app) : frontière structurelle, les membres n'y ont pas accès.
 export const metadata: Metadata = {
   title: 'Algoria Members',

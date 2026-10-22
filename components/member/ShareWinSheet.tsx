@@ -36,7 +36,7 @@ export function ShareWinSheet({ win, code, copying, rewardRate, onClose }: { win
   const [format, setFormat] = useState<CardFormat>('story');
   const [preview, setPreview] = useState<{ url: string; blob: Blob } | null>(null);
   const [copied, setCopied] = useState(false);
-  const refLink = code ? `https://app.algoria.tech/r/${code}` : 'https://algoria.tech';
+  const refLink = code ? `https://app.getalgoria.com/r/${code}` : 'https://getalgoria.com';
   // LE LIEN PORTE LE GAIN (?w=ticket) : la page d'invitation en fait son og:image (la carte, rendue serveur avec
   // le QR du membre). WhatsApp et Telegram, qui n'envoient qu'un texte par lien, affichent donc la carte en aperçu.
   const link = code && win ? `${refLink}?w=${encodeURIComponent(win.ticket)}` : refLink;

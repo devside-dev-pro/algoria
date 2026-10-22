@@ -137,7 +137,7 @@ export default function DownloadPage() {
   /** Copie l'adresse — le secours UNIVERSEL : coller dans le vrai navigateur marche partout, quelle que
    *  soit l'app dans laquelle la personne est enfermée et quel que soit l'endroit où son menu se cache. */
   const copyLink = async () => {
-    const url = 'https://app.algoria.tech/download';
+    const url = 'https://app.getalgoria.com/download';
     try {
       await navigator.clipboard.writeText(url);
     } catch {
@@ -231,7 +231,7 @@ export default function DownloadPage() {
         </button>
 
         {/* ── PORTE D'ENTRÉE (01/08) — cette page n'en avait AUCUNE. Son seul bouton installait la PWA, son
-            seul lien renvoyait à algoria.tech : quelqu'un qui arrivait ici pour CRÉER SON COMPTE tournait en
+            seul lien renvoyait à getalgoria.com : quelqu'un qui arrivait ici pour CRÉER SON COMPTE tournait en
             rond dans les instructions d'installation. Plusieurs cas signalés deux jours de suite, dont une
             personne qui a fini par écrire « still cannot get in to register » — littéralement exact.
             Et le piège était conceptuel autant qu'ergonomique : installer n'est PAS nécessaire, l'app
@@ -346,7 +346,7 @@ export default function DownloadPage() {
               </div>
             </div>
           ))}
-          <a href="https://algoria.tech/track-record" target="_blank" rel="noreferrer"
+          <a href="https://getalgoria.com/track-record" target="_blank" rel="noreferrer"
             style={{ marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '12px 14px', borderRadius: 12, textDecoration: 'none', border: '1px solid rgba(245,194,74,.4)', background: 'rgba(245,194,74,.07)' }}>
             <span style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.45 }}>
               <b style={{ color: 'var(--gold)' }}>Don&rsquo;t trust, verify.</b> Every real trade since July, red months included.
@@ -437,7 +437,7 @@ export default function DownloadPage() {
 
         <p style={{ fontSize: 10.5, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.5, margin: 0 }}>
           Trading involves risk of loss. Educational &amp; entertainment content — not financial advice.
-          <br /><a href="/" style={{ color: 'var(--dim)' }}>algoria.tech</a>
+          <br /><a href="/" style={{ color: 'var(--dim)' }}>getalgoria.com</a>
         </p>
       </div>
     </main>

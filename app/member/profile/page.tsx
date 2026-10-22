@@ -204,7 +204,7 @@ export default function Profile() {
           {/* lien de partage */}
           <div style={{ display: 'flex', gap: 8 }}>
             <span className="mono" style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-strong)', fontSize: 12.5, color: 'var(--cyan)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              app.algoria.tech/r/{referral.code}
+              app.getalgoria.com/r/{referral.code}
             </span>
             <button
               onClick={() => setInvite(true)}

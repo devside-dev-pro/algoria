@@ -8,7 +8,7 @@ import 'dotenv/config'; // charge le .env AVANT le client MetaApi (no-op sur Rai
 //   tsx scripts/backfill-scalp-cache.ts Gold       (force le symbole broker si besoin)
 //   M5_PAGES=120 tsx scripts/backfill-scalp-cache.ts   (va chercher encore plus loin)
 // Puis : git add backtest/.cache/XAUUSD-M5-15.json && git commit -m "chore: deeper M5" && git push
-//        → dis-le moi et je régénère algoria.tech/backtest en 12 mois, tous les trades.
+//        → dis-le moi et je régénère getalgoria.com/backtest en 12 mois, tous les trades.
 import { writeFileSync } from 'node:fs';
 import { connectMaster } from '../runner/metaapi/client';
 import { backfill } from '../runner/metaapi/candles';

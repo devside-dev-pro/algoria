@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // CONNEXION EN UN TAP DEPUIS TELEGRAM — la cible du bouton « Open Algoria » que le bot envoie juste après
-// le START (voir app/api/telegram/route.ts). Raison d'être : un lien vers app.algoria.tech cliqué dans
+// le START (voir app/api/telegram/route.ts). Raison d'être : un lien vers app.getalgoria.com cliqué dans
 // Telegram s'ouvre dans le navigateur INTÉGRÉ de Telegram ; le login natif renvoie alors la personne sur
 // Telegram pour taper START, ce qui emporte l'onglet qui interrogeait le serveur. La connexion réussit
 // côté bot mais ne se termine jamais côté app — la personne reste bloquée sur l'écran d'attente.

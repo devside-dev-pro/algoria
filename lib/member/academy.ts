@@ -31,7 +31,7 @@ export interface QuizQuestion { q: string; options: string[]; answer: number; wh
 
 const pct = (r: number) => `${Math.round(r * 100)}%`;
 const usd = (n: number) => `$${n.toLocaleString('en-US')}`;
-const TRACK = { href: 'https://algoria.tech/track-record', label: 'algoria.tech/track-record' };
+const TRACK = { href: 'https://getalgoria.com/track-record', label: 'getalgoria.com/track-record' };
 
 export const ACADEMY: AcademyModule[] = [
   {

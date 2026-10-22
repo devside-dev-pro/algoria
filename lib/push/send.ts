@@ -3,7 +3,7 @@
 //
 // Env (Railway ET Vercel, server-only) :
 //   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY — paire générée via `npx web-push generate-vapid-keys`
-//   VAPID_SUBJECT — contact (ex. mailto:contact@algoria.tech)
+//   VAPID_SUBJECT — contact (ex. mailto:contact@getalgoria.com)
 // Env Vercel (client) : NEXT_PUBLIC_VAPID_PUBLIC_KEY = la même clé publique.
 import webpush from 'web-push';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -21,7 +21,7 @@ function configure(): boolean {
   const pub = process.env.VAPID_PUBLIC_KEY ?? process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const priv = process.env.VAPID_PRIVATE_KEY;
   if (!pub || !priv) return false; // pas configuré → no-op silencieux (ne casse jamais le trading)
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT ?? 'mailto:contact@algoria.tech', pub, priv);
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT ?? 'mailto:contact@getalgoria.com', pub, priv);
   ready = true;
   return true;
 }

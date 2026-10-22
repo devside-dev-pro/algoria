@@ -2,7 +2,7 @@ import 'dotenv/config';
 // BACKTEST COMBINÉ « TOUS LES TRADES » SUR 12 MOIS — tourne LÀ OÙ sont les données + les credentials
 // (Railway ou ta machine). Va chercher le M5 (scalp) ET le H1 (swings) directement chez le broker, lance le
 // backtest combiné (un seul compte, 1% de risque/trade), et IMPRIME un petit JSON de résultat à copier-coller.
-// Aucun fichier à transférer, aucun git : tu colles la sortie et je régénère algoria.tech/backtest.
+// Aucun fichier à transférer, aucun git : tu colles la sortie et je régénère getalgoria.com/backtest.
 //
 //   npx tsx scripts/backtest-12mo.ts            (symboles = ALGORIA_SYMBOL / BTCUSD_SYMBOL)
 //   npx tsx scripts/backtest-12mo.ts Gold BTCUSD

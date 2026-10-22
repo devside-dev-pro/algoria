@@ -6,7 +6,7 @@ import { Login } from '@/components/Login';
 import { Cockpit } from '@/components/Cockpit';
 
 // Cockpit opérateur (protégé) — déplacé de "/" vers "/app" pour libérer le domaine racine au funnel public.
-// Source OBS : algoria.tech/app?broadcast=1
+// Source OBS : getalgoria.com/app?broadcast=1
 export default function AppPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);

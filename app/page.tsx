@@ -6,7 +6,7 @@ import { tgHref } from '@/lib/telegram';
 import { WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
 import { Testimonials } from '@/components/Testimonials';
 
-// Funnel PUBLIC (domaine racine) : ce que voit un viewer qui tape algoria.tech (lien en bio TikTok).
+// Funnel PUBLIC (domaine racine) : ce que voit un viewer qui tape getalgoria.com (lien en bio TikTok).
 // VERSION CLOSING — une seule page qui déroule l'argumentaire complet : bannière live, hero, PREUVE
 // (vrais gains via /api/public/proof, wins only), vidéo de bienvenue (env), how-it-works, FAQ
 // anti-objections (honnête : on gagne via les brokers partenaires — la transparence close), CTA final.

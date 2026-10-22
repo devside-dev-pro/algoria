@@ -1,5 +1,5 @@
 'use client';
-// ALGORIA ADMIN — le back-office CRM de l'opérateur (admin.algoria.tech). Desktop-first, hors coque membre.
+// ALGORIA ADMIN — le back-office CRM de l'opérateur (admin.getalgoria.com). Desktop-first, hors coque membre.
 // 6 espaces : DASHBOARD (les chiffres qui comptent), QUEUE (à appliquer dans Social Trade Hub),
 // MEMBERS (le CRM : recherche, statuts, comptes), DEPOSITS (le registre des dépôts broker → bilan
 // mensuel exportable en CSV), AFFILIATE (l'argent des parrains), TOOLS (whitelist, push).

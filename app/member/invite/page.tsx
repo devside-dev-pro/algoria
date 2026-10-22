@@ -30,7 +30,7 @@ async function referrerFirstName(code: string): Promise<string | null> {
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
-const ORIGIN = 'https://app.algoria.tech';
+const ORIGIN = 'https://app.getalgoria.com';
 
 /** Le gain partagé : uniquement un trade RÉEL, clôturé en gain (même règle anti-falsification que /api/card/win). */
 async function sharedWin(ticket: string) {
