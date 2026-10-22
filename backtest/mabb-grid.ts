@@ -176,4 +176,25 @@ effect('EMA rapide / lente', PAIRS.map(([f, s]): [string, (g: G) => boolean] => 
 effect('EMA de tendance', TRENDS.map((t): [string, (g: G) => boolean] => [`${t}`, (g) => g.c.trend === t]));
 effect('filtre ADX', ADX.map(([a, d]): [string, (g: G) => boolean] => [a ? `≥${a}${d ? '+DI' : ''}` : 'off', (g) => g.c.adxMin === a && g.c.di === d]));
 effect('RR', RRS.map((r): [string, (g: G) => boolean] => [`${r}`, (g) => g.c.rr === r]));
+// ===== Les réglages demandés (EMA courtes + ADX, RR ≥ 2) face à l'EA actuel, sur toute la fenêtre =====
+console.log('\n── RÉGLAGES DEMANDÉS FACE À L’EA ACTUEL (2 ans · 1re année / 2e année · depuis le 1er juin 2026 · hasard sur 20 tirages)');
+const since = (res: ReturnType<typeof run>) => { const ts = res.trades.filter((t) => t.openT >= Date.UTC(2026, 5, 1)); return ts.reduce((a, t) => a + t.pnl, 0); };
+const CANDIDATES: Cfg[] = [
+  { fast: 9, slow: 21, trend: 200, adxMin: 0, di: false, rr: 2, catchUp: true },
+  { fast: 9, slow: 21, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
+  { fast: 8, slow: 13, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
+  { fast: 5, slow: 13, trend: 200, adxMin: 0, di: false, rr: 2, catchUp: true },
+  { fast: 5, slow: 13, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
+  { fast: 5, slow: 13, trend: 200, adxMin: 25, di: false, rr: 2, catchUp: true },
+  { fast: 5, slow: 13, trend: 200, adxMin: 20, di: true, rr: 2, catchUp: true },
+  { fast: 5, slow: 13, trend: 200, adxMin: 20, di: false, rr: 2.5, catchUp: true },
+  { fast: 5, slow: 10, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
+  { fast: 3, slow: 8, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
+];
+for (const c of CANDIDATES) {
+  const res = run(c), all = st(res, 'all');
+  const nets = Array.from({ length: 20 }, (_, k) => st(run(c, { randomDir: true, seed: 11 + 31 * k }), 'all').net);
+  console.log(`   ${label(c).padEnd(40)} │ ${cell(all)} · DD ${fmt(all.dd).padStart(8)} $ │ PF ${st(res, 'h1').pf.toFixed(2)} / ${st(res, 'h2').pf.toFixed(2)} │ juin→ ${fmt(since(res)).padStart(8)} $ │ bat ${nets.filter((v) => v < all.net).length}/20`);
+}
+
 console.log('\nLecture : seul le chiffre de l’année jugée compte. Un réglage brillant l’année de choix et quelconque l’année jugée a été trouvé par chance.');
