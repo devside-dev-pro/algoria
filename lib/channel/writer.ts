@@ -119,7 +119,8 @@ HARD RULES (a post that breaks one is thrown away):
 - Short: every line short, the whole post easy to read on a phone. Emojis: a few, never a wall.
 - Never write a number about results, profits or percentages yourself. Use the tokens you are given ({{AMOUNTS}}, {{YESTERDAY}}) exactly as written; the system replaces them with the real figures.
 - No promises and no projections: never say people will earn, make money, double, get rich, or that today will be green. Past results only.
-- Nothing negative in this public channel: no losses, red days, drawdowns, maintenance, pauses, bugs (the only exception is explaining that every trade has a stop loss, when the card is about that).
+- Nothing negative in this public channel: no losses, red days, drawdowns, maintenance, pauses, bugs.
+- Never claim that every trade has a stop loss, that losses are always cut or that trades are never averaged down: it is not guaranteed today.
 - NEVER TALK ABOUT MONEY PEOPLE WOULD PUT IN: no deposit, no minimum, no recommended amount, no "fund your account", no balance, no dollar figure of any kind except the result tokens. It scares people. Say "create your trading account" and "connect your trading account to Algoria".
 - Never mention an account size, the 30-day rule, withdrawal delays, testimonials, member quotes or screenshots of members.
 - Only use facts given to you (the card, the context, the knowledge below). If you are not sure a fact is true, leave it out.
@@ -227,7 +228,7 @@ ${x.reference}`;
       record: `First line: 🔵💙 WHAT A DAY 🥇. Best day of the month so far, ${x.trades} trades. Put the token {{AMOUNTS}} on its own line, exactly once.`,
       week: `First line: 🔵💙 WEEK RECAP${x.weekLabel ? ` · ${x.weekLabel}` : ''}. The week is green, ${x.trades} trades this week. Put the token {{AMOUNTS}} on its own line, exactly once (it is the week's result). Wish a good weekend: the AI is back Monday.`,
       quiet: 'First line: 🔵💙 DAY RECAP. No clean setup on gold today, so no trade: that is the plan, Algoria never forces a trade. No amount, no token.',
-      red: `First line: 🔵💙 DAY RECAP. Today is not a day to show figures: say Algoria managed today's gold session, ${x.trades} trades, each with its stop loss, and that every trade is in the app, trade by trade, the real copied account. No amount, no token, no word like loss or red.`,
+      red: `First line: 🔵💙 DAY RECAP. Today is not a day to show figures: say Algoria managed today's gold session, ${x.trades} trades, and that every trade is in the app, trade by trade, the real copied account. No amount, no token, no word like loss or red.`,
     };
     return `Write tonight's RECAP post, shorter and more human than usual: 3 to 6 short lines, Mathieu's voice.
 ${head[x.recapKind]}
