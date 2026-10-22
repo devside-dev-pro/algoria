@@ -52,7 +52,7 @@ export default function MemberLogin() {
       poll.current = setInterval(async () => {
         const p = (await fetch(`/api/member/tglogin?code=${d.code}`).then((x) => x.json()).catch(() => null)) as { ok?: boolean; denied?: boolean; expired?: boolean } | null;
         // sur le sous-domaine ADMIN, on atterrit directement sur le back-office CRM (pas sur le Home membre)
-        const dest = typeof window !== 'undefined' && window.location.hostname.startsWith('admin.') ? '/admin' : '/member';
+        const dest = afterLogin();
         if (p?.ok) { if (poll.current) clearInterval(poll.current); router.replace(dest); }
         else if (p?.denied) { if (poll.current) clearInterval(poll.current); router.replace('/member/denied'); }
         else if (p?.expired) { if (poll.current) clearInterval(poll.current); setLink(null); setPhase('expired'); }
@@ -121,6 +121,16 @@ export default function MemberLogin() {
   );
 }
 
+/** Où aller une fois connecté. Le sous-domaine admin → le back-office ; sinon ?next=/member/… quand une page
+ *  membre a renvoyé ici (la déclaration de l'incident du 22/10, ouverte depuis le DM du bot), sinon l'accueil.
+ *  Seuls les chemins /member/… sont acceptés : jamais une redirection vers un autre site. */
+function afterLogin(): string {
+  if (typeof window === 'undefined') return '/member';
+  if (window.location.hostname.startsWith('admin.')) return '/admin';
+  const next = new URLSearchParams(window.location.search).get('next') ?? '';
+  return /^\/member\/[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(next) ? next : '/member';
+}
+
 /** Saisie du code à 6 chiffres émis par le bot (/code). Replié par défaut : le chemin normal reste le
  *  bouton Telegram — ceci est le secours de ceux que les deux autres portes n'atteignent pas. */
 function CodeEntry({ t }: { t: (k: string) => string }) {
@@ -141,7 +151,7 @@ function CodeEntry({ t }: { t: (k: string) => string }) {
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; denied?: boolean; error?: string };
       if (d.denied) { router.replace('/member/denied'); return; }
       if (!r.ok || !d.ok) { setErr(d.error ?? 'this code is not valid'); setCode(''); return; }
-      router.replace(window.location.hostname.startsWith('admin.') ? '/admin' : '/member');
+      router.replace(afterLogin());
     } catch {
       setErr('network error — try again');
     } finally {

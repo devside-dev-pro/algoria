@@ -7,6 +7,7 @@ import { BROKERS } from '@/lib/member/brokers';
 import { estimateCommission } from '@/lib/member/commissions';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 import { ctaKeyboard, asLocale, APP_URL } from '@/lib/member/i18n';
+import { affectedMembers } from '@/lib/member/incident';
 import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
 import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, winbackFollowup, type OffboardReason, type WinbackGroup } from '@/lib/member/winback';
 import { summarizeTrack, fmtPct } from '@/lib/member/trackFacts';
@@ -337,7 +338,7 @@ type Body = {
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
     setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; resetOnboarding?: number; offboardBatch?: Array<{ tg_id: number; reason?: string }>; connectSth?: string; winbackList?: boolean; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
-    botBroadcast?: { audience: 'pending' | 'live' | 'stalled'; text: string; tag: string; cta?: boolean };
+    botBroadcast?: { audience: 'pending' | 'live' | 'stalled' | 'incident'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
     editMember?: { tg_id: number; field: string; value: string | null };
     offerBlast?: { text?: string; title?: string; pushBody?: string; url?: string; dryRun?: boolean };
@@ -1535,6 +1536,9 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       const { data: submitted } = await db.from('member_actions').select('tg_id').eq('kind', 'connect');
       const hasSubmitted = new Set((submitted ?? []).map((r) => Number(r.tg_id)));
       targets = ((ms ?? []) as typeof targets).filter((m) => !hasSubmitted.has(Number(m.tg_id)));
+    } else if (audience === 'incident') {
+      // 🚨 INCIDENT DU 21-22/10/2026 : les membres qui copiaient cette nuit-là (lib/member/incident.ts)
+      targets = (await affectedMembers(db)).map((m) => ({ tg_id: m.tg_id, member_no: m.member_no, tg_name: m.tg_name, locale: m.locale }));
     } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });
 
     // DÉJÀ PRÉVENUS SOUS CETTE ÉTIQUETTE → on les saute. `status='done'` est ESSENTIEL et non
@@ -1569,7 +1573,10 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
         // actifs → on les envoie sur l'accueil de l'app, pas sur l'onboarding qu'ils ont déjà franchi.
         // 'stalled' n'a JAMAIS vu l'accueil : le renvoyer sur /member l'y ferait rebondir vers l'onboarding.
         // On l'envoie directement là où il s'est arrêté — un clic de moins sur le seul segment qui décroche.
-        const bMarkup = body.botBroadcast.cta ? ctaKeyboard(asLocale(m.locale), audience === 'stalled' ? '/member/onboarding' : '/member') : undefined;
+        const bMarkup = !body.botBroadcast.cta ? undefined
+          // l'incident : un seul bouton, droit sur la déclaration (pas de canal ni d'onboarding ce jour-là)
+          : audience === 'incident' ? { inline_keyboard: [[{ text: '📝 Tell me where you stand', url: `${APP_URL}/member/incident` }]] }
+          : ctaKeyboard(asLocale(m.locale), audience === 'stalled' ? '/member/onboarding' : '/member');
         const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ chat_id: Number(m.tg_id), text: body_, parse_mode: 'HTML', disable_web_page_preview: true, ...(bMarkup ? { reply_markup: bMarkup } : {}) }),
