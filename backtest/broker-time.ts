@@ -4,8 +4,10 @@
 // d'été américaine (2e dimanche de mars → 1er dimanche de novembre) et UTC+2 le reste de l'année. Les premiers labos
 // (ea-arena.ts, mabb-arena.ts) prenaient UTC+3 toute l'année : de novembre à mars, leurs heures de session étaient
 // décalées d'une heure par rapport à celles qu'un EA lit dans TimeCurrent(). lib/engine/zone.ts, lui, recalibre le
-// décalage sur les D1 du broker ; ici on n'a que des M5, d'où la règle du calendrier américain, et `reopenCheck`
-// pour vérifier sur les bougies que la reprise quotidienne tombe toujours à la même heure serveur.
+// décalage sur les D1 du broker ; ici la règle du calendrier américain, et `d1Check` pour la confronter aux D1 du
+// broker (une D1 ouvre à minuit heure serveur : son heure d'ouverture en UTC donne le vrai décalage). `reopenCheck`
+// seul ne prouve rien sur l'horloge du broker : l'or reprend à 18 h New York, que la règle « New York + 7 h » place à
+// 1 h quel que soit le serveur ; il ne repère que les trous de données.
 import type { Bar } from '../lib/engine/types';
 
 const HOUR = 3_600_000, DAY = 86_400_000;
@@ -37,7 +39,7 @@ export function brokerClock(bars: Bar[], barMs = 300_000): BrokerClock {
   return c;
 }
 
-/** Contrôle : heure serveur de la première bougie après chaque pause quotidienne (trou de 30 min à 12 h), en %. */
+/** Heure serveur de la première bougie après chaque trou de 30 min à 12 h (reprise quotidienne, ou trou de données). */
 export function reopenCheck(bars: Bar[], clock: BrokerClock): string {
   const hist = new Map<number, number>(); let total = 0;
   for (let i = 1; i < bars.length; i++) {
@@ -45,5 +47,15 @@ export function reopenCheck(bars: Bar[], clock: BrokerClock): string {
     if (gap < 30 * 60_000 || gap > 12 * HOUR) continue;
     hist.set(clock.openHour[i], (hist.get(clock.openHour[i]) ?? 0) + 1); total++;
   }
-  return [...hist.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([h, k]) => `${h} h ${Math.round((100 * k) / total)} %`).join(' · ') + ` (${total} reprises)`;
+  return [...hist.entries()].sort((a, b) => b[1] - a[1]).map(([h, k]) => `${k} à ${h} h`).join(' · ') + ` (${total} reprises)`;
+}
+
+/** Contrôle de l'horloge : décalage réel lu sur chaque D1 du broker (ouverture = minuit serveur) contre brokerOffset. */
+export function d1Check(d1: Bar[]): string {
+  let ok = 0; const bad: string[] = [];
+  for (const b of d1) {
+    const real = (DAY - (b.time % DAY)) % DAY;
+    if (real === brokerOffset(b.time + 12 * HOUR)) ok++; else bad.push(`${new Date(b.time + real).toISOString().slice(0, 10)} (UTC+${real / HOUR})`);
+  }
+  return `${ok}/${d1.length} D1 conformes` + (bad.length ? ` · écarts : ${bad.slice(0, 12).join(', ')}${bad.length > 12 ? ` … (+${bad.length - 12})` : ''}` : '');
 }

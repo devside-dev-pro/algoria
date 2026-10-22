@@ -27,7 +27,7 @@
 //   npx tsx backtest/mabb-grid.ts XAUUSD            (bougies : node scripts/pull-cache.mjs XAUUSD M5)
 import { existsSync, readFileSync } from 'node:fs';
 import type { Bar } from '../lib/engine/types';
-import { brokerClock, reopenCheck } from './broker-time';
+import { brokerClock, d1Check, reopenCheck } from './broker-time';
 
 const sym = process.argv[2] ?? 'XAUUSD';
 const path = `backtest/.cache/${sym}-M5-15.json`;
@@ -154,7 +154,8 @@ for (const [fast, slow] of PAIRS) for (const trend of TRENDS) for (const [adxMin
   grid.push({ c, h1: st(res, 'h1'), h2: st(res, 'h2'), all: st(res, 'all') });
 }
 console.log(`GRILLE EMA COURTES + ADX + RR — ${sym} · ${m5.length} bougies M5 · ${new Date(m5[0].time).toISOString().slice(0, 10)} → ${new Date(m5[m5.length - 1].time).toISOString().slice(0, 10)} · coupure ${new Date(cut).toISOString().slice(0, 10)} · ${daysIn.h1} + ${daysIn.h2} jours · 1 lot · coûts ${COST} $/oz`);
-console.log(`Reprise quotidienne en heure serveur : ${reopenCheck(m5, T)} — une seule heure attendue si le calendrier d'été est le bon.`);
+console.log(`Reprises après un trou (heure serveur) : ${reopenCheck(m5, T)}.`);
+console.log(`Horloge serveur contre les D1 du broker : ${existsSync(`backtest/.cache/${sym}-D1-15.json`) ? d1Check(JSON.parse(readFileSync(`backtest/.cache/${sym}-D1-15.json`, 'utf8')) as Bar[]) : `D1 absentes → node scripts/pull-cache.mjs ${sym} D1`}.`);
 console.log(`${grid.length} réglages. Règle de choix écrite à l'avance : ≥ ${MIN_TRADES_PER_DAY} trades/jour sur l'année de choix, puis meilleur PF.`);
 
 { const res = run({ fast: 9, slow: 21, trend: 200, adxMin: 0, di: false, rr: 2, sl: 1.5, catchUp: true });

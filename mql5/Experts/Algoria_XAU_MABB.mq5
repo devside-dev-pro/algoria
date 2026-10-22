@@ -49,8 +49,8 @@ input double            InpBBDeviation     = 2.0;              // Bollinger : é
 input int               InpRSIPeriod       = 14;               // RSI : période
 input double            InpRSIExtreme      = 30.0;             // RSI : seuil de survente (surachat = 100 - seuil)
 input int               InpADXPeriod       = 14;               // ADX : période (iADX de MT5)
-input double            InpADXMin          = 20;               // ADX minimum pour un signal EMA (0 = sans filtre)
-input bool              InpADXUseDI        = true;             // ADX : exiger +DI > -DI à l'achat (et l'inverse à la vente)
+input double            InpADXMin          = 20;               // ADX minimum pour un signal EMA (0 = sans seuil ; voir aussi InpADXUseDI)
+input bool              InpADXUseDI        = true;             // ADX : exiger +DI > -DI à l'achat, l'inverse à la vente (false + ADX 0 = sans filtre)
 
 input group "Quota journalier"
 input int               InpMinTradesPerDay = 4;                // Minimum visé de trades par jour
@@ -168,7 +168,8 @@ void OnTimer()
    ForcedExit(now);
   }
 
-// minutes avant la fin de la séance de trading en cours, d'après les horaires du broker (-1 : pas de fin dans la journée)
+// minutes avant la fin de la séance de trading en cours, d'après les horaires du broker (-1 : séance inconnue, ou qui
+// se poursuit sans coupure le lendemain)
 int MinutesToSessionEnd(const MqlDateTime &now)
   {
    int secs = now.hour * 3600 + now.min * 60 + now.sec;
@@ -177,9 +178,17 @@ int MinutesToSessionEnd(const MqlDateTime &now)
      {
       if(!SymbolInfoSessionTrade(_Symbol, (ENUM_DAY_OF_WEEK)now.day_of_week, i, from, to))
          break;
-      int f = (int)from, t = (int)to;
-      if(secs >= f && secs < t)
-         return t >= 86340 ? -1 : (t - secs) / 60; // une séance qui va jusqu'à minuit continue le lendemain
+      int f = (int)from, t = (int)MathMin((double)to, 86400.0);
+      if(secs < f || secs >= t)
+         continue;
+      // une séance qui va jusqu'à minuit ne continue que si le lendemain en ouvre une à 0 h
+      if(t >= 86340)
+        {
+         datetime nf = 0, nt = 0;
+         if(SymbolInfoSessionTrade(_Symbol, (ENUM_DAY_OF_WEEK)((now.day_of_week + 1) % 7), 0, nf, nt) && (int)nf == 0)
+            return -1;
+        }
+      return (t - secs) / 60;
      }
    return -1;
   }
@@ -209,13 +218,16 @@ bool ForcedExit(const MqlDateTime &now)
    bool stale = DayStart((datetime)PositionGetInteger(POSITION_TIME)) < DayStart(TimeCurrent());
    if(!stale && !NoEntryTime(now))
       return false;
-   // or fermé plus tôt que le forex (jour férié) : le serveur répond « marché fermé » ; on réessaie toutes les 5 minutes
-   static datetime lastRefusal = 0;
-   if((long)(TimeCurrent() - lastRefusal) < 300)
+   // or fermé plus tôt que le forex (jour férié) : le serveur répond « marché fermé ». Sans nouveau prix de l'or, on
+   // ne réessaie que toutes les 5 minutes ; au premier prix de la reprise, on réessaie tout de suite.
+   static datetime lastRefusal = 0, lastRefusalQuote = 0;
+   datetime quote = (datetime)SymbolInfoInteger(_Symbol, SYMBOL_TIME);
+   if(quote <= lastRefusalQuote && (long)(TimeCurrent() - lastRefusal) < 300)
       return true;
    if(!g_trade.PositionClose(ticket))
      {
       lastRefusal = TimeCurrent();
+      lastRefusalQuote = quote;
       PrintFormat("Fermeture forcée refusée : %d %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
      }
    return true;
