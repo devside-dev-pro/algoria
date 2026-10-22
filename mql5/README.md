@@ -57,13 +57,34 @@ Sur les 2 ans :
   - un ADX ≥ 25 ou ≥ 30 fait tomber la fréquence sous 3 trades par jour (2,9 et 1,5 en moyenne sur la grille), et le
     minimum de 4 trades devient hors d'atteinte ;
   - un stop serré est ruineux (PF moyen 0,67 / 0,80 à 1 ATR, contre 0,84 / 0,96 à 3 ATR).
-- **Le réglage et ses voisins** (un seul changement à la fois, 2 ans) :
-
-  <!-- VOISINS -->
-
+- **Le réglage tient à deux choses et casse avec le spread** (voir ses voisins ci-dessous).
 - **Les réglages « à la main », fixés avant de voir la grille**, sont tous négatifs à RR 0,5 sur 2 ans, de −6 k$ à
   −142 k$ par lot. Ils couvrent les EMA 9/21, 5/13 et 3/8 sur EMA 200, avec ou sans ADX ≥ 20, et des stops de 1,5,
   2 ou 3 ATR.
+
+### Le réglage et ses voisins (2 ans, un seul changement à la fois)
+
+| changement | PF | net (1 lot) | 1re / 2e année | pire creux | ≥ 4 trades | bat le hasard |
+|---|---|---|---|---|---|---|
+| **aucun (réglage par défaut)** | 1,02 | +15 328 $ | 0,95 / 1,05 | −45 182 $ | 72 % | 20/20 |
+| spread 0,30 $ (coûts 0,42 $/oz) | 0,99 | −5 992 $ | 0,92 / 1,03 | −46 602 $ | 72 % | 20/20 |
+| spread 0,40 $ (coûts 0,52 $/oz) | 0,97 | −27 312 $ | 0,88 / 1,01 | −51 798 $ | 72 % | 20/20 |
+| sans rattrapage | 0,91 | −72 347 $ | 0,89 / 0,92 | −78 278 $ | 49 % | 10/20 |
+| ADX ≥ 20 sans la confirmation DI | 0,88 | −132 290 $ | 0,85 / 0,90 | −150 549 $ | 89 % | 2/20 |
+| RR 0,4 | 1,02 | +18 971 $ | 0,95 / 1,06 | −39 303 $ | 78 % | 18/20 |
+| RR 0,6 | 1,01 | +13 095 $ | 0,97 / 1,03 | −39 500 $ | 67 % | 13/20 |
+| stop 2,5 ATR | 0,98 | −17 031 $ | 0,94 / 1,00 | −32 174 $ | 80 % | 18/20 |
+| tendance EMA 200 | 1,02 | +15 268 $ | 0,95 / 1,05 | −50 996 $ | 72 % | 18/20 |
+| EMA 4/9 | 0,99 | −5 407 $ | 0,87 / 1,06 | −50 903 $ | 66 % | 19/20 |
+
+Lecture :
+- **La confirmation +DI/−DI est indispensable.** Sans elle, on perd 132 k$.
+- **Le rattrapage aussi.** Sans lui, la règle perd 72 k$ et ne tient 4 trades que 49 % des jours. Or les trades
+  de rattrapage sont précisément ceux qui n'ont pas de filtre de tendance.
+- **Le spread est décisif.** Le labo compte 0,32 $/oz l'aller-retour : 0,20 de spread, 0,05 de glissement, 0,07 de
+  commission. 0,10 $ de plus suffit à passer en perte.
+- **Le RR lui-même est stable entre 0,4 et 0,6.** C'est un bon signe : le résultat ne dépend pas d'une valeur
+  exacte.
 
 ### Pour comparer : l'ancien réglage, à RR 2
 
