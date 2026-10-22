@@ -3,23 +3,22 @@
 //|  EA court terme sur l'or : croisement de moyennes mobiles et/ou  |
 //|  bandes de Bollinger, avec un quota de 4 à 5 trades par jour.    |
 //+------------------------------------------------------------------+
-// Règles reprises de robots publics, rejouées AVANT d'être codées ici sur deux ans de M5 broker (oct. 2024 →
-// oct. 2026, coûts 0,32 $/oz, 1 lot, contre la même entrée en direction tirée au hasard) : backtest/mabb-arena.ts.
-//   - EMA 9/21 + filtre EMA 200, SL 1,5 ATR, TP 2R, rattrapage EMA 9/21 nu dès 14 h (réglages par défaut) :
-//     +42 k$, PF 1,05, pire creux −44 k$, bat 10 tirages au hasard sur 10. MAIS première année négative
-//     (−18 k$), le gain vient de juin-oct. 2026, et TP 1,5R → −5 k$, spread 0,40 $ → +4 k$. Avantage mince.
-//   - Bollinger 20/2 en retour à la moyenne + RSI 14 : −71 k$, ne bat pas le hasard.
-//   - Bollinger 20/2 en cassure dans le sens de l'EMA 200 : −136 k$, ne bat pas le hasard.
-//   (BBRSI de geraked sans sa grille : −34 k$ ; « Moving Average » de MetaQuotes : −121 k$.)
-// Les modes Bollinger restent disponibles pour être testés au Strategy Tester ; ils ne sont pas recommandés.
+// Réglages par défaut = la demande de Mathieu (EMA courtes, filtre ADX, RR « négatif » de 0,5, lot fixe), réglés par
+// le labo backtest/mabb-grid.ts : 420 combinaisons EMA × tendance × ADX × stop, toutes à RR 0,5, CHOISIES sur la 1re
+// année de M5 broker (oct. 2024 → oct. 2025) puis JUGÉES sur la 2e, jamais vue. Résultat (1 lot, coûts 0,32 $/oz) :
+//   EMA 3/8 + tendance EMA 50, ADX(14) ≥ 20 avec +DI/−DI, stop 3 ATR, TP 1,5 ATR, rattrapage dès 14 h :
+//   année jugée PF 1,05 (+29 k$), sur 2 ans PF 1,02 (+15 k$), 66 % de gagnants, pire creux −45 k$, 4 trades/jour,
+//   ≥ 4 trades 72 % des jours. Proche de l'équilibre : aucun réglage à RR 0,5 n'atteint PF 1,2 sur l'année jugée.
+// L'ancien réglage (EMA 9/21/200, stop 1,5 ATR, RR 2) faisait +40 k$ sur 2 ans (PF 1,05) ; il reste à portée des
+// paramètres. Les règles Bollinger, BBRSI de geraked (sans sa grille) et la « Moving Average » de MetaQuotes perdent
+// toutes et ne battent pas le hasard (backtest/mabb-arena.ts) : les modes Bollinger restent là pour être testés.
 // Le MAXIMUM de trades par jour est un plafond dur. Le MINIMUM ne peut pas se décréter : à partir de
-// InpCatchUpHour, s'il manque des trades, une règle de rattrapage plus permissive prend le relais (labo : 4 trades
-// atteints 69 % des jours). Les jours trop calmes, l'EA finit sous le minimum ; il n'ouvre jamais de trade sans
-// signal.
+// InpCatchUpHour, s'il manque des trades, la même règle sans filtre de tendance prend le relais. Les jours trop
+// calmes, l'EA finit sous le minimum ; il n'ouvre jamais de trade sans signal.
 #property copyright "Algoria"
 #property link      "https://getalgoria.com"
-#property version   "1.00"
-#property description "Or (XAUUSD) court terme : EMA 9/21 + EMA 200 et/ou Bollinger 20/2, 4 à 5 trades par jour."
+#property version   "1.10"
+#property description "Or (XAUUSD) court terme : EMA 3/8 + EMA 50, filtre ADX, RR 0,5, lot fixe, 4 à 5 trades par jour."
 #property description "Toujours valider en démo et au Strategy Tester (ticks réels) avant le réel."
 
 #include <Trade\Trade.mqh>
@@ -42,21 +41,21 @@ enum ENUM_MABB_CATCHUP
 input group "Signal"
 input ENUM_MABB_SIGNAL  InpSignalMode      = MABB_EMA_CROSS;   // Règle d'entrée
 input ENUM_TIMEFRAMES   InpTimeframe       = PERIOD_M5;        // Unité de temps des signaux
-input int               InpFastEMA         = 9;                // EMA rapide
-input int               InpSlowEMA         = 21;               // EMA lente
-input int               InpTrendEMA        = 200;              // EMA de tendance (0 = sans filtre)
+input int               InpFastEMA         = 3;                // EMA rapide
+input int               InpSlowEMA         = 8;                // EMA lente
+input int               InpTrendEMA        = 50;               // EMA de tendance (0 = sans filtre)
 input int               InpBBPeriod        = 20;               // Bollinger : période
 input double            InpBBDeviation     = 2.0;              // Bollinger : écarts-types
 input int               InpRSIPeriod       = 14;               // RSI : période
 input double            InpRSIExtreme      = 30.0;             // RSI : seuil de survente (surachat = 100 - seuil)
 input int               InpADXPeriod       = 14;               // ADX : période (iADX de MT5)
-input double            InpADXMin          = 0;                // ADX minimum pour un signal EMA (0 = sans filtre)
-input bool              InpADXUseDI        = false;            // ADX : exiger +DI > -DI à l'achat (et l'inverse à la vente)
+input double            InpADXMin          = 20;               // ADX minimum pour un signal EMA (0 = sans filtre)
+input bool              InpADXUseDI        = true;             // ADX : exiger +DI > -DI à l'achat (et l'inverse à la vente)
 
 input group "Quota journalier"
 input int               InpMinTradesPerDay = 4;                // Minimum visé de trades par jour
 input int               InpMaxTradesPerDay = 5;                // Maximum de trades par jour (plafond dur)
-input ENUM_MABB_CATCHUP InpCatchUpMode     = MABB_CATCHUP_EMA_NO_FILTER; // Rattrapage si le minimum n'est pas atteint
+input ENUM_MABB_CATCHUP InpCatchUpMode     = MABB_CATCHUP_EMA_NO_FILTER; // Rattrapage si le minimum n'est pas atteint (filtre ADX conservé)
 input int               InpCatchUpHour     = 14;               // Heure serveur à partir de laquelle on rattrape
 input double            InpCatchUpBBDev    = 1.5;              // Rattrapage Bollinger : écarts-types
 input double            InpCatchUpRSI      = 40.0;             // Rattrapage Bollinger : seuil RSI
@@ -71,7 +70,7 @@ input int               InpCloseBeforeEnd  = 10;               // Fermer N minut
 
 input group "Sorties"
 input int               InpATRPeriod       = 14;               // ATR : période
-input double            InpStopATR         = 1.5;              // Stop = ATR × ce multiple
+input double            InpStopATR         = 3.0;              // Stop = ATR × ce multiple
 input double            InpRewardRisk      = 0.5;              // RR : TP = stop × ce ratio (0,5 = TP à la moitié du stop)
 input bool              InpExitOnCross     = false;            // Fermer aussi au croisement EMA inverse
 

@@ -79,13 +79,14 @@ function signal(c: Cfg, i: number, withTrend: boolean): 1 | -1 | 0 {
 
 // ===== Moteur (identique à mabb-arena.ts : pire cas, le stop passe avant le TP dans une même bougie ; trou servi à l'ouverture) =====
 interface Trade { openT: number; closeT: number; dir: 1 | -1; pnl: number; r: number; catchUp: boolean }
-function run(c: Cfg, opts: { randomDir: boolean; seed: number } = { randomDir: false, seed: 7 }) {
+function run(c: Cfg, opts: { randomDir: boolean; seed: number; cost?: number } = { randomDir: false, seed: 7 }) {
+  const cost = opts.cost ?? COST;
   const trades: Trade[] = []; const perDay = new Map<number, number>();
   let pos: { dir: 1 | -1; entry: number; sl: number; tp: number; openT: number; day: number; catchUp: boolean } | null = null;
   let rnd = opts.seed >>> 0; // mulberry32
   const rand = () => { rnd = (rnd + 0x6d2b79f5) >>> 0; let z = rnd; z = Math.imul(z ^ (z >>> 15), z | 1); z ^= z + Math.imul(z ^ (z >>> 7), z | 61); return ((z ^ (z >>> 14)) >>> 0) / 4294967296; };
   const close = (px: number, t: number) => { const p = pos!; const gross = (px - p.entry) * p.dir;
-    trades.push({ openT: p.openT, closeT: t, dir: p.dir, pnl: (gross - COST) * LOT, r: gross / Math.abs(p.entry - p.sl), catchUp: p.catchUp }); pos = null; };
+    trades.push({ openT: p.openT, closeT: t, dir: p.dir, pnl: (gross - cost) * LOT, r: gross / Math.abs(p.entry - p.sl), catchUp: p.catchUp }); pos = null; };
   for (let i = 300; i < m5.length; i++) {
     const b = m5[i];
     if (pos && T.openDay[i] !== pos.day) close(b.open, b.time); // nouveau jour serveur : l'EA ferme au premier tick
@@ -203,6 +204,21 @@ for (const c of CANDIDATES) {
   const res = run(c), all = st(res, 'all');
   const nets = Array.from({ length: 20 }, (_, k) => st(run(c, { randomDir: true, seed: 11 + 31 * k }), 'all').net);
   console.log(`   ${label(c).padEnd(50)} │ ${cell(all)} · win ${Math.round(100 * all.win)} % · DD ${fmt(all.dd).padStart(8)} $ │ PF ${st(res, 'h1').pf.toFixed(2)} / ${st(res, 'h2').pf.toFixed(2)} │ juin→ ${fmt(since(res)).padStart(8)} $ │ bat ${nets.filter((v) => v < all.net).length}/20`);
+}
+
+// ===== Le réglage par défaut de l'EA, et ses voisins : un réglage qui ne tient qu'à lui-même n'en est pas un =====
+console.log('\n── RÉGLAGE PAR DÉFAUT DE L’EA ET SES VOISINS (2 ans · PF 1re / 2e année · hasard sur 20 tirages ; une ligne = un seul changement)');
+const DEF: Cfg = { fast: 3, slow: 8, trend: 50, adxMin: 20, di: true, rr: 0.5, sl: 3, catchUp: true };
+const NEIGHBOURS: [string, Cfg, number?][] = [
+  ['défaut de l’EA', DEF], ['spread 0,30 $ (coûts 0,42)', DEF, 0.42], ['spread 0,40 $ (coûts 0,52)', DEF, 0.52],
+  ['sans rattrapage', { ...DEF, catchUp: false }], ['RR 0,4', { ...DEF, rr: 0.4 }], ['RR 0,6', { ...DEF, rr: 0.6 }],
+  ['stop 2,5 ATR', { ...DEF, sl: 2.5 }], ['tendance EMA 200', { ...DEF, trend: 200 }], ['ADX ≥ 20 sans DI', { ...DEF, di: false }],
+  ['EMA 4/9', { ...DEF, fast: 4, slow: 9 }],
+];
+for (const [name, c, cost] of NEIGHBOURS) {
+  const res = run(c, { randomDir: false, seed: 7, cost }), all = st(res, 'all');
+  const nets = Array.from({ length: 20 }, (_, k) => st(run(c, { randomDir: true, seed: 11 + 31 * k, cost }), 'all').net);
+  console.log(`   ${name.padEnd(28)} │ ${cell(all)} · win ${Math.round(100 * all.win)} % · DD ${fmt(all.dd).padStart(8)} $ │ PF ${st(res, 'h1').pf.toFixed(2)} / ${st(res, 'h2').pf.toFixed(2)} │ juin→ ${fmt(since(res)).padStart(8)} $ │ bat ${nets.filter((v) => v < all.net).length}/20`);
 }
 
 console.log('\nLecture : seul le chiffre de l’année jugée compte. Un réglage brillant l’année de choix et quelconque l’année jugée a été trouvé par chance.');
