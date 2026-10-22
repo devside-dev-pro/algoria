@@ -7,7 +7,7 @@ import { BROKERS } from '@/lib/member/brokers';
 import { estimateCommission } from '@/lib/member/commissions';
 import { LOT_MAX, isLotAllowed } from '@/lib/member/lots';
 import { ctaKeyboard, asLocale, APP_URL } from '@/lib/member/i18n';
-import { affectedMembers } from '@/lib/member/incident';
+import { affectedMembers, inAudience } from '@/lib/member/incident';
 import { lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
 import { OFFBOARDED, OFFBOARD_REASONS, isOffboardReason, winbackMessage, winbackFollowup, type OffboardReason, type WinbackGroup } from '@/lib/member/winback';
 import { summarizeTrack, fmtPct } from '@/lib/member/trackFacts';
@@ -1537,8 +1537,9 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       const hasSubmitted = new Set((submitted ?? []).map((r) => Number(r.tg_id)));
       targets = ((ms ?? []) as typeof targets).filter((m) => !hasSubmitted.has(Number(m.tg_id)));
     } else if (audience === 'incident') {
-      // 🚨 INCIDENT DU 21-22/10/2026 : les membres qui copiaient cette nuit-là (lib/member/incident.ts)
-      targets = (await affectedMembers(db)).map((m) => ({ tg_id: m.tg_id, member_no: m.member_no, tg_name: m.tg_name, locale: m.locale }));
+      // 🚨 INCIDENT DU 21-22/10/2026 : les membres qui copiaient VRAIMENT cette nuit-là — la liste figée, moins
+      // ceux que STH montre sans master et ceux que Mathieu a retirés (lib/member/incident.ts, inAudience)
+      targets = (await affectedMembers(db)).filter(inAudience).map((m) => ({ tg_id: m.tg_id, member_no: m.member_no, tg_name: m.tg_name, locale: m.locale }));
     } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });
 
     // DÉJÀ PRÉVENUS SOUS CETTE ÉTIQUETTE → on les saute. `status='done'` est ESSENTIEL et non

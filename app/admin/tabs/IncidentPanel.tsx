@@ -5,11 +5,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { dimP, inp, okBtn, secH } from '../_shared';
 
 type Row = {
-  member_no: number | null; name: string | null; username: string | null; lot: number; broker: string | null; status: string;
+  tg_id: number; member_no: number | null; name: string | null; username: string | null; lot: number; broker: string | null; status: string;
+  sth: 'copying' | 'not-copying' | 'unknown' | null; sth_detail: string | null; excluded: boolean; inAudience: boolean;
   estimated: number; asked: 'ok' | 'failed' | null;
   claim: { before: number; now: number; loss: number; note: string; proof: string | null; at: string } | null;
 };
-type Report = { affected: number; declared: number; totalDeclared: number; asked: number; rows: Row[] };
+type Report = { affected: number; audience: number; sthChecked: boolean; declared: number; totalDeclared: number; asked: number; rows: Row[] };
 
 const TAG = 'incident-22-10';
 const DEFAULT_TEXT = `Hey{name}, it's Mathieu.
@@ -34,8 +35,25 @@ export function IncidentPanel() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // « que les gens qui étaient connectés… moins cela fera de bruit, mieux c'est » : STH dit qui copiait vraiment
+  const sthCheck = () => {
+    setBusy(true); setMsg(null);
+    void fetch('/api/member/admin/incident', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthCheck: true }) })
+      .then(async (r) => {
+        const d = (await r.json()) as { error?: string; warning?: string; saved?: boolean; copying?: number; notCopying?: number; unknown?: number };
+        setMsg(d.error ? `⚠ ${d.error}` : d.warning ? `⚠ ${d.warning}` : `✅ STH : ${d.copying} copiaient · ${d.notCopying} ne copiaient pas (retirés de l’envoi) · ${d.unknown} sans réponse (gardés)`);
+        load();
+      })
+      .finally(() => setBusy(false));
+  };
+  const toggle = (r: Row) => {
+    void fetch('/api/member/admin/incident', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exclude: { tg_id: r.tg_id, excluded: !r.excluded } }) })
+      .then(() => load());
+  };
+
   const send = () => {
-    if (!window.confirm(`Envoyer ce message par le bot aux ${rep?.affected ?? '?'} membres touchés ? (ceux qui l’ont déjà reçu sont sautés)`)) return;
+    const unchecked = rep && !rep.sthChecked ? '\n\n⚠ STH n’a pas encore été vérifié : ceux qui ne copiaient pas le recevront aussi. Clique d’abord sur « VÉRIFIER SUR STH » si tu veux les retirer.' : '';
+    if (!window.confirm(`Envoyer ce message par le bot aux ${rep?.audience ?? '?'} membres cochés ? (ceux qui l’ont déjà reçu sont sautés)${unchecked}`)) return;
     setBusy(true); setMsg(null);
     void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botBroadcast: { text, tag: TAG, audience: 'incident', cta: true } }) })
       .then(async (r) => {
@@ -49,10 +67,11 @@ export function IncidentPanel() {
   return (
     <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 980, border: '1px solid rgba(255,107,138,.45)' }}>
       <h2 style={{ ...secH, color: 'var(--down)' }}>🚨 INCIDENT 21-22/10 — DÉCLARATIONS DE PERTE</h2>
-      <p style={dimP}>Les membres qui copiaient cette nuit-là. Le message leur part par le bot Algoria, avec un bouton vers la page de déclaration (solde avant, solde actuel, capture). Une déclaration n’est pas une demande de remboursement : la page le dit.</p>
+      <p style={dimP}>Les membres connectés (live) cette nuit-là — ni les membres en pause, ni ceux en attente. « Vérifier sur STH » retire en plus ceux que STH montre abonnés à aucun master : ils ne copiaient pas. Tu peux aussi décocher quelqu’un à la main. Le message ne part qu’aux cochés, par le bot Algoria, avec un bouton vers la page de déclaration. Une déclaration n’est pas une demande de remboursement : la page le dit.</p>
       {rep && (
         <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13 }}>
-          <span>👥 touchés : <b>{rep.affected}</b></span>
+          <span>👥 connectés cette nuit : <b>{rep.affected}</b></span>
+          <span>🎯 recevront le message : <b>{rep.audience}</b>{!rep.sthChecked && <span style={{ color: 'var(--muted)' }}> (STH pas encore vérifié)</span>}</span>
           <span>📨 demande reçue : <b>{rep.asked}</b></span>
           <span>📝 ont déclaré : <b>{rep.declared}</b></span>
           <span>💸 pertes déclarées : <b>{usd(rep.totalDeclared)}</b></span>
@@ -60,6 +79,7 @@ export function IncidentPanel() {
       )}
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={12} style={{ ...inp, fontSize: 12.5, lineHeight: 1.5 }} />
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button disabled={busy} onClick={sthCheck} style={{ ...okBtn, padding: '9px 14px', fontSize: 12 }}>🔎 VÉRIFIER SUR STH QUI COPIAIT</button>
         <button disabled={busy || !text.trim()} onClick={send} style={{ ...okBtn, padding: '9px 14px', fontSize: 12 }}>📣 ENVOYER LA DEMANDE AUX MEMBRES TOUCHÉS</button>
         <button onClick={load} style={{ ...okBtn, padding: '9px 14px', fontSize: 12 }}>↻ ACTUALISER</button>
         {msg && <span style={{ fontSize: 12 }}>{msg}</span>}
@@ -69,14 +89,16 @@ export function IncidentPanel() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
-                <th style={{ padding: 6 }}>#</th><th>membre</th><th>lot</th><th>broker</th><th>estimé*</th><th>avant</th><th>maintenant</th><th>perte déclarée</th><th>capture</th><th>commentaire</th><th>demande</th>
+                <th style={{ padding: 6 }}>envoyer</th><th>#</th><th>membre</th><th>STH</th><th>lot</th><th>broker</th><th>estimé*</th><th>avant</th><th>maintenant</th><th>perte déclarée</th><th>capture</th><th>commentaire</th><th>demande</th>
               </tr>
             </thead>
             <tbody>
               {rep.rows.map((r) => (
-                <tr key={`${r.member_no}-${r.username}`} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: 6 }}>{r.member_no}</td>
+                <tr key={r.tg_id} style={{ borderTop: '1px solid var(--border)', opacity: r.inAudience ? 1 : 0.45 }}>
+                  <td style={{ padding: 6 }}><input type="checkbox" checked={!r.excluded} onChange={() => toggle(r)} title={r.excluded ? 'retiré à la main' : 'décocher pour ne pas lui envoyer'} /></td>
+                  <td>{r.member_no}</td>
                   <td>{r.username ? `@${r.username}` : r.name}</td>
+                  <td title={r.sth_detail ?? ''}>{r.sth === 'copying' ? '✓ copiait' : r.sth === 'not-copying' ? '✗ ne copiait pas' : r.sth === 'unknown' ? '?' : ''}</td>
                   <td className="mono">{r.lot}</td>
                   <td>{r.broker}</td>
                   <td className="mono" style={{ color: 'var(--muted)' }}>{usd(r.estimated)}</td>
@@ -90,7 +112,7 @@ export function IncidentPanel() {
               ))}
             </tbody>
           </table>
-          <p style={{ ...dimP, marginTop: 8 }}>* estimé = les trades de la nuit à son lot s’il les avait tous copiés ; sa vraie perte est plafonnée par son solde (le broker clôture avant). ⚠ = le bot n’a pas pu lui écrire (bloqué ou jamais ouvert) : à contacter toi-même.</p>
+          <p style={{ ...dimP, marginTop: 8 }}>* estimé = les trades de la nuit à son lot s’il les avait tous copiés ; sa vraie perte est plafonnée par son solde (le broker clôture avant). ⚠ = le bot n’a pas pu lui écrire (bloqué ou jamais ouvert) : à contacter toi-même. Ligne grisée = ne recevra pas le message (décoché, ou STH montre qu’il ne copiait pas) ; il peut quand même déclarer s’il a le lien.</p>
         </div>
       )}
     </section>
