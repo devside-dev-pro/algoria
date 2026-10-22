@@ -229,6 +229,29 @@ export const NUDGE_TOUCHES: ReadonlyArray<{ touch: 1 | 2 | 3 | 4; day: number }>
  *  en masse les 1 000 anciens ; eux auront UNE campagne de réactivation, à la main, quand le produit sera prêt). */
 export const NUDGE_SINCE: string = process.env.ALGORIA_NUDGE_SINCE ?? '2026-09-09T00:00:00Z';
 
+/** Lecture / écriture brute d'un réglage de support_settings (texte libre). Utilisé par les garde-fous du master
+ *  (runner/guard.ts) pour que l'ancre du jour et le verrou survivent à un redémarrage. undefined = illisible. */
+export async function getSetting(key: string): Promise<string | null | undefined> {
+  try {
+    const raw = db as unknown as { from: (t: string) => any };
+    const { data, error } = await raw.from('support_settings').select('value').eq('key', key).limit(1);
+    if (error) return undefined;
+    return (data?.[0]?.value as string | undefined) ?? null;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function setSetting(key: string, value: string): Promise<boolean> {
+  try {
+    const raw = db as unknown as { from: (t: string) => any };
+    const { error } = await raw.from('support_settings').upsert({ key, value, updated_at: new Date().toISOString(), updated_by: 'runner' }, { onConflict: 'key' });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 /** INTERRUPTEURS DU RUNNER EN BASE (22/10/2026). support_settings 'nudges' = 'off' → pas de relance quotidienne ;
  *  'sth_autorepair' = 'off' → l'audit STH de 7 h ne rebranche personne, même avec ALGORIA_STH_AUTOREPAIR=1 (après
  *  une mise en pause générale sur STH, il rebrancherait tous les membres encore « live » chez nous) ;
