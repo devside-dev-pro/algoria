@@ -60,5 +60,14 @@ function protocol(pick: Half, judge: Half, title: string) {
 }
 protocol('h1', 'h2', 'CHOIX SUR LA 1re ANNÉE, JUGEMENT SUR LA 2e');
 protocol('h2', 'h1', 'À L’ENVERS : CHOIX SUR LA 2e ANNÉE, JUGEMENT SUR LA 1re');
+// La sortie au temps de 2 h est la seule variante qui fait mieux les deux années, sans passer la règle. Un vrai effet
+// donne un plateau sur toute une plage de durées ; un pic isolé à 2 h serait du bruit. Courbe complète, sans choix.
+console.log('\n── SORTIE AU TEMPS, COURBE COMPLÈTE (aucun choix fait ici : on regarde si 2 h est un plateau ou un pic)');
+for (const bars of [18, 24, 30, 36, 48, 60, 72, 96]) {
+  const r = measure(`après ${bars * 5} min`, { ...BASE, maxBars: bars });
+  console.log(`${line(r)} │ 2 ans ${fmt(r.all.net)} $ · DD ${fmt(r.all.dd)} $`);
+}
+console.log(`${line(base)} │ 2 ans ${fmt(base.all.net)} $ · DD ${fmt(base.all.dd)} $  (sans sortie au temps)`);
+
 console.log(`\nRéglage actuel, 2 ans : ${cell(base.all)} · win ${Math.round(100 * base.all.win)} % · DD ${fmt(base.all.dd)} $`);
 console.log('Lecture : une famille adoptée sur une année et qui n’améliore pas l’autre a été trouvée par chance.');
