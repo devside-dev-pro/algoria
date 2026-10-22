@@ -53,11 +53,15 @@ Sur les 2 ans :
 - **Le choix fait à l'envers échoue.** Le meilleur réglage de la 2e année (EMA 4/9 + EMA 100, ADX ≥ 20 + DI,
   stop 3 ATR) perd sur la 1re (PF 0,89, −30 784 $).
 - **Ce qui se répète d'une année sur l'autre, à RR 0,5 :**
-  - les meilleurs réglages ont tous un stop large (3 ATR) et le filtre ADX ≥ 20 avec DI ;
+  - le stop large : les 3 meilleurs réglages de la 1re année et les 6 meilleurs de la 2e ont un stop de 3 ATR et
+    l'ADX ≥ 20 avec DI. En moyenne sur toute la grille, seul le stop large aide les deux années ; l'ADX avec DI
+    n'aide que la 1re (PF moyen 0,81 contre 0,78 sans ADX), pas la 2e (0,92 dans les deux cas) ;
   - un ADX ≥ 25 ou ≥ 30 fait tomber la fréquence sous 3 trades par jour (2,9 et 1,5 en moyenne sur la grille), et le
     minimum de 4 trades devient hors d'atteinte ;
   - un stop serré est ruineux (PF moyen 0,67 / 0,80 à 1 ATR, contre 0,84 / 0,96 à 3 ATR).
-- **Le réglage tient à deux choses et casse avec le spread** (voir ses voisins ci-dessous).
+- **Le réglage est fragile** (voir ses voisins ci-dessous). Un seul changement suffit à le faire perdre sur 2 ans :
+  retirer la confirmation DI, retirer le rattrapage, 0,10 $ de spread en plus, un stop de 2,5 ATR ou des EMA 4/9.
+  Seuls un RR de 0,4 à 0,6 et une tendance EMA 200 le laissent positif.
 - **Les réglages « à la main », fixés avant de voir la grille**, sont tous négatifs à RR 0,5 sur 2 ans, de −6 k$ à
   −142 k$ par lot. Ils couvrent les EMA 9/21, 5/13 et 3/8 sur EMA 200, avec ou sans ADX ≥ 20, et des stops de 1,5,
   2 ou 3 ATR.
@@ -83,7 +87,9 @@ Lecture :
   de rattrapage sont précisément ceux qui n'ont pas de filtre de tendance.
 - **Le spread est décisif.** Le labo compte 0,32 $/oz l'aller-retour : 0,20 de spread, 0,05 de glissement, 0,07 de
   commission. 0,10 $ de plus suffit à passer en perte.
-- **Le RR lui-même est stable entre 0,4 et 0,6.** C'est un bon signe : le résultat ne dépend pas d'une valeur
+- **Le stop et la paire d'EMA comptent aussi.** Un stop de 2,5 ATR (−17 k$) ou des EMA 4/9 (−5 k$) passent en
+  perte.
+- **Seul le RR est stable**, entre 0,4 et 0,6 : sur ce paramètre-là, le résultat ne dépend pas d'une valeur
   exacte.
 
 ### Pour comparer : l'ancien réglage, à RR 2
@@ -95,8 +101,13 @@ Même labo, même fenêtre, rattrapage dès 14 h, stop 1,5 ATR, TP 2 fois le sto
 | EMA 9/21 + EMA 200 | 1,05 | +40 512 $ | PF 0,91 / 1,11 | −53 641 $ | 69 % | 20/20 |
 | EMA 5/13 + EMA 200 | 1,04 | +36 588 $ | PF 1,01 / 1,05 | −34 159 $ | 88 % | 20/20 |
 
-L'EMA 5/13 à RR 2 est la seule configuration « EMA courtes » rentable **les deux années**. Ces réglages restent
-accessibles par les paramètres.
+Parmi les réglages mesurés un par un, l'EMA 5/13 à RR 2 est le seul « EMA courtes » rentable **les deux années**.
+
+Ces réglages restent accessibles par les paramètres. Pour retrouver l'ancien réglage, il faut aussi couper tout le
+filtre ADX :
+- `InpFastEMA` = 9 (ou 5), `InpSlowEMA` = 21 (ou 13), `InpTrendEMA` = 200 ;
+- `InpADXMin` = 0 **et** `InpADXUseDI` = false ;
+- `InpStopATR` = 1,5, `InpRewardRisk` = 2.
 
 ### Les robots publics (`mabb-arena.ts`)
 
@@ -183,7 +194,8 @@ Cette vérification tourne aussi sur un minuteur de 30 secondes. Elle ne dépend
 
 Un cas reste : une clôture anticipée que le broker n'a pas inscrite dans ses horaires (jour férié américain, Black
 Friday, 24 et 31 décembre). Une position ouverte juste avant peut alors passer la nuit, ou le week-end, et elle est
-fermée au premier tick de la séance suivante. Le labo modélise exactement ce cas (fermeture à l'ouverture suivante).
+fermée dès le premier prix de la séance suivante. Le labo modélise ce cas par une fermeture à l'ouverture de la
+première bougie du nouveau jour ; dans MT5, le prix réel des premières secondes de la reprise peut s'en écarter.
 
 ## Paramètres
 
@@ -195,8 +207,8 @@ fermée au premier tick de la séance suivante. Le labo modélise exactement ce 
 | | `InpTrendEMA` | 50 | EMA de tendance ; 0 supprime le filtre |
 | | `InpBBPeriod` / `InpBBDeviation` / `InpRSIPeriod` / `InpRSIExtreme` | 20 / 2 / 14 / 30 | modes Bollinger |
 | | `InpADXPeriod` | 14 | ADX standard de MT5 (`iADX`), le même que celui du labo |
-| | `InpADXMin` | 20 | ADX minimum de la dernière bougie close, pour le signal EMA **et** pour le rattrapage ; 0 = sans filtre |
-| | `InpADXUseDI` | oui | exige +DI > −DI pour acheter, −DI > +DI pour vendre |
+| | `InpADXMin` | 20 | ADX minimum de la dernière bougie close, pour le signal EMA **et** pour le rattrapage ; 0 = sans seuil |
+| | `InpADXUseDI` | oui | exige +DI > −DI pour acheter, −DI > +DI pour vendre. Pour retirer tout le filtre : `InpADXMin` = 0 **et** `InpADXUseDI` = false |
 | Quota | `InpMinTradesPerDay` | 4 | objectif : sous ce nombre, le rattrapage s'active |
 | | `InpMaxTradesPerDay` | 5 | plafond dur, compté en positions dans l'historique du serveur (survit à un redémarrage) |
 | | `InpCatchUpMode` | EMA sans filtre | rattrapage : le même croisement sans EMA de tendance (filtre ADX conservé), ou Bollinger resserrée, ou aucun |
