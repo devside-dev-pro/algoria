@@ -27,10 +27,14 @@
 // (EX → EMA 9/21 sans filtre 200 ; BV → BB 20/1,5). Si le rattrapage perd, le minimum coûte de l'argent.
 //
 // COÛTS : 0,32 $ l'aller-retour par once (comme ea-arena.ts). Résultats en $ POUR 1 LOT (100 onces).
+// EXÉCUTION, au plus près de ce que l'EA peut faire : heure serveur avec l'heure d'été américaine (broker-time.ts) ;
+// une position encore ouverte au premier tick d'un nouveau jour serveur (clôture anticipée, jour férié) y est fermée
+// au prix d'ouverture ; un stop ou un TP sauté par un trou est servi au prix d'ouverture, pas au niveau.
 //
 //   npx tsx backtest/mabb-arena.ts XAUUSD            (bougies : node scripts/pull-cache.mjs XAUUSD M5)
 import { existsSync, readFileSync } from 'node:fs';
 import type { Bar } from '../lib/engine/types';
+import { brokerClock, reopenCheck } from './broker-time';
 
 const sym = process.argv[2] ?? 'XAUUSD';
 const path = `backtest/.cache/${sym}-M5-15.json`;
@@ -38,9 +42,7 @@ if (!existsSync(path)) { console.error(`${path} absent → node scripts/pull-cac
 const m5 = (JSON.parse(readFileSync(path, 'utf8')) as Bar[]).sort((a, b) => a.time - b.time);
 const COST = 0.2 + 0.05 + 0.07; // $ par once, aller-retour
 const LOT = 100;
-const OFFSET = 3 * 3_600_000; // heure broker ≈ UTC+3
-const brokerDay = (t: number) => Math.floor((t + OFFSET) / 86_400_000);
-const brokerHour = (t: number) => new Date(t + OFFSET).getUTCHours();
+const T = brokerClock(m5); // heure serveur : UTC+3 en heure d'été américaine, UTC+2 sinon (broker-time.ts)
 const month = (t: number) => new Date(t).toISOString().slice(0, 7);
 const SESSION_START = 9, SESSION_END = 22, FLAT_HOUR = 23, FRIDAY_FLAT = 21, MAX_PER_DAY = 5, MIN_PER_DAY = 4, CATCHUP_HOUR = 16; // l'EA rattrape dès 14 h : voir la sensibilité
 
@@ -110,7 +112,18 @@ const WITH_CATCHUP: Strat[] = [
 
 // ===== Moteur (pire cas : dans une même bougie, le stop passe avant le TP) =====
 interface Trade { openT: number; closeT: number; dir: 1 | -1; pnl: number; r: number; catchUp: boolean }
-interface Pos { dir: 1 | -1; sigDir: 1 | -1; entry: number; sl: number; tp: number; openT: number; catchUp: boolean }
+interface Pos { dir: 1 | -1; sigDir: 1 | -1; entry: number; sl: number; tp: number; openT: number; day: number; catchUp: boolean }
+// SL / TP pendant la bougie : servis au niveau, ou au prix d'ouverture si la bougie ouvre au-delà ; si les deux sont
+// touchés dans la même bougie, le stop passe d'abord (pire cas)
+function step(p: { dir: 1 | -1; sl: number; tp: number }, b: Bar, close: (px: number, t: number) => void) {
+  if (p.dir === 1) {
+    if (b.open >= p.tp) close(b.open, b.time); else if (b.open <= p.sl) close(b.open, b.time);
+    else if (b.low <= p.sl) close(p.sl, b.time); else if (b.high >= p.tp) close(p.tp, b.time);
+  } else {
+    if (b.open <= p.tp) close(b.open, b.time); else if (b.open >= p.sl) close(b.open, b.time);
+    else if (b.high >= p.sl) close(p.sl, b.time); else if (b.low <= p.tp) close(p.tp, b.time);
+  }
+}
 function run(s: Strat, opts: { randomDir: boolean; seed: number; catchUpHour?: number; cost?: number }): { trades: Trade[]; perDay: Map<number, number> } {
   const cost = opts.cost ?? COST, catchUpHour = opts.catchUpHour ?? CATCHUP_HOUR;
   const trades: Trade[] = []; const perDay = new Map<number, number>(); let pos: Pos | null = null; let rnd = opts.seed >>> 0;
@@ -120,14 +133,11 @@ function run(s: Strat, opts: { randomDir: boolean; seed: number; catchUpHour?: n
     trades.push({ openT: p.openT, closeT: t, dir: p.dir, pnl: (gross - cost) * LOT, r: gross / Math.abs(p.entry - p.sl), catchUp: p.catchUp }); pos = null; };
   for (let i = 501; i < m5.length; i++) {
     const b = m5[i];
-    if (pos) { // SL / TP touchés pendant la bougie i
-      if (pos.dir === 1) { if (b.low <= pos.sl) close(pos.sl, b.time); else if (b.high >= pos.tp) close(pos.tp, b.time); }
-      else { if (b.high >= pos.sl) close(pos.sl, b.time); else if (b.low <= pos.tp) close(pos.tp, b.time); }
-    }
-    const hr = brokerHour(b.time + 300_000), d = brokerDay(b.time); // heure de la CLÔTURE de la bougie
-    const gap = i + 1 < m5.length && m5[i + 1].time - b.time > 3_600_000; // trou de cotation (nuit, week-end)
-    const friday = new Date(b.time + 300_000 + OFFSET).getUTCDay() === 5 && hr >= FRIDAY_FLAT;
-    if (pos && (hr >= FLAT_HOUR || friday || gap || brokerDay(b.time + 300_000) !== brokerDay(pos.openT))) { close(b.close, b.time); continue; }
+    if (pos && T.openDay[i] !== pos.day) close(b.open, b.time); // nouveau jour serveur : l'EA ferme au premier tick
+    if (pos) step(pos, b, close);
+    const hr = T.closeHour[i], d = T.openDay[i]; // heure de la CLÔTURE de la bougie
+    const friday = T.closeDow[i] === 5 && hr >= FRIDAY_FLAT;
+    if (pos && (hr >= FLAT_HOUR || friday)) { close(b.close, b.time); continue; }
     if (pos && s.exitOnSig && s.exitOnSig(i) === -pos.sigDir) { close(b.close, b.time); continue; } // comme l'original : pas de retournement sur la même bougie
     if (pos || friday || hr < SESSION_START || hr >= SESSION_END) continue;
     const n = perDay.get(d) ?? 0; if (n >= MAX_PER_DAY) continue;
@@ -137,7 +147,7 @@ function run(s: Strat, opts: { randomDir: boolean; seed: number; catchUpHour?: n
     const lv = s.levels(i, sigDir, b.close); if (!lv) continue;
     const dir: 1 | -1 = opts.randomDir ? (rand() < 0.5 ? 1 : -1) : sigDir;
     const flip = dir !== sigDir; // direction au hasard : mêmes distances, en miroir
-    pos = { dir, sigDir, entry: b.close, sl: flip ? 2 * b.close - lv.sl : lv.sl, tp: flip ? 2 * b.close - lv.tp : lv.tp, openT: b.time, catchUp };
+    pos = { dir, sigDir, entry: b.close, sl: flip ? 2 * b.close - lv.sl : lv.sl, tp: flip ? 2 * b.close - lv.tp : lv.tp, openT: b.time, day: T.closeDay[i], catchUp };
     perDay.set(d, n + 1);
   }
   if (pos) close(m5[m5.length - 1].close, m5[m5.length - 1].time);
@@ -146,7 +156,7 @@ function run(s: Strat, opts: { randomDir: boolean; seed: number; catchUpHour?: n
 
 // ===== Rapport =====
 const fmt = (v: number) => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString('en-US');
-const tradingDays = new Set(m5.filter((b) => { const h = brokerHour(b.time); return h >= SESSION_START && h < SESSION_END; }).map((b) => brokerDay(b.time))).size;
+const tradingDays = new Set(m5.map((_, i) => i).filter((i) => T.openHour[i] >= SESSION_START && T.openHour[i] < SESSION_END).map((i) => T.openDay[i])).size;
 function stats(ts: Trade[]) {
   const net = ts.reduce((a, t) => a + t.pnl, 0), wins = ts.filter((t) => t.pnl > 0);
   const gp = wins.reduce((a, t) => a + t.pnl, 0), gl = ts.filter((t) => t.pnl <= 0).reduce((a, t) => a + t.pnl, 0);
@@ -160,6 +170,7 @@ function line(label: string, ts: Trade[]) {
 }
 const cut = Math.floor((m5[0].time + m5[m5.length - 1].time) / 2);
 console.log(`ARÈNE MA / BOLLINGER — ${sym} · ${m5.length} bougies M5 · ${new Date(m5[0].time).toISOString().slice(0, 10)} → ${new Date(m5[m5.length - 1].time).toISOString().slice(0, 10)} · ${tradingDays} jours de bourse · 1 lot · coûts ${COST} $/oz`);
+console.log(`Reprise quotidienne en heure serveur : ${reopenCheck(m5, T)} — une seule heure attendue si le calendrier d'été est le bon.`);
 console.log(`Session ${SESSION_START} h-${SESSION_END} h broker, à plat à ${FLAT_HOUR} h, ${MAX_PER_DAY} trades/jour max, rattrapage dès ${CATCHUP_HOUR} h si < ${MIN_PER_DAY}.`);
 const results: { s: Strat; real: Trade[]; rnd: Trade[]; perDay: Map<number, number> }[] = [];
 for (const s of [...STRATS, ...WITH_CATCHUP]) {
