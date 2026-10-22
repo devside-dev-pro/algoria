@@ -71,12 +71,12 @@ input int               InpFridayFlatHour  = 21;               // Vendredi : tou
 input group "Sorties"
 input int               InpATRPeriod       = 14;               // ATR : période
 input double            InpStopATR         = 1.5;              // Stop = ATR × ce multiple
-input double            InpRewardRisk      = 2.0;              // TP = stop × ce ratio (hors retour à la moyenne)
+input double            InpRewardRisk      = 0.5;              // RR : TP = stop × ce ratio (0,5 = TP à la moitié du stop)
 input bool              InpExitOnCross     = false;            // Fermer aussi au croisement EMA inverse
 
 input group "Risque"
-input double            InpRiskPercent     = 0.5;              // Risque par trade, % de l'équité (si lot fixe = 0)
-input double            InpFixedLots       = 0.0;              // Lot fixe (0 = calcul au risque)
+input double            InpFixedLots       = 0.01;             // Lot fixe par trade (0 = calcul au risque ci-dessous)
+input double            InpRiskPercent     = 0.5;              // Risque par trade, % de l'équité (seulement si lot fixe = 0)
 input double            InpDailyLossPct    = 2.0;              // Perte du jour max, % du solde (0 = off)
 input double            InpMaxSpread       = 0.50;             // Spread max en prix, soit $ par once sur l'or (0 = off)
 input int               InpSlippagePoints  = 30;               // Glissement toléré en points
@@ -349,7 +349,7 @@ void Enter(const int dir, const double signalTp, const bool catchUp)
    double sl = entry - dir * slDist;
    double tp = (signalTp > 0) ? signalTp : entry + dir * InpRewardRisk * slDist;
    // un TP de retour à la moyenne trop proche (ou déjà dépassé) ne paie pas le spread : on passe
-   if((tp - entry) * dir < 0.3 * atr)
+   if(signalTp > 0 && (tp - entry) * dir < 0.3 * atr)
       return;
    double minDist = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
    if(MathAbs(entry - sl) <= minDist || MathAbs(tp - entry) <= minDist)
@@ -360,7 +360,7 @@ void Enter(const int dir, const double signalTp, const bool catchUp)
    double lots = LotsForRisk(MathAbs(entry - sl));
    if(lots <= 0)
      {
-      PrintFormat("Lot calculé sous le minimum du broker (risque %.2f %%, stop %.2f) : entrée ignorée.", InpRiskPercent, slDist);
+      PrintFormat("Lot sous le minimum du broker (lot fixe %.2f, risque %.2f %%, stop %.2f) : entrée ignorée.", InpFixedLots, InpRiskPercent, slDist);
       return;
      }
    ENUM_ORDER_TYPE type = (dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
