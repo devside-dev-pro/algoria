@@ -101,7 +101,8 @@ export async function buildRecap(db: Db, day = parisDay(new Date())): Promise<Re
     // est dans l'app, jours rouges compris, et on n'annonce aucun gain.
     return { ...base, kind: 'red', text: [
       `🔵💙 DAY RECAP · ${label(day)}`,
-      `🤖 Algoria AI managed today's gold session, ${today.length} trade${today.length > 1 ? 's' : ''}, every one with its stop loss.`,
+      // plus de « every one with its stop loss » (22/10/2026) : faux en mode copie, rien ne l'impose aujourd'hui
+      `🤖 Algoria AI managed today's gold session, ${today.length} trade${today.length > 1 ? 's' : ''}.`,
       `📊 Every trade it takes is in the app, trade by trade, red days included. No filter, no screenshots: the real copied account.${liveLine}`,
       APP,
     ].join('\n\n') };
