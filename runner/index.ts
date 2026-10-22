@@ -41,7 +41,7 @@ const COPY_MODE = process.env.ALGORIA_COPY_OBSERVE === '1';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { REF_LABEL, REF_LOT } from '../lib/display/scale';
 import { tradingDayOf, tradingHour } from '../lib/display/tradingDay';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, runnerSwitch, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
@@ -1326,6 +1326,13 @@ async function main() {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
     if (now.getUTCHours() !== 10 || lastNudgeDay === today) return;
+    // interrupteur en base (support_settings 'nudges', voir runnerSwitch) : coupé → rien aujourd'hui ;
+    // illisible → rien non plus, on réessaie au passage suivant
+    const sw = await runnerSwitch();
+    if (sw !== 'on') {
+      if (sw === 'off') { lastNudgeDay = today; console.log('[algoria] relances du jour : coupées (support_settings nudges=off)'); }
+      return;
+    }
     lastNudgeDay = today;
     try {
       const { sendDm } = await import('./telegram');
@@ -1458,7 +1465,8 @@ async function main() {
     lastAuditDay = today;
     try {
       const members = await listCopierMembers();
-      const autoRepair = process.env.ALGORIA_STH_AUTOREPAIR === '1';
+      // l'interrupteur en base l'emporte sur la variable : 'off' (ou illisible) → on signale, on ne rebranche pas
+      const autoRepair = process.env.ALGORIA_STH_AUTOREPAIR === '1' && (await runnerSwitch('sth_autorepair')) === 'on';
       const orphans: string[] = []; const errors: string[] = []; const repaired: string[] = [];
       for (const m of members) {
         const name = `#${m.member_no ?? '?'} ${m.tg_username ? '@' + m.tg_username : (m.tg_name ?? '')}`.trim();
