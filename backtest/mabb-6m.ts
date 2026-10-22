@@ -96,5 +96,20 @@ for (const [pick, judge] of [['h1', 'h2'], ['h2', 'h1']] as ['h1' | 'h2', 'h1' |
   if (r[judge].pf > base[judge].pf) verdicts.push(r);
 }
 
+// ===== 4. Ajouté APRÈS avoir vu les sections 1 à 3 : la sortie au temps est le seul changement qui fait mieux sur les
+// deux moitiés. Avant de l'écrire dans l'EA, on regarde toute la surface durée × tendance : un vrai effet donne une
+// zone large, un hasard donne une case isolée.
+console.log('\n── SURFACE SORTIE AU TEMPS × TENDANCE (ajoutée après lecture des sections 1 à 3 ; PF des deux moitiés · net 6 mois · mois gagnants)');
+const winMonths = (res: Res) => { const m = new Map<string, number>(); for (const t of res.trades) { const k = day(t.openT).slice(0, 7); m.set(k, (m.get(k) ?? 0) + t.pnl); } return `${[...m.values()].filter((v) => v > 0).length}/${m.size}`; };
+for (const trend of [50, 200, 600]) for (const bars of [0, 6, 12, 18, 24, 30, 36]) {
+  const r = measure('', { ...BASE, trend, maxBars: bars || undefined });
+  console.log(`   EMA ${String(trend).padEnd(3)} · ${bars ? `sortie après ${String(bars * 5).padStart(3)} min` : 'sans sortie au temps'} │ PF ${r.h1.pf.toFixed(2)} / ${r.h2.pf.toFixed(2)} │ 6 mois PF ${r.all.pf.toFixed(2)} · ${fmt(r.all.net).padStart(8)} $ · DD ${fmt(r.all.dd).padStart(8)} $ · ${r.all.perDay.toFixed(1)} tr/j · ≥4 ${Math.round(100 * r.all.ge4)} % │ mois gagnants ${winMonths(r.res)}`);
+}
+for (const [name, c] of [['sortie après 90 min', { ...BASE, maxBars: 18 }], ['sortie après 120 min', { ...BASE, maxBars: 24 }]] as [string, Cfg][]) {
+  const r = measure(name, c);
+  console.log(`\n   ${name} (le reste de l'EA inchangé) :`);
+  card(r);
+}
+
 console.log(`\nVerdict : ${verdicts.length ? `${verdicts.length} combinaison(s) passe(nt) la règle sur la moitié jugée.` : 'aucune amélioration ne tient sur la moitié qu’elle n’a pas vue ; le réglage actuel reste.'}`);
 console.log('Lecture : seule la moitié jugée compte. Sur 3 mois, un écart de PF de quelques centièmes reste du bruit.');
