@@ -23,6 +23,13 @@ export const COST = 0.2 + 0.05 + 0.07, LOT = 100;
 export const T = brokerClock(m5); // heure serveur : UTC+3 en heure d'été américaine, UTC+2 sinon (broker-time.ts)
 export const SESSION_START = 9, SESSION_END = 22, FLAT_HOUR = 23, FRIDAY_FLAT = 21, MAX_PER_DAY = 5, MIN_PER_DAY = 4, CATCHUP_HOUR = 14;
 export const MIN_TRADES_PER_DAY = 3.5; // contrainte de fréquence de la règle de choix
+// Fenêtre de test (--months N) : seuls les N derniers mois sont tradés et mesurés, coupés en deux moitiés ; les
+// indicateurs chauffent sur l'historique d'avant, comme l'EA sur l'historique du terminal. Sans l'option : tout le cache.
+const monthsArg = process.argv.indexOf('--months');
+export const MONTHS = monthsArg > 0 ? Number(process.argv[monthsArg + 1]) : 0;
+const lastT = m5[m5.length - 1].time, from = new Date(lastT); from.setUTCMonth(from.getUTCMonth() - MONTHS);
+export const START = MONTHS > 0 ? Math.max(300, m5.findIndex((b) => b.time >= from.getTime())) : 300;
+const FIRST = MONTHS > 0 ? START : 0; // début des mesures (sans fenêtre : inchangé, tout le cache)
 
 // ===== Indicateurs (valeur à la clôture de la bougie i, conventions MT5) =====
 export const closes = m5.map((b) => b.close);
@@ -78,7 +85,7 @@ export function run(c: Cfg, opts: { randomDir: boolean; seed: number; cost?: num
   const rand = () => { rnd = (rnd + 0x6d2b79f5) >>> 0; let z = rnd; z = Math.imul(z ^ (z >>> 15), z | 1); z ^= z + Math.imul(z ^ (z >>> 7), z | 61); return ((z ^ (z >>> 14)) >>> 0) / 4294967296; };
   const close = (px: number, t: number) => { const p = pos!; const gross = (px - p.entry) * p.dir;
     trades.push({ openT: p.openT, closeT: t, dir: p.dir, pnl: (gross - cost) * LOT, r: gross / Math.abs(p.entry - p.sl0), catchUp: p.catchUp }); pos = null; };
-  for (let i = 300; i < m5.length; i++) {
+  for (let i = START; i < m5.length; i++) {
     const b = m5[i];
     if (pos && T.openDay[i] !== pos.day) close(b.open, b.time); // nouveau jour serveur : l'EA ferme au premier tick
     if (pos) {
@@ -111,8 +118,8 @@ export function run(c: Cfg, opts: { randomDir: boolean; seed: number; cost?: num
 }
 
 // ===== Mesures, par moitié =====
-export const cut = Math.floor((m5[0].time + m5[m5.length - 1].time) / 2);
-const sessionDays = [...new Set(m5.map((_, i) => i).filter((i) => T.openHour[i] >= SESSION_START && T.openHour[i] < SESSION_END).map((i) => T.openDay[i]))];
+export const cut = Math.floor((m5[FIRST].time + lastT) / 2);
+const sessionDays = [...new Set(m5.map((_, i) => i).filter((i) => i >= FIRST && T.openHour[i] >= SESSION_START && T.openHour[i] < SESSION_END).map((i) => T.openDay[i]))];
 export const cutDay = T.openDay[m5.findIndex((b) => b.time >= cut)];
 export const daysIn = { h1: sessionDays.filter((d) => d < cutDay).length, h2: sessionDays.filter((d) => d >= cutDay).length, all: sessionDays.length };
 export type Half = 'h1' | 'h2' | 'all';
