@@ -118,9 +118,12 @@ export function run(c: Cfg, opts: { randomDir: boolean; seed: number; cost?: num
 }
 
 // ===== Mesures, par moitié =====
-export const cut = Math.floor((m5[FIRST].time + lastT) / 2);
+// Fenêtre --months : coupure à minuit serveur, pour qu'un jour entier (ses trades et son quota) tombe dans une seule
+// moitié. Sur tout le cache, les labos gardent la coupure au milieu exact, avec laquelle leurs chiffres ont été publiés.
+const mid = Math.floor((m5[FIRST].time + lastT) / 2);
+export const cutDay = T.openDay[m5.findIndex((b) => b.time >= mid)];
+export const cut = MONTHS > 0 ? m5[m5.findIndex((_, i) => T.openDay[i] >= cutDay)].time : mid;
 const sessionDays = [...new Set(m5.map((_, i) => i).filter((i) => i >= FIRST && T.openHour[i] >= SESSION_START && T.openHour[i] < SESSION_END).map((i) => T.openDay[i]))];
-export const cutDay = T.openDay[m5.findIndex((b) => b.time >= cut)];
 export const daysIn = { h1: sessionDays.filter((d) => d < cutDay).length, h2: sessionDays.filter((d) => d >= cutDay).length, all: sessionDays.length };
 export type Half = 'h1' | 'h2' | 'all';
 export interface St { n: number; net: number; pf: number; dd: number; perDay: number; ge4: number; win: number; r: number }

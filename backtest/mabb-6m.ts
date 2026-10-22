@@ -5,14 +5,15 @@
 // d'aujourd'hui, trop peu pour que le meilleur réglage d'une grille ne doive rien à la chance. Donc, comme sur les deux
 // ans, on coupe la fenêtre en deux : on CHOISIT sur les 3 premiers mois, on JUGE sur les 3 derniers, puis à l'envers.
 // RÈGLE, écrite avant de voir les chiffres : un changement n'entre dans l'EA que s'il fait mieux que le réglage actuel
-// sur la moitié qui n'a pas servi à le choisir.
+// (la v1.10, BASE ci-dessous) sur la moitié qui n'a pas servi à le choisir.
 //
 //   npx tsx backtest/mabb-6m.ts XAUUSD --months 6        (bougies : node scripts/pull-cache.mjs XAUUSD M5)
-import { COST, MIN_TRADES_PER_DAY, START, cell, cut, daysIn, fmt, label, m5, run, spearman, st, sym, type Cfg, type Half, type St } from './mabb-core';
+import { COST, MIN_TRADES_PER_DAY, START, T, cell, cutDay, daysIn, fmt, label, m5, run, spearman, st, sym, type Cfg, type Half, type St } from './mabb-core';
 
 if (START <= 300) { console.error('--months N manquant : ce labo ne regarde que les derniers mois'); process.exit(1); }
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
-const NAME: Record<'h1' | 'h2', string> = { h1: `${day(m5[START].time)} → ${day(cut)}`, h2: `${day(cut)} → ${day(m5[m5.length - 1].time)}` };
+const serverDay = (d: number) => day(d * 86_400_000); // T.openDay → date du jour serveur
+const NAME: Record<'h1' | 'h2', string> = { h1: `${serverDay(T.openDay[START])} → ${serverDay(cutDay - 1)}`, h2: `${serverDay(cutDay)} → ${serverDay(T.openDay[m5.length - 1])}` };
 
 const BASE: Cfg = { fast: 3, slow: 8, trend: 50, adxMin: 20, di: true, rr: 0.5, sl: 3, catchUp: true };
 type Res = ReturnType<typeof run>;
@@ -30,12 +31,12 @@ function card(r: Row) {
   console.log(`   mois par mois : ${byMonth(r.res)}`);
 }
 
-console.log(`L'EA SUR LES 6 DERNIERS MOIS — ${sym} · ${day(m5[START].time)} → ${day(m5[m5.length - 1].time)} · 1 lot · coûts ${COST} $/oz`);
+console.log(`L'EA SUR LES 6 DERNIERS MOIS — ${sym} · jours serveur ${serverDay(T.openDay[START])} → ${serverDay(T.openDay[m5.length - 1])} · 1 lot · coûts ${COST} $/oz`);
 console.log(`Moitié de choix / moitié jugée : ${NAME.h1} (${daysIn.h1} jours) et ${NAME.h2} (${daysIn.h2} jours).\n`);
 
 // ===== 1. L'EA tel qu'il est =====
-const base = measure('réglage actuel', BASE);
-console.log(`── L'EA TEL QU'IL EST (${label(BASE)})`);
+const base = measure('v1.10', BASE);
+console.log(`── L'EA v1.10 TEL QU'IL ÉTAIT (${label(BASE)})`);
 console.log(`   ${NAME.h1} : ${cell(base.h1)}`);
 console.log(`   ${NAME.h2} : ${cell(base.h2)}`);
 card(base);
@@ -53,12 +54,12 @@ for (const [pick, judge] of [['h1', 'h2'], ['h2', 'h1']] as ['h1' | 'h2', 'h1' |
   const eligible = grid.filter((g) => g[pick].perDay >= MIN_TRADES_PER_DAY).sort((a, b) => b[pick].pf - a[pick].pf);
   console.log(`   choisi sur ${NAME[pick]}, jugé sur ${NAME[judge]} :`);
   for (const g of eligible.slice(0, 5)) console.log(`      ${label(g.c).padEnd(52)} │ choix ${cell(g[pick])} │ JUGÉ ${cell(g[judge])}`);
-  console.log(`      réglage actuel de l'EA, même moitié jugée : ${cell(base[judge])}`);
+  console.log(`      v1.10, même moitié jugée : ${cell(base[judge])}`);
   console.log(`      toute la grille sur la moitié jugée : PF > 1 pour ${grid.filter((g) => g[judge].pf > 1).length}/${grid.length}, PF ≥ 1,2 pour ${grid.filter((g) => g[judge].pf >= 1.2).length}`);
 }
 console.log(`   Corrélation de rang du PF entre les deux moitiés : ${spearman(grid.map((g) => g.h1.pf), grid.map((g) => g.h2.pf)).toFixed(2)} (0 = la 1re moitié ne dit rien de la 2e).`);
 
-// ===== 3. Les améliorations du réglage actuel, une famille à la fois =====
+// ===== 3. Les améliorations de la v1.10, une famille à la fois =====
 const FAMILIES: { name: string; variants: [string, Partial<Cfg>][] }[] = [
   { name: 'tendance', variants: [['sans filtre de tendance', { trend: 0 }], ['EMA 200', { trend: 200 }], ['EMA 600 (≈ EMA 50 H1)', { trend: 600 }]] },
   { name: 'TP minimum', variants: [['TP ≥ 4 × coûts', { minTpCost: 4 }], ['TP ≥ 6 × coûts', { minTpCost: 6 }], ['TP ≥ 8 × coûts', { minTpCost: 8 }]] },
@@ -70,7 +71,7 @@ const FAMILIES: { name: string; variants: [string, Partial<Cfg>][] }[] = [
   { name: 'stop / RR', variants: [['stop 2 ATR', { sl: 2 }], ['stop 2,5 ATR', { sl: 2.5 }], ['RR 0,4', { rr: 0.4 }], ['RR 0,6', { rr: 0.6 }]] },
 ];
 const rows = FAMILIES.map((f) => ({ f, rs: f.variants.map(([n, p]) => measure(n, { ...BASE, ...p })) }));
-console.log(`\n── AMÉLIORATIONS DU RÉGLAGE ACTUEL (une ligne = un seul changement)`);
+console.log(`\n── AMÉLIORATIONS DE LA v1.10 (une ligne = un seul changement)`);
 console.log(`   ${'variante'.padEnd(30)} │ ${NAME.h1.padEnd(50)} │ ${NAME.h2}`);
 const line = (r: Row) => `   ${r.name.padEnd(30)} │ ${cell(r.h1)} │ ${cell(r.h2)}`;
 console.log(line(base));
@@ -85,20 +86,22 @@ for (const [pick, judge] of [['h1', 'h2'], ['h2', 'h1']] as ['h1' | 'h2', 'h1' |
     const ok = rs.filter((r) => r[pick].perDay >= MIN_TRADES_PER_DAY).sort((a, b) => b[pick].pf - a[pick].pf)[0];
     if (ok && ok[pick].pf >= base[pick].pf + MIN_GAIN) { adopted.push(`${f.name} : ${ok.name} (PF ${base[pick].pf.toFixed(2)} → ${ok[pick].pf.toFixed(2)})`); combo = { ...combo, ...f.variants.find(([n]) => n === ok.name)![1] }; }
   }
-  if (!adopted.length) { console.log('   aucune famille ne passe la règle : le réglage actuel reste.'); continue; }
+  if (!adopted.length) { console.log('   aucune famille ne passe la règle : la v1.10 reste.'); continue; }
   for (const a of adopted) console.log(`   adoptée · ${a}`);
   const r = measure(`choisi sur ${NAME[pick]}`, combo);
   console.log(`   combinaison, moitié de choix : ${cell(r[pick])}`);
-  console.log(`   combinaison, MOITIÉ JUGÉE    : ${cell(r[judge])}  (réglage actuel : ${cell(base[judge])})`);
-  console.log(`   → ${r[judge].pf > base[judge].pf ? 'PASSE : mieux que le réglage actuel sur la moitié jugée' : 'ÉCHOUE : pas mieux que le réglage actuel sur la moitié jugée'}`);
+  console.log(`   combinaison, MOITIÉ JUGÉE    : ${cell(r[judge])}  (v1.10 : ${cell(base[judge])})`);
+  console.log(`   → ${r[judge].pf > base[judge].pf ? 'PASSE : mieux que la v1.10 sur la moitié jugée' : 'ÉCHOUE : pas mieux que la v1.10 sur la moitié jugée'}`);
   card(r);
   console.log(`   ${JSON.stringify(combo)}`);
   if (r[judge].pf > base[judge].pf) verdicts.push(r);
 }
 
-// ===== 4. Ajouté APRÈS avoir vu les sections 1 à 3 : la sortie au temps est le seul changement qui fait mieux sur les
-// deux moitiés. Avant de l'écrire dans l'EA, on regarde toute la surface durée × tendance : un vrai effet donne une
-// zone large, un hasard donne une case isolée.
+// ===== 4. Ajouté APRÈS avoir vu les sections 1 à 3 : une tendance plus lente (EMA 200, EMA 600) et la sortie au temps
+// (1 h à 2 h) font mieux que la v1.10 sur les deux moitiés, et les deux choix automatiques de la section 3 les ont pris
+// (le break-even aux 3/4 du TP et la fenêtre 9 h-19 h aussi, plus faiblement ou à moins de 3,5 trades/jour). Avant de
+// les écrire dans l'EA, on regarde toute la surface durée × tendance : un vrai effet donne une zone large, un hasard
+// donne une case isolée.
 console.log('\n── SURFACE SORTIE AU TEMPS × TENDANCE (ajoutée après lecture des sections 1 à 3 ; PF des deux moitiés · net 6 mois · mois gagnants)');
 const winMonths = (res: Res) => { const m = new Map<string, number>(); for (const t of res.trades) { const k = day(t.openT).slice(0, 7); m.set(k, (m.get(k) ?? 0) + t.pnl); } return `${[...m.values()].filter((v) => v > 0).length}/${m.size}`; };
 for (const trend of [50, 200, 600]) for (const bars of [0, 6, 12, 18, 24, 30, 36]) {
@@ -134,5 +137,5 @@ for (const [name, c, cost] of NEIGHBOURS) {
   console.log(`      ${name.padEnd(28)} │ PF ${h1.pf.toFixed(2)} / ${h2.pf.toFixed(2)} │ 6 mois PF ${all.pf.toFixed(2)} · ${fmt(all.net).padStart(8)} $ · DD ${fmt(all.dd).padStart(8)} $ · ${all.perDay.toFixed(1)} tr/j · ≥4 ${Math.round(100 * all.ge4)} %`);
 }
 
-console.log(`\nVerdict : ${verdicts.length ? `${verdicts.length} combinaison(s) passe(nt) la règle sur la moitié jugée.` : 'aucune amélioration ne tient sur la moitié qu’elle n’a pas vue ; le réglage actuel reste.'}`);
+console.log(`\nVerdict des choix automatiques (section 3) : ${verdicts.length ? `${verdicts.length} combinaison(s) sur 2 passe(nt) la règle sur la moitié jugée.` : 'aucune amélioration ne tient sur la moitié qu’elle n’a pas vue.'} Le réglage retenu (section 5) a été choisi après lecture : il n'est pas jugé par la règle.`);
 console.log('Lecture : seule la moitié jugée compte. Sur 3 mois, un écart de PF de quelques centièmes reste du bruit.');

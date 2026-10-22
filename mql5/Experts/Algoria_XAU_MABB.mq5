@@ -226,7 +226,8 @@ bool ForcedExit(const MqlDateTime &now)
    if(InpMaxHoldMinutes > 0)
      {
       datetime bar = iTime(_Symbol, InpTimeframe, 0);
-      timeUp = bar > 0 && (long)(bar - (opened - opened % PeriodSeconds(InpTimeframe))) >= (long)InpMaxHoldMinutes * 60;
+      datetime entryBar = iTime(_Symbol, InpTimeframe, iBarShift(_Symbol, InpTimeframe, opened));
+      timeUp = bar > 0 && entryBar > 0 && (long)(bar - entryBar) >= (long)InpMaxHoldMinutes * 60;
       // le labo ne rentre pas sur la bougie d'une sortie au temps : cette bougie ne sera pas traitée par OnTick
       if(timeUp)
          g_lastBar = bar;
