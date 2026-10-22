@@ -5,16 +5,17 @@
 //+------------------------------------------------------------------+
 // Réglages par défaut = la demande de Mathieu (EMA courtes, filtre ADX, RR « négatif » de 0,5, lot fixe), mesurés sur
 // les 6 DERNIERS MOIS de M5 broker seulement (22/04 → 22/10/2026, backtest/mabb-6m.ts), coupés en deux moitiés de
-// 3 mois : un changement ne compte que s'il fait mieux sur les deux. 1 lot, coûts 0,32 $/oz :
+// 3 mois : on choisit sur l'une et on juge sur l'autre. 1 lot, coûts 0,32 $/oz :
 //   EMA 3/8 + tendance EMA 200, ADX(14) ≥ 20 avec +DI/−DI, stop 3 ATR, TP 1,5 ATR, rattrapage dès 14 h, et SORTIE
 //   AU TEMPS : un trade qui n'a touché ni stop ni TP au bout de 90 min est fermé à la clôture de la bougie.
 //   PF 1,14 puis 1,24 sur les deux moitiés, 1,19 sur 6 mois (+40 k$), pire creux −13 k$, 4,3 trades/jour.
 //   La v1.10 (EMA 50, sans sortie au temps) faisait PF 0,92 puis 1,07, 0,99 sur 6 mois (−3,5 k$), creux −29 k$.
-// La sortie au temps est le seul changement qui améliore les deux moitiés ; elle marche de 30 min à 2 h et avec une
-// tendance EMA 200 ou 600 (PF 1,11 à 1,24 sur chaque moitié) : 90 min et EMA 200 sont le cœur de cette zone, choisis
-// APRÈS avoir vu les 6 mois, donc optimistes par construction. Les règles Bollinger, BBRSI de geraked (sans sa
-// grille) et la « Moving Average » de MetaQuotes perdent toutes (backtest/mabb-arena.ts) : les modes Bollinger
-// restent là pour être testés.
+// Une tendance plus lente et la sortie au temps sont les deux changements qui font nettement mieux sur les deux
+// moitiés. Avec une tendance EMA 200 ou 600, la sortie au temps marche de 30 min à 2 h (PF 1,04 à 1,24 sur chaque
+// moitié) : 90 min et EMA 200 sont au cœur de cette zone, choisis APRÈS avoir vu les 6 mois, donc optimistes par
+// construction. Tous leurs voisins (spread 0,40 $, 60 ou 120 min, EMA 100 ou 600, RR 0,4 ou 0,6…) restent gagnants
+// sur les deux moitiés. Les règles Bollinger, BBRSI de geraked (sans sa grille) et la « Moving Average » de
+// MetaQuotes perdent toutes (backtest/mabb-arena.ts) : les modes Bollinger restent là pour être testés.
 // Le MAXIMUM de trades par jour est un plafond dur. Le MINIMUM ne peut pas se décréter : à partir de
 // InpCatchUpHour, s'il manque des trades, la même règle sans filtre de tendance prend le relais. Les jours trop
 // calmes, l'EA finit sous le minimum ; il n'ouvre jamais de trade sans signal.

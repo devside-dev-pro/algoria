@@ -18,11 +18,11 @@ glissement, 0,07 de commission). Au lot par défaut de 0,01, il faut **diviser p
 ## Les 6 derniers mois (22/04 → 22/10/2026)
 
 Le réglage est mesuré sur les seules bougies M5 de notre broker des 6 derniers mois (`backtest/mabb-6m.ts`). Cette
-fenêtre est coupée en deux moitiés de 3 mois.
+fenêtre est coupée en deux moitiés de 3 mois, à minuit heure serveur.
 
 | v1.20 | PF | net (1 lot) | net (0,01 lot) | trades/jour | ≥ 4 trades | pire creux (1 lot) |
 |---|---|---|---|---|---|---|
-| 22/04 → 23/07 | 1,14 | +16 722 $ | +167 $ | 4,4 | 91 % des jours | −12 085 $ |
+| 22/04 → 22/07 | 1,14 | +16 722 $ | +167 $ | 4,4 | 91 % des jours | −12 085 $ |
 | 23/07 → 22/10 | 1,24 | +23 436 $ | +234 $ | 4,2 | 82 % | −11 568 $ |
 | **6 mois** | **1,19** | **+40 157 $** | **+402 $** | 4,3 | 86 % | −12 902 $ |
 
@@ -40,15 +40,21 @@ Sur les mêmes 6 mois, la v1.10 (EMA 50, sans sortie au temps) faisait PF 0,92 p
 ### Comment ce réglage a été trouvé
 
 La règle a été écrite avant de voir les chiffres : on choisit sur une moitié, et un changement n'entre dans l'EA
-que s'il fait mieux que le réglage actuel **sur l'autre moitié**, celle qui n'a pas servi à le choisir.
+que s'il fait mieux que la v1.10 **sur l'autre moitié**, celle qui n'a pas servi à le choisir.
 
-- **Re-régler les EMA, l'ADX et le stop ne sert à rien.** Le meilleur des 420 réglages de la grille sur une
-  moitié ne tient pas sur l'autre :
+- **Re-régler les EMA, l'ADX et le stop ne donne rien de fiable.** Le meilleur des 420 réglages de la grille sur
+  une moitié est perdant sur l'autre :
   - choisi sur avril → juillet (EMA 3/8 + EMA 100, ADX ≥ 20 + DI, stop 2 ATR, PF 1,22), il fait PF 0,99 sur
-    juillet → octobre ;
-  - choisi sur juillet → octobre (EMA 4/9 + EMA 200, ADX ≥ 20 sans DI, PF 1,37), il fait PF 0,96 sur avril → juillet.
-- **La sortie au temps est le seul changement qui améliore les deux moitiés.** Elle marche de 30 minutes à
-  2 heures, et mieux avec une tendance lente (PF avril → juillet / juillet → octobre) :
+    juillet → octobre, moins que la v1.10 (1,07) ;
+  - choisi sur juillet → octobre (EMA 4/9 + EMA 200, ADX ≥ 20 sans DI, PF 1,37), il fait PF 0,96 sur
+    avril → juillet. C'est mieux que la v1.10 (0,92), mais toujours perdant.
+
+  Quelques réglages un peu plus bas dans le classement tiennent mieux, comme l'EMA 4/9 + EMA 200 avec DI (PF 1,13
+  sur avril → juillet). Mais rien ne permettait de les désigner d'avance.
+- **Deux changements font nettement mieux que la v1.10 sur les deux moitiés : une tendance plus lente et la sortie
+  au temps.** Avec la tendance EMA 50 de la v1.10, la sortie au temps aide de 1 h à 2 h (à 30 min, elle ne fait que
+  rejoindre la v1.10 sur juillet → octobre). Avec une tendance EMA 200 ou 600, toute sortie entre 30 min et 2 h
+  fait mieux que la v1.10 sur les deux moitiés (PF avril → juillet / juillet → octobre) :
 
 | sortie au temps | tendance EMA 50 | tendance EMA 200 | tendance EMA 600 |
 |---|---|---|---|
@@ -67,9 +73,12 @@ que s'il fait mieux que le réglage actuel **sur l'autre moitié**, celle qui n'
   - choisi sur avril → juillet : six changements empilés (EMA 600, sortie après 30 min, stop 2 ATR, fenêtre
     9 h-19 h, break-even, rattrapage dès 11 h). Sur juillet → octobre, il fait PF 0,95 contre 1,07 : il échoue.
 
-  Les deux ont pris une tendance plus lente et une sortie au temps.
-- **EMA 200 et 90 minutes sont le cœur de la zone.** L'EA ne garde que ces deux changements, sans le break-even ni
-  le filtre de bougie. Ce choix a été fait **après** avoir vu les 6 mois : ses chiffres sont donc optimistes par
+  Les deux ont pris une tendance plus lente et une sortie au temps. D'autres changements isolés font aussi mieux
+  que la v1.10 sur les deux moitiés, mais plus faiblement : le break-even aux 3/4 du TP (0,94 / 1,13) et la fenêtre
+  9 h-19 h (1,02 / 1,11, mais 3,3 trades par jour seulement sur juillet → octobre).
+- **EMA 200 et 90 minutes sont au cœur de la zone.** Ensemble, ils font mieux que chacun seul sur les deux moitiés
+  (EMA 200 seule : 0,98 / 1,21 ; sortie après 90 min seule : 1,04 / 1,20 ; les deux : 1,14 / 1,24). L'EA ne garde
+  que ces deux changements, sans le break-even ni le filtre de bougie. Ce choix a été fait **après** avoir vu les 6 mois : ses chiffres sont donc optimistes par
   construction. C'est pourquoi ses voisins comptent plus que lui.
 
 Pourquoi la sortie au temps aide, probablement : avec un stop deux fois plus loin que le TP, un trade qui n'a pas
@@ -99,8 +108,8 @@ Lecture :
   la grande différence avec la v1.10, qu'un seul changement faisait passer en perte sur 2 ans.
 - **Les plus sensibles :** un stop de 2,5 ATR (PF 1,04 sur juillet → octobre) et le retrait de la confirmation DI
   (PF 1,03 sur avril → juillet, creux de −22 k$).
-- **Le rattrapage ne sert plus à gagner, mais à tenir le quota.** Sans lui, l'EA gagne presque autant mais ne fait
-  4 trades que 56 % des jours, contre 86 %.
+- **Le rattrapage sert surtout à tenir le quota.** Ses 146 trades rapportent +6 669 $. Sans lui, l'EA gagne moins
+  (+29 938 $ contre +40 157 $), avec le même PF, et ne fait 4 trades que 56 % des jours, contre 86 %.
 - **EMA 4/9 fait un peu mieux, et n'a pas été retenue.** Chercher le meilleur voisin, c'est finir par garder le plus
   chanceux.
 
