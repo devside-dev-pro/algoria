@@ -67,6 +67,7 @@ input int               InpSessionStart    = 9;                // Première heur
 input int               InpSessionEnd      = 22;               // Plus d'entrée à partir de cette heure
 input int               InpFlatHour        = 23;               // Tout fermer à partir de cette heure
 input int               InpFridayFlatHour  = 21;               // Vendredi : tout fermer et ne plus entrer à partir de cette heure
+input int               InpCloseBeforeEnd  = 10;               // Fermer N minutes avant la fin de séance du broker (0 = off)
 
 input group "Sorties"
 input int               InpATRPeriod       = 14;               // ATR : période
@@ -123,12 +124,17 @@ int OnInit()
    g_trade.SetDeviationInPoints(InpSlippagePoints);
    g_trade.SetTypeFillingBySymbol(_Symbol);
    g_lastEntry = LastEntryTime();
+   // au chargement, on attend la prochaine bougie : la dernière close a peut-être déjà été tradée avant un redémarrage
+   g_lastBar = iTime(_Symbol, InpTimeframe, 0);
+   // sorties forcées vérifiées aussi sans tick (clôture anticipée, marché qui s'endort avant l'heure de mise à plat)
+   EventSetTimer(30);
    return INIT_SUCCEEDED;
   }
 
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   EventKillTimer();
    Release(g_hFast);
    Release(g_hSlow);
    Release(g_hTrend);
@@ -156,26 +162,85 @@ void Release(int &handle)
   }
 
 //+------------------------------------------------------------------+
+void OnTimer()
+  {
+   MqlDateTime now;
+   TimeToStruct(TimeCurrent(), now);
+   ForcedExit(now);
+  }
+
+// minutes avant la fin de la séance de trading en cours, d'après les horaires du broker (-1 : pas de fin dans la journée)
+int MinutesToSessionEnd(const MqlDateTime &now)
+  {
+   int secs = now.hour * 3600 + now.min * 60 + now.sec;
+   datetime from = 0, to = 0;
+   for(uint i = 0; i < 16; i++)
+     {
+      if(!SymbolInfoSessionTrade(_Symbol, (ENUM_DAY_OF_WEEK)now.day_of_week, i, from, to))
+         break;
+      int f = (int)from, t = (int)to;
+      if(secs >= f && secs < t)
+         return t >= 86340 ? -1 : (t - secs) / 60; // une séance qui va jusqu'à minuit continue le lendemain
+     }
+   return -1;
+  }
+
+// plus d'entrée : heure de mise à plat, vendredi soir, ou fin de séance du broker toute proche
+bool NoEntryTime(const MqlDateTime &now)
+  {
+   if(now.hour >= InpFlatHour || (now.day_of_week == 5 && now.hour >= InpFridayFlatHour))
+      return true;
+   if(InpCloseBeforeEnd > 0)
+     {
+      int left = MinutesToSessionEnd(now);
+      if(left >= 0 && left <= InpCloseBeforeEnd)
+         return true;
+     }
+   return false;
+  }
+
+// ferme notre position à l'heure de mise à plat, avant la fin de séance, ou si elle date d'un jour serveur précédent
+// (clôture anticipée, jour férié, terminal déconnecté au moment de la mise à plat) ; true si une position est ouverte
+// et qu'il faut la fermer
+bool ForcedExit(const MqlDateTime &now)
+  {
+   ulong ticket = 0;
+   if(!SelectOurPosition(ticket))
+      return false;
+   bool stale = DayStart((datetime)PositionGetInteger(POSITION_TIME)) < DayStart(TimeCurrent());
+   if(!stale && !NoEntryTime(now))
+      return false;
+   // or fermé plus tôt que le forex (jour férié) : le serveur répond « marché fermé » ; on réessaie toutes les 5 minutes
+   static datetime lastRefusal = 0;
+   if((long)(TimeCurrent() - lastRefusal) < 300)
+      return true;
+   if(!g_trade.PositionClose(ticket))
+     {
+      lastRefusal = TimeCurrent();
+      PrintFormat("Fermeture forcée refusée : %d %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+     }
+   return true;
+  }
+
+//+------------------------------------------------------------------+
 void OnTick()
   {
    MqlDateTime now;
    TimeToStruct(TimeCurrent(), now);
-   bool friday = (now.day_of_week == 5);
-   bool flat = (now.hour >= InpFlatHour) || (friday && now.hour >= InpFridayFlatHour);
 
-   // fermeture de fin de journée / de semaine : à chaque tick, pas seulement à la nouvelle bougie
-   ulong ticket = 0;
-   if(SelectOurPosition(ticket) && flat)
-     {
-      if(!g_trade.PositionClose(ticket))
-         PrintFormat("Fermeture de fin de session refusée : %d %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+   // sorties forcées : à chaque tick, pas seulement à la nouvelle bougie
+   if(ForcedExit(now))
       return;
-     }
 
    datetime bar = iTime(_Symbol, InpTimeframe, 0);
    if(bar == 0 || bar == g_lastBar)
       return;
+   // pic de spread au premier tick : on réessaie pendant une minute plutôt que de perdre le signal de la bougie
+   if(InpMaxSpread > 0 && SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID) > InpMaxSpread &&
+      (long)(TimeCurrent() - bar) < 60)
+      return;
    g_lastBar = bar;
+   ulong ticket = 0;
 
    int today = TradesToday();
    TrackStatDay(now, today);
@@ -195,7 +260,7 @@ void OnTick()
 
    if(SelectOurPosition(ticket))
       return; // une position à la fois
-   if(flat || now.hour < InpSessionStart || now.hour >= InpSessionEnd)
+   if(NoEntryTime(now) || now.hour < InpSessionStart || now.hour >= InpSessionEnd)
       return;
    if(today >= InpMaxTradesPerDay)
       return;
@@ -373,7 +438,10 @@ void Enter(const int dir, const double signalTp, const bool catchUp)
    string comment = catchUp ? "MABB rattrapage" : "MABB";
    bool ok = (dir == 1) ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment) : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
    if(ok && (g_trade.ResultRetcode() == TRADE_RETCODE_DONE || g_trade.ResultRetcode() == TRADE_RETCODE_PLACED))
+     {
       g_lastEntry = TimeCurrent();
+      g_statDayTrades++; // le bilan du testeur compte aussi une entrée prise sur la dernière bougie avant une clôture
+     }
    else
       PrintFormat("Ordre refusé : %d %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
   }
@@ -434,18 +502,28 @@ bool SelectOurPosition(ulong &ticket)
 
 datetime DayStart(const datetime t) { return (datetime)((long)t - (long)t % 86400); }
 
-// compté dans l'historique du serveur : survit à un redémarrage du terminal ou de l'EA
+// compté dans l'historique du serveur : survit à un redémarrage du terminal ou de l'EA. Une entrée exécutée en
+// plusieurs morceaux donne plusieurs deals d'entrée pour la même position : on compte les positions, pas les deals.
 int TradesToday()
   {
    if(!HistorySelect(DayStart(TimeCurrent()), TimeCurrent() + 60))
       return 0;
+   ulong seen[];
    int n = 0;
    for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
      {
       ulong d = HistoryDealGetTicket(i);
-      if(HistoryDealGetString(d, DEAL_SYMBOL) == _Symbol && (ulong)HistoryDealGetInteger(d, DEAL_MAGIC) == InpMagic &&
-         HistoryDealGetInteger(d, DEAL_ENTRY) == DEAL_ENTRY_IN)
-         n++;
+      if(HistoryDealGetString(d, DEAL_SYMBOL) != _Symbol || (ulong)HistoryDealGetInteger(d, DEAL_MAGIC) != InpMagic ||
+         HistoryDealGetInteger(d, DEAL_ENTRY) != DEAL_ENTRY_IN)
+         continue;
+      ulong id = (ulong)HistoryDealGetInteger(d, DEAL_POSITION_ID);
+      bool dup = false;
+      for(int k = 0; k < n && !dup; k++)
+         dup = (seen[k] == id);
+      if(dup)
+         continue;
+      ArrayResize(seen, n + 1);
+      seen[n++] = id;
      }
    return n;
   }
