@@ -42,7 +42,7 @@ const OFFSET = 3 * 3_600_000; // heure broker ≈ UTC+3
 const brokerDay = (t: number) => Math.floor((t + OFFSET) / 86_400_000);
 const brokerHour = (t: number) => new Date(t + OFFSET).getUTCHours();
 const month = (t: number) => new Date(t).toISOString().slice(0, 7);
-const SESSION_START = 9, SESSION_END = 22, FLAT_HOUR = 23, FRIDAY_FLAT = 21, MAX_PER_DAY = 5, MIN_PER_DAY = 4, CATCHUP_HOUR = 16;
+const SESSION_START = 9, SESSION_END = 22, FLAT_HOUR = 23, FRIDAY_FLAT = 21, MAX_PER_DAY = 5, MIN_PER_DAY = 4, CATCHUP_HOUR = 16; // l'EA rattrape dès 14 h : voir la sensibilité
 
 // ===== Indicateurs, valeur à la CLÔTURE de la bougie i (causal), conventions MT5 =====
 const closes = m5.map((b) => b.close);
