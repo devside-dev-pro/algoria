@@ -161,6 +161,9 @@ for (const [pick, judge, name] of [['h1', 'h2', 'CHOISI SUR LA 1re ANNÉE, JUGÉ
   if (best) {
     const nets = Array.from({ length: 10 }, (_, k) => st(run(best.c, { randomDir: true, seed: 11 + 31 * k }), judge).net);
     console.log(`   → choix : ${label(best.c)} — année jugée ${cell(best[judge])} · DD ${fmt(best[judge].dd)} $ · bat ${nets.filter((v) => v < best[judge].net).length}/10 tirages au hasard`);
+    const res = run(best.c), all = st(res, 'all');
+    const allNets = Array.from({ length: 20 }, (_, k) => st(run(best.c, { randomDir: true, seed: 11 + 31 * k }), 'all').net);
+    console.log(`     sur 2 ans : ${cell(all)} · win ${Math.round(100 * all.win)} % · DD ${fmt(all.dd)} $ · depuis le 1er juin 2026 ${fmt(res.trades.filter((t) => t.openT >= Date.UTC(2026, 5, 1)).reduce((a, t) => a + t.pnl, 0))} $ · bat ${allNets.filter((v) => v < all.net).length}/20 tirages`);
   }
   const pfs = (g: (typeof grid)[number]) => g[judge].pf;
   console.log(`   Sur l'année jugée, toute la grille : PF > 1 pour ${grid.filter((g) => pfs(g) > 1).length}/${grid.length}, PF ≥ 1,2 pour ${grid.filter((g) => pfs(g) >= 1.2).length}, PF ≥ 1,5 pour ${grid.filter((g) => pfs(g) >= 1.5).length} (dont ${grid.filter((g) => pfs(g) >= 1.5 && g[judge].perDay >= MIN_TRADES_PER_DAY).length} à ≥ ${MIN_TRADES_PER_DAY} tr/j).`);
