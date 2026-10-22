@@ -32,6 +32,7 @@ import { sthReady, sthStatus, sthMoveMaster } from '../lib/member/sth';
 import { startTikTok, stopTikTok } from './tiktok';
 import { runSentinel } from './sentinel';
 import { startCopyObserver } from './observer';
+import { startGuard } from './guard';
 import { startSourceHistorySync } from './sourceHistory';
 
 // MODE COPIE : ce compte reçoit ses trades d'un copieur externe, nos moteurs ne décident plus rien ici.
@@ -352,6 +353,8 @@ async function main() {
         // jour du COMPTE, pas de qui a pris les trades : sur un compte alimenté par un copieur, un mauvais
         // jour de la source ferait fermer SES positions par NOTRE cap, au pire moment, au creux de la journée.
         // On paie une stratégie pour ses décisions ; on ne la débranche pas au milieu d'un trade.
+        // ⚠️ 22/10/2026 : c'était une erreur de ne RIEN mettre à la place — la nuit du 21 au 22, le copieur a perdu
+        // 85 % du master sans qu'aucune règle ne l'arrête. En mode copie, la protection vit dans runner/guard.ts.
         if (!COPY_MODE && state.dayDone && state.dayDoneReason === 'loss' && hardClosedDay !== state.dayStamp) {
           hardClosedDay = state.dayStamp ?? '';
           const openHere = ((terminal.positions ?? []) as any[]).filter((p) => p.symbol === BROKER);
@@ -969,6 +972,9 @@ async function main() {
     const covered = new Set(engines.map((e) => e.inst.broker));
     stream.addSynchronizationListener(new DealRecorder(null, '', covered));
     startCopyObserver({ terminal, label: 'copie' });
+    // 🛡️ LES GARDE-FOUS DU MASTER (22/10/2026, après la nuit du 21 au 22) : stop de secours, 10 positions max,
+    // coupure à −5 % sur la journée. Ils ne dépendent plus du copieur — voir runner/guard.ts.
+    startGuard({ stream, terminal, isKilled: () => killed });
     console.log(`[algoria] mode copie ACTIF · symboles déjà couverts : ${[...covered].join(', ') || 'aucun'}`);
   }
 
