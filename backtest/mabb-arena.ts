@@ -21,7 +21,7 @@
 //   Z    LIGNE DE BASE pour chacune : mêmes entrées, mêmes sorties, direction tirée au hasard (SL/TP en miroir).
 //
 // LE QUOTA : 5 trades par jour broker au plus ; session 9 h-22 h broker (≈ Londres + New York), tout est fermé à
-// 23 h. Le « minimum 4 » ne se décrète pas : une règle qui ne voit que 2 signaux un jour calme ne peut en voir 4
+// 23 h, et le vendredi dès 21 h (comme l'EA). Le « minimum 4 » ne se décrète pas : une règle qui ne voit que 2 signaux un jour calme ne peut en voir 4
 // qu'en baissant ses exigences. On mesure donc (1) la part des jours où chaque règle atteint 4 seule, et (2) un
 // RATTRAPAGE : à partir de 16 h broker, s'il manque des trades, une seconde règle plus rapide prend le relais
 // (EX → EMA 9/21 sans filtre 200 ; BV → BB 20/1,5). Si le rattrapage perd, le minimum coûte de l'argent.
@@ -42,7 +42,7 @@ const OFFSET = 3 * 3_600_000; // heure broker ≈ UTC+3
 const brokerDay = (t: number) => Math.floor((t + OFFSET) / 86_400_000);
 const brokerHour = (t: number) => new Date(t + OFFSET).getUTCHours();
 const month = (t: number) => new Date(t).toISOString().slice(0, 7);
-const SESSION_START = 9, SESSION_END = 22, FLAT_HOUR = 23, MAX_PER_DAY = 5, MIN_PER_DAY = 4, CATCHUP_HOUR = 16;
+const SESSION_START = 9, SESSION_END = 22, FLAT_HOUR = 23, FRIDAY_FLAT = 21, MAX_PER_DAY = 5, MIN_PER_DAY = 4, CATCHUP_HOUR = 16;
 
 // ===== Indicateurs, valeur à la CLÔTURE de la bougie i (causal), conventions MT5 =====
 const closes = m5.map((b) => b.close);
@@ -111,12 +111,13 @@ const WITH_CATCHUP: Strat[] = [
 // ===== Moteur (pire cas : dans une même bougie, le stop passe avant le TP) =====
 interface Trade { openT: number; closeT: number; dir: 1 | -1; pnl: number; r: number; catchUp: boolean }
 interface Pos { dir: 1 | -1; sigDir: 1 | -1; entry: number; sl: number; tp: number; openT: number; catchUp: boolean }
-function run(s: Strat, opts: { randomDir: boolean; seed: number }): { trades: Trade[]; perDay: Map<number, number> } {
+function run(s: Strat, opts: { randomDir: boolean; seed: number; catchUpHour?: number; cost?: number }): { trades: Trade[]; perDay: Map<number, number> } {
+  const cost = opts.cost ?? COST, catchUpHour = opts.catchUpHour ?? CATCHUP_HOUR;
   const trades: Trade[] = []; const perDay = new Map<number, number>(); let pos: Pos | null = null; let rnd = opts.seed >>> 0;
   // mulberry32 : le LCG des autres labos perd sa précision en double et boucle tous les 10 466 tirages
   const rand = () => { rnd = (rnd + 0x6d2b79f5) >>> 0; let z = rnd; z = Math.imul(z ^ (z >>> 15), z | 1); z ^= z + Math.imul(z ^ (z >>> 7), z | 61); return ((z ^ (z >>> 14)) >>> 0) / 4294967296; };
   const close = (px: number, t: number) => { const p = pos!; const gross = (px - p.entry) * p.dir;
-    trades.push({ openT: p.openT, closeT: t, dir: p.dir, pnl: (gross - COST) * LOT, r: gross / Math.abs(p.entry - p.sl), catchUp: p.catchUp }); pos = null; };
+    trades.push({ openT: p.openT, closeT: t, dir: p.dir, pnl: (gross - cost) * LOT, r: gross / Math.abs(p.entry - p.sl), catchUp: p.catchUp }); pos = null; };
   for (let i = 501; i < m5.length; i++) {
     const b = m5[i];
     if (pos) { // SL / TP touchés pendant la bougie i
@@ -125,12 +126,13 @@ function run(s: Strat, opts: { randomDir: boolean; seed: number }): { trades: Tr
     }
     const hr = brokerHour(b.time + 300_000), d = brokerDay(b.time); // heure de la CLÔTURE de la bougie
     const gap = i + 1 < m5.length && m5[i + 1].time - b.time > 3_600_000; // trou de cotation (nuit, week-end)
-    if (pos && (hr >= FLAT_HOUR || gap || brokerDay(b.time + 300_000) !== brokerDay(pos.openT))) { close(b.close, b.time); continue; }
+    const friday = new Date(b.time + 300_000 + OFFSET).getUTCDay() === 5 && hr >= FRIDAY_FLAT;
+    if (pos && (hr >= FLAT_HOUR || friday || gap || brokerDay(b.time + 300_000) !== brokerDay(pos.openT))) { close(b.close, b.time); continue; }
     if (pos && s.exitOnSig && s.exitOnSig(i) === -pos.sigDir) { close(b.close, b.time); continue; } // comme l'original : pas de retournement sur la même bougie
-    if (pos || hr < SESSION_START || hr >= SESSION_END) continue;
+    if (pos || friday || hr < SESSION_START || hr >= SESSION_END) continue;
     const n = perDay.get(d) ?? 0; if (n >= MAX_PER_DAY) continue;
     let sigDir = s.sig(i), catchUp = false;
-    if (!sigDir && s.catchUp && hr >= CATCHUP_HOUR && n < MIN_PER_DAY) { sigDir = s.catchUp(i); catchUp = sigDir !== 0; }
+    if (!sigDir && s.catchUp && hr >= catchUpHour && n < MIN_PER_DAY) { sigDir = s.catchUp(i); catchUp = sigDir !== 0; }
     if (!sigDir) continue;
     const lv = s.levels(i, sigDir, b.close); if (!lv) continue;
     const dir: 1 | -1 = opts.randomDir ? (rand() < 0.5 ? 1 : -1) : sigDir;
@@ -187,4 +189,24 @@ for (const { s, real } of results) {
   console.log(`  ${s.name}: ${green}/${keys.length} mois verts`);
   for (let i = 0; i < keys.length; i += 8) console.log('    ' + keys.slice(i, i + 8).map((k) => `${k.slice(2)} ${fmt(m.get(k)!).padStart(7)}`).join(' · '));
 }
+// ===== Sensibilité de la seule règle qui bat le hasard (EX+) : un avantage qui ne tient qu'à un réglage n'en est pas un
+console.log(`\n── SENSIBILITÉ DE EX+ (une ligne = un seul réglage changé ; hasard sur 10 tirages)`);
+function sensi(label: string, s: Strat, o: { catchUpHour?: number; cost?: number } = {}) {
+  const real = run(s, { randomDir: false, seed: 7, ...o });
+  const nets = Array.from({ length: 10 }, (_, k) => stats(run(s, { randomDir: true, seed: 11 + 31 * k, ...o }).trades).net);
+  const x = stats(real.trades), ge4 = [...real.perDay.values()].filter((v) => v >= MIN_PER_DAY).length;
+  const h1 = stats(real.trades.filter((t) => t.openT < cut)).net, h2 = stats(real.trades.filter((t) => t.openT >= cut)).net;
+  console.log(`   ${label.padEnd(30)} net ${fmt(x.net).padStart(9)} $ · PF ${x.pf.toFixed(2)} · DD ${fmt(x.dd).padStart(8)} $ · moitiés ${fmt(h1)} / ${fmt(h2)} · ≥ 4 trades ${Math.round((100 * ge4) / tradingDays)} % des jours · bat ${nets.filter((v) => v < x.net).length}/10 tirages`);
+}
+const exPlus = WITH_CATCHUP[0];
+sensi('référence (16 h, TP 2R)', exPlus);
+sensi('rattrapage dès 14 h', exPlus, { catchUpHour: 14 });
+sensi('rattrapage dès 18 h', exPlus, { catchUpHour: 18 });
+sensi('TP 1,5R', { ...exPlus, levels: atrLevels(1.5, 1.5) });
+sensi('TP 3R', { ...exPlus, levels: atrLevels(1.5, 3) });
+sensi('stop 1 ATR, TP 2R', { ...exPlus, levels: atrLevels(1, 2) });
+sensi('spread 0,30 $ (coûts 0,42)', exPlus, { cost: 0.42 });
+sensi('spread 0,40 $ (coûts 0,52)', exPlus, { cost: 0.52 });
+sensi('EMA 9/21 nu toute la journée', { ...exPlus, sig: emaXfast, catchUp: undefined });
+
 console.log('\nLecture : une règle qui ne bat pas ses tirages au hasard n’a pas de direction ; un rattrapage qui perd veut dire que le « minimum 4 » se paie.');
