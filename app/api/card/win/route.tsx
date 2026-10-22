@@ -44,8 +44,8 @@ export async function GET(req: NextRequest) {
   // ?ref=<code> (02/10/2026) : la carte sert aussi d'APERÇU DE LIEN quand un membre partage un gain (WhatsApp /
   // Telegram affichent l'og:image de la page d'invitation) — le QR et le lien sont alors les SIENS.
   const ref = (req.nextUrl.searchParams.get('ref') ?? '').toLowerCase();
-  const qrTarget = REF_CODE_RE.test(ref) ? `https://app.algoria-ai.com/r/${ref}` : 'https://algoria-ai.com';
-  const qrLabel = REF_CODE_RE.test(ref) ? `app.algoria-ai.com/r/${ref}` : 'algoria-ai.com';
+  const qrTarget = REF_CODE_RE.test(ref) ? `https://app.getalgoria.com/r/${ref}` : 'https://getalgoria.com';
+  const qrLabel = REF_CODE_RE.test(ref) ? `app.getalgoria.com/r/${ref}` : 'getalgoria.com';
   const qrSvg = await QRCode.toString(qrTarget, { type: 'svg', margin: 1, color: { dark: '#0b0e14', light: '#ffffff' } });
   const qrUri = `data:image/svg+xml;base64,${Buffer.from(qrSvg).toString('base64')}`;
   // logo (filigrane + en-tête) — best-effort : la carte se rend sans si l'asset est injoignable

@@ -2,7 +2,7 @@
 // et un QR code qui ramène du monde. Généré 100% côté client (canvas), deux formats :
 //   story 1080×1920 (stories Insta/TikTok) · landscape 1200×675 (posts, Telegram, X — la carte Binance).
 // Deux usages : le membre partage SES gains (QR = SON lien de parrainage → il gagne 50$),
-// la CM télécharge les gains du compte maître pour le canal (QR = algoria-ai.com).
+// la CM télécharge les gains du compte maître pour le canal (QR = getalgoria.com).
 import QRCode from 'qrcode';
 import { REF_LABEL } from '@/lib/display/scale';
 
@@ -17,8 +17,8 @@ export interface WinCardOpts {
   direction: string; // 'long' | 'short'
   pnl: number; // gain en $ (positif), DÉJÀ ramené à 0.10 lot par l'appelant (atRef) — la carte l'annonce
   closedAt?: string | null; // ISO — affiché en date lisible
-  qrUrl: string; // destination du QR (lien de parrainage du membre, ou algoria-ai.com)
-  qrLabel: string; // texte sous le QR (ex. 'algoria-ai.com' ou 'app.algoria-ai.com/r/ab12cd')
+  qrUrl: string; // destination du QR (lien de parrainage du membre, ou getalgoria.com)
+  qrLabel: string; // texte sous le QR (ex. 'getalgoria.com' ou 'app.getalgoria.com/r/ab12cd')
   format?: CardFormat; // défaut : story
 }
 

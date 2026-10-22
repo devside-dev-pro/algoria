@@ -136,7 +136,7 @@ export function ToolsTab() {
               <p style={dimP}>Only members who enabled notifications receive it — always 🧪 test on yourself before blasting a segment.</p>
             </section>
 
-            {/* WIN CARD STUDIO — les stories façon Binance pour la CM : P&L en énorme + QR algoria-ai.com,
+            {/* WIN CARD STUDIO — les stories façon Binance pour la CM : P&L en énorme + QR getalgoria.com,
                 format 1080×1920 prêt à poster (canal, stories, TikTok) — à déposer dans le Drive */}
             <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 680 }}>
               <h2 style={secH}>🎨 WIN CARDS — STORY 9:16 · WIDE 16:9</h2>

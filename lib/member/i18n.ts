@@ -24,8 +24,8 @@ export const asLocale = (v: unknown): Locale => (v === 'it' ? 'it' : 'en');
  *  écrire à un inconnu, donc le message le plus rentable du funnel. */
 /** Les boutons sous le message de bienvenue (anglais seulement, voir JOIN_DM). */
 export const JOIN_DM_BUTTONS = [
-  [{ text: '📲 CREATE MY FREE ACCOUNT', url: 'https://app.algoria-ai.com/member' }],
-  [{ text: '🎓 THE ACADEMY, IN 5 MIN', url: 'https://app.algoria-ai.com/academy' }],
+  [{ text: '📲 CREATE MY FREE ACCOUNT', url: 'https://app.getalgoria.com/member' }],
+  [{ text: '🎓 THE ACADEMY, IN 5 MIN', url: 'https://app.getalgoria.com/academy' }],
 ];
 
 export const JOIN_DM: Record<Locale, string> = {
@@ -57,10 +57,10 @@ export const JOIN_DM: Record<Locale, string> = {
     'Nel frattempo, parti in vantaggio 👇',
     '',
     '🎓 <b>Inizia dall\'Academy</b> — cos\'è Algoria e come funziona, in pochi minuti:',
-    'app.algoria-ai.com/academy',
+    'app.getalgoria.com/academy',
     '',
     '📲 <b>Crea il tuo account gratuito</b> — prepara il tuo accesso:',
-    'app.algoria-ai.com/member',
+    'app.getalgoria.com/member',
     '',
     '💬 <b>Hai una domanda?</b> Scrivi direttamente a Mathieu: @mathieu_algoria',
     '',
@@ -104,7 +104,7 @@ export const SUPPORT_TG_URL = 'https://t.me/mathieu_algoria';
 // endroit. Ce n'est pas un secret — un lien d'invitation est fait pour être diffusé.
 export const CHANNEL_INVITE_URL = 'https://t.me/+n3THAxOYSok2ZjY8';
 /** Racine de l'espace membre — les relances visent l'onboarding, les annonces l'accueil. */
-export const APP_URL = 'https://app.algoria-ai.com';
+export const APP_URL = 'https://app.getalgoria.com';
 
 const CTA_APP: Record<Locale, string> = { en: '🚀 Open the app', it: "🚀 Apri l'app" };
 const CTA_CHANNEL: Record<Locale, string> = { en: '📡 Join the channel', it: '📡 Entra nel canale' };

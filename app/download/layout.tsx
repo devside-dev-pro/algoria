@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 
-// PAGE STORE (algoria-ai.com/download) — l'installation d'une PWA n'est un réflexe pour personne :
+// PAGE STORE (getalgoria.com/download) — l'installation d'une PWA n'est un réflexe pour personne :
 // on la présente comme une fiche App Store (icône, note, screenshots, avis, bouton INSTALL).
 // Lien direct partageable aux VIP ; la mini-popup de l'espace membre redirige ici.
 // Le manifest DOIT être lié sur cette page : c'est lui qui rend la page « installable »

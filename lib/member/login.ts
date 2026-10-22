@@ -9,7 +9,7 @@ import { localeForChat } from './i18n';
 // Le second existe parce que le premier ne survit pas au navigateur intégré de Telegram : partir sur
 // Telegram pour taper START détruit (ou fait perdre de vue) la page qui interroge le serveur, et la
 // connexion — pourtant réussie côté bot — ne se termine jamais. Vécu par les membres qui arrivent sur
-// app.algoria-ai.com depuis un lien Telegram. Le bouton supprime l'aller-retour au lieu de le contourner :
+// app.getalgoria.com depuis un lien Telegram. Le bouton supprime l'aller-retour au lieu de le contourner :
 // on ne peut PAS forcer un navigateur externe depuis Telegram sur iPhone (Apple ne l'autorise pas).
 // Une seule implémentation ici = les deux portes posent EXACTEMENT la même session.
 
@@ -138,7 +138,7 @@ export async function consumeLoginCode(
   const srcCookie = (req.cookies.get('alg_src')?.value ?? '').toLowerCase().slice(0, 60);
   let source = /^[a-z0-9:_-]{2,60}$/.test(srcCookie) ? srcCookie : null;
   // TROIS SECOURS AU COOKIE (17/08). Le cookie seul n'a jamais rien rempli : 0 fiche sur 516 avait une
-  // origine, parce qu'il exige un clic UTM vers algoria-ai.com alors que les pubs pointent vers le CANAL
+  // origine, parce qu'il exige un clic UTM vers getalgoria.com alors que les pubs pointent vers le CANAL
   // Telegram — le prospect arrive sur l'app par le lien du bot, sans jamais passer par notre site.
   //   1. acquisition_sources : le tag d'un deep-link de pub (/start ad_sa), capté par le webhook du bot.
   //   2. invite_name : le NOM du lien d'invitation du canal, déjà enregistré sur chaque demande d'adhésion.

@@ -70,7 +70,7 @@ export function useAdminState() {
   // COMPOSEUR DE POST CANAL (avec bouton) — Telegram n'autorise un clavier inline QUE via un bot.
   const [cpText, setCpText] = useState('');
   const [cpBtn, setCpBtn] = useState('🚀 OPEN ALGORIA');
-  const [cpUrl, setCpUrl] = useState('https://app.algoria-ai.com/member');
+  const [cpUrl, setCpUrl] = useState('https://app.getalgoria.com/member');
   const [cpChat, setCpChat] = useState<string>('');
   const [cpReport, setCpReport] = useState<Array<{ channel: string; ok: boolean; error?: string }> | null>(null);
   // 📣 ANNONCE GROUPÉE VIA LE BOT — prévenir un segment entier d'un changement, en une fois.
@@ -126,7 +126,7 @@ export function useAdminState() {
       '• Risk is capped every single day',
       '• Algoria itself stays <b>completely free</b>',
       '',
-      '👉 app.algoria-ai.com/member/onboarding',
+      '👉 app.getalgoria.com/member/onboarding',
       'Need a hand? Message @mathieu_algoria — he does this all day.',
     ].join('\n'),
   );
@@ -263,7 +263,7 @@ export function useAdminState() {
         periodLabel: period === 'day' ? 'SESSION' : 'THIS WEEK', format,
         count: s.count, total: s.total, best: s.best,
         dateLabel: period === 'day' ? fmtD(sessionDate) : `${fmtD(Date.now() - 7 * 86_400_000)} – ${fmtD(Date.now())}`,
-        qrUrl: 'https://algoria-ai.com', qrLabel: 'algoria-ai.com',
+        qrUrl: 'https://getalgoria.com', qrLabel: 'getalgoria.com',
       });
       await shareOrDownloadCard(blob, `algoria-${period}-recap-${format === 'landscape' ? 'wide' : 'story'}.png`);
     } finally {
@@ -273,7 +273,7 @@ export function useAdminState() {
   const downloadCard = async (t: { ticket: string; symbol: string; direction: string; pnl: number; closed_at: string; lot?: number | null }, format: 'story' | 'landscape') => {
     setCarding(`${t.ticket}-${format}`);
     try {
-      const blob = await drawWinCard({ symbol: t.symbol, direction: t.direction, pnl: atRef(t.pnl, t.lot), closedAt: t.closed_at, format, qrUrl: 'https://algoria-ai.com', qrLabel: 'algoria-ai.com' });
+      const blob = await drawWinCard({ symbol: t.symbol, direction: t.direction, pnl: atRef(t.pnl, t.lot), closedAt: t.closed_at, format, qrUrl: 'https://getalgoria.com', qrLabel: 'getalgoria.com' });
       await shareOrDownloadCard(blob, `algoria-win-${t.ticket}-${format === 'landscape' ? 'wide' : 'story'}.png`);
     } finally {
       setCarding(null);

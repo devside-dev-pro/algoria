@@ -8,7 +8,7 @@
 //   · VERDICTS : chaque lecture du desk devient une carte flash — même « no edge » est un événement
 //   · EN POSITION : héros P&L flottant géant qui tique en temps réel
 //   · WIN : célébration plein cadre · SL : carte sobre 5 s (« risk managed ») — jamais de rouge dramatisé
-//   · footer : défilé des wins du jour + CTA + QR vers algoria-ai.com (funnel Telegram — le closing passe par
+//   · footer : défilé des wins du jour + CTA + QR vers getalgoria.com (funnel Telegram — le closing passe par
 //     le canal et le contact humain AVANT l'app : choix produit)
 // Ouvrir dans le navigateur du stream (session opérateur connectée) et cropper la source en portrait.
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -50,7 +50,7 @@ export default function LiveStage() {
 
   useEffect(() => {
     void import('qrcode').then((m) =>
-      m.toDataURL('https://algoria-ai.com', { margin: 1, width: 200, color: { dark: '#0b0e14', light: '#dce9ff' } }).then(setQr),
+      m.toDataURL('https://getalgoria.com', { margin: 1, width: 200, color: { dark: '#0b0e14', light: '#dce9ff' } }).then(setQr),
     );
     const ivCta = window.setInterval(() => setCtaIdx((i) => (i + 1) % CTAS.length), 8000);
     const ivSec = window.setInterval(() => {
@@ -250,9 +250,9 @@ export default function LiveStage() {
         </div>
         {qr && (
           <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-            <img src={qr} alt="algoria-ai.com" width={70} height={70} style={{ borderRadius: 8, border: '2px solid rgba(43,227,245,.4)' }} />
+            <img src={qr} alt="getalgoria.com" width={70} height={70} style={{ borderRadius: 8, border: '2px solid rgba(43,227,245,.4)' }} />
             {/* pas à l'aise avec les QR ? l'adresse en toutes lettres — les deux portes d'entrée à l'écran */}
-            <span className="mono" style={{ fontSize: 9, letterSpacing: 0.6, color: 'var(--cyan)', fontWeight: 700 }}>algoria-ai.com</span>
+            <span className="mono" style={{ fontSize: 9, letterSpacing: 0.6, color: 'var(--cyan)', fontWeight: 700 }}>getalgoria.com</span>
             <span className="mono" style={{ fontSize: 6.5, letterSpacing: 0.8, color: 'var(--dim)' }}>SCAN OR TYPE IT — FREE</span>
           </div>
         )}

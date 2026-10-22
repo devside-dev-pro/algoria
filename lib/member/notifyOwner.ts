@@ -14,11 +14,11 @@
 //     Telegram injoignable, bot bloqué) : l'alerte n'est jamais perdue, et jamais doublée.
 // Best effort, jamais bloquant : une alerte qui échoue ne doit pas casser l'action du membre.
 //
-// LES LIENS SONT ABSOLUS vers admin.algoria-ai.com. Les alertes techniques pointaient sur `/member/admin`
-// (page morte) ou `/admin` (réécrit en `/member/admin` sur app.algoria-ai.com par le middleware → boucle).
+// LES LIENS SONT ABSOLUS vers admin.getalgoria.com. Les alertes techniques pointaient sur `/member/admin`
+// (page morte) ou `/admin` (réécrit en `/member/admin` sur app.getalgoria.com par le middleware → boucle).
 import { pushToAdmins } from '../push/send';
 
-export const ADMIN_URL = (process.env.ADMIN_URL ?? 'https://admin.algoria-ai.com').replace(/\/$/, '');
+export const ADMIN_URL = (process.env.ADMIN_URL ?? 'https://admin.getalgoria.com').replace(/\/$/, '');
 export const adminLink = (path = '/'): string => `${ADMIN_URL}${path.startsWith('/') ? path : `/${path}`}`;
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

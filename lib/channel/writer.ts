@@ -233,7 +233,7 @@ ${x.reference}`;
     return `Write tonight's RECAP post, shorter and more human than usual: 3 to 6 short lines, Mathieu's voice.
 ${head[x.recapKind]}
 ${live}
-Last line exactly: 👉 app.algoria-ai.com
+Last line exactly: 👉 app.getalgoria.com
 Do not write the risk sentence, the system adds it.`;
   },
 };

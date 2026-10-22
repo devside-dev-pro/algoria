@@ -8,7 +8,7 @@ import { TRACK_SINCE_MS } from '@/lib/member/trackSince';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// PREUVE SOCIALE PUBLIQUE (landing algoria-ai.com) — AUCUNE session requise, donc règle 70/30 stricte :
+// PREUVE SOCIALE PUBLIQUE (landing getalgoria.com) — AUCUNE session requise, donc règle 70/30 stricte :
 // UNIQUEMENT des gains (≥5$, hors micro-scalps show, hors NAS retiré), jamais une perte, jamais le desk.
 // C'est exactement ce que le viewer voit déjà à l'antenne — la landing ne révèle rien de plus.
 export async function GET() {

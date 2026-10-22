@@ -1,6 +1,6 @@
 // BANNIÈRE DES POSTS DU CANAL (15/10/2026, Mathieu : « ça manque de couleurs, de bannières, ça fait très texte et
 // robot »). Chaque How it works et chaque CTA du CM (lib/channel/cm.ts) part avec une bannière aux couleurs d'Algoria :
-// le titre du post en grand, son étiquette, le QR algoria-ai.com. Même famille visuelle que la carte de gain (/api/card/win).
+// le titre du post en grand, son étiquette, le QR getalgoria.com. Même famille visuelle que la carte de gain (/api/card/win).
 // ANTI-DÉTOURNEMENT : aucun texte ne vient de l'URL. On charge le post RÉEL (channel_posts, par son id) : impossible de
 // fabriquer une bannière Algoria avec un texte arbitraire. `v` ne sert qu'à casser le cache quand le texte change.
 // PAS D'EMOJI : Satori ne rend que les glyphes de la police (voir /api/card/win) ; le titre est nettoyé.
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   if (!row || !['morning', 'howto', 'cta'].includes(row.kind)) return new Response('not found', { status: 404 });
   const { kicker, title } = bannerParts(row);
 
-  const qrSvg = await QRCode.toString('https://algoria-ai.com', { type: 'svg', margin: 1, color: { dark: '#0b0e14', light: '#ffffff' } });
+  const qrSvg = await QRCode.toString('https://getalgoria.com', { type: 'svg', margin: 1, color: { dark: '#0b0e14', light: '#ffffff' } });
   const qrUri = `data:image/svg+xml;base64,${Buffer.from(qrSvg).toString('base64')}`;
   let markUri: string | null = null;
   try {

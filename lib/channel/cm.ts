@@ -49,7 +49,7 @@ const L = {
   academy: `${APP_URL}/academy`,
   install: `${APP_URL}/download`,
   history: `${APP_URL}/member/history`,
-  track: 'https://algoria-ai.com/track-record',
+  track: 'https://getalgoria.com/track-record',
   me: SUPPORT_TG_URL,
 };
 
