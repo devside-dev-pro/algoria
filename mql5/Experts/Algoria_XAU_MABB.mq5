@@ -49,6 +49,9 @@ input int               InpBBPeriod        = 20;               // Bollinger : p�
 input double            InpBBDeviation     = 2.0;              // Bollinger : écarts-types
 input int               InpRSIPeriod       = 14;               // RSI : période
 input double            InpRSIExtreme      = 30.0;             // RSI : seuil de survente (surachat = 100 - seuil)
+input int               InpADXPeriod       = 14;               // ADX : période (iADX de MT5)
+input double            InpADXMin          = 0;                // ADX minimum pour un signal EMA (0 = sans filtre)
+input bool              InpADXUseDI        = false;            // ADX : exiger +DI > -DI à l'achat (et l'inverse à la vente)
 
 input group "Quota journalier"
 input int               InpMinTradesPerDay = 4;                // Minimum visé de trades par jour
@@ -81,7 +84,7 @@ input ulong             InpMagic           = 26102201;         // Numéro magiqu
 
 CTrade   g_trade;
 int      g_hFast = INVALID_HANDLE, g_hSlow = INVALID_HANDLE, g_hTrend = INVALID_HANDLE;
-int      g_hBB = INVALID_HANDLE, g_hBBWide = INVALID_HANDLE, g_hRSI = INVALID_HANDLE, g_hATR = INVALID_HANDLE;
+int      g_hBB = INVALID_HANDLE, g_hBBWide = INVALID_HANDLE, g_hRSI = INVALID_HANDLE, g_hATR = INVALID_HANDLE, g_hADX = INVALID_HANDLE;
 datetime g_lastBar = 0;
 datetime g_lastEntry = 0;
 // bilan de fin de test : jours de session, jours au minimum, trades
@@ -95,9 +98,9 @@ int OnInit()
       Print("Quota invalide : il faut 0 <= minimum <= maximum et maximum >= 1.");
       return INIT_PARAMETERS_INCORRECT;
      }
-   if(InpFastEMA < 1 || InpSlowEMA <= InpFastEMA || InpStopATR <= 0 || InpRewardRisk <= 0)
+   if(InpFastEMA < 1 || InpSlowEMA <= InpFastEMA || InpStopATR <= 0 || InpRewardRisk <= 0 || InpADXPeriod < 1)
      {
-      Print("Paramètres invalides : EMA lente > EMA rapide, stop et ratio > 0.");
+      Print("Paramètres invalides : EMA lente > EMA rapide, stop, ratio et période ADX > 0.");
       return INIT_PARAMETERS_INCORRECT;
      }
    g_hFast  = iMA(_Symbol, InpTimeframe, InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -108,8 +111,10 @@ int OnInit()
    g_hBBWide = iBands(_Symbol, InpTimeframe, InpBBPeriod, 0, InpCatchUpBBDev, PRICE_CLOSE);
    g_hRSI    = iRSI(_Symbol, InpTimeframe, InpRSIPeriod, PRICE_CLOSE);
    g_hATR    = iATR(_Symbol, InpTimeframe, InpATRPeriod);
+   g_hADX    = iADX(_Symbol, InpTimeframe, InpADXPeriod);
    if(g_hFast == INVALID_HANDLE || g_hSlow == INVALID_HANDLE || (InpTrendEMA > 0 && g_hTrend == INVALID_HANDLE) ||
-      g_hBB == INVALID_HANDLE || g_hBBWide == INVALID_HANDLE || g_hRSI == INVALID_HANDLE || g_hATR == INVALID_HANDLE)
+      g_hBB == INVALID_HANDLE || g_hBBWide == INVALID_HANDLE || g_hRSI == INVALID_HANDLE || g_hATR == INVALID_HANDLE ||
+      g_hADX == INVALID_HANDLE)
      {
       Print("Indicateurs impossibles à créer, erreur ", GetLastError());
       return INIT_FAILED;
@@ -131,6 +136,7 @@ void OnDeinit(const int reason)
    Release(g_hBBWide);
    Release(g_hRSI);
    Release(g_hATR);
+   Release(g_hADX);
    if(MQLInfoInteger(MQL_TESTER))
      {
       CloseStatDay();
@@ -178,7 +184,7 @@ void OnTick()
    // sortie au croisement inverse
    if(InpExitOnCross && SelectOurPosition(ticket))
      {
-      int cross = EmaCross(false);
+      int cross = RawEmaCross();
       long type = PositionGetInteger(POSITION_TYPE);
       if((type == POSITION_TYPE_BUY && cross == -1) || (type == POSITION_TYPE_SELL && cross == 1))
         {
@@ -225,19 +231,38 @@ double Buf(const int handle, const int buffer, const int shift)
 
 bool Valid(const double v) { return v != EMPTY_VALUE && v != 0.0 && MathIsValidNumber(v); }
 
-// +1 croisement haussier sur la dernière bougie close, -1 baissier, 0 rien ; filtre = EMA de tendance
-int EmaCross(const bool withTrendFilter)
+// +1 croisement haussier de l'EMA rapide sur la lente à la dernière bougie close, -1 baissier, 0 rien
+int RawEmaCross()
   {
    double f1 = Buf(g_hFast, 0, 1), f2 = Buf(g_hFast, 0, 2), s1 = Buf(g_hSlow, 0, 1), s2 = Buf(g_hSlow, 0, 2);
    if(!Valid(f1) || !Valid(f2) || !Valid(s1) || !Valid(s2))
       return 0;
-   int dir = (f2 <= s2 && f1 > s1) ? 1 : (f2 >= s2 && f1 < s1) ? -1 : 0;
-   if(dir == 0 || !withTrendFilter || g_hTrend == INVALID_HANDLE)
-      return dir;
-   double t1 = Buf(g_hTrend, 0, 1), c1 = iClose(_Symbol, InpTimeframe, 1);
-   if(!Valid(t1))
+   return (f2 <= s2 && f1 > s1) ? 1 : (f2 >= s2 && f1 < s1) ? -1 : 0;
+  }
+
+// croisement filtré : EMA de tendance (si demandée), puis ADX ; le rattrapage passe withTrendFilter = false
+int EmaCross(const bool withTrendFilter)
+  {
+   int dir = RawEmaCross();
+   if(dir == 0)
       return 0;
-   return (dir == 1 && c1 > t1) || (dir == -1 && c1 < t1) ? dir : 0;
+   if(withTrendFilter && g_hTrend != INVALID_HANDLE)
+     {
+      double t1 = Buf(g_hTrend, 0, 1), c1 = iClose(_Symbol, InpTimeframe, 1);
+      if(!Valid(t1) || !((dir == 1 && c1 > t1) || (dir == -1 && c1 < t1)))
+         return 0;
+     }
+   if(InpADXMin > 0 || InpADXUseDI)
+     {
+      double adx = Buf(g_hADX, MAIN_LINE, 1), pdi = Buf(g_hADX, PLUSDI_LINE, 1), ndi = Buf(g_hADX, MINUSDI_LINE, 1);
+      if(adx == EMPTY_VALUE || pdi == EMPTY_VALUE || ndi == EMPTY_VALUE)
+         return 0;
+      if(InpADXMin > 0 && adx < InpADXMin)
+         return 0;
+      if(InpADXUseDI && ((dir == 1 && pdi <= ndi) || (dir == -1 && ndi <= pdi)))
+         return 0;
+     }
+   return dir;
   }
 
 // retour à la moyenne : clôture hors bande puis retour dedans, RSI extrême sur la bougie hors bande ; TP = médiane
