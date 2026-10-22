@@ -1,7 +1,8 @@
-// GRILLE EMA COURTES + ADX + RR (22/10/2026) — la suite de mabb-arena.ts, demandée par Mathieu : « un filtre ADX en
-// plus, des EMA plus courtes », et le RR à surveiller (à 1,5 la règle perdait).
+// GRILLE EMA COURTES + ADX, RR 0,5 (22/10/2026) — la suite de mabb-arena.ts, demandée par Mathieu : « un filtre ADX en
+// plus, des EMA plus courtes », et un RR « négatif » de 0,5 : TP = la moitié du stop, pour beaucoup de petits gains.
+// RR fixé à 0,5 ; avec un TP court, la largeur du stop compte autant que le ratio : on la fait varier.
 //
-// LE PIÈGE. Essayer 588 réglages sur les mêmes deux ans et garder le meilleur, c'est trouver le réglage le plus
+// LE PIÈGE. Essayer 420 réglages sur les mêmes deux ans et garder le meilleur, c'est trouver le réglage le plus
 // chanceux, pas le meilleur. Donc :
 //   1. On CHOISIT sur la première année seulement (avant la coupure au milieu de la fenêtre), avec une règle écrite
 //      à l'avance : parmi les réglages qui tiennent ≥ 3,5 trades par jour en moyenne, le meilleur PF.
@@ -10,15 +11,16 @@
 //      entre le PF d'une année et celui de l'autre sur toute la grille : proche de 0, la grille ne sait rien prédire.
 //      Attention, les coûts créent à eux seuls de la corrélation (les EMA rapides tradent plus, paient plus, partout).
 //   Sur une marche aléatoire, le réglage choisi a encore « battu » ses 10 tirages au hasard (60 sur 60 avec plus de
-//   tirages) sur une graine, et pas sur deux autres : le tirage au hasard ne protège pas d'un choix parmi 588.
+//   tirages) sur une graine, et pas sur deux autres : le tirage au hasard ne protège pas d'un choix parmi des centaines.
 //   Seuls comptent l'année jugée et l'allure de la grille entière sur cette année.
 //
 // LA RÈGLE (celle de l'EA, M5, bougies closes, entrée à la clôture, une position à la fois) :
 //   croisement EMA rapide / lente, clôture du bon côté de l'EMA de tendance, ADX(14) ≥ seuil (iADX de MT5 : DM
 //   normalisés par le TR de la bougie, lissage EMA 2/(n+1) — ADX.mq5 de MetaQuotes), option +DI > −DI pour un achat.
-//   SL 1,5 × ATR14, TP = RR × SL. Rattrapage dès 14 h si < 4 trades : même croisement SANS filtre de tendance, avec
+//   SL = k × ATR14 (k = 1, 1,5, 2 ou 3), TP = 0,5 × SL. Rattrapage dès 14 h si < 4 trades : même croisement SANS filtre de tendance, avec
 //   le filtre ADX. 5 trades par jour broker au plus, session 9 h-22 h, à plat à 23 h, vendredi à 21 h.
-// COÛTS 0,32 $/oz l'aller-retour, 1 lot = 100 oz.
+// COÛTS 0,32 $/oz l'aller-retour, 1 lot = 100 oz. Avec un TP court, les coûts pèsent lourd : 0,32 $ sur un TP de
+// 1,50 $, c'est un cinquième du gain. Et le pire cas (stop servi avant le TP dans une même M5) pèse plus aussi.
 //
 //   npx tsx backtest/mabb-grid.ts XAUUSD            (bougies : node scripts/pull-cache.mjs XAUUSD M5)
 import { existsSync, readFileSync } from 'node:fs';
@@ -32,7 +34,7 @@ const COST = 0.2 + 0.05 + 0.07, LOT = 100;
 const OFFSET = 3 * 3_600_000; // heure broker ≈ UTC+3
 const brokerDay = (t: number) => Math.floor((t + OFFSET) / 86_400_000);
 const brokerHour = (t: number) => new Date(t + OFFSET).getUTCHours();
-const SESSION_START = 9, SESSION_END = 22, FLAT_HOUR = 23, FRIDAY_FLAT = 21, MAX_PER_DAY = 5, MIN_PER_DAY = 4, CATCHUP_HOUR = 14, SL_ATR = 1.5;
+const SESSION_START = 9, SESSION_END = 22, FLAT_HOUR = 23, FRIDAY_FLAT = 21, MAX_PER_DAY = 5, MIN_PER_DAY = 4, CATCHUP_HOUR = 14;
 const MIN_TRADES_PER_DAY = 3.5; // contrainte de fréquence de la règle de choix
 
 // ===== Indicateurs (valeur à la clôture de la bougie i, conventions MT5) =====
@@ -62,8 +64,8 @@ const emaCache = new Map<number, number[]>();
 const E = (n: number) => emaCache.get(n) ?? emaCache.set(n, ema(n)).get(n)!;
 
 // ===== Réglage =====
-interface Cfg { fast: number; slow: number; trend: number; adxMin: number; di: boolean; rr: number; catchUp: boolean }
-const label = (c: Cfg) => `EMA ${c.fast}/${c.slow}/${c.trend} · ADX ${c.adxMin ? `≥${c.adxMin}${c.di ? '+DI' : ''}` : 'off'} · RR ${c.rr}${c.catchUp ? '' : ' · sans rattrapage'}`;
+interface Cfg { fast: number; slow: number; trend: number; adxMin: number; di: boolean; rr: number; sl: number; catchUp: boolean }
+const label = (c: Cfg) => `EMA ${c.fast}/${c.slow}/${c.trend} · ADX ${c.adxMin ? `≥${c.adxMin}${c.di ? '+DI' : ''}` : 'off'} · SL ${c.sl} ATR · RR ${c.rr}${c.catchUp ? '' : ' · sans rattrapage'}`;
 function signal(c: Cfg, i: number, withTrend: boolean): 1 | -1 | 0 {
   const f = E(c.fast), s = E(c.slow);
   const dir = f[i - 1] <= s[i - 1] && f[i] > s[i] ? 1 : f[i - 1] >= s[i - 1] && f[i] < s[i] ? -1 : 0;
@@ -98,7 +100,7 @@ function run(c: Cfg, opts: { randomDir: boolean; seed: number } = { randomDir: f
     let sigDir = signal(c, i, true), catchUp = false;
     if (!sigDir && c.catchUp && hr >= CATCHUP_HOUR && n < MIN_PER_DAY) { sigDir = signal(c, i, false); catchUp = sigDir !== 0; }
     if (!sigDir) continue;
-    const dist = SL_ATR * atr[i]; if (!(dist > 0)) continue;
+    const dist = c.sl * atr[i]; if (!(dist > 0)) continue;
     const dir: 1 | -1 = opts.randomDir ? (rand() < 0.5 ? 1 : -1) : sigDir;
     pos = { dir, entry: b.close, sl: b.close - dir * dist, tp: b.close + dir * c.rr * dist, openT: b.time, catchUp };
     perDay.set(d, n + 1);
@@ -135,25 +137,26 @@ function spearman(a: number[], b: number[]) {
 // ===== La grille =====
 const PAIRS: [number, number][] = [[3, 8], [4, 9], [5, 10], [5, 13], [8, 13], [8, 21], [9, 21]];
 const TRENDS = [50, 100, 200];
-const ADX: [number, boolean][] = [[0, false], [20, false], [25, false], [30, false], [20, true], [25, true], [30, true]];
-const RRS = [1.5, 2, 2.5, 3];
+const ADX: [number, boolean][] = [[0, false], [20, false], [25, false], [30, false], [20, true]];
+const RR = 0.5;
+const SLS = [1, 1.5, 2, 3];
 const grid: { c: Cfg; h1: St; h2: St; all: St }[] = [];
-for (const [fast, slow] of PAIRS) for (const trend of TRENDS) for (const [adxMin, di] of ADX) for (const rr of RRS) {
-  const c: Cfg = { fast, slow, trend, adxMin, di, rr, catchUp: true };
+for (const [fast, slow] of PAIRS) for (const trend of TRENDS) for (const [adxMin, di] of ADX) for (const sl of SLS) {
+  const c: Cfg = { fast, slow, trend, adxMin, di, rr: RR, sl, catchUp: true };
   const res = run(c);
   grid.push({ c, h1: st(res, 'h1'), h2: st(res, 'h2'), all: st(res, 'all') });
 }
 console.log(`GRILLE EMA COURTES + ADX + RR — ${sym} · ${m5.length} bougies M5 · ${new Date(m5[0].time).toISOString().slice(0, 10)} → ${new Date(m5[m5.length - 1].time).toISOString().slice(0, 10)} · coupure ${new Date(cut).toISOString().slice(0, 10)} · ${daysIn.h1} + ${daysIn.h2} jours · 1 lot · coûts ${COST} $/oz`);
 console.log(`${grid.length} réglages. Règle de choix écrite à l'avance : ≥ ${MIN_TRADES_PER_DAY} trades/jour sur l'année de choix, puis meilleur PF.`);
 
-const ref = grid.find((g) => g.c.fast === 9 && g.c.slow === 21 && g.c.trend === 200 && !g.c.adxMin && g.c.rr === 2)!;
-console.log(`\nRéférence = EA actuel (EMA 9/21/200, sans ADX, RR 2) :\n   1re année ${cell(ref.h1)}\n   2e année  ${cell(ref.h2)}`);
+{ const res = run({ fast: 9, slow: 21, trend: 200, adxMin: 0, di: false, rr: 2, sl: 1.5, catchUp: true });
+  console.log(`\nRéférence = EA actuel (EMA 9/21/200, sans ADX, SL 1,5 ATR, RR 2), hors grille :\n   1re année ${cell(st(res, 'h1'))}\n   2e année  ${cell(st(res, 'h2'))}`); }
 
 for (const [pick, judge, name] of [['h1', 'h2', 'CHOISI SUR LA 1re ANNÉE, JUGÉ SUR LA 2e'], ['h2', 'h1', 'À L’ENVERS : CHOISI SUR LA 2e, JUGÉ SUR LA 1re']] as [Half, Half, string][]) {
   const eligible = grid.filter((g) => g[pick].perDay >= MIN_TRADES_PER_DAY).sort((a, b) => b[pick].pf - a[pick].pf);
   console.log(`\n── ${name} (${eligible.length} réglages assez fréquents)`);
-  console.log(`   ${'réglage'.padEnd(46)} │ année de choix${' '.repeat(38)}│ année jugée`);
-  for (const g of eligible.slice(0, 10)) console.log(`   ${label(g.c).padEnd(46)} │ ${cell(g[pick])} │ ${cell(g[judge])}`);
+  console.log(`   ${'réglage'.padEnd(54)} │ année de choix${' '.repeat(38)}│ année jugée`);
+  for (const g of eligible.slice(0, 10)) console.log(`   ${label(g.c).padEnd(54)} │ ${cell(g[pick])} │ ${cell(g[judge])}`);
   const best = eligible[0];
   if (best) {
     const nets = Array.from({ length: 10 }, (_, k) => st(run(best.c, { randomDir: true, seed: 11 + 31 * k }), judge).net);
@@ -175,26 +178,21 @@ const effect = (name: string, groups: [string, (g: G) => boolean][]) => {
 effect('EMA rapide / lente', PAIRS.map(([f, s]): [string, (g: G) => boolean] => [`${f}/${s}`, (g) => g.c.fast === f && g.c.slow === s]));
 effect('EMA de tendance', TRENDS.map((t): [string, (g: G) => boolean] => [`${t}`, (g) => g.c.trend === t]));
 effect('filtre ADX', ADX.map(([a, d]): [string, (g: G) => boolean] => [a ? `≥${a}${d ? '+DI' : ''}` : 'off', (g) => g.c.adxMin === a && g.c.di === d]));
-effect('RR', RRS.map((r): [string, (g: G) => boolean] => [`${r}`, (g) => g.c.rr === r]));
-// ===== Les réglages demandés (EMA courtes + ADX, RR ≥ 2) face à l'EA actuel, sur toute la fenêtre =====
-console.log('\n── RÉGLAGES DEMANDÉS FACE À L’EA ACTUEL (2 ans · 1re année / 2e année · depuis le 1er juin 2026 · hasard sur 20 tirages)');
-const since = (res: ReturnType<typeof run>) => { const ts = res.trades.filter((t) => t.openT >= Date.UTC(2026, 5, 1)); return ts.reduce((a, t) => a + t.pnl, 0); };
+effect('stop (× ATR), TP = moitié du stop', SLS.map((k): [string, (g: G) => boolean] => [`${k}`, (g) => g.c.sl === k]));
+// ===== Les réglages demandés (EMA courtes, avec ou sans ADX, RR 0,5), écrits AVANT de voir la grille, face à l'EA actuel
+console.log('\n── RÉGLAGES DEMANDÉS FACE À L’EA ACTUEL (2 ans · PF 1re / 2e année · depuis le 1er juin 2026 · hasard sur 20 tirages)');
+const since = (res: ReturnType<typeof run>) => res.trades.filter((t) => t.openT >= Date.UTC(2026, 5, 1)).reduce((a, t) => a + t.pnl, 0);
 const CANDIDATES: Cfg[] = [
-  { fast: 9, slow: 21, trend: 200, adxMin: 0, di: false, rr: 2, catchUp: true },
-  { fast: 9, slow: 21, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
-  { fast: 8, slow: 13, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
-  { fast: 5, slow: 13, trend: 200, adxMin: 0, di: false, rr: 2, catchUp: true },
-  { fast: 5, slow: 13, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
-  { fast: 5, slow: 13, trend: 200, adxMin: 25, di: false, rr: 2, catchUp: true },
-  { fast: 5, slow: 13, trend: 200, adxMin: 20, di: true, rr: 2, catchUp: true },
-  { fast: 5, slow: 13, trend: 200, adxMin: 20, di: false, rr: 2.5, catchUp: true },
-  { fast: 5, slow: 10, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
-  { fast: 3, slow: 8, trend: 200, adxMin: 20, di: false, rr: 2, catchUp: true },
+  { fast: 9, slow: 21, trend: 200, adxMin: 0, di: false, rr: 2, sl: 1.5, catchUp: true }, // EA actuel
+  { fast: 5, slow: 13, trend: 200, adxMin: 0, di: false, rr: 2, sl: 1.5, catchUp: true },
 ];
+for (const [fast, slow] of [[9, 21], [5, 13], [3, 8]] as [number, number][])
+  for (const adxMin of [0, 20])
+    for (const sl of [1.5, 2, 3]) CANDIDATES.push({ fast, slow, trend: 200, adxMin, di: false, rr: 0.5, sl, catchUp: true });
 for (const c of CANDIDATES) {
   const res = run(c), all = st(res, 'all');
   const nets = Array.from({ length: 20 }, (_, k) => st(run(c, { randomDir: true, seed: 11 + 31 * k }), 'all').net);
-  console.log(`   ${label(c).padEnd(40)} │ ${cell(all)} · DD ${fmt(all.dd).padStart(8)} $ │ PF ${st(res, 'h1').pf.toFixed(2)} / ${st(res, 'h2').pf.toFixed(2)} │ juin→ ${fmt(since(res)).padStart(8)} $ │ bat ${nets.filter((v) => v < all.net).length}/20`);
+  console.log(`   ${label(c).padEnd(50)} │ ${cell(all)} · win ${Math.round(100 * all.win)} % · DD ${fmt(all.dd).padStart(8)} $ │ PF ${st(res, 'h1').pf.toFixed(2)} / ${st(res, 'h2').pf.toFixed(2)} │ juin→ ${fmt(since(res)).padStart(8)} $ │ bat ${nets.filter((v) => v < all.net).length}/20`);
 }
 
 console.log('\nLecture : seul le chiffre de l’année jugée compte. Un réglage brillant l’année de choix et quelconque l’année jugée a été trouvé par chance.');
