@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin } from '@/lib/member/server';
 import { INCIDENT, INCIDENT_KIND, PROOF_BUCKET, affectedMembers, estimatedLoss, inAudience, type Affected, type SthSeen } from '@/lib/member/incident';
-import { sthReady, sthStatus, sthConfiguredMaster } from '@/lib/member/sth';
+import { sthReady, sthStatus, sthConfiguredMaster, sthConnected } from '@/lib/member/sth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,8 +51,8 @@ export async function GET(req: NextRequest) {
 
 // POST — deux gestes de Mathieu sur la liste (Mathieu, 22/10 : « que les gens qui étaient connectés… moins cela
 // fera de bruit, mieux c'est pour notre image »).
-//  · { sthCheck: true } : demande à STH, pour chacun, s'il est abonné au master. Abonné → il copiait ; abonné à
-//    rien ou à un autre master → il ne copiait pas, il sort de l'audience. Enregistré sur la ligne de l'instantané.
+//  · { sthCheck: true } : demande à STH, pour chacun, si son compte MetaTrader est branché et abonné au master. Les
+//    deux → il copiait ; sinon il sort de l'audience. Enregistré (avec la réponse brute) sur la ligne de l'instantané.
 //  · { exclude: { tg_id, excluded } } : retirer (ou remettre) un membre à la main.
 export async function POST(req: NextRequest) {
   const s = verifySession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -78,32 +78,46 @@ export async function POST(req: NextRequest) {
     const { data: stopped } = await db.from('member_actions').select('tg_id').in('kind', ['pause', 'disconnect']).gte('created_at', INCIDENT.start)
       .in('tg_id', affected.length ? affected.map((m) => m.tg_id) : [0]);
     const stoppedAfter = new Set(((stopped ?? []) as Array<{ tg_id: number }>).map((r) => Number(r.tg_id)));
-    const seen: Array<{ m: Affected; sth: SthSeen; detail: string }> = [];
+    // CE QUE STH DIT, BRUT (22/10, 2e version) : la 1re ne regardait que la liste des masters, et répondait « 72 sur 72
+    // copiaient » — faux d'après Mathieu. On regarde aussi si le compte MetaTrader est réellement branché chez STH
+    // (isTradingAccountConnected, le bon champ depuis le 01/10), et on garde la réponse brute de chacun pour pouvoir
+    // relire ce que STH a dit.
+    type Seen = { m: Affected; sth: SthSeen; detail: string; raw: { connected: boolean | null; masters: string[]; error?: string } };
     const todo = affected.filter((m) => m.snapshot);
-    for (let i = 0; i < todo.length; i += 8) {
-      seen.push(...await Promise.all(todo.slice(i, i + 8).map(async (m) => {
-        if (stoppedAfter.has(m.tg_id)) return { m, sth: 'copying' as const, detail: 'paused after the incident started' };
+    const seen: Seen[] = [];
+    for (let i = 0; i < todo.length; i += 12) {
+      seen.push(...await Promise.all(todo.slice(i, i + 12).map(async (m): Promise<Seen> => {
         const st = await sthStatus(String(m.tg_id));
-        if (!st.ok) return { m, sth: 'unknown' as const, detail: st.errorMessage || 'STH did not answer' };
+        if (!st.ok) return { m, sth: stoppedAfter.has(m.tg_id) ? 'copying' : 'unknown', detail: st.errorMessage || 'STH did not answer', raw: { connected: null, masters: [], error: st.errorMessage } };
         const ids = (st.data.masterAccountsList ?? []).map((x) => String(x.id));
-        if (!ids.length) return { m, sth: 'not-copying' as const, detail: 'subscribed to no master on STH' };
-        if (master && !ids.includes(master)) return { m, sth: 'not-copying' as const, detail: `on ${ids.join(', ')}, not on ${master}` };
-        return { m, sth: 'copying' as const, detail: `on ${ids.join(', ')}` };
+        const connected = sthConnected(st.data);
+        const raw = { connected, masters: ids };
+        if (stoppedAfter.has(m.tg_id)) return { m, sth: 'copying', detail: 'paused after the incident started', raw };
+        if (!connected) return { m, sth: 'not-copying', detail: 'MetaTrader account not connected on STH', raw };
+        if (!ids.length) return { m, sth: 'not-copying', detail: 'subscribed to no master on STH', raw };
+        if (master && !ids.includes(master)) return { m, sth: 'not-copying', detail: `on ${ids.join(', ')}, not on ${master}`, raw };
+        return { m, sth: 'copying', detail: `connected, on ${ids.join(', ')}`, raw };
       })));
     }
-    const copying = seen.filter((r) => r.sth === 'copying').length;
-    const notCopying = seen.filter((r) => r.sth === 'not-copying').length;
-    const unknown = seen.length - copying - notCopying;
-    // GARDE : si la copie a déjà été mise en pause pour tout le monde sur STH, tout le monde apparaît « sans master »
-    // et le contrôle ne dit plus rien de la nuit. Plus de la moitié sans master → on n'enregistre RIEN.
-    if (copying + notCopying > 0 && notCopying > (copying + notCopying) / 2) {
-      return NextResponse.json({ saved: false, copying, notCopying, unknown, warning: `${notCopying} sur ${copying + notCopying} apparaissent sans master sur STH : la copie a sans doute déjà été mise en pause pour tout le monde, le contrôle ne dit plus qui copiait cette nuit. Liste inchangée.` });
-    }
+    // GARDE : si la copie a déjà été mise en pause pour tout le monde, la plupart apparaissent « sans master » et ça ne dit
+    // plus rien de la nuit — ceux-là restent « ? » (gardés dans l'envoi) au lieu d'être retirés.
+    const noMaster = seen.filter((r) => r.raw.connected && !r.raw.masters.length).length;
+    const massPause = noMaster > seen.length / 2;
+    if (massPause) for (const r of seen) if (r.detail === 'subscribed to no master on STH') { r.sth = 'unknown'; r.detail = 'no master on STH (copy probably paused for everyone)'; }
     const at = new Date().toISOString();
-    for (let i = 0; i < seen.length; i += 8) {
-      await Promise.all(seen.slice(i, i + 8).map((r) => save(r.m, { sth: r.sth, sth_detail: r.detail, sth_checked_at: at })));
+    let saved = 0;
+    const saveErrors: string[] = [];
+    for (let i = 0; i < seen.length; i += 12) {
+      const res = await Promise.all(seen.slice(i, i + 12).map((r) => save(r.m, { sth: r.sth, sth_detail: r.detail, sth_raw: r.raw, sth_checked_at: at })));
+      for (const x of res as Array<{ error: { message: string } | null }>) { if (x.error) saveErrors.push(x.error.message); else saved++; }
     }
-    return NextResponse.json({ saved: true, copying, notCopying, unknown });
+    const count = (k: SthSeen) => seen.filter((r) => r.sth === k).length;
+    return NextResponse.json({
+      saved, saveErrors: [...new Set(saveErrors)].slice(0, 3), massPause,
+      copying: count('copying'), notCopying: count('not-copying'), unknown: count('unknown'),
+      notConnected: seen.filter((r) => r.raw.connected === false).length, noMaster,
+      masterLists: [...new Set(seen.map((r) => r.raw.masters.join(',')))].slice(0, 5),
+    });
   }
 
   return NextResponse.json({ error: 'nothing to do' }, { status: 400 });

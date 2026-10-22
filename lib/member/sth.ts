@@ -30,6 +30,7 @@ async function sthPost<T = Record<string, unknown>>(route: string, payload: Reco
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ PartnerLicense: LICENSE, ...payload }),
+      signal: AbortSignal.timeout(20_000), // un appel STH qui pend ne doit pas emporter toute la route (contrôle de 72 comptes)
     });
     const data = (await res.json().catch(() => ({}))) as T & { errorMessage?: string };
     const err = (data?.errorMessage ?? '').toString().trim() || (res.ok ? '' : `HTTP ${res.status}`);
