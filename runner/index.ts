@@ -1525,9 +1525,13 @@ async function main() {
       // VALIDÉ (01/09) — le volume tradé décide à la place de Mathieu. Les deux files restent séparées
       // pour la raison expliquée dans listRipeJoinRequests : le VIP, filtré, ne doit jamais affamer le
       // public en occupant la limite avec des demandes qui ne passeront pas.
+      // VIP EN ATTENTE (22/10/2026, après l'incident de la nuit) : support_settings 'vip_autojoin' = 'off' → les
+      // demandes VIP restent en file, Mathieu fait patienter les nouveaux 2-3 jours. Le canal public, lui, continue.
+      // Repassé à 'on' : la file entière est approuvée au passage suivant (aucun âge maximum).
+      const vipOpen = Number.isFinite(vipId) && (await runnerSwitch('vip_autojoin')) === 'on';
       const [publiques, vip] = await Promise.all([
         listRipeJoinRequests(AUTOJOIN_MIN, 25, Number.isFinite(vipId) ? [vipId] : []),
-        Number.isFinite(vipId) ? listRipeVipRequests(AUTOJOIN_MIN, vipId, 25) : Promise.resolve([]),
+        vipOpen ? listRipeVipRequests(AUTOJOIN_MIN, vipId, 25) : Promise.resolve([]),
       ]);
       const ripe = [...publiques, ...vip];
       if (!ripe.length) return;

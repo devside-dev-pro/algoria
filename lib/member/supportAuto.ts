@@ -28,6 +28,7 @@ import { draftReply, lastDraftIssue } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
+import { INCIDENT_TOPIC, incidentActive, wasAffected } from './incident';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -451,7 +452,14 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   }
 
   const { data: recentAuto } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', 'auto').gte('created_at', iso(Date.now() - 3_600_000)).limit(MAX_AUTO_PER_HOUR + 1);
+  // 🚨 INCIDENT DU 21-22/10 (lib/member/incident.ts) : un membre touché, ou une question sur la nuit ou sur les
+  // résultats → toujours une carte, Mathieu répond lui-même. Le reste de l'onboarding repart en automatique.
+  const incidentHold = !incidentActive() ? null
+    : (await wasAffected(db, job.tg_id)) ? 'membre touché par l’incident du 22/10 : à toi de lui répondre'
+    : INCIDENT_TOPIC.test(joined) ? 'il parle de l’incident ou des résultats : à toi de répondre'
+    : null;
   const why = !autopilot ? 'pilote automatique coupé'
+    : incidentHold ? incidentHold
     : manual ? 'tu as écrit dans cette conversation il y a moins de 2 h'
     : firstNoWelcome ? 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir'
     : !draft.auto ? 'Claude n’est pas sûr'
