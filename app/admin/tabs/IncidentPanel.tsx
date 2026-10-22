@@ -40,8 +40,9 @@ export function IncidentPanel() {
     setBusy(true); setMsg(null);
     void fetch('/api/member/admin/incident', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sthCheck: true }) })
       .then(async (r) => {
-        const d = (await r.json()) as { error?: string; warning?: string; saved?: boolean; copying?: number; notCopying?: number; unknown?: number };
-        setMsg(d.error ? `⚠ ${d.error}` : d.warning ? `⚠ ${d.warning}` : `✅ STH : ${d.copying} copiaient · ${d.notCopying} ne copiaient pas (retirés de l’envoi) · ${d.unknown} sans réponse (gardés)`);
+        const d = (await r.json().catch(() => ({ error: `réponse illisible (HTTP ${r.status})` }))) as { error?: string; saved?: number; saveErrors?: string[]; massPause?: boolean; copying?: number; notCopying?: number; unknown?: number; notConnected?: number; noMaster?: number };
+        setMsg(d.error ? `⚠ ${d.error}`
+          : `${d.saveErrors?.length ? `⚠ enregistrement : ${d.saveErrors.join(' / ')} · ` : '✅ '}STH : ${d.copying} copiaient · ${d.notCopying} ne copiaient pas (retirés : ${d.notConnected} compte MT5 non branché, ${d.noMaster} sans master) · ${d.unknown} sans réponse (gardés)${d.massPause ? ' · la copie semble déjà en pause pour tout le monde : les « sans master » sont gardés' : ''} · ${d.saved} enregistrés`);
         load();
       })
       .finally(() => setBusy(false));
@@ -98,7 +99,7 @@ export function IncidentPanel() {
                   <td style={{ padding: 6 }}><input type="checkbox" checked={!r.excluded} onChange={() => toggle(r)} title={r.excluded ? 'retiré à la main' : 'décocher pour ne pas lui envoyer'} /></td>
                   <td>{r.member_no}</td>
                   <td>{r.username ? `@${r.username}` : r.name}</td>
-                  <td title={r.sth_detail ?? ''}>{r.sth === 'copying' ? '✓ copiait' : r.sth === 'not-copying' ? '✗ ne copiait pas' : r.sth === 'unknown' ? '?' : ''}</td>
+                  <td title={r.sth_detail ?? ''} style={{ maxWidth: 170 }}>{r.sth === 'copying' ? '✓ copiait' : r.sth === 'not-copying' ? '✗ ne copiait pas' : r.sth === 'unknown' ? '?' : ''}{r.sth && r.sth !== 'copying' && r.sth_detail ? <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.sth_detail}</div> : null}</td>
                   <td className="mono">{r.lot}</td>
                   <td>{r.broker}</td>
                   <td className="mono" style={{ color: 'var(--muted)' }}>{usd(r.estimated)}</td>
