@@ -10,6 +10,7 @@
 // PAR LOTS : Telegram limite à ~20 messages/minute par canal. Chaque appel traite au plus `limit` publications (12 par
 // défaut, soit 12 éditions par canal) et dit combien il en reste ; on rappelle la route jusqu'à 0.
 // Canal italien : son texte est une TRADUCTION qu'on n'a pas gardée — on y corrige le bouton, pas le texte.
+// Les CTA envoyés à la main depuis l'admin (member_actions 'channel_post', bouton seulement) sont repris aussi.
 import { NextResponse, type NextRequest } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { sourceChannel } from '@/lib/channel/publish';
@@ -27,7 +28,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 let lastRun = 0;
 
 type Target = { chat: string; id: number; it: boolean };
-type Row = { kind: 'post' | 'recap'; key: string; messageId: number; text: string; html: string; photo: boolean; btnText: string | null; btnUrl: string | null };
+type Row = { kind: 'post' | 'recap' | 'admin'; key: string; messageId: number; text: string; html: string; photo: boolean; btnText: string | null; btnUrl: string | null; detail?: Record<string, unknown> };
 
 export async function GET(req: NextRequest) {
   const dry = req.nextUrl.searchParams.get('dry') === '1';
@@ -50,9 +51,10 @@ export async function GET(req: NextRequest) {
   const it = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
 
   // ── ce qu'il reste à corriger ────────────────────────────────────────────────────────────────────────────
-  const [{ data: posts }, { data: recaps }] = await Promise.all([
+  const [{ data: posts }, { data: recaps }, { data: admin }] = await Promise.all([
     db.from('channel_posts').select('id,message_id,text,button_text,button_url,photo_url').eq('status', 'published').not('message_id', 'is', null).limit(1000),
     db.from('channel_recaps').select('day,message_id,text').eq('status', 'published').not('message_id', 'is', null).limit(1000),
+    db.from('member_actions').select('id,detail').eq('kind', 'channel_post').eq('status', 'done').limit(1000),
   ]);
   const rows: Row[] = [
     ...((posts ?? []) as Array<{ id: number; message_id: number; text: string | null; button_text: string | null; button_url: string | null; photo_url: string | null }>)
@@ -61,6 +63,10 @@ export async function GET(req: NextRequest) {
     ...((recaps ?? []) as Array<{ day: string; message_id: number; text: string | null }>)
       .filter((r) => has(r.text))
       .map((r) => ({ kind: 'recap' as const, key: String(r.day), messageId: Number(r.message_id), text: r.text ?? '', html: esc(r.text ?? ''), photo: false, btnText: null, btnUrl: null })),
+    // le texte gardé est tronqué à 500 caractères : on ne touche qu'au bouton
+    ...((admin ?? []) as Array<{ id: string; detail: Record<string, unknown> | null }>)
+      .filter((a) => a.detail && String(a.detail.chat_id) === String(src) && a.detail.message_id && a.detail.button && has(String(a.detail.url ?? '')))
+      .map((a) => ({ kind: 'admin' as const, key: String(a.id), messageId: Number(a.detail!.message_id), text: '', html: '', photo: false, btnText: String(a.detail!.button), btnUrl: String(a.detail!.url), detail: a.detail! })),
   ];
   const batch = rows.slice(0, limit);
 
@@ -94,7 +100,8 @@ export async function GET(req: NextRequest) {
       // la source est corrigée → la ligne aussi (elle ne sera plus reprise ; le texte stocké suit le message)
       if (edits[0]?.ok && !rateLimited) {
         if (row.kind === 'post') await db.from('channel_posts').update({ text: row.text ? fix(row.text) : row.text, button_url: row.btnUrl ? fix(row.btnUrl) : row.btnUrl }).eq('id', Number(row.key));
-        else await db.from('channel_recaps').update({ text: fix(row.text) }).eq('day', row.key);
+        else if (row.kind === 'recap') await db.from('channel_recaps').update({ text: fix(row.text) }).eq('day', row.key);
+        else await db.from('member_actions').update({ detail: { ...row.detail, url: fix(row.btnUrl ?? '') } }).eq('id', row.key);
       }
     }
   }
