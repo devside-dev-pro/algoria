@@ -1539,7 +1539,11 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     } else if (audience === 'incident') {
       // 🚨 INCIDENT DU 21-22/10/2026 : les membres qui copiaient VRAIMENT cette nuit-là — la liste figée, moins
       // ceux que STH montre sans master et ceux que Mathieu a retirés (lib/member/incident.ts, inAudience)
-      targets = (await affectedMembers(db)).filter(inAudience).map((m) => ({ tg_id: m.tg_id, member_no: m.member_no, tg_name: m.tg_name, locale: m.locale }));
+      // ceux qui ONT DÉJÀ DÉCLARÉ sont sautés (22/10 : le 1er envoi pointait sur algoria.tech, suspendu dans l'après-midi ;
+      // le renvoi du bon lien ne doit pas relancer les 13 qui avaient déjà répondu)
+      const { data: claimed } = await db.from('member_actions').select('tg_id').eq('kind', 'incident_claim').eq('status', 'done');
+      const declared = new Set(((claimed ?? []) as Array<{ tg_id: number }>).map((r) => Number(r.tg_id)));
+      targets = (await affectedMembers(db)).filter((m) => inAudience(m) && !declared.has(m.tg_id)).map((m) => ({ tg_id: m.tg_id, member_no: m.member_no, tg_name: m.tg_name, locale: m.locale }));
     } else return NextResponse.json({ error: 'unknown audience' }, { status: 400 });
 
     // DÉJÀ PRÉVENUS SOUS CETTE ÉTIQUETTE → on les saute. `status='done'` est ESSENTIEL et non

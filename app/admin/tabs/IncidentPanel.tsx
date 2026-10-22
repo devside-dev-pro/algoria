@@ -13,6 +13,12 @@ type Row = {
 type Report = { affected: number; audience: number; sthChecked: boolean; declared: number; totalDeclared: number; asked: number; rows: Row[] };
 
 const TAG = 'incident-22-10';
+// LE RENVOI DU BON LIEN (22/10, soir) : le 1er envoi pointait sur algoria.tech, suspendu par le registre dans l'après-midi.
+// Étiquette à part (l'anti-doublon de la 1re l'aurait bloqué) ; le serveur saute ceux qui ont déjà déclaré.
+const RELINK_TAG = 'incident-22-10-relink';
+const RELINK_TEXT = `Hey{name}, quick one : the link in my last message stopped working, sorry about that 🙏🏼
+
+Here is the right one, it takes 1 minute to tell me your balance before and now. Thank you`;
 const DEFAULT_TEXT = `Hey{name}, it's Mathieu.
 
 After what happened on the night of 21 to 22 October, I want to know exactly where each of you stands, so I can look for the best possible solution for everyone.
@@ -52,6 +58,18 @@ export function IncidentPanel() {
       .then(() => load());
   };
 
+  const relink = () => {
+    if (!window.confirm(`Renvoyer le bon lien de déclaration aux membres cochés qui n’ont PAS encore déclaré ?\n\n« ${RELINK_TEXT.replace('{name}', '')} »`)) return;
+    setBusy(true); setMsg(null);
+    void fetch('/api/member/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botBroadcast: { text: RELINK_TEXT, tag: RELINK_TAG, audience: 'incident', cta: true } }) })
+      .then(async (r) => {
+        const d = (await r.json()) as { error?: string; sent?: number; skipped?: number; failed?: number };
+        setMsg(d.error ? `⚠ ${d.error}` : `✅ bon lien renvoyé à ${d.sent} · déjà reçu ${d.skipped} · échecs ${d.failed}`);
+        load();
+      })
+      .finally(() => setBusy(false));
+  };
+
   const send = () => {
     const unchecked = rep && !rep.sthChecked ? '\n\n⚠ STH n’a pas encore été vérifié : ceux qui ne copiaient pas le recevront aussi. Clique d’abord sur « VÉRIFIER SUR STH » si tu veux les retirer.' : '';
     if (!window.confirm(`Envoyer ce message par le bot aux ${rep?.audience ?? '?'} membres cochés ? (ceux qui l’ont déjà reçu sont sautés)${unchecked}`)) return;
@@ -82,6 +100,7 @@ export function IncidentPanel() {
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <button disabled={busy} onClick={sthCheck} style={{ ...okBtn, padding: '9px 14px', fontSize: 12 }}>🔎 VÉRIFIER SUR STH QUI COPIAIT</button>
         <button disabled={busy || !text.trim()} onClick={send} style={{ ...okBtn, padding: '9px 14px', fontSize: 12 }}>📣 ENVOYER LA DEMANDE AUX MEMBRES TOUCHÉS</button>
+        <button disabled={busy} onClick={relink} style={{ ...okBtn, padding: '9px 14px', fontSize: 12 }}>🔗 RENVOYER LE BON LIEN (NON DÉCLARÉS)</button>
         <button onClick={load} style={{ ...okBtn, padding: '9px 14px', fontSize: 12 }}>↻ ACTUALISER</button>
         {msg && <span style={{ fontSize: 12 }}>{msg}</span>}
       </div>
