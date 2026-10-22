@@ -229,6 +229,24 @@ export const NUDGE_TOUCHES: ReadonlyArray<{ touch: 1 | 2 | 3 | 4; day: number }>
  *  en masse les 1 000 anciens ; eux auront UNE campagne de réactivation, à la main, quand le produit sera prêt). */
 export const NUDGE_SINCE: string = process.env.ALGORIA_NUDGE_SINCE ?? '2026-09-09T00:00:00Z';
 
+/** INTERRUPTEURS DU RUNNER EN BASE (22/10/2026). support_settings 'nudges' = 'off' → pas de relance quotidienne ;
+ *  'sth_autorepair' = 'off' → l'audit STH de 7 h ne rebranche personne, même avec ALGORIA_STH_AUTOREPAIR=1 (après
+ *  une mise en pause générale sur STH, il rebrancherait tous les membres encore « live » chez nous).
+ *  Né de l'incident de la nuit du 21 au 22/10 : ce jour-là, relancer les inscrits « reviens brancher ton compte »
+ *  pendant que les membres découvraient leurs pertes était le pire message possible, et la seule façon de l'arrêter
+ *  était de couper le runner sur Railway. Ligne absente → 'on' (comportement d'avant). Lecture impossible → null :
+ *  l'appelant ne relance pas et réessaie au passage suivant (une relance ratée ne coûte rien, une de trop si). */
+export async function runnerSwitch(key: 'nudges' | 'sth_autorepair' = 'nudges'): Promise<'on' | 'off' | null> {
+  try {
+    const raw = db as unknown as { from: (t: string) => any };
+    const { data, error } = await raw.from('support_settings').select('value').eq('key', key).limit(1);
+    if (error) return null;
+    return (data?.[0]?.value ?? 'on') === 'off' ? 'off' : 'on';
+  } catch {
+    return null;
+  }
+}
+
 /**
  * RELANCES FIXES — quatre messages, une fois chacun (bloc B, 09/09/2026, décision Mathieu).
  *
