@@ -144,8 +144,10 @@ on tombe à +29 493 $, et avec 0,40 $ à +9 923 $.
   - tout fermé à 23 h, et dès 21 h le vendredi.
 
   Le labo suppose un serveur « clôture de New York » : UTC+3 pendant l'heure d'été américaine, UTC+2 le reste de
-  l'année. Il l'a vérifié sur nos bougies : la reprise quotidienne de l'or tombe à 1 h serveur, 421 jours sur 421.
-  Si l'or de Raise FX reprend à une autre heure, décaler toutes les heures d'autant.
+  l'année. C'est vérifié sur les bougies journalières de notre broker, qui ouvrent à minuit serveur : 5 225 sur 5 225
+  depuis 2008, y compris les semaines où les heures d'été européenne et américaine diffèrent.
+  Si le serveur de Raise FX suit une autre horloge, décaler toutes les heures d'autant. Pour le vérifier, la bougie
+  journalière de l'or doit s'ouvrir à 00:00 dans MT5.
 - **Spread moyen sur l'or.** Avec un TP de 1,5 ATR, chaque dixième de dollar de spread se paie sur chaque trade
   (voir les voisins plus haut). `InpMaxSpread` (0,50 $) ne bloque que les pics : il ne rend pas un spread moyen trop
   large rentable.
