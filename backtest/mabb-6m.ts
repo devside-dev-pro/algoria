@@ -111,5 +111,28 @@ for (const [name, c] of [['sortie après 90 min', { ...BASE, maxBars: 18 }], ['s
   card(r);
 }
 
+// ===== 5. Le réglage retenu pour l'EA v1.20 : le cœur de la zone de la section 4 (tendance EMA 200, sortie après
+// 90 min ; 60 et 120 min, EMA 600 font presque aussi bien). Choisi APRÈS avoir vu les 6 mois : ses chiffres sont
+// optimistes par construction, et ses voisins disent s'il tient à une valeur exacte.
+const CHOSEN: Cfg = { ...BASE, trend: 200, maxBars: 18 };
+const chosen = measure('réglage retenu', CHOSEN);
+console.log(`\n── RÉGLAGE RETENU POUR L'EA (${label(CHOSEN)} · sortie après 90 min)`);
+console.log(`   ${NAME.h1} : ${cell(chosen.h1)} · DD ${fmt(chosen.h1.dd)} $`);
+console.log(`   ${NAME.h2} : ${cell(chosen.h2)} · DD ${fmt(chosen.h2.dd)} $`);
+card(chosen);
+console.log(`   trades de rattrapage : ${chosen.res.trades.filter((t) => t.catchUp).length}/${chosen.res.trades.length}, net ${fmt(chosen.res.trades.filter((t) => t.catchUp).reduce((a, t) => a + t.pnl, 0))} $`);
+console.log('   ses voisins (un seul changement à la fois) :');
+const NEIGHBOURS: [string, Cfg, number?][] = [
+  ['spread 0,30 $ (coûts 0,42)', CHOSEN, 0.42], ['spread 0,40 $ (coûts 0,52)', CHOSEN, 0.52],
+  ['sortie après 60 min', { ...CHOSEN, maxBars: 12 }], ['sortie après 120 min', { ...CHOSEN, maxBars: 24 }],
+  ['tendance EMA 100', { ...CHOSEN, trend: 100 }], ['tendance EMA 600', { ...CHOSEN, trend: 600 }],
+  ['RR 0,4', { ...CHOSEN, rr: 0.4 }], ['RR 0,6', { ...CHOSEN, rr: 0.6 }], ['stop 2,5 ATR', { ...CHOSEN, sl: 2.5 }],
+  ['ADX ≥ 20 sans DI', { ...CHOSEN, di: false }], ['sans rattrapage', { ...CHOSEN, catchUp: false }], ['EMA 4/9', { ...CHOSEN, fast: 4, slow: 9 }],
+];
+for (const [name, c, cost] of NEIGHBOURS) {
+  const res = run(c, { randomDir: false, seed: 7, cost }), h1 = st(res, 'h1'), h2 = st(res, 'h2'), all = st(res, 'all');
+  console.log(`      ${name.padEnd(28)} │ PF ${h1.pf.toFixed(2)} / ${h2.pf.toFixed(2)} │ 6 mois PF ${all.pf.toFixed(2)} · ${fmt(all.net).padStart(8)} $ · DD ${fmt(all.dd).padStart(8)} $ · ${all.perDay.toFixed(1)} tr/j · ≥4 ${Math.round(100 * all.ge4)} %`);
+}
+
 console.log(`\nVerdict : ${verdicts.length ? `${verdicts.length} combinaison(s) passe(nt) la règle sur la moitié jugée.` : 'aucune amélioration ne tient sur la moitié qu’elle n’a pas vue ; le réglage actuel reste.'}`);
 console.log('Lecture : seule la moitié jugée compte. Sur 3 mois, un écart de PF de quelques centièmes reste du bruit.');
