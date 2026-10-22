@@ -43,7 +43,7 @@ async function applyTelegramWebhook(token: string): Promise<{ ok: boolean; descr
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
   const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5000),
-    body: JSON.stringify({ url: 'https://www.algoria.tech/api/telegram', ...(secret ? { secret_token: secret } : {}), allowed_updates: TG_ALLOWED_UPDATES }),
+    body: JSON.stringify({ url: 'https://www.algoria-ai.com/api/telegram', ...(secret ? { secret_token: secret } : {}), allowed_updates: TG_ALLOWED_UPDATES }),
   });
   return (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string } as { ok: boolean; description?: string };
 }
@@ -763,7 +763,7 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
         // l'onboarding, cohérent avec la cible du push juste en dessous.
         // ⚠️ `url` peut être ABSOLUE — le composer accepte '/chemin' comme 'https://…' (voir customPush).
         // ctaKeyboard attend un CHEMIN qu'elle préfixe par APP_URL : lui passer une URL absolue produirait
-        // « https://app.algoria.tech/https://… », un bouton mort. On ne retient donc que la forme chemin.
+        // « https://app.algoria-ai.com/https://… », un bouton mort. On ne retient donc que la forme chemin.
         const offerPath = typeof url === 'string' && url.startsWith('/') ? url : '/member/onboarding';
         const offerMarkup = ctaKeyboard(asLocale((m as { locale?: string }).locale), offerPath);
         // le DM échoue (403) si la personne n'a jamais ouvert le chat du bot — normal, le push prend le relais

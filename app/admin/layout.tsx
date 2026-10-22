@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 
-// BACK-OFFICE CRM (admin.algoria.tech) — interface OPÉRATEUR, desktop-first, hors de la coque membre :
+// BACK-OFFICE CRM (admin.algoria-ai.com) — interface OPÉRATEUR, desktop-first, hors de la coque membre :
 // plus de nav mobile Home/History/…, un vrai outil de gestion (file STH, CRM membres, affiliation, outils).
 export const metadata: Metadata = {
   title: 'Algoria Admin',

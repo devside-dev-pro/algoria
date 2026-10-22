@@ -55,7 +55,7 @@ export function StopCopySheet({ kind, onKeep, onStop }: { kind: 'pause' | 'disco
               A member who stops right after a red day keeps that loss and misses the days that follow.
             </p>
             <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>
-              Past results do not guarantee future results. <a href="https://algoria.tech/track-record" style={{ color: 'var(--cyan)' }}>See every trade →</a>
+              Past results do not guarantee future results. <a href="https://algoria-ai.com/track-record" style={{ color: 'var(--cyan)' }}>See every trade →</a>
             </p>
           </div>
         )}

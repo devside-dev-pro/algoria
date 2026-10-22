@@ -36,7 +36,7 @@ export function Testimonials({ title = 'What members say' }: { title?: string })
       </div>
       <p style={{ margin: 0, fontSize: 10.5, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.5 }}>
         Real Telegram conversations with members, shared with their permission (surnames blurred). Individual results vary,
-        and past results do not guarantee future results. <a href="https://algoria.tech/track-record" style={{ color: 'var(--cyan)' }}>See every trade of the account →</a>
+        and past results do not guarantee future results. <a href="https://algoria-ai.com/track-record" style={{ color: 'var(--cyan)' }}>See every trade of the account →</a>
       </p>
     </section>
   );

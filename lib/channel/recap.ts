@@ -34,7 +34,7 @@ const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00
 const usd = (v: number) => `${v >= 0 ? '+' : '−'}$${Math.abs(v) >= 100 ? Math.round(Math.abs(v)).toLocaleString('en-US') : Math.abs(v).toFixed(2)}`;
 const amounts = (net10: number) => `✅ ${usd(net10 / 10)} at 0.01 lot · ${usd(net10)} at 0.10 lot`;
 const RISK = "Trading involves risk. Past results don't guarantee future results.";
-const APP = '👉 app.algoria.tech';
+const APP = '👉 app.algoria-ai.com';
 
 /** Les trades copiés (stratégie live, sans démonstration ni NAS100), clôturés depuis `sinceIso`. Sert aussi au CM (lib/channel/cm.ts). */
 export async function liveTrades(db: Db, sinceIso: string): Promise<Trade[]> {

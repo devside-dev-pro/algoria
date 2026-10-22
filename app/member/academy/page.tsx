@@ -1,6 +1,6 @@
 'use client';
 // ACADEMY — OUVERTE AU PUBLIC (pas de login requis) : c'est la page de closing.
-// Le lien partageable est algoria.tech/academy → un prospect lit sans friction ; dès qu'il touche
+// Le lien partageable est algoria-ai.com/academy → un prospect lit sans friction ; dès qu'il touche
 // Home/History/…, le useMe de CES pages le renvoie au login Telegram. Ici : pas de redirect sur 401.
 //
 // 30/09/2026 : les deux vidéos du fondateur (Welcome, « Meet ALGORIA 2.0 ») sont retirées — elles parlaient

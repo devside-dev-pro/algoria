@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
           <div style={{ display: 'flex', padding: '12px 24px', borderRadius: 999, border: '2px solid rgba(43,227,245,.5)', backgroundColor: 'rgba(43,227,245,.08)' }}>
             <span style={{ fontSize: 24, fontWeight: 700, color: '#2be3f5', letterSpacing: 2, lineHeight: 1 }}>FREE TO SIGN IN · REAL ACCOUNT · LIVE</span>
           </div>
-          <span style={{ fontSize: 26, fontWeight: 700, color: 'rgba(232,240,255,.85)', marginLeft: 28, lineHeight: 1 }}>app.algoria.tech</span>
+          <span style={{ fontSize: 26, fontWeight: 700, color: 'rgba(232,240,255,.85)', marginLeft: 28, lineHeight: 1 }}>app.algoria-ai.com</span>
         </div>
         <span style={{ position: 'absolute', right: 56, bottom: 30, fontSize: 16, color: 'rgba(147,165,196,.55)', lineHeight: 1 }}>Trading involves risk.</span>
       </div>

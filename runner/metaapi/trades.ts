@@ -6,7 +6,7 @@ import type { Signal } from '../../lib/engine/types';
 import { atOneLot, atRef, REF_LABEL } from '../../lib/display/scale';
 
 // Base publique de l'app membre — héberge /api/card/win (la carte de gain servie à Telegram).
-const APP_BASE = process.env.MEMBER_APP_URL ?? 'https://app.algoria.tech';
+const APP_BASE = process.env.MEMBER_APP_URL ?? 'https://app.algoria-ai.com';
 
 const px2 = (x: number): string => (Math.round(Number(x) * 100) / 100).toString(); // prix propre (coupe le bruit flottant)
 
@@ -50,7 +50,7 @@ function vipTradeClose(displaySymbol: string, pnlRaw: number, reason: string, en
   const pnl = atRef(pnlRaw, lot);
   if (at1 >= VIP_WIN_MIN) {
     const how = reason === 'tp' ? 'target hit' : reason === 'trail' ? 'profit locked by trailing stop' : 'banked';
-    // Carte GAIN — VISUELLE : la win card (style Binance, QR algoria.tech) rendue par l'app, postée en
+    // Carte GAIN — VISUELLE : la win card (style Binance, QR algoria-ai.com) rendue par l'app, postée en
     // photo — « forwardable » telle quelle vers le public. Repli TEXTE si le rendu/le post échoue : un TP
     // ne se perd jamais. La carte lit le trade en BASE (anti-falsification) → il est déjà enregistré ici.
     const text = `✅ <b>+${usd(pnl)}</b> · ${VIP_TAG}\n${px}<i>${how}</i>\n\nShown at ${REF_LABEL} — copied to your size automatically.`;

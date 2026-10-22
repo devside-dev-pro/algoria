@@ -11,7 +11,7 @@ import { MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
 import { track } from '@/lib/member/funnel';
 import type { Referral } from '@/app/member/ui';
 
-export const inviteLink = (code: string) => `https://app.algoria.tech/r/${code}`;
+export const inviteLink = (code: string) => `https://app.algoria-ai.com/r/${code}`;
 export const inviteText = (link: string) =>
   `I'm using Algoria: its AI trades gold and every trade is copied automatically to my account. Have a look, signing in is free 👇\n\n${link}\n\nTrading involves risk.`;
 /** Ce que rapporte un filleul pour un dépôt donné : même règle que lib/member/affiliate (taux, plafond, arrondi). */

@@ -11,12 +11,13 @@ export const dynamic = 'force-dynamic';
 
 let lastRepair = 0;
 
-// DOMAINE DE SECOURS (22/10/2026) : algoria.tech a été suspendu par le registre du .tech — plus aucun webhook n'arrivait,
-// donc plus de support, plus de connexion, plus d'adhésions. Appelée sur l'adresse Vercel du projet, la route y branche
-// le webhook ; appelée sur un domaine algoria.tech (une fois rétabli), elle remet la config canonique. Liste fermée :
-// jamais un domaine tiers, jamais une URL de déploiement de préversion.
+// CHANGEMENT DE DOMAINE (22/10/2026) : algoria.tech a été suspendu par le registre du .tech — plus aucun webhook
+// n'arrivait, donc plus de support, plus de connexion, plus d'adhésions. Le domaine canonique est désormais
+// algoria-ai.com. Appelée sur l'adresse Vercel du projet (secours), la route y branche le webhook ; appelée sur
+// n'importe quel autre domaine du projet, elle remet la config canonique. Liste fermée : jamais un domaine tiers,
+// jamais une URL de déploiement de préversion.
 const FALLBACK_HOSTS = new Set(['algoria-rust.vercel.app']);
-const webhookBase = (host: string) => (FALLBACK_HOSTS.has(host) ? `https://${host}` : 'https://www.algoria.tech');
+const webhookBase = (host: string) => (FALLBACK_HOSTS.has(host) ? `https://${host}` : 'https://www.algoria-ai.com');
 
 export async function GET(req: NextRequest) {
   const base = webhookBase((req.headers.get('host') ?? '').toLowerCase());

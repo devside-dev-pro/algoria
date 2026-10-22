@@ -26,7 +26,7 @@ export const maxDuration = 60; // 25 s jusqu'au 15/10/2026 : la réécriture d'u
 //   SUPABASE_SERVICE_KEY    — insert + upload Storage côté serveur (la table est en lecture seule pour anon)
 // Enregistrement du webhook (navigateur, TOKEN = celui du bot @BotFather) — chat_member est indispensable
 // pour capter les ACCEPTATIONS (Telegram ne l'envoie que s'il est explicitement listé) :
-//   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://www.algoria.tech/api/telegram&secret_token=<SECRET>&allowed_updates=%5B%22chat_join_request%22%2C%22chat_member%22%5D
+//   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://www.algoria-ai.com/api/telegram&secret_token=<SECRET>&allowed_updates=%5B%22chat_join_request%22%2C%22chat_member%22%5D
 
 /**
  * Photo de profil du demandeur → copiée dans Supabase Storage (bucket public tg-avatars).
@@ -373,7 +373,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // CONNEXION NATIVE de l'app membre : /start lg_<code> (deep-link depuis app.algoria.tech/member/login).
+  // CONNEXION NATIVE de l'app membre : /start lg_<code> (deep-link depuis app.algoria-ai.com/member/login).
   // On confirme le code avec l'identité Telegram de l'expéditeur → la page de login (en polling) pose la session.
   // Nécessite "message" dans allowed_updates du webhook.
   // ⚠️ CE WEBHOOK EST LE SEUL DU BOT (Telegram n'en autorise qu'UN) : login + waitlist live + inbox vivent
@@ -508,7 +508,7 @@ export async function POST(req: Request) {
               chat_id: u.id,
               text: SIGNED_IN[loginLocale] + (shortCode ? SIGNED_IN_CODE_HINT[loginLocale].replace('%s', shortCode) : ''),
               parse_mode: 'HTML',
-              reply_markup: { inline_keyboard: [[{ text: SIGNED_IN_BTN[loginLocale], url: `https://app.algoria.tech/member/login/confirm?c=${code}` }]] },
+              reply_markup: { inline_keyboard: [[{ text: SIGNED_IN_BTN[loginLocale], url: `https://app.algoria-ai.com/member/login/confirm?c=${code}` }]] },
             }),
           }).catch(() => {});
         }
@@ -521,7 +521,7 @@ export async function POST(req: Request) {
   // ATTRIBUTION PUBLICITAIRE : /start <tag> (deep-link de pub, ex. t.me/<bot>?start=ad_sa).
   //
   // POURQUOI ICI ET PAS PAR COOKIE : le cookie alg_src du middleware ne se pose que sur un clic UTM vers
-  // algoria.tech, or les pubs pointent vers le CANAL Telegram — le prospect ne touche jamais notre site
+  // algoria-ai.com, or les pubs pointent vers le CANAL Telegram — le prospect ne touche jamais notre site
   // avant d'être inscrit. Résultat mesuré le 17/08 : members.source vide sur les 516 fiches, alors que
   // 1 231 $/semaine étaient répartis sur cinq sets de pub sans savoir lequel produit des membres financés.
   //

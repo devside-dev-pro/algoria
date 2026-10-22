@@ -8,14 +8,14 @@ const mono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500'], variab
 
 // metadataBase : rend les URLs OG absolues — sans ça TikTok/Telegram/WhatsApp ignorent l'image de partage
 export const metadata = {
-  metadataBase: new URL('https://algoria.tech'),
+  metadataBase: new URL('https://algoria-ai.com'),
   title: 'Algoria AI — the AI that trades gold & Bitcoin, live',
   description: 'Real trades executed autonomously around the clock. Analysis, signals and results, free in the Telegram channel. Join for free.',
   openGraph: {
     title: 'Algoria AI — the AI that trades gold & Bitcoin, live',
     description: 'Real money, real trades, streamed with nothing to hide. Join the free Telegram channel.',
     type: 'website',
-    url: 'https://algoria.tech',
+    url: 'https://algoria-ai.com',
     siteName: 'Algoria AI',
     images: [{ url: '/brand/og.png', width: 1200, height: 630, alt: 'Algoria AI — live AI trading' }],
   },
