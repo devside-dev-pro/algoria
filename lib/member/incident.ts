@@ -56,7 +56,7 @@ export interface Affected {
   tg_id: number; member_no: number | null; tg_name: string | null; tg_username: string | null; locale: string | null; lot: number; broker: string | null; status: string; since: string | null;
   sth: SthSeen | null; sth_detail: string | null; excluded: boolean;
   /** la ligne de l'instantané (null sans instantané) : c'est elle qui porte le contrôle STH et le retrait à la main */
-  snapshot: { id: number; detail: Record<string, unknown> } | null;
+  snapshot: { id: string; detail: Record<string, unknown> } | null; // id = uuid de member_actions (jamais un nombre)
 }
 
 /** QUI REÇOIT LE DM (Mathieu, 22/10 : « que les gens qui étaient connectés… moins cela fera de bruit, mieux c'est
@@ -74,7 +74,7 @@ type Base = Pick<Affected, 'tg_id' | 'member_no' | 'tg_name' | 'tg_username' | '
  *  passés en pause / débranchés APRÈS le début de l'incident. */
 export async function affectedMembers(db: Db): Promise<Affected[]> {
   const { data: snap } = await db.from('member_actions').select('id,tg_id,detail').eq('kind', 'incident_affected').eq('status', 'done').limit(2000);
-  const frozen = ((snap ?? []) as Array<{ id: number; tg_id: number; detail: Record<string, unknown> }>).filter((r) => r.detail?.incident === INCIDENT.id);
+  const frozen = ((snap ?? []) as Array<{ id: string; tg_id: number; detail: Record<string, unknown> }>).filter((r) => r.detail?.incident === INCIDENT.id);
   if (frozen.length) {
     const ids = frozen.map((r) => Number(r.tg_id));
     const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name,tg_username,locale,lot,broker,status').in('tg_id', ids).is('banned_at', null);
@@ -85,7 +85,7 @@ export async function affectedMembers(db: Db): Promise<Affected[]> {
       return {
         ...m, tg_id: Number(m.tg_id), lot: Number(d.lot ?? m.lot ?? 0.01) || 0.01, since: (d.since as string | undefined) ?? null,
         sth: (d.sth as SthSeen | undefined) ?? null, sth_detail: (d.sth_detail as string | undefined) ?? null, excluded: d.excluded === true,
-        snapshot: row ? { id: Number(row.id), detail: d } : null,
+        snapshot: row ? { id: String(row.id), detail: d } : null,
       };
     });
   }
