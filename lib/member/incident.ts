@@ -44,7 +44,8 @@ export const INCIDENT_NOTE = `IMPORTANT CONTEXT, since 22 October 2026 (it overr
 On the night of 21 to 22 October, a failure in our trading system opened far too many buy positions on gold, almost all without a stop loss. The main account lost about 85%, and most members who were copying it took a very heavy loss; many accounts were closed by the broker. All trading is stopped until the failure is found, fixed and tested. Mathieu told the full truth in the VIP channel and is contacting every affected member personally.
 - If someone mentions it: acknowledge it plainly, never minimise it, never blame the market, never promise a refund or compensation (Mathieu is working on the best possible solution, nothing is confirmed yet), and say he will come back to them personally.
 - Do not quote ANY past results, percentages or win rates right now.
-- New people can still open their account and get set up; access to the VIP and the copy start in a few days, once the new setup is ready. Never say the copy is running today.`;
+- New people can still open their account and get set up; access to the VIP and the copy start in a few days, once the new setup is ready. Never say the copy is running today.
+- Our address changed on 22 October: the app is now https://app.getalgoria.com (old algoria.tech links no longer work). If someone says a link is broken, give them the new one.`;
 
 export const INCIDENT_KIND = 'incident_claim';
 export const PROOF_BUCKET = 'incident-proofs';
