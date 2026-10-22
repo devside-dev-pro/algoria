@@ -9,11 +9,14 @@ import { CTA_TEMPLATES, dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } fr
 import { OFFBOARD_REASONS, type OffboardReason } from '@/lib/member/winback';
 import { atRef, REF_LABEL } from '@/lib/display/scale';
 import { AgentBrain } from './AgentBrain';
+import { IncidentPanel } from './IncidentPanel';
 
 export function ToolsTab() {
   const { bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, downloadCard, downloadRecap, feedWins, input, live, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
   return (
           <>
+            {/* 🚨 l'incident du 21-22/10/2026 : en tête tant qu'il est en cours */}
+            <IncidentPanel />
             {/* 🧠 le cerveau d'Algoria AI — en tête des outils : c'est lui que Mathieu nourrit le plus souvent */}
             <AgentBrain />
             <AgentBrain docKey="memory" />
