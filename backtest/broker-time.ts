@@ -55,7 +55,7 @@ export function d1Check(d1: Bar[]): string {
   let ok = 0; const bad: string[] = [];
   for (const b of d1) {
     const real = (DAY - (b.time % DAY)) % DAY;
-    if (real === brokerOffset(b.time + 12 * HOUR)) ok++; else bad.push(`${new Date(b.time + real).toISOString().slice(0, 10)} (UTC+${real / HOUR})`);
+    if (real === brokerOffset(b.time)) ok++; else bad.push // à l'instant d'ouverture : un dimanche de changement d'heure, la D1 ouvre avant le changement(`${new Date(b.time + real).toISOString().slice(0, 10)} (UTC+${real / HOUR})`);
   }
   return `${ok}/${d1.length} D1 conformes` + (bad.length ? ` · écarts : ${bad.slice(0, 12).join(', ')}${bad.length > 12 ? ` … (+${bad.length - 12})` : ''}` : '');
 }
