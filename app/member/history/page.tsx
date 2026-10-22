@@ -7,6 +7,7 @@ import { TRADING_TZ } from '@/lib/display/tradingDay';
 import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { ShareWinSheet, type ShareableWin } from '@/components/member/ShareWinSheet';
+import { HistoryMaintenance } from '@/components/HistoryMaintenance';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; closed_at: string; lot?: number }
 
@@ -17,7 +18,8 @@ export default function MemberHistory() {
   const [clientLot, setClientLot] = useState(0.01);
   const [paywall, setPaywall] = useState(false);
   const [shareTarget, setShareTarget] = useState<ShareableWin | null>(null);
-  const [trackSince, setTrackSince] = useState<string | null>(null); // départ du track record visible (lib/member/trackSince.ts)
+  const [trackSince, setTrackSince] = useState<string | null>(null);
+  const [maintenance, setMaintenance] = useState(false); // 🛠 lib/member/historyMaintenance.ts // départ du track record visible (lib/member/trackSince.ts)
   // PÉRIODE (28/09/2026) : « depuis Algoria 2.0 » par défaut. Sur 7 jours seuls, une mauvaise séance rendait
   // tout l'historique rouge alors que le membre est vert depuis le départ. Le prospect garde le flux court.
   type Range = 'all' | '30d' | '7d';
@@ -29,7 +31,8 @@ export default function MemberHistory() {
     setOpenDays(null);
     void fetch(`/api/member/feed?range=${unlocked ? range : '7d'}`).then(async (r) => {
       if (!r.ok) return;
-      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; trackSince?: string };
+      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; trackSince?: string; maintenance?: boolean };
+      setMaintenance(!!d.maintenance);
       setTrades(d.trades);
       if (d.trackSince) setTrackSince(d.trackSince);
       if (d.clientLot) setClientLot(d.clientLot);
@@ -51,6 +54,7 @@ export default function MemberHistory() {
   const shareWin = (t: FeedTrade) => setShareTarget({ ticket: t.ticket, symbol: t.symbol, direction: t.direction, refPnl: ref(t), closedAt: t.closed_at });
   if (loading) return <main style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)' }}>loading…</main>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
+  if (maintenance) return <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}><HistoryMaintenance /></main>;
   const wins = trades.filter((t) => Number(t.pnl) > 0).length;
   const net = trades.reduce((a, t) => a + ref(t), 0); // période entière, pertes comprises, à 0.10 lot
   // montant d'une ligne : à SA taille pour un membre, à 0.10 lot pour un prospect (il n'a pas encore de taille)

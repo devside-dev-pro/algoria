@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { sdb } from '@/lib/member/server';
+import { historyGate, MAINTENANCE_BODY } from '@/lib/member/historyGate';
 import { MASTER_TRACK_FROM } from '@/lib/track/source';
 import { loadMaster } from '../master';
 
@@ -16,6 +17,8 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 const lotOf = (lot: unknown) => (Number(lot) > 0 ? Number(lot) : 1);
 
 export async function GET(req: NextRequest) {
+  const gate = await historyGate(req); // 🛠 historique en maintenance (lib/member/historyMaintenance.ts)
+  if (gate === 'hidden') return NextResponse.json(MAINTENANCE_BODY, { headers: { 'Cache-Control': 'private, no-store' } });
   const month = req.nextUrl.searchParams.get('month') ?? '';
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < MASTER_TRACK_FROM.slice(0, 7)) {
     return NextResponse.json({ error: `trade-by-trade detail starts in ${MASTER_TRACK_FROM.slice(0, 7)}` }, { status: 400 });
@@ -35,6 +38,6 @@ export async function GET(req: NextRequest) {
     })).reverse(),
   })).reverse();
   const res = NextResponse.json({ month, days });
-  res.headers.set('Cache-Control', 's-maxage=600, stale-while-revalidate=3600');
+  res.headers.set('Cache-Control', gate === 'open' ? 's-maxage=600, stale-while-revalidate=3600' : 'private, no-store');
   return res;
 }

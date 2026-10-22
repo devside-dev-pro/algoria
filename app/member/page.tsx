@@ -12,6 +12,7 @@ import { useMe, StatusPill, UnlockSheet, LoadFailed, SUPPORT_TG, CONTACT_URL, ty
 import { tgHref } from '@/lib/telegram';
 import { STRATEGY_MIN_DEPOSIT } from '@/lib/member/minimums';
 import { track, trackOnce } from '@/lib/member/funnel';
+import { HistoryMaintenance } from '@/components/HistoryMaintenance';
 import { ShareWinSheet, type ShareableWin } from '@/components/member/ShareWinSheet';
 import { InviteSheet, exampleDeposits, rewardFor } from '@/components/member/InviteSheet';
 
@@ -33,10 +34,12 @@ export default function MemberHome() {
   const [social, setSocial] = useState<Social | null>(null);
   const router = useRouter();
   const [tick, setTick] = useState(0); // rotation du bandeau preuve sociale
+  const [historyOff, setHistoryOff] = useState(false); // 🛠 historique en maintenance (lib/member/historyMaintenance.ts)
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => {
       if (!r.ok) return;
-      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; social?: Social };
+      const d = (await r.json()) as { trades: FeedTrade[]; clientLot?: number; social?: Social; maintenance?: boolean };
+      setHistoryOff(!!d.maintenance);
       setTrades(d.trades.slice(0, 8));
       if (d.clientLot) setClientLot(d.clientLot);
       if (d.social) setSocial(d.social);
@@ -167,7 +170,7 @@ export default function MemberHome() {
 
       {/* Derniers trades d'Algoria — les mêmes pour tous, pertes comprises (14/10/2026 : le prospect ne voyait
           que les gains, une prospecte l'a relevé). Membre : à sa taille ; prospect : à 0.10 lot. */}
-      <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {historyOff ? <HistoryMaintenance /> : <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h2 style={{ fontSize: 13, margin: 0, letterSpacing: 1.2, color: unlocked ? 'var(--muted)' : 'var(--gold)' }}>{unlocked ? 'ALGORIA 2.0 — LATEST TRADES' : '✨ ALGORIA 2.0 — LATEST TRADES'}</h2>
           {wins.length > 0 && <span className="mono" style={{ fontSize: 11, color: 'var(--up)' }}>✓ {wins.length}/{trades.length} wins</span>}
@@ -221,7 +224,7 @@ export default function MemberHome() {
         <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--dim)' }}>
           {unlocked ? (sameAsRef ? `Shown at your copy size (${clientLot} lot). Times in Paris time.` : `Shown at your copy size (${clientLot} lot), at ${REF_LABEL} in brackets. Times in Paris time.`) : `ALGORIA 2.0’s latest trades, wins and losses, shown at ${REF_LABEL}. Every trade has a stop loss, and members’ accounts copied every one of them automatically. Times in Paris time. The full history is in the History tab.`}
         </p>
-      </section>
+      </section>}
 
       <UnlockSheet open={paywall} onClose={() => setPaywall(false)} status={member.status} />
       <ShareWinSheet win={shareTarget} code={referral?.code ?? null} copying={member.status === 'live' || member.status === 'paused'} rewardRate={referral?.rewardRate ?? null} onClose={() => setShareTarget(null)} />

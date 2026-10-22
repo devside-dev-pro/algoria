@@ -13,6 +13,7 @@
 // HONNÊTETÉ, PAR CONSTRUCTION : les mois rouges et le pire creux s'affichent comme les autres ; la date de
 // départ est écrite en clair, avec la raison ; aucune taille de compte n'est suggérée (décision Mathieu :
 // chacun gère son money management) — le % dit seulement que le SIEN dépendra du lot qu'il choisit.
+import { HistoryMaintenance } from './HistoryMaintenance';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MASTER_TRACK_FROM, SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
 import { TRADING_TZ } from '@/lib/display/tradingDay';
@@ -186,11 +187,14 @@ export function TrackRecord() {
   const [mode, setMode] = useState<'pct' | 'usd'>('pct');
   const [lot, setLot] = useState(0.1);
   const [openMonth, setOpenMonth] = useState<string | null>(null);
+  const [maintenance, setMaintenance] = useState(false); // 🛠 lib/member/historyMaintenance.ts
 
   useEffect(() => {
     void fetch('/api/public/track').then(async (r) => {
       if (!r.ok) throw new Error(String(r.status));
-      setData((await r.json()) as Track);
+      const d = (await r.json()) as Track & { maintenance?: boolean };
+      if (d.maintenance) { setMaintenance(true); return; }
+      setData(d);
     }).catch(() => setFailed(true));
   }, []);
 
@@ -238,6 +242,7 @@ export function TrackRecord() {
   const fmt = (n: number, sign = true) => (mode === 'pct' ? fmtPct(n, sign) : fmtUsd(n, sign));
   const updated = data ? new Date(data.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: TRADING_TZ }) + ' Paris time' : '';
 
+  if (maintenance) return <HistoryMaintenance />;
   if (failed) return <p style={{ fontSize: 12.5, color: 'var(--dim)' }}>The track record could not be loaded right now — try again in a minute.</p>;
   if (!data || !view) return <p style={{ fontSize: 12.5, color: 'var(--dim)' }}>loading…</p>;
   const maxAbs = Math.max(...view.monthRows.map((m) => Math.abs(view.val(m)))) || 1;
