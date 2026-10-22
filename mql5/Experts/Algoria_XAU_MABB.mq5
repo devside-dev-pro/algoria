@@ -3,22 +3,25 @@
 //|  EA court terme sur l'or : croisement de moyennes mobiles et/ou  |
 //|  bandes de Bollinger, avec un quota de 4 à 5 trades par jour.    |
 //+------------------------------------------------------------------+
-// Réglages par défaut = la demande de Mathieu (EMA courtes, filtre ADX, RR « négatif » de 0,5, lot fixe), réglés par
-// le labo backtest/mabb-grid.ts : 420 combinaisons EMA × tendance × ADX × stop, toutes à RR 0,5, CHOISIES sur la 1re
-// année de M5 broker (oct. 2024 → oct. 2025) puis JUGÉES sur la 2e, jamais vue. Résultat (1 lot, coûts 0,32 $/oz) :
-//   EMA 3/8 + tendance EMA 50, ADX(14) ≥ 20 avec +DI/−DI, stop 3 ATR, TP 1,5 ATR, rattrapage dès 14 h :
-//   année jugée PF 1,05 (+29 k$), sur 2 ans PF 1,02 (+15 k$), 66 % de gagnants, pire creux −45 k$, 4 trades/jour,
-//   ≥ 4 trades 72 % des jours. Proche de l'équilibre : aucun réglage à RR 0,5 n'atteint PF 1,2 sur l'année jugée.
-// L'ancien réglage (EMA 9/21/200, stop 1,5 ATR, RR 2) faisait +40 k$ sur 2 ans (PF 1,05) ; il reste à portée des
-// paramètres. Les règles Bollinger, BBRSI de geraked (sans sa grille) et la « Moving Average » de MetaQuotes perdent
-// toutes et ne battent pas le hasard (backtest/mabb-arena.ts) : les modes Bollinger restent là pour être testés.
+// Réglages par défaut = la demande de Mathieu (EMA courtes, filtre ADX, RR « négatif » de 0,5, lot fixe), mesurés sur
+// les 6 DERNIERS MOIS de M5 broker seulement (22/04 → 22/10/2026, backtest/mabb-6m.ts), coupés en deux moitiés de
+// 3 mois : un changement ne compte que s'il fait mieux sur les deux. 1 lot, coûts 0,32 $/oz :
+//   EMA 3/8 + tendance EMA 200, ADX(14) ≥ 20 avec +DI/−DI, stop 3 ATR, TP 1,5 ATR, rattrapage dès 14 h, et SORTIE
+//   AU TEMPS : un trade qui n'a touché ni stop ni TP au bout de 90 min est fermé à la clôture de la bougie.
+//   PF 1,14 puis 1,24 sur les deux moitiés, 1,19 sur 6 mois (+40 k$), pire creux −13 k$, 4,3 trades/jour.
+//   La v1.10 (EMA 50, sans sortie au temps) faisait PF 0,92 puis 1,07, 0,99 sur 6 mois (−3,5 k$), creux −29 k$.
+// La sortie au temps est le seul changement qui améliore les deux moitiés ; elle marche de 30 min à 2 h et avec une
+// tendance EMA 200 ou 600 (PF 1,11 à 1,24 sur chaque moitié) : 90 min et EMA 200 sont le cœur de cette zone, choisis
+// APRÈS avoir vu les 6 mois, donc optimistes par construction. Les règles Bollinger, BBRSI de geraked (sans sa
+// grille) et la « Moving Average » de MetaQuotes perdent toutes (backtest/mabb-arena.ts) : les modes Bollinger
+// restent là pour être testés.
 // Le MAXIMUM de trades par jour est un plafond dur. Le MINIMUM ne peut pas se décréter : à partir de
 // InpCatchUpHour, s'il manque des trades, la même règle sans filtre de tendance prend le relais. Les jours trop
 // calmes, l'EA finit sous le minimum ; il n'ouvre jamais de trade sans signal.
 #property copyright "Algoria"
 #property link      "https://getalgoria.com"
-#property version   "1.10"
-#property description "Or (XAUUSD) court terme : EMA 3/8 + EMA 50, filtre ADX, RR 0,5, lot fixe, 4 à 5 trades par jour."
+#property version   "1.20"
+#property description "Or (XAUUSD) court terme : EMA 3/8 + EMA 200, filtre ADX, RR 0,5, sortie après 90 min, lot fixe, 4 à 5 trades par jour."
 #property description "Toujours valider en démo et au Strategy Tester (ticks réels) avant le réel."
 
 #include <Trade\Trade.mqh>
@@ -43,7 +46,7 @@ input ENUM_MABB_SIGNAL  InpSignalMode      = MABB_EMA_CROSS;   // Règle d'entr�
 input ENUM_TIMEFRAMES   InpTimeframe       = PERIOD_M5;        // Unité de temps des signaux
 input int               InpFastEMA         = 3;                // EMA rapide
 input int               InpSlowEMA         = 8;                // EMA lente
-input int               InpTrendEMA        = 50;               // EMA de tendance (0 = sans filtre)
+input int               InpTrendEMA        = 200;              // EMA de tendance (0 = sans filtre)
 input int               InpBBPeriod        = 20;               // Bollinger : période
 input double            InpBBDeviation     = 2.0;              // Bollinger : écarts-types
 input int               InpRSIPeriod       = 14;               // RSI : période
@@ -73,6 +76,7 @@ input int               InpATRPeriod       = 14;               // ATR : période
 input double            InpStopATR         = 3.0;              // Stop = ATR × ce multiple
 input double            InpRewardRisk      = 0.5;              // RR : TP = stop × ce ratio (0,5 = TP à la moitié du stop)
 input bool              InpExitOnCross     = false;            // Fermer aussi au croisement EMA inverse
+input int               InpMaxHoldMinutes  = 90;               // Fermer à la clôture de bougie si ni stop ni TP au bout de N minutes (0 = off)
 
 input group "Risque"
 input double            InpFixedLots       = 0.01;             // Lot fixe par trade (0 = calcul au risque ci-dessous)
@@ -207,16 +211,27 @@ bool NoEntryTime(const MqlDateTime &now)
    return false;
   }
 
-// ferme notre position à l'heure de mise à plat, avant la fin de séance, ou si elle date d'un jour serveur précédent
-// (clôture anticipée, jour férié, terminal déconnecté au moment de la mise à plat) ; true si une position est ouverte
-// et qu'il faut la fermer
+// ferme notre position à l'heure de mise à plat, avant la fin de séance, si elle date d'un jour serveur précédent
+// (clôture anticipée, jour férié, terminal déconnecté au moment de la mise à plat), ou à la première bougie qui
+// s'ouvre InpMaxHoldMinutes après celle de l'entrée (sortie au temps, à la clôture de bougie comme dans le labo) ;
+// true si une position est ouverte et qu'il faut la fermer
 bool ForcedExit(const MqlDateTime &now)
   {
    ulong ticket = 0;
    if(!SelectOurPosition(ticket))
       return false;
-   bool stale = DayStart((datetime)PositionGetInteger(POSITION_TIME)) < DayStart(TimeCurrent());
-   if(!stale && !NoEntryTime(now))
+   datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
+   bool stale = DayStart(opened) < DayStart(TimeCurrent());
+   bool timeUp = false;
+   if(InpMaxHoldMinutes > 0)
+     {
+      datetime bar = iTime(_Symbol, InpTimeframe, 0);
+      timeUp = bar > 0 && (long)(bar - (opened - opened % PeriodSeconds(InpTimeframe))) >= (long)InpMaxHoldMinutes * 60;
+      // le labo ne rentre pas sur la bougie d'une sortie au temps : cette bougie ne sera pas traitée par OnTick
+      if(timeUp)
+         g_lastBar = bar;
+     }
+   if(!stale && !timeUp && !NoEntryTime(now))
       return false;
    // or fermé plus tôt que le forex (jour férié) : le serveur répond « marché fermé ». Sans nouveau prix de l'or, on
    // ne réessaie que toutes les 5 minutes ; au premier prix de la reprise, on réessaie tout de suite.
