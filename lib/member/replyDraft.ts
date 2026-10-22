@@ -22,6 +22,7 @@ import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from './activa
 import { APP_URL } from './i18n';
 import { getAgentDoc } from './agentDocs';
 import { trackFacts } from './trackFacts';
+import { INCIDENT_NOTE, incidentActive } from './incident';
 
 const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
 const SUPPORT_MODEL = process.env.ALGORIA_SUPPORT_MODEL ?? 'claude-sonnet-5-5';
@@ -290,7 +291,9 @@ async function attempt(i: DraftInput, retry: string | null): Promise<Draft | nul
   const user = `${them}: ${i.member?.member_no != null ? `member #${i.member.member_no}` : biz ? 'not an Algoria member yet' : 'unknown'} ${i.member?.tg_username ? '@' + i.member.tg_username : (i.member?.tg_name ?? '')}\nStatus: ${statusLine}\nApp language: ${i.locale ?? 'en'}\n\nRecent exchange:\n${history}\n\nNew message from the ${them.toLowerCase()}${i.images?.length ? ` (with ${i.images.length} screenshot${i.images.length > 1 ? 's' : ''}, above)` : ''}:\n"""${i.text.slice(0, 1200)}"""${i.note ? `\n\nNote: ${i.note}` : ''}${retry ? `\n\nYour previous answer was rejected: ${retry}. Write it again.` : ''}\n\nReturn the JSON, on ONE line (write \\n inside the "reply" string for a line break).`;
   try {
     const client = new Anthropic({ timeout: i.timeoutMs ?? 8000, maxRetries: 0 });
-    const [knowledge, memory, track] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('memory'), trackFacts()]);
+    const [knowledge, memory, trackNow] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('memory'), trackFacts()]);
+    // 🚨 incident du 21-22/10 : la note remplace les chiffres du track record tant que la garde court
+    const track = incidentActive() ? INCIDENT_NOTE : trackNow;
     const sys = biz ? businessSystem(knowledge, memory, track) : system(i.locale ?? 'en', knowledge, memory, track);
     // LE SUPPORT DE MATHIEU (16/10/2026) : ses réponses partent seules quand le modèle est sûr, donc le meilleur modèle
     // (ALGORIA_SUPPORT_MODEL). Le prompt système (faits, knowledge, mémoire) est le même d'un message à l'autre : mis en

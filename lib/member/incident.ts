@@ -20,7 +20,31 @@ export const INCIDENT = {
   /** perte du master sur la nuit, à 1.00 lot (trades fermés entre 23 h et 2 h UTC) */
   masterLoss: 60849,
   tag: 'incident-22-10',
+  /** jusqu'à quand le support traite la nuit comme un sujet chaud (garde du pilote automatique + note au modèle) */
+  guardUntil: '2026-11-05T00:00:00Z',
 } as const;
+
+export const incidentActive = (now = Date.now()): boolean => now < Date.parse(INCIDENT.guardUntil);
+
+/** LE SUPPORT PENDANT L'INCIDENT (22/10, Mathieu : « faut pas stopper tout, les onboardings continuent »). Le
+ *  pilote automatique repart, mais tout ce qui touche à la nuit ou aux résultats passe par une carte : Mathieu
+ *  répond lui-même, le bot n'improvise pas là-dessus. */
+export const INCIDENT_TOPIC = /\b(blown|wiped|liquidat\w*|margin call|stop ?out|stopped out|account (?:was |got |is |has been )?(?:closed|gone|empty|blown|wiped)|what happened|last night|yesterday night|drawdown|crash\w*|bug|glitch|malfunction\w*|compensat\w*|results?|performance|profits?|returns?|track ?record|win ?rate|how much (?:did|do|can|could) (?:you|we|i|people) (?:make|earn))\b/i;
+
+/** Était-il sur la liste figée des membres touchés ? (une requête, pour la garde du pilote automatique) */
+export async function wasAffected(db: Db, tgId: number): Promise<boolean> {
+  const { data } = await db.from('member_actions').select('detail').eq('tg_id', tgId).eq('kind', 'incident_affected').eq('status', 'done').limit(5);
+  return ((data ?? []) as Array<{ detail: Record<string, unknown> }>).some((r) => r.detail?.incident === INCIDENT.id);
+}
+
+/** Ce que le modèle doit savoir pour rédiger (à la place des chiffres du track record, tant que la garde court :
+ *  octobre affiche la chute, et citer un « +X % depuis le lancement » ce jour-là serait trompeur). Les faits sont
+ *  ceux du message VIP de Mathieu du 22/10. */
+export const INCIDENT_NOTE = `IMPORTANT CONTEXT, since 22 October 2026 (it overrides any results or performance figures you may know):
+On the night of 21 to 22 October, a failure in our trading system opened far too many buy positions on gold, almost all without a stop loss. The main account lost about 85%, and most members who were copying it took a very heavy loss; many accounts were closed by the broker. All trading is stopped until the failure is found, fixed and tested. Mathieu told the full truth in the VIP channel and is contacting every affected member personally.
+- If someone mentions it: acknowledge it plainly, never minimise it, never blame the market, never promise a refund or compensation (Mathieu is working on the best possible solution, nothing is confirmed yet), and say he will come back to them personally.
+- Do not quote ANY past results, percentages or win rates right now.
+- New people can still open their account and get set up; access to the VIP and the copy start in a few days, once the new setup is ready. Never say the copy is running today.`;
 
 export const INCIDENT_KIND = 'incident_claim';
 export const PROOF_BUCKET = 'incident-proofs';
