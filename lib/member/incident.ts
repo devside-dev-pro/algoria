@@ -25,22 +25,44 @@ export const INCIDENT = {
 export const INCIDENT_KIND = 'incident_claim';
 export const PROOF_BUCKET = 'incident-proofs';
 
-export interface Affected { tg_id: number; member_no: number | null; tg_name: string | null; tg_username: string | null; locale: string | null; lot: number; broker: string | null; status: string; since: string | null }
+/** Ce que STH a montré pour ce membre au contrôle « qui copiait vraiment » (null = pas encore contrôlé). */
+export type SthSeen = 'copying' | 'not-copying' | 'unknown';
+
+export interface Affected {
+  tg_id: number; member_no: number | null; tg_name: string | null; tg_username: string | null; locale: string | null; lot: number; broker: string | null; status: string; since: string | null;
+  sth: SthSeen | null; sth_detail: string | null; excluded: boolean;
+  /** la ligne de l'instantané (null sans instantané) : c'est elle qui porte le contrôle STH et le retrait à la main */
+  snapshot: { id: number; detail: Record<string, unknown> } | null;
+}
+
+/** QUI REÇOIT LE DM (Mathieu, 22/10 : « que les gens qui étaient connectés… moins cela fera de bruit, mieux c'est
+ *  pour notre image »). La liste figée ne contient déjà que des membres live cette nuit-là ; on retire en plus ceux
+ *  que STH montre abonnés à aucun master (ou à un autre), et ceux que Mathieu a retirés à la main. Un « unknown »
+ *  (STH injoignable) RESTE : rater quelqu'un qui a vraiment perdu serait pire qu'un message de trop. Un membre retiré
+ *  garde le droit de déclarer sur la page s'il y arrive. */
+export const inAudience = (m: Affected): boolean => !m.excluded && m.sth !== 'not-copying';
+
+type Base = Pick<Affected, 'tg_id' | 'member_no' | 'tg_name' | 'tg_username' | 'locale' | 'broker' | 'status'> & { lot: number | null };
 
 /** Les membres qui copiaient pendant l'incident. D'abord l'INSTANTANÉ figé le 22/10 au matin (lignes member_actions
  *  'incident_affected', les 72 live de ce moment-là) : une mise en pause générale sur STH ensuite ne doit faire sortir
  *  personne de la liste. Sans instantané : branchés (connect validé) avant la dernière position, et encore live, ou
  *  passés en pause / débranchés APRÈS le début de l'incident. */
 export async function affectedMembers(db: Db): Promise<Affected[]> {
-  const { data: snap } = await db.from('member_actions').select('tg_id,detail').eq('kind', 'incident_affected').eq('status', 'done').limit(2000);
-  const frozen = ((snap ?? []) as Array<{ tg_id: number; detail: Record<string, unknown> }>).filter((r) => r.detail?.incident === INCIDENT.id);
+  const { data: snap } = await db.from('member_actions').select('id,tg_id,detail').eq('kind', 'incident_affected').eq('status', 'done').limit(2000);
+  const frozen = ((snap ?? []) as Array<{ id: number; tg_id: number; detail: Record<string, unknown> }>).filter((r) => r.detail?.incident === INCIDENT.id);
   if (frozen.length) {
     const ids = frozen.map((r) => Number(r.tg_id));
     const { data: ms } = await db.from('members').select('tg_id,member_no,tg_name,tg_username,locale,lot,broker,status').in('tg_id', ids).is('banned_at', null);
-    const at = new Map(frozen.map((r) => [Number(r.tg_id), r.detail]));
-    return ((ms ?? []) as Array<Omit<Affected, 'since' | 'lot'> & { lot: number | null }>).map((m) => {
-      const d = at.get(Number(m.tg_id)) ?? {};
-      return { ...m, tg_id: Number(m.tg_id), lot: Number(d.lot ?? m.lot ?? 0.01) || 0.01, since: (d.since as string | undefined) ?? null };
+    const at = new Map(frozen.map((r) => [Number(r.tg_id), r]));
+    return ((ms ?? []) as Array<Base>).map((m) => {
+      const row = at.get(Number(m.tg_id));
+      const d = row?.detail ?? {};
+      return {
+        ...m, tg_id: Number(m.tg_id), lot: Number(d.lot ?? m.lot ?? 0.01) || 0.01, since: (d.since as string | undefined) ?? null,
+        sth: (d.sth as SthSeen | undefined) ?? null, sth_detail: (d.sth_detail as string | undefined) ?? null, excluded: d.excluded === true,
+        snapshot: row ? { id: Number(row.id), detail: d } : null,
+      };
     });
   }
   const [{ data: ms }, { data: starts }, { data: after }] = await Promise.all([
@@ -54,9 +76,9 @@ export async function affectedMembers(db: Db): Promise<Affected[]> {
     if (!first.has(k) || s.done_at < first.get(k)!) first.set(k, s.done_at);
   }
   const stoppedAfter = new Set(((after ?? []) as Array<{ tg_id: number }>).map((r) => Number(r.tg_id)));
-  return ((ms ?? []) as Array<Omit<Affected, 'since' | 'lot'> & { lot: number | null }>)
+  return ((ms ?? []) as Array<Base>)
     .filter((m) => first.has(Number(m.tg_id)) && (m.status === 'live' || stoppedAfter.has(Number(m.tg_id))))
-    .map((m) => ({ ...m, tg_id: Number(m.tg_id), lot: Number(m.lot ?? 0.01) || 0.01, since: first.get(Number(m.tg_id)) ?? null }));
+    .map((m) => ({ ...m, tg_id: Number(m.tg_id), lot: Number(m.lot ?? 0.01) || 0.01, since: first.get(Number(m.tg_id)) ?? null, sth: null, sth_detail: null, excluded: false, snapshot: null }));
 }
 
 /** Ce que les trades de la nuit représentent à son lot, s'il les a tous copiés (sa vraie perte est plafonnée par son
