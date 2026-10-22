@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
+import { historyGate, MAINTENANCE_BODY } from '@/lib/member/historyGate';
 import { sdb } from '@/lib/member/server';
 import { MASTER_TRACK_FROM, SOURCE_TRACK_START } from '@/lib/track/source';
 import { loadMaster } from './master';
@@ -37,7 +38,10 @@ const lotOf = (lot: unknown) => (Number(lot) > 0 ? Number(lot) : 1);
 
 type Day = { d: string; u: number; net: number; cash: number; n: number; w: number; base?: number };
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // 🛠 historique en maintenance (lib/member/historyMaintenance.ts) : rien pour les prospects et la page publique
+  const gate = await historyGate(req);
+  if (gate === 'hidden') return NextResponse.json(MAINTENANCE_BODY, { headers: { 'Cache-Control': 'private, no-store' } });
   const db = sdb() as unknown as { from: (t: string) => any; rpc: (f: string, a: object) => any };
   const rows: Array<{ time: string; type: string; entry_type: string | null; volume: number | null; profit: number | null; commission: number | null; swap: number | null }> = [];
   // PostgREST plafonne à 1 000 lignes par requête : on pagine
@@ -137,6 +141,6 @@ export async function GET() {
     days,
   });
   // le master bouge en continu : un cache CDN de 10 min (l'écran l'annonce)
-  res.headers.set('Cache-Control', 's-maxage=600, stale-while-revalidate=3600');
+  res.headers.set('Cache-Control', gate === 'open' ? 's-maxage=600, stale-while-revalidate=3600' : 'private, no-store');
   return res;
 }

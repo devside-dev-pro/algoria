@@ -4,6 +4,7 @@ import { isShowTrade } from '@/lib/cockpit/showTrades';
 import { inMaintenance, LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { OFFBOARDED } from '@/lib/member/winback';
 import { TRACK_SINCE, TRACK_SINCE_MS } from '@/lib/member/trackSince';
+import { seesHistory } from '@/lib/member/historyMaintenance';
 import { tradingDayOf, tradingDayStartMs } from '@/lib/display/tradingDay';
 
 export const runtime = 'nodejs';
@@ -74,7 +75,9 @@ export async function GET(req: NextRequest) {
   // chez des membres arrivés après, qui ne l'avaient pas sur leur compte. Admins et prospects voient tout l'historique.
   const copyStart = (startQ.data?.[0] as { done_at?: string } | undefined)?.done_at ? Date.parse(String((startQ.data?.[0] as { done_at: string }).done_at)) : NaN;
   const mine = (t: { opened_at?: string | null }) => !Number.isFinite(copyStart) || isAdmin(s.username) || !['live', 'paused'].includes(feedStatus) || !t.opened_at || Date.parse(String(t.opened_at)) >= copyStart;
-  const trades = clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY && (unlocked || Date.parse(String(t.closed_at)) >= prospectFrom) && mine(t));
+  // 🛠 HISTORIQUE EN MAINTENANCE pour les prospects (22/10/2026, lib/member/historyMaintenance.ts) : aucun trade
+  const maintenance = !seesHistory(feedStatus, isAdmin(s.username));
+  const trades = maintenance ? [] : clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY && (unlocked || Date.parse(String(t.closed_at)) >= prospectFrom) && mine(t));
   // PROSPECTS : LES MÊMES TRADES QUE LES MEMBRES, PERTES COMPRISES (14/10/2026, décision Mathieu). Jusqu'ici le
   // prospect ne voyait que les 30 derniers GAINS (« bande-annonce ») : biaisé, et contredit par tout ce qu'on dit
   // (« every single trade is public, wins and losses »). Une prospecte l'a relevé au bot le 14/10. Ce qui évite de
@@ -118,5 +121,5 @@ export async function GET(req: NextRequest) {
     lastLiveNo: lastLive && lastLiveHours != null && lastLiveHours < 72 ? Number(lastLive.member_no) : null,
     lastLiveHours: lastLive && lastLiveHours != null && lastLiveHours < 72 ? lastLiveHours : null,
   };
-  return NextResponse.json({ desk: deskOut, trades, locked: !unlocked, clientLot, social, trackSince: TRACK_SINCE, range: unlocked && (range === 'all' || range === '30d') ? range : '7d' });
+  return NextResponse.json({ desk: deskOut, trades, maintenance, locked: !unlocked, clientLot, social, trackSince: TRACK_SINCE, range: unlocked && (range === 'all' || range === '30d') ? range : '7d' });
 }

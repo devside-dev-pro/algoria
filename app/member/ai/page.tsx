@@ -139,12 +139,13 @@ const GREETINGS = [
 export default function AlgoriaAI() {
   const router = useRouter();
   const [days, setDays] = useState<TrackDay[] | null>(null);
+  const [curveOff, setCurveOff] = useState(false); // 🛠 historique en maintenance : pas de courbe (lib/member/historyMaintenance.ts)
   const [greet, setGreet] = useState(0);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [typed, setTyped] = useState(0);
   const answerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    void fetch('/api/public/track').then((r) => (r.ok ? r.json() : null)).then((d: { days?: TrackDay[] } | null) => setDays(d?.days ?? [])).catch(() => setDays([]));
+    void fetch('/api/public/track').then((r) => (r.ok ? r.json() : null)).then((d: { days?: TrackDay[]; maintenance?: boolean } | null) => { setCurveOff(!!d?.maintenance); setDays(d?.days ?? []); }).catch(() => setDays([]));
   }, []);
   const lesson = ask ? lessonOf(ask) : undefined;
   const full = lesson ? plain(nb(lesson.body)) : '';
@@ -174,7 +175,7 @@ export default function AlgoriaAI() {
         <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', minHeight: 20, maxWidth: 300 }}>{nb(GREETINGS[greet])}</div>
       </section>
 
-      <section className="panel" style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {!curveOff && <section className="panel" style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 9.5, letterSpacing: 1.2, whiteSpace: 'nowrap' }}>
           <span style={{ color: 'var(--gold)' }}>REAL ACCOUNT · SINCE JULY</span>
           {week !== null && <span style={{ color: 'var(--dim)' }}>{week} TRADES · 7D</span>}
@@ -183,7 +184,7 @@ export default function AlgoriaAI() {
         <button onClick={() => router.push('/member/track-record')} style={{ alignSelf: 'flex-start', background: 'transparent', border: 'none', padding: 0, color: 'var(--cyan)', fontWeight: 750, fontSize: 12.5, cursor: 'pointer' }}>
           See every trade, in % or at your lot →
         </button>
-      </section>
+      </section>}
 
       <section className="panel" style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="mono" style={{ fontSize: 9.5, letterSpacing: 1.4, color: 'var(--gold)' }}>ASK ALGORIA AI</div>
