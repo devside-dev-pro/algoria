@@ -114,7 +114,7 @@ VOICE: you write AS Mathieu, the founder, in the first person when it is persona
 AUDIENCE: beginners, mostly in South Africa and the UK. Many arrived from an ad and have not created their account yet. 90% of them are not traders and never will be: they want the AI to do it for them. So no market talk, no charts, no volatility, no macro, no jargon, nothing that could worry them; say BUY and SELL (never long or short). The only market event you may ever mention is one the task explicitly gives you.
 
 HARD RULES (a post that breaks one is thrown away):
-- English only. Telegram HTML only: <b>bold</b> and <i>italic</i>, nothing else. No markdown, no hashtags, no links in the text (the system adds the button).
+- English only. Telegram HTML only: <b>bold</b> and <i>italic</i>, nothing else. No markdown, no hashtags, no links in the text (when a post has a button, the system adds it).
 - Never an em dash or an en dash. Put a space before "?" and "!" (that's how Mathieu writes).
 - Short: every line short, the whole post easy to read on a phone. Emojis: a few, never a wall.
 - Never write a number about results, profits or percentages yourself. Use the tokens you are given ({{AMOUNTS}}, {{YESTERDAY}}) exactly as written; the system replaces them with the real figures.
@@ -147,14 +147,15 @@ const PROMISE = /guarantee|risk[- ]?free|passive income|get rich|easy money|fina
 const MONEY_IN = /\b(deposit(?:s|ed|ing)?|fund(?:s|ed|ing)?\b(?! manager)|minimum|balance|top[- ]?up|invest(?:ed|ing|ment)?)\b|\bfund it\b|\bhow much\b/i;
 const NEGATIVE = /\b(loss|losses|losing|lost|red day|drawdown|maintenance|paused?|bug|outage|down day)\b/i;
 
-type GuardOpts = { tokens: Record<string, string>; required?: string[]; allowNegative?: boolean; allowedUsd?: number[]; allowedNumbers?: number[]; maxChars?: number };
+type GuardOpts = { tokens: Record<string, string>; required?: string[]; allowNegative?: boolean; noButton?: boolean; allowedUsd?: number[]; allowedNumbers?: number[]; maxChars?: number };
 
 /** Nettoie et contrôle un texte du modèle : le texte prêt, ou la raison du refus (renvoyée au modèle pour un 2e essai). */
 export function check(raw: string, o: GuardOpts): { ok: true; text: string } | { ok: false; why: string } {
   // humanize : tiret long → virgule, gras markdown retiré ; puis l'espace de Mathieu avant ? et !, même collés à du gras
   let t = humanize(raw.replace(/\r/g, ''), true).replace(/([^\s?!])([?!]+)(?=<\/[bi]>)/g, '$1 $2');
   if (/<(?!\/?(?:b|i)>)[^>]*>/i.test(t)) return { ok: false, why: 'only <b> and <i> tags are allowed' };
-  if (/https?:\/\/|t\.me\/|\.tech\b|www\./i.test(t)) return { ok: false, why: 'no links in the text, the button is added by the system' };
+  if (/https?:\/\/|t\.me\/|\.tech\b|www\./i.test(t)) return { ok: false, why: 'no links in the text' };
+  if (o.noButton && /👇|\b(?:tap|click|press)\s+(?:the\s+)?(?:button|below|here|link)\b|\bbutton below\b/i.test(t)) return { ok: false, why: 'there is no button under this post: never point below (no 👇, no "tap the button")' };
   if (PROMISE.test(t.replace(RISK, ''))) return { ok: false, why: 'it sounds like a promise of gains' };
   if (!o.allowNegative && NEGATIVE.test(t.replace(/stop[- ]?loss(?:es)?/gi, ''))) return { ok: false, why: 'negative words are not allowed in this public channel' };
   if (MONEY_IN.test(t)) return { ok: false, why: 'never talk about money to put in (deposit, fund, minimum, balance, invest): say create / connect your trading account' };
@@ -197,19 +198,19 @@ async function ask(system: string, user: string): Promise<string | null> {
 
 export type Brief =
   | { kind: 'morning' }
-  | { kind: 'howto'; card: string; button: string }
+  | { kind: 'howto'; card: string }
   | { kind: 'cta'; goal: string; reference: string; button: string }
   | { kind: 'recap'; recapKind: 'win' | 'record' | 'week' | 'quiet' | 'red'; trades: number; wins: number; liveMembers: number[]; weekLabel?: string };
 
 const BRIEFS: Record<Brief['kind'], (b: Brief) => string> = {
   morning: () => `Write the MORNING post that kickstarts the day in the channel. 3 to 6 short lines, warm and human, like Mathieu saying hi to his community.
 Make it feel written for today, not a generic "good morning, let's go": use what is true today. Ideas (pick one or two, vary from the recent posts): the AI is on and working for the members while they live their day; the LAST SESSION result with the token {{YESTERDAY}} (written exactly like that, only if it is given); a one-line answer to a question people asked this week; on a weekend, enjoy it, the AI is back Monday. If a MAJOR EVENT is given, you may add one calm line about it.
-End with something light that invites them in (open the app with the button below, or reply / say hi). No promise about today's results.`,
+End with something light and human (reply, say hi). There is NO button under this post: never point below (no 👇, no "tap the button"). No promise about today's results.`,
   howto: (b) => {
     const x = b as Extract<Brief, { kind: 'howto' }>;
     return `Write today's HOW IT WORKS post. First line exactly: 🔵💙 HOW IT WORKS
 Rewrite this fact card in fresh words, with a new hook. Keep exactly its facts, add no other fact. 4 to 9 short lines. If the card ends with the risk sentence, keep it word for word as the last line.
-The button "${x.button}" is added below by the system: you may point to it with 👇.
+There is NO button under this post: never point below (no 👇, no "tap the button"). It informs, it does not sell.
 FACT CARD:
 ${x.card}`;
   },
@@ -251,6 +252,7 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
     : {
         tokens,
         allowNegative: b.kind === 'howto',
+        noButton: b.kind === 'morning' || b.kind === 'howto',
         allowedUsd: [],
         ...(b.kind === 'morning' ? { allowedNumbers: [c.lastSession?.trades ?? -1, c.week?.trades ?? -1, ...dateNums], maxChars: 600 } : { maxChars: 900 }),
       };

@@ -6,7 +6,8 @@
 // Le bot reprend tout ça, sauf les bulles vidéo (il propose seulement la question du jour) :
 //   · 9h00   le bonjour qui lance la journée, écrit avec ce qui se passe vraiment ce jour-là ;
 //   · 11h00  un post « How it works » (une banque de fiches, en rotation, faits de l'Academy uniquement) ;
-//   · 12h30, 17h30, 20h30  trois CTA (deux le week-end), en rotation, vers l'app ou vers Mathieu ;
+//   · 17h30, 20h30  deux CTA (13h00 et 20h30 le week-end), en rotation, vers l'app ou vers Mathieu : les SEULS
+//     posts avec un bouton (22/10/2026) ;
 //   · 14h00 et 19h00 (semaine)  la carte du meilleur gain depuis le créneau précédent, comme dans le VIP ;
 //   · 23h05  le récap du jour, qui garde son propre brouillon (lib/channel/recap.ts).
 // Les heures bougent de quelques minutes d'un jour à l'autre : un canal qui poste à 12:30:00 pile tous les jours
@@ -55,29 +56,31 @@ const L = {
 
 export type CmPost = { id: string; text: string; btn: string; url: string };
 const post = (id: string, lines: string[], btn: string, url: string): CmPost => ({ id, text: lines.join('\n'), btn, url });
+const card = (id: string, lines: string[]) => ({ id, text: lines.join('\n') });
 const HOW = '🔵💙 HOW IT WORKS';
 
-/** Les posts « How it works », dans l'ordre de passage. Chaque affirmation vient de l'Academy (lib/member/academy.ts). */
-export const HOWTO: CmPost[] = [
-  post('who', [HOW, "<b>Who's really trading ?</b>", '', 'Algoria is 100% driven by AI. 🤖', 'Mathieu built it. He never places a trade by hand.', '', "Every trade you see here is the AI's decision. Zero manual trades."], '🎓 HOW IT WORKS, IN 5 MIN', L.academy),
-  post('copy', [HOW, '<b>Do I have to copy the trades myself ?</b>', '', 'No. ❌', '', 'You connect your own MetaTrader 5 account once.', 'After that, every Algoria trade is copied to it automatically, at the size you chose.', '', 'No signals to follow. No charts to watch. You see everything live in the app. 📲'], '🚀 OPEN ALGORIA', L.app),
-  post('money', [HOW, '<b>Whose account is it ?</b>', '', 'Yours. In YOUR name, at the broker. 🔐', '', '🤖 Algoria takes the trade', '🔁 The copier sends it to your trading account', '💼 Your account: your size, your broker, your name', '', 'Nothing goes through us.'], '🎓 LEARN MORE', L.academy),
-  post('password', [HOW, '<b>What can the trader password do ?</b>', '', 'It connects your account to the copier. That\'s it.', '', '✅ Copy the trades', '❌ Take anything out of your account', '❌ Open your client area', '', 'Your account stays 100% in your hands. 🙌'], '🎓 LEARN MORE', L.academy),
-  post('start', [HOW, '<b>What do I need to start ?</b>', '', '1️⃣ Create your trading account with our partner broker', '2️⃣ Connect your trading account to Algoria in the app: encrypted, 2 minutes', '3️⃣ The team switches the copy on ✅', '', 'Trading involves risk.'], '⚡ START HERE', L.start),
+/** Les posts « How it works », dans l'ordre de passage. Chaque affirmation vient de l'Academy (lib/member/academy.ts).
+ *  Sans bouton (22/10/2026, voir « deux boutons par jour » plus bas). */
+export const HOWTO: Array<{ id: string; text: string }> = [
+  card('who', [HOW, "<b>Who's really trading ?</b>", '', 'Algoria is 100% driven by AI. 🤖', 'Mathieu built it. He never places a trade by hand.', '', "Every trade you see here is the AI's decision. Zero manual trades."]),
+  card('copy', [HOW, '<b>Do I have to copy the trades myself ?</b>', '', 'No. ❌', '', 'You connect your own MetaTrader 5 account once.', 'After that, every Algoria trade is copied to it automatically, at the size you chose.', '', 'No signals to follow. No charts to watch. You see everything live in the app. 📲']),
+  card('money', [HOW, '<b>Whose account is it ?</b>', '', 'Yours. In YOUR name, at the broker. 🔐', '', '🤖 Algoria takes the trade', '🔁 The copier sends it to your trading account', '💼 Your account: your size, your broker, your name', '', 'Nothing goes through us.']),
+  card('password', [HOW, '<b>What can the trader password do ?</b>', '', 'It connects your account to the copier. That\'s it.', '', '✅ Copy the trades', '❌ Take anything out of your account', '❌ Open your client area', '', 'Your account stays 100% in your hands. 🙌']),
+  card('start', [HOW, '<b>What do I need to start ?</b>', '', '1️⃣ Create your trading account with our partner broker', '2️⃣ Connect your trading account to Algoria in the app: encrypted, 2 minutes', '3️⃣ The team switches the copy on ✅', '', 'Trading involves risk.']),
   // 'stoploss' RETIRÉ (22/10/2026) : « Every trade has a stop loss… never averaged down » était faux — la nuit du
   // 21 au 22/10, 124 positions sur 145 n'avaient pas de stop et le copieur rachetait à chaque baisse. Il ne revient
   // que quand le stop obligatoire est imposé par le runner (garde-fous de l'après-incident).
-  post('pause', [HOW, '<b>Can I stop the copy ?</b>', '', 'Yes, anytime, by yourself. ⏸', '', 'Open the app, Profile, PAUSE.', 'The copy stops. Tap RESUME when you want it back.', '', 'No message to send, no one to ask. You stay in control.'], '🚀 OPEN ALGORIA', L.app),
-  post('quiet', [HOW, '<b>No trade today ?</b>', '', "That's the plan. ✅", '', 'Algoria never forces a trade. It only enters when a clean setup shows up.', '', 'Quiet days are normal. They are part of the strategy, not a bug. 🧘'], '🎓 LEARN MORE', L.academy),
-  post('free', [HOW, '<b>Why is Algoria free ?</b>', '', '💸 No subscription, no fee, never a cut of your profits.', '', 'The partner broker pays Algoria when you create your trading account through our link.', "That's why the link matters: an account created without it isn't linked to Algoria. 🔗"], '⚡ START HERE', L.start),
-  post('martingale', [HOW, '<b>Is it a martingale ?</b>', '', 'No. 🙅', '', 'A martingale doubles its size after every loss to win it back.', 'Algoria does the opposite:', '📏 you choose your copy size once', '📏 it stays the same, win or lose', '', 'Your lot never grows after a loss.'], '🎓 LEARN MORE', L.academy),
-  post('track', [HOW, '<b>Do they only show the wins ?</b>', '', 'No. 📊', '', 'The track record is the real account: month by month since July 2026, trade by trade since October. Red months included.', '', 'No simulation. No backtest. No screenshots.', '', RISK], '📊 SEE THE TRACK RECORD', L.track),
-  post('broker', [HOW, '<b>Which broker should I pick ?</b>', '', '🥇 RaiseFX first: your account runs with the same spreads as the account Algoria trades.', '', 'Already have an account there ? Pick another partner: VT Markets, PU Prime, TradingSphere or Xlence.', '', 'The app gives you the right link for each one. 📲'], '⚡ START HERE', L.start),
-  post('biglot', [HOW, '<b>Bigger lot, faster results ?</b>', '', 'No. ⚠️', '', 'Your copy size is set once, in your profile, and it never grows after a loss.', "A bigger lot doesn't make the strategy better. It just makes every move bigger, up and down.", '', 'Algoria is built to run calm, not fast. 🧘'], '🎓 LEARN MORE', L.academy),
-  post('existing', [HOW, '<b>Already have an account at the broker ?</b>', '', "You can't open a second one at the same broker: KYC blocks it. 🚫", '', 'Two easy ways in:', 'A️⃣ Attach your account to Algoria: ask their support, the app gives you the exact message to send', 'B️⃣ Open at another partner broker, through the link in the app'], '⚡ START HERE', L.start),
-  post('lot', [HOW, "<b>What's a lot ?</b>", '', 'The size of a trade. 📏', '', '1.00 is a standard lot. 0.01 is a micro lot, 100 times smaller.', 'The bigger the lot, the more each price move is worth, up AND down.', '', 'At Algoria: your lot is set once in your profile, and it never grows after a loss.'], '🎓 THE FULL GLOSSARY', L.academy),
-  post('theapp', [HOW, "<b>What's in the app ?</b>", '', '📲 The live AI feed: what Algoria is watching, right now', '✅ Every trade, wins and losses, at your own size', '🔔 A notification when a trade closes in profit', '', 'No App Store. Installs in seconds. Free.'], '📲 INSTALL THE APP', L.install),
-  post('setup', [HOW, '<b>How long does the setup take ?</b>', '', 'About 10 minutes on your side. ⏱', '', '1️⃣ Create your trading account through the app', '2️⃣ Connect your trading account to Algoria', '', 'Stuck at any step ? Write to Mathieu, he answers himself. 💬'], '💬 MESSAGE MATHIEU', L.me),
+  card('pause', [HOW, '<b>Can I stop the copy ?</b>', '', 'Yes, anytime, by yourself. ⏸', '', 'Open the app, Profile, PAUSE.', 'The copy stops. Tap RESUME when you want it back.', '', 'No message to send, no one to ask. You stay in control.']),
+  card('quiet', [HOW, '<b>No trade today ?</b>', '', "That's the plan. ✅", '', 'Algoria never forces a trade. It only enters when a clean setup shows up.', '', 'Quiet days are normal. They are part of the strategy, not a bug. 🧘']),
+  card('free', [HOW, '<b>Why is Algoria free ?</b>', '', '💸 No subscription, no fee, never a cut of your profits.', '', 'The partner broker pays Algoria when you create your trading account through our link.', "That's why the link matters: an account created without it isn't linked to Algoria. 🔗"]),
+  card('martingale', [HOW, '<b>Is it a martingale ?</b>', '', 'No. 🙅', '', 'A martingale doubles its size after every loss to win it back.', 'Algoria does the opposite:', '📏 you choose your copy size once', '📏 it stays the same, win or lose', '', 'Your lot never grows after a loss.']),
+  card('track', [HOW, '<b>Do they only show the wins ?</b>', '', 'No. 📊', '', 'The track record is the real account: month by month since July 2026, trade by trade since October. Red months included.', '', 'No simulation. No backtest. No screenshots.', '', RISK]),
+  card('broker', [HOW, '<b>Which broker should I pick ?</b>', '', '🥇 RaiseFX first: your account runs with the same spreads as the account Algoria trades.', '', 'Already have an account there ? Pick another partner: VT Markets, PU Prime, TradingSphere or Xlence.', '', 'The app gives you the right link for each one. 📲']),
+  card('biglot', [HOW, '<b>Bigger lot, faster results ?</b>', '', 'No. ⚠️', '', 'Your copy size is set once, in your profile, and it never grows after a loss.', "A bigger lot doesn't make the strategy better. It just makes every move bigger, up and down.", '', 'Algoria is built to run calm, not fast. 🧘']),
+  card('existing', [HOW, '<b>Already have an account at the broker ?</b>', '', "You can't open a second one at the same broker: KYC blocks it. 🚫", '', 'Two easy ways in:', 'A️⃣ Attach your account to Algoria: ask their support, the app gives you the exact message to send', 'B️⃣ Open at another partner broker, through the link in the app']),
+  card('lot', [HOW, "<b>What's a lot ?</b>", '', 'The size of a trade. 📏', '', '1.00 is a standard lot. 0.01 is a micro lot, 100 times smaller.', 'The bigger the lot, the more each price move is worth, up AND down.', '', 'At Algoria: your lot is set once in your profile, and it never grows after a loss.']),
+  card('theapp', [HOW, "<b>What's in the app ?</b>", '', '📲 The live AI feed: what Algoria is watching, right now', '✅ Every trade, wins and losses, at your own size', '🔔 A notification when a trade closes in profit', '', 'No App Store. Installs in seconds. Free.']),
+  card('setup', [HOW, '<b>How long does the setup take ?</b>', '', 'About 10 minutes on your side. ⏱', '', '1️⃣ Create your trading account through the app', '2️⃣ Connect your trading account to Algoria', '', 'Stuck at any step ? Write to Mathieu, he answers himself. 💬']),
 ];
 
 /** Les CTA, en rotation par famille : « app » (ils avancent seuls) et « mathieu » (ils ont besoin d'un humain). */
@@ -95,10 +98,12 @@ export const CTAS: Array<CmPost & { fam: 'app' | 'mathieu' }> = [
 
 type Slot = { slot: string; at: string; kind: 'morning' | 'howto' | 'cta' | 'tp'; fam?: 'app' | 'mathieu' };
 // heures de Paris. Le soir compte : l'audience (Afrique du Sud, Royaume-Uni) a fini sa journée.
+// DEUX BOUTONS PAR JOUR, PAS PLUS (22/10/2026, Mathieu : « que des posts avec des boutons, ça fait très robotisé…
+// à la limite un ou deux boutons par jour pour les CTA »). Seuls les deux CTA du jour ont un bouton ; le bonjour,
+// les How it works et les cartes de gain partent sans. Le CTA de 12h30 en semaine est retiré (il y en avait trois).
 const WEEKDAY: Slot[] = [
   { slot: 'morning', at: '09:00', kind: 'morning' },
   { slot: 'howto', at: '11:00', kind: 'howto' },
-  { slot: 'cta1', at: '12:30', kind: 'cta', fam: 'app' },
   { slot: 'tp1', at: '14:00', kind: 'tp' },
   { slot: 'cta2', at: '17:30', kind: 'cta', fam: 'mathieu' },
   { slot: 'tp2', at: '19:00', kind: 'tp' },
@@ -183,15 +188,15 @@ export async function planDay(db: Db, day: string): Promise<number> {
     if (at <= now) continue; // créneau déjà passé (plan préparé en retard)
     const base = { day, slot: s.slot, kind: s.kind, scheduled_at: new Date(at).toISOString(), status: 'draft' };
     if (s.kind === 'morning') {
-      rows.push({ ...base, ref: 'morning', text: null, button_text: '🚀 OPEN ALGORIA', button_url: L.app });
+      rows.push({ ...base, ref: 'morning', text: null });
       briefs.push({ kind: 'morning' });
       continue;
     }
     if (s.kind === 'howto') {
       hi = nextIn(HOWTO, hi, () => true);
       const p = HOWTO[hi];
-      rows.push({ ...base, ref: p.id, text: p.text, button_text: p.btn, button_url: p.url });
-      briefs.push({ kind: 'howto', card: p.text, button: p.btn });
+      rows.push({ ...base, ref: p.id, text: p.text });
+      briefs.push({ kind: 'howto', card: p.text });
     } else if (s.kind === 'cta') {
       const fam = s.fam ?? 'app';
       const i = nextIn(CTAS, ci[fam], (c) => c.fam === fam);
@@ -411,7 +416,7 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
     if (r.kind === 'tp') {
       const w = await pickWin(db, r).catch((e) => ({ reason: String((e as Error).message).slice(0, 120) }));
       if ('reason' in w) { await db.from('channel_posts').update({ status: 'skipped', report: { reason: w.reason } }).eq('id', r.id); skipped++; continue; }
-      text = w.text; photo = w.photo; ref = w.ticket; btnText = '📲 SEE EVERY TRADE'; btnUrl = L.history;
+      text = w.text; photo = w.photo; ref = w.ticket; btnText = ''; btnUrl = ''; // la carte parle d'elle-même : pas de bouton
     } else if (!photo) photo = bannerUrl(r); // How it works, CTA, bonjour sans photo : la bannière
     let out = await publishToChannels(db, { chatId: src, text, buttonText: btnText, buttonUrl: btnUrl, ...(photo ? { photoUrl: photo } : {}) });
     // la carte n'a pas pu être rendue ou récupérée par Telegram : le gain part en texte, il ne se perd pas
@@ -430,7 +435,7 @@ const todayFr = () => new Date().toLocaleDateString('fr-FR', { day: '2-digit', m
 
 function briefOf(r: Row): Brief | null {
   if (r.kind === 'morning') return { kind: 'morning' };
-  if (r.kind === 'howto') { const p = HOWTO.find((x) => x.id === r.ref); return p ? { kind: 'howto', card: p.text, button: p.btn } : null; }
+  if (r.kind === 'howto') { const p = HOWTO.find((x) => x.id === r.ref); return p ? { kind: 'howto', card: p.text } : null; }
   if (r.kind === 'cta') { const c = CTAS.find((x) => x.id === r.ref); return c ? { kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn } : null; }
   return null;
 }
