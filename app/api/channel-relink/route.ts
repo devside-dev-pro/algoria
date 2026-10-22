@@ -11,6 +11,10 @@
 // défaut, soit 12 éditions par canal) et dit combien il en reste ; on rappelle la route jusqu'à 0.
 // Canal italien : son texte est une TRADUCTION qu'on n'a pas gardée — on y corrige le bouton, pas le texte.
 // Les CTA envoyés à la main depuis l'admin (member_actions 'channel_post', bouton seulement) sont repris aussi.
+//
+// ?strip=1 (22/10/2026, Mathieu : « retire-les ») : RETIRE le bouton des bonjours, How it works et cartes de gain déjà
+// publiés — la règle du CM est désormais deux boutons par jour, seulement sur les CTA (lib/channel/cm.ts).
+// Dans les deux modes, le dernier lot contrôle aussi le message épinglé de chaque canal.
 import { NextResponse, type NextRequest } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { sourceChannel } from '@/lib/channel/publish';
@@ -28,10 +32,11 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 let lastRun = 0;
 
 type Target = { chat: string; id: number; it: boolean };
-type Row = { kind: 'post' | 'recap' | 'admin'; key: string; messageId: number; text: string; html: string; photo: boolean; btnText: string | null; btnUrl: string | null; detail?: Record<string, unknown> };
+type Row = { kind: 'post' | 'recap' | 'admin' | 'strip'; key: string; messageId: number; text: string; html: string; photo: boolean; btnText: string | null; btnUrl: string | null; detail?: Record<string, unknown> };
 
 export async function GET(req: NextRequest) {
   const dry = req.nextUrl.searchParams.get('dry') === '1';
+  const strip = req.nextUrl.searchParams.get('strip') === '1';
   const limit = Math.min(30, Math.max(1, Number(req.nextUrl.searchParams.get('limit') ?? 12) || 12));
   if (!dry && Date.now() - lastRun < 55_000) return NextResponse.json({ ok: true, throttled: true, retryInSec: Math.ceil((55_000 - (Date.now() - lastRun)) / 1000) });
   if (!dry) lastRun = Date.now();
@@ -52,11 +57,14 @@ export async function GET(req: NextRequest) {
 
   // ── ce qu'il reste à corriger ────────────────────────────────────────────────────────────────────────────
   const [{ data: posts }, { data: recaps }, { data: admin }] = await Promise.all([
-    db.from('channel_posts').select('id,message_id,text,button_text,button_url,photo_url').eq('status', 'published').not('message_id', 'is', null).limit(1000),
+    db.from('channel_posts').select('id,kind,message_id,text,button_text,button_url,photo_url').eq('status', 'published').not('message_id', 'is', null).limit(1000),
     db.from('channel_recaps').select('day,message_id,text').eq('status', 'published').not('message_id', 'is', null).limit(1000),
     db.from('member_actions').select('id,detail').eq('kind', 'channel_post').eq('status', 'done').limit(1000),
   ]);
-  const rows: Row[] = [
+  type PostRow = { id: number; kind: string; message_id: number; text: string | null; button_text: string | null; button_url: string | null; photo_url: string | null };
+  const rows: Row[] = strip ? ((posts ?? []) as PostRow[])
+    .filter((p) => ['morning', 'howto', 'tp'].includes(p.kind) && !!p.button_url)
+    .map((p) => ({ kind: 'strip' as const, key: String(p.id), messageId: Number(p.message_id), text: '', html: '', photo: false, btnText: null, btnUrl: null })) : [
     ...((posts ?? []) as Array<{ id: number; message_id: number; text: string | null; button_text: string | null; button_url: string | null; photo_url: string | null }>)
       .filter((p) => has(p.button_url) || has(p.text))
       .map((p) => ({ kind: 'post' as const, key: String(p.id), messageId: Number(p.message_id), text: p.text ?? '', html: p.text ?? '', photo: !!p.photo_url, btnText: p.button_text, btnUrl: p.button_url })),
@@ -88,18 +96,20 @@ export async function GET(req: NextRequest) {
       for (const t of targets) {
         const textChanged = has(row.text) && !t.it;
         let d;
-        if (textChanged && row.photo) d = await tg('editMessageCaption', { chat_id: t.chat, message_id: t.id, caption: fix(row.html).slice(0, 1024), parse_mode: 'HTML', ...(markup ? { reply_markup: markup } : {}) });
+        if (row.kind === 'strip') d = await tg('editMessageReplyMarkup', { chat_id: t.chat, message_id: t.id, reply_markup: { inline_keyboard: [] } });
+        else if (textChanged && row.photo) d = await tg('editMessageCaption', { chat_id: t.chat, message_id: t.id, caption: fix(row.html).slice(0, 1024), parse_mode: 'HTML', ...(markup ? { reply_markup: markup } : {}) });
         else if (textChanged) d = await tg('editMessageText', { chat_id: t.chat, message_id: t.id, text: fix(row.html).slice(0, 4000), parse_mode: 'HTML', disable_web_page_preview: true, ...(markup ? { reply_markup: markup } : {}) });
         else if (markup && has(row.btnUrl)) d = await tg('editMessageReplyMarkup', { chat_id: t.chat, message_id: t.id, reply_markup: markup });
         else { edits.push({ chat: t.it ? 'IT' : t.chat === src ? 'source' : 'mirror', ok: true, error: 'nothing to change here' }); continue; }
-        const notModified = /not modified/i.test(d.description ?? '');
+        const notModified = /not modified|message to edit not found/i.test(d.description ?? ''); // supprimé : plus rien à corriger
         if (d.parameters?.retry_after) rateLimited = true;
         edits.push({ chat: t.it ? 'IT' : t.chat === src ? 'source' : 'mirror', ok: !!d.ok || notModified, ...(d.ok || notModified ? {} : { error: d.description }) });
       }
       report.push({ kind: row.kind, key: row.key, edits });
       // la source est corrigée → la ligne aussi (elle ne sera plus reprise ; le texte stocké suit le message)
       if (edits[0]?.ok && !rateLimited) {
-        if (row.kind === 'post') await db.from('channel_posts').update({ text: row.text ? fix(row.text) : row.text, button_url: row.btnUrl ? fix(row.btnUrl) : row.btnUrl }).eq('id', Number(row.key));
+        if (row.kind === 'strip') await db.from('channel_posts').update({ button_text: null, button_url: null }).eq('id', Number(row.key));
+        else if (row.kind === 'post') await db.from('channel_posts').update({ text: row.text ? fix(row.text) : row.text, button_url: row.btnUrl ? fix(row.btnUrl) : row.btnUrl }).eq('id', Number(row.key));
         else if (row.kind === 'recap') await db.from('channel_recaps').update({ text: fix(row.text) }).eq('day', row.key);
         else await db.from('member_actions').update({ detail: { ...row.detail, url: fix(row.btnUrl ?? '') } }).eq('id', row.key);
       }
@@ -123,6 +133,21 @@ export async function GET(req: NextRequest) {
       if (!has(cur)) { profile.push({ what: `${name} description`, ok: true, changed: false }); continue; }
       const s = await tg('setChatDescription', { chat_id: chat, description: fix(cur) });
       profile.push({ what: `${name} description`, ok: !!s.ok, changed: true, ...(s.ok ? {} : { error: s.description }) });
+    }
+    // LE MESSAGE ÉPINGLÉ : son bouton est corrigé si on peut l'éditer ; un lien dans son TEXTE est seulement signalé
+    // (le reconstruire avec sa mise en forme demanderait ses entités — à corriger à la main)
+    for (const [name, chat] of [['source', src], ['mirror', mirror], ['IT', it]] as const) {
+      if (!chat) continue;
+      const g = await tg('getChat', { chat_id: chat });
+      const pin = (g.result as { pinned_message?: { message_id: number; text?: string; caption?: string; reply_markup?: { inline_keyboard?: Array<Array<{ text: string; url?: string }>> } } } | undefined)?.pinned_message;
+      if (!pin) { profile.push({ what: `${name} pinned`, ok: true, changed: false, error: 'no pinned message' }); continue; }
+      const kb = pin.reply_markup?.inline_keyboard ?? [];
+      const textOld = has(pin.text) || has(pin.caption);
+      if (kb.some((r) => r.some((x) => has(x.url)))) {
+        const s = await tg('editMessageReplyMarkup', { chat_id: chat, message_id: pin.message_id, reply_markup: { inline_keyboard: kb.map((r) => r.map((x) => (x.url ? { ...x, url: fix(x.url) } : x))) } });
+        profile.push({ what: `${name} pinned button`, ok: !!s.ok, changed: true, ...(s.ok ? {} : { error: s.description }) });
+      }
+      profile.push({ what: `${name} pinned text`, ok: !textOld, changed: false, ...(textOld ? { error: 'the pinned text still has algoria.tech: edit it by hand' } : {}) });
     }
   }
 
