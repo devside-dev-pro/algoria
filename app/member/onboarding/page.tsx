@@ -16,6 +16,7 @@ import { DIRECT_ACCESS_PRICE_USD, DIRECT_ACCESS_URL } from '@/lib/member/directA
 import { WhereAreMyCredentials } from '@/components/member/WhereAreMyCredentials';
 import { track, trackOnce } from '@/lib/member/funnel';
 import { StuckHelp } from '@/components/member/StuckHelp';
+import { LEGAL } from '@/lib/legal';
 
 // PREUVE + RÉASSURANCE au mur du dépôt (étape 0) : c'est LÀ que 84% des inscrits se figent. On réchauffe
 // le moment de l'hésitation — gains réels de la semaine (70/30, jamais de perte), les 3 peurs désamorcées,
@@ -614,6 +615,12 @@ export default function Onboarding() {
           )}
           <SubmitError msg={err} t={t} />
           <p className="mono" style={{ fontSize: 10, color: 'var(--dim)', margin: 0, letterSpacing: 0.5 }}>AES-256 · STORED SERVER-SIDE ONLY · REVOKE ANYTIME BY CHANGING YOUR PASSWORD</p>
+          {/* 24/10/2026 : app.algoria.tech/member a été signalé « phishing » (Netcraft) puis suspendu. Une page qui demande un
+              mot de passe doit dire qui la tient, pourquoi elle le demande et ce qu'il NE permet PAS (lib/legal.ts). */}
+          <p style={{ fontSize: 10.5, color: 'var(--dim)', margin: 0, lineHeight: 1.5 }}>
+            Algoria only uses your <b>trader</b> password to copy trades onto your own account. It can&rsquo;t withdraw money, and it&rsquo;s not the password of your broker client area: never send us that one.{' '}
+            <a href="/privacy" target="_blank" rel="noreferrer" style={{ color: 'var(--muted)' }}>Privacy</a> · <a href="/terms" target="_blank" rel="noreferrer" style={{ color: 'var(--muted)' }}>Terms</a> · <a href="/risk" target="_blank" rel="noreferrer" style={{ color: 'var(--muted)' }}>Risk</a> · {LEGAL.company}
+          </p>
           </>)}
 
           {/* ═══ RETOUR À L'ÉTAPE BROKER — TOUJOURS VISIBLE (21/08/2026) ═════════════════════════════

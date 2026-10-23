@@ -29,7 +29,8 @@ export function middleware(req: NextRequest) {
   if (host.startsWith('app.')) {
     // la fiche store /download vit aussi sur ce sous-domaine (la popup membre y renvoie en relatif —
     // sans ça, app.getalgoria.com/download était réécrit en /member/download → 404)
-    if (url.pathname === '/download') return withAttribution(req, NextResponse.next());
+    // (24/10/2026) les pages légales aussi : l'étape du mot de passe MT5 y renvoie (voir lib/legal.ts)
+    if (['/download', '/terms', '/privacy', '/risk'].includes(url.pathname)) return withAttribution(req, NextResponse.next());
     if (!url.pathname.startsWith('/member')) {
       url.pathname = `/member${url.pathname === '/' ? '' : url.pathname}`;
       return withAttribution(req, NextResponse.rewrite(url));
