@@ -69,7 +69,16 @@ const LOGGED_SINCE = Date.parse('2026-09-29T10:47:00Z');
 // (19/10/2026 : le bouton devient « Contact Mathieu », « I already have the app, how do I get connected now ? » ; les anciens
 // messages restent reconnus, des liens publiés avant circulent encore)
 const APP_BUTTON = /book a quick call to activate|quick call to set up my algoria|skip the waiting list|already have the app, how do i get connected/i;
-const legacyContact = (m: { created_at?: string | null } | null, firstText: string) => !!m?.created_at && Date.parse(m.created_at) < LOGGED_SINCE && !APP_BUTTON.test(firstText);
+// 23/10/2026 (Mathieu : « oui fais-le ») : le 21/10, 4 comptes de l'app du début septembre ont reçu « welcome to Algoria, where
+// are you from ? » en passant par le bouton « Contact Mathieu ». On ne sait pas s'ils lui avaient parlé avant le 29/09 ; un
+// compte de PLUS DE 14 JOURS n'a donc plus d'accueil, même par le bouton : on répond directement à sa question. Les vrais
+// nouveaux (pas de compte, ou compte récent) gardent la bulle.
+const OLD_ACCOUNT_MS = 14 * 86_400_000;
+const legacyContact = (m: { created_at?: string | null } | null, firstText: string) => {
+  if (!m?.created_at) return false;
+  const created = Date.parse(m.created_at);
+  return Date.now() - created > OLD_ACCOUNT_MS || (created < LOGGED_SINCE && !APP_BUTTON.test(firstText));
+};
 // 🔥 un montant de 1 000 ou plus en $, £, € (pas en rands : 1 000 ZAR ≈ 50 $)
 const AMOUNT = /(?:[$£€]\s?(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)|(\d{1,3}(?:[,.\s]\d{3})+|\d{4,7}|\d{1,3}\s?k)\s?(?:[$£€]|usd|usdt|eur|euros?|gbp|pounds?|dollars?|aud|nzd|chf)(?![a-z]))/gi;
 export function hotAmount(text: string): boolean {
@@ -266,7 +275,7 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   let lang: Lang = member?.locale === 'it' ? 'it' : 'en';
   const { data: first } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').order('created_at', { ascending: true }).limit(5);
   const firstTexts = ((first ?? []) as Array<{ detail: Record<string, unknown> }>).map((r) => String(r.detail?.text ?? ''));
-  if (legacyContact(member, firstTexts[0] ?? '')) return { status: 'done', result: { outcome: 'skip', reason: 'ancien contact (compte de l’app d’avant le 29/09, message écrit à la main)' } };
+  if (legacyContact(member, firstTexts[0] ?? '')) return { status: 'done', result: { outcome: 'skip', reason: 'ancien contact (compte de l’app de plus de 14 jours, ou d’avant le 29/09 et message écrit à la main)' } };
   if (!member?.locale && firstTexts.some((t) => ITALIAN.test(t))) lang = 'it';
   // il a déjà dit d'où il vient (« I'm from UK… ») : pas de bulle qui le lui redemande, on passe à son vocal et au
   // message d'après (c'est la réponse qui s'en charge)
@@ -360,7 +369,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const newbie = !NO_WELCOME.has(member?.status ?? '');
   const ownerSpoke = rows.some((r) => r.detail?.from === 'owner');
   const welcomed = rows.some((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]');
-  // rien d'enregistré de Mathieu, mais un compte de l'app d'avant le 29/09 : sans doute un ancien contact
+  // rien d'enregistré de Mathieu, mais un compte de l'app de plus de 14 jours (ou d'avant le 29/09) : sans doute un ancien contact
   const legacy = !ownerSpoke && !welcomed && legacyContact(member, String(rows.find((r) => r.detail?.from === 'client')?.detail?.text ?? ''));
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
@@ -438,7 +447,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   }
   // un nouveau venu qui n'a reçu AUCUN accueil ne reste jamais sans rien, même pour un simple « hello »
   if (draft.skip && legacy) {
-    await reviewCard(db, conn, last.id, base, member, null, 'ancien contact (compte de l’app d’avant le 29/09), rien d’enregistré avec toi : à toi de voir');
+    await reviewCard(db, conn, last.id, base, member, null, 'ancien contact (compte de l’app de plus de 14 jours ou d’avant le 29/09), rien d’enregistré avec toi : à toi de voir');
     return { status: 'done', result: { outcome: 'review', reason: 'ancien contact', ...extra } };
   }
   if (draft.skip && firstNoWelcome) {
