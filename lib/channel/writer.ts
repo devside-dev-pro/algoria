@@ -16,7 +16,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getAgentDoc } from '@/lib/member/agentDocs';
 import { humanize } from '@/lib/member/replyDraft';
 import { atRef } from '@/lib/display/scale';
-import { tradingDayOf } from '@/lib/display/tradingDay';
+import { tradingDayOf, tradingTimeMs } from '@/lib/display/tradingDay';
 import { liveTrades } from './recap';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,10 +94,14 @@ export async function dayContext(db: Db, day: string): Promise<DayContext> {
   const wk = wd >= 2 && wd <= 5 ? sum((d) => d >= monday && d < day) : wd === 6 || wd === 0 ? sum((d) => d >= addDays(monday, 0) && d <= addDays(monday, 4)) : { trades: 0, net10: 0 };
   const questions = (qs as Array<{ detail: { from?: string; text?: string } | null }>)
     .map((r) => (r.detail?.from === 'client' ? String(r.detail?.text ?? '') : '')).filter((t) => t.length > 8 && !t.startsWith('[')).slice(0, 40).map((t) => t.slice(0, 160).replace(/\s+/g, ' '));
+  // LE PLAN PART À 18h (23/10/2026) : la séance de la veille n'est pas finie quand on écrit le bonjour du lendemain. Un
+  // chiffre partiel ne se cite pas (la soirée peut tout changer) : résultat de la veille et de la semaine seulement
+  // si la séance est close (l'or ferme à 23h, Paris).
+  const closed = Date.now() >= tradingTimeMs(last, '23:00');
   return {
     day, dateLabel: longDate(day), weekend: wd === 0 || wd === 6, news,
-    lastSession: ls.trades && ls.net10 > 0 ? { day: last, ...ls } : null,
-    week: wk.trades && wk.net10 > 0 ? wk : null,
+    lastSession: closed && ls.trades && ls.net10 > 0 ? { day: last, ...ls } : null,
+    week: closed && wk.trades && wk.net10 > 0 ? wk : null,
     recent: [...(recentRows as Array<{ text: string | null }>), ...(recaps as Array<{ text: string | null }>)].map((r) => String(r.text ?? '').slice(0, 300)).filter(Boolean),
     questions,
   };
@@ -199,6 +203,7 @@ async function ask(system: string, user: string): Promise<string | null> {
 export type Brief =
   | { kind: 'morning' }
   | { kind: 'howto'; card: string }
+  | { kind: 'qa' }
   | { kind: 'cta'; goal: string; reference: string; button: string }
   | { kind: 'recap'; recapKind: 'win' | 'record' | 'week' | 'quiet' | 'red'; trades: number; wins: number; liveMembers: number[]; weekLabel?: string };
 
@@ -214,6 +219,11 @@ There is NO button under this post: never point below (no 👇, no "tap the butt
 FACT CARD:
 ${x.card}`;
   },
+  // LA QUESTION DE LA SEMAINE (23/10/2026) : remplace la carte de gain de 19 h tant que le master est à l'arrêt
+  qa: () => `Write today's YOU ASKED post. First line exactly: 💬 YOU ASKED
+Pick ONE beginner question that people really asked this week (QUESTIONS PEOPLE ASKED MATHIEU THIS WEEK): how Algoria works, the app, the broker, the trading account, the setup, the copy. Never a question about results, profits, the last days, a loss, a complaint or one person's own account. If none fits, take a classic beginner question that the knowledge answers ("Do I need to know trading ?").
+Second line: the question in <b>bold</b>, rewritten in your own words (never a name, never their exact message). Then answer it in 3 to 6 short lines, using ONLY facts from Mathieu's knowledge, like Mathieu answering a friend.
+There is NO button under this post: never point below (no 👇, no "tap the button"). It informs, it does not sell.`,
   cta: (b) => {
     const x = b as Extract<Brief, { kind: 'cta' }>;
     return `Write a short CALL TO ACTION post. 2 to 5 short lines. Goal: ${x.goal}
@@ -252,7 +262,7 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
     : {
         tokens,
         allowNegative: b.kind === 'howto',
-        noButton: b.kind === 'morning' || b.kind === 'howto',
+        noButton: b.kind === 'morning' || b.kind === 'howto' || b.kind === 'qa',
         allowedUsd: [],
         ...(b.kind === 'morning' ? { allowedNumbers: [c.lastSession?.trades ?? -1, c.week?.trades ?? -1, ...dateNums], maxChars: 600 } : { maxChars: 900 }),
       };

@@ -19,8 +19,8 @@
 // en RÉPONDANT au message du matin (« 2 plus court », « # jamais d'emoji fusée ») : le post est réécrit et la leçon
 // entre dans la mémoire du CM (agent_docs « cm_memory »), relue à chaque rédaction.
 //
-// RIEN NE PART SANS UN CLIC. LA VEILLE À 23h15 (Paris), juste après le brouillon du récap, les admins reçoivent les
-// posts du lendemain dans un seul message (Mathieu, 15/10 : « je me lève pas aussi tôt ») :
+// RIEN NE PART SANS UN CLIC. LA VEILLE À 18h (Paris), les admins reçoivent les posts du lendemain dans un seul message
+// (Mathieu, 15/10 : « je me lève pas aussi tôt » ; 23/10 : 23h15 lui arrivait à 1 h du matin à Dubaï) :
 // « ✅ Tout valider », ou ❌ sur un post précis. Un post non validé à son heure expire. Les cartes de gain sont
 // validées comme créneau : leur contenu est choisi à l'heure dite, selon une règle fixe (un vrai trade copié, gagnant,
 // au moins +150 $ à 1 lot comme les cartes du VIP), et le créneau saute s'il n'y en a pas.
@@ -96,7 +96,7 @@ export const CTAS: Array<CmPost & { fam: 'app' | 'mathieu' }> = [
   { ...post('question', ['💬 <b>Any question about Algoria ?</b>', '', 'How the copy works, which broker to pick, how to connect your trading account: ask me. A real human answers, I reply myself 🙏🏼'], '💬 ASK MATHIEU', L.me), fam: 'mathieu' },
 ];
 
-type Slot = { slot: string; at: string; kind: 'morning' | 'howto' | 'cta' | 'tp'; fam?: 'app' | 'mathieu' };
+type Slot = { slot: string; at: string; kind: 'morning' | 'howto' | 'cta' | 'tp' | 'qa'; fam?: 'app' | 'mathieu' };
 // heures de Paris. Le soir compte : l'audience (Afrique du Sud, Royaume-Uni) a fini sa journée.
 // DEUX BOUTONS PAR JOUR, PAS PLUS (22/10/2026, Mathieu : « que des posts avec des boutons, ça fait très robotisé…
 // à la limite un ou deux boutons par jour pour les CTA »). Seuls les deux CTA du jour ont un bouton ; le bonjour,
@@ -115,10 +115,19 @@ const WEEKEND: Slot[] = [
   { slot: 'cta1', at: '13:00', kind: 'cta', fam: 'app' },
   { slot: 'cta2', at: '20:30', kind: 'cta', fam: 'mathieu' },
 ];
-/** Heure (Paris) à laquelle le plan du LENDEMAIN part aux admins : après la fermeture de l'or (23h) et le brouillon du
- *  récap (23h05). Mathieu valide le soir, la journée tourne seule. Avant cette heure, c'est le plan du jour qui manque
- *  éventuellement (panne, premier jour) qui est préparé, tout de suite. */
-export const PLAN_AT = '23:15';
+/** Heure (Paris) à laquelle le plan du LENDEMAIN part aux admins. Mathieu valide le soir, la journée tourne seule. Avant
+ *  cette heure, c'est le plan du jour qui manque éventuellement (panne, premier jour) qui est préparé, tout de suite.
+ *  23h15 jusqu'au 23/10/2026 (après la fermeture de l'or) ; 18h depuis, à la demande de Mathieu qui vit à Dubaï
+ *  (20 h ou 21 h chez lui). La séance du jour n'est pas finie à 18h : le bonjour ne cite le résultat de la veille que
+ *  si la séance est close au moment de l'écrire (lib/channel/writer.ts, dayContext). */
+export const PLAN_AT = '18:00';
+/** MASTER À L'ARRÊT (23/10/2026, Mathieu) : support_settings 'cm_win_cards' = 'off' → pas de gain à montrer, la carte de
+ *  14 h devient un How it works et celle de 19 h « la question de la semaine », sans bouton. Remettre 'on' quand le
+ *  nouveau master trade. */
+async function winCardsOn(db: Db): Promise<boolean> {
+  const { data } = await db.from('support_settings').select('value').eq('key', 'cm_win_cards').limit(1);
+  return String((data?.[0] as { value?: string } | undefined)?.value ?? 'on').trim().toLowerCase() !== 'off';
+}
 /** Le jour dont le plan doit exister à l'instant `now`. */
 export const planTarget = (now = Date.now()) => {
   const today = tradingDayOf(now);
@@ -181,6 +190,7 @@ export async function planDay(db: Db, day: string): Promise<number> {
     mathieu: last((r) => (r.kind === 'cta' ? CTAS.findIndex((c) => c.id === r.ref && c.fam === 'mathieu') : -1)),
   };
   const now = Date.now();
+  const winCards = await winCardsOn(db).catch(() => true);
   const rows: Array<Record<string, unknown>> = [];
   const briefs: Array<Brief | null> = [];
   for (const s of slots) {
@@ -205,6 +215,14 @@ export async function planDay(db: Db, day: string): Promise<number> {
       const c = CTAS[i];
       rows.push({ ...base, ref: c.id, text: c.text, button_text: c.btn, button_url: c.url });
       briefs.push({ kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn });
+    } else if (!winCards && s.slot === 'tp1') { // master à l'arrêt : un 2e How it works à la place de la carte de 14 h
+      hi = nextIn(HOWTO, hi, () => true);
+      const p = HOWTO[hi];
+      rows.push({ ...base, slot: 'howto2', kind: 'howto', ref: p.id, text: p.text });
+      briefs.push({ kind: 'howto', card: p.text });
+    } else if (!winCards) { // … et la question de la semaine à la place de celle de 19 h
+      rows.push({ ...base, slot: 'qa', kind: 'qa', ref: 'qa', text: null });
+      briefs.push({ kind: 'qa' });
     } else { rows.push(base); briefs.push(null); } // carte de gain : choisie à l'heure dite
   }
   if (!rows.length) return 0;
@@ -214,7 +232,7 @@ export async function planDay(db: Db, day: string): Promise<number> {
   const written = ctx ? await Promise.all(briefs.map((b) => (b ? writePost(ctx, b).catch(() => null) : Promise.resolve(null)))) : briefs.map(() => null);
   for (let k = rows.length - 1; k >= 0; k--) {
     if (written[k]) { rows[k].text = written[k]; rows[k].report = { writer: 'ai' }; }
-    else if (rows[k].kind === 'morning') rows.splice(k, 1);
+    else if (rows[k].kind === 'morning' || rows[k].kind === 'qa') rows.splice(k, 1); // pas de version en conserve
     else if (rows[k].kind !== 'tp') rows[k].report = { writer: 'bank' };
   }
   if (!rows.length) return 0;
@@ -256,7 +274,7 @@ async function videoIdea(db: Db): Promise<string | null> {
 
 // ── LE MESSAGE AUX ADMINS ─────────────────────────────────────────────────────────────────────────────
 
-const POST_KINDS = ['morning', 'howto', 'cta', 'tp'];
+const POST_KINDS = ['morning', 'howto', 'cta', 'tp', 'qa'];
 const STATUS: Record<string, string> = { draft: '⏳ à valider', approved: '✅ validé', publishing: '📤 en cours', published: '📣 publié', skipped: '❌ pas publié', expired: '⌛ expiré' };
 const NUM = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'];
 const parisHHMM = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
@@ -273,7 +291,7 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
   const tomorrow = day > tradingDayOf(Date.now());
   const parts: string[] = [`📣 <b>Canal public · ${tomorrow ? 'demain, ' : ''}${esc(dayLabel(day))}</b>`, tomorrow ? '<i>Valide ce soir : les posts partiront demain à leur heure, même si tu dors. Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>' : '<i>Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>'];
   posts.forEach((r, i) => {
-    const head = r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'cta' ? 'CTA' : 'CARTE DE GAIN';
+    const head = r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'qa' ? 'QUESTION DE LA SEMAINE' : r.kind === 'cta' ? 'CTA' : 'CARTE DE GAIN';
     const by = (r.report as { writer?: string } | null)?.writer;
     const tag = by === 'ai' ? ' · ✍️ IA' : by === 'fixed' ? ' · ✏️ corrigé' : by === 'bank' ? ' · 📄 banque' : '';
     const img = r.kind === 'tp' ? '' : r.photo_url ? ' · 📸 photo' : ' · 🖼 bannière';
@@ -436,6 +454,7 @@ const todayFr = () => new Date().toLocaleDateString('fr-FR', { day: '2-digit', m
 function briefOf(r: Row): Brief | null {
   if (r.kind === 'morning') return { kind: 'morning' };
   if (r.kind === 'howto') { const p = HOWTO.find((x) => x.id === r.ref); return p ? { kind: 'howto', card: p.text } : null; }
+  if (r.kind === 'qa') return { kind: 'qa' };
   if (r.kind === 'cta') { const c = CTAS.find((x) => x.id === r.ref); return c ? { kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn } : null; }
   return null;
 }
@@ -488,7 +507,7 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
       swaps.push({ n: a.n, r });
       continue;
     }
-    const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
+    const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'qa' ? 'question de la semaine' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
     // la remarque est une leçon pour la suite, que le post puisse encore être réécrit ou non
     await appendAgentMemory(db, `${todayFr()} · ${label} : « ${a.text.slice(0, 300)} »`, by, 'cm_memory');
     const brief = briefOf(r);
@@ -550,10 +569,11 @@ const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').re
 export function bannerParts(r: { kind: string; text: string | null; button_text: string | null; day?: string }): { kicker: string; title: string } {
   const text = r.text ?? '';
   const bold = /<b>([\s\S]+?)<\/b>/.exec(text)?.[1];
-  const firstLine = text.split('\n').map((l) => l.trim()).find((l) => l && !/HOW IT WORKS/i.test(l)) ?? '';
+  const firstLine = text.split('\n').map((l) => l.trim()).find((l) => l && !/HOW IT WORKS|YOU ASKED/i.test(l)) ?? '';
   let title = strip(bold ?? firstLine);
   if (title.length > 90) title = `${title.slice(0, 87).replace(/\s+\S*$/, '')}…`;
   if (r.kind === 'howto') return { kicker: 'HOW IT WORKS', title: title || 'How Algoria works' };
+  if (r.kind === 'qa') return { kicker: 'YOU ASKED', title: title || 'Your questions, answered' };
   if (r.kind === 'morning') {
     const d = r.day ? new Date(`${String(r.day).slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).toUpperCase() : '';
     return { kicker: 'GOOD MORNING, ALGORIA FAMILY', title: d || title };
@@ -571,7 +591,7 @@ export const bannerUrl = (r: { id: number; text: string | null; report: unknown 
 function albumOf(rows: Row[]): Array<{ media: string; caption: string }> {
   const posts = rows.filter((r) => POST_KINDS.includes(r.kind));
   return posts.map((r, i) => ({ r, i })).filter(({ r }) => r.kind !== 'tp' && ['draft', 'approved', 'skipped'].includes(r.status))
-    .map(({ r, i }) => ({ media: r.photo_url || bannerUrl(r), caption: `${NUM[i] ?? i + 1} ${parisHHMM(r.scheduled_at)} · ${r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : 'CTA'}` }));
+    .map(({ r, i }) => ({ media: r.photo_url || bannerUrl(r), caption: `${NUM[i] ?? i + 1} ${parisHHMM(r.scheduled_at)} · ${r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'qa' ? 'QUESTION' : 'CTA'}` }));
 }
 
 /** La photo du bonjour : la moins récemment utilisée (parmi les 3 plus anciennes, au hasard), puis marquée utilisée. */
