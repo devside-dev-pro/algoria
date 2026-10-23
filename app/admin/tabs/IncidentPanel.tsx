@@ -16,9 +16,13 @@ const TAG = 'incident-22-10';
 // LE RENVOI DU BON LIEN (22/10, soir) : le 1er envoi pointait sur algoria.tech, suspendu par le registre dans l'après-midi.
 // Étiquette à part (l'anti-doublon de la 1re l'aurait bloqué) ; le serveur saute ceux qui ont déjà déclaré.
 const RELINK_TAG = 'incident-22-10-relink';
-const RELINK_TEXT = `Hey{name}, quick one : the link in my last message stopped working, sorry about that 🙏🏼
+// 23/10 : la moitié des « je n'arrive plus à me connecter » venaient de l'icône installée avant le 22/10 (elle pointe
+// sur algoria.tech) — le renvoi le dit aussi, un seul message pour les deux problèmes.
+const RELINK_TEXT = `Hey{name}, quick one : our address changed yesterday, so the link in my last message doesn't work anymore, sorry about that 🙏🏼
 
-Here is the right one, it takes 1 minute to tell me your balance before and now. Thank you`;
+Here is the right one, it takes 1 minute to tell me your balance before and now.
+
+If the Algoria app on your phone doesn't open anymore, same reason : delete it and install it again from app.getalgoria.com/download, then log in with Telegram. Thank you`;
 const DEFAULT_TEXT = `Hey{name}, it's Mathieu.
 
 After what happened on the night of 21 to 22 October, I want to know exactly where each of you stands, so I can look for the best possible solution for everyone.

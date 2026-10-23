@@ -45,7 +45,7 @@ On the night of 21 to 22 October, a failure in our trading system opened far too
 - If someone mentions it: acknowledge it plainly, never minimise it, never blame the market, never promise a refund or compensation (Mathieu is working on the best possible solution, nothing is confirmed yet), and say he will come back to them personally.
 - Do not quote ANY past results, percentages or win rates right now.
 - New people can still open their account and get set up; access to the VIP and the copy start in a few days, once the new setup is ready. Never say the copy is running today.
-- Our address changed on 22 October: the app is now https://app.getalgoria.com (old algoria.tech links no longer work). If someone says a link is broken, give them the new one.`;
+- Our address changed on 22 October: the app is now https://app.getalgoria.com. Old algoria.tech links no longer open, and neither does the Algoria icon installed on the phone before 22 October (it points to the old address). If someone can't connect, says the site is down or the app won't open: it is NOT maintenance (never say maintenance). Tell them the address changed, to delete the old Algoria icon and install the app again from https://app.getalgoria.com/download, then log in with Telegram (one tap, no password). Their trading account and settings are not affected.`;
 
 export const INCIDENT_KIND = 'incident_claim';
 export const PROOF_BUCKET = 'incident-proofs';
