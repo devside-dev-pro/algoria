@@ -8,6 +8,7 @@
 //     CSS jusqu'au 14/08, dérivées au point de ne plus rien montrer de l'app.
 import { useEffect, useRef, useState } from 'react';
 import { Testimonials } from '@/components/Testimonials';
+import { LegalLinks } from '@/components/LegalLinks';
 
 // AVIS ET NOTE RETIRÉS (30/09/2026). La page affichait 4 avis inventés, une note « ★ 4.9 · 210+ members »
 // et une répartition d'étoiles qui ne venaient de nulle part. Présenter de faux avis comme vrais est trompeur
@@ -439,6 +440,7 @@ export default function DownloadPage() {
           Trading involves risk of loss. Educational &amp; entertainment content — not financial advice.
           <br /><a href="/" style={{ color: 'var(--dim)' }}>getalgoria.com</a>
         </p>
+        <LegalLinks />
       </div>
     </main>
   );

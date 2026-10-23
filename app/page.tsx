@@ -5,6 +5,7 @@ import { usePrice, useFeedHealth } from '@/lib/cockpit/useRealtime';
 import { tgHref } from '@/lib/telegram';
 import { WITHDRAW_LOCK_DAYS } from '@/lib/member/activation';
 import { Testimonials } from '@/components/Testimonials';
+import { LegalLinks } from '@/components/LegalLinks';
 
 // Funnel PUBLIC (domaine racine) : ce que voit un viewer qui tape getalgoria.com (lien en bio TikTok).
 // VERSION CLOSING — une seule page qui déroule l'argumentaire complet : bannière live, hero, PREUVE
@@ -195,6 +196,7 @@ export default function Funnel() {
         <p style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4, maxWidth: 380, lineHeight: 1.4 }}>
           Trading involves risk of loss. Past performance does not guarantee future results. Educational &amp; entertainment content — not financial advice.
         </p>
+        <LegalLinks style={{ maxWidth: 380 }} />
       </div>
     </main>
   );
