@@ -8,9 +8,13 @@ import { LegalLinks } from '@/components/LegalLinks';
 import { LocalTime, SeatButton } from './parts';
 
 export const dynamic = 'force-dynamic';
+// l'aperçu du lien quand il est partagé dans le canal ou en DM (sinon celui de la page d'accueil)
+const SHARE = { title: 'Live webinar: trading gold without the 6 hours a day', description: '45 minutes live with Mathieu, founder of Algoria. Free, on Zoom.' };
 export const metadata: Metadata = {
   title: 'Live webinar · Algoria',
   description: 'Trading gold without the 6 hours a day: 45 minutes live with Mathieu, founder of Algoria.',
+  openGraph: { ...SHARE, url: 'https://getalgoria.com/webinar', siteName: 'Algoria AI', type: 'website', images: [{ url: 'https://getalgoria.com/webinar/mathieu.jpg', width: 640, height: 800, alt: 'Mathieu, founder of Algoria' }] },
+  twitter: { card: 'summary_large_image', ...SHARE, images: ['https://getalgoria.com/webinar/mathieu.jpg'] },
 };
 
 const CHANNEL = process.env.NEXT_PUBLIC_TELEGRAM_URL || 'https://t.me/';
