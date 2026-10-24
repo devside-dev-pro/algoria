@@ -37,7 +37,9 @@ const label = { fontSize: 11.5, fontWeight: 800, letterSpacing: 2, color: 'var(-
 
 export default async function Webinar() {
   let sessions: WebinarSession[] = [];
-  try { sessions = await upcomingSessions(sdb(), 2); } catch { /* base injoignable : la page reste lisible */ }
+  // UNE SEULE SESSION À LA FOIS (24/10/2026, Mathieu) : avec deux dates au choix, on remet au dimanche ce qu'on
+  // pourrait faire mercredi. La suivante n'apparaît qu'une fois celle-ci passée (45 min après son début).
+  try { sessions = await upcomingSessions(sdb(), 1); } catch { /* base injoignable : la page reste lisible */ }
   const next = sessions[0];
 
   return (
