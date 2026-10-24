@@ -39,6 +39,7 @@ import { dayContext, writePost, type Brief, type DayContext } from './writer';
 import { atOneLot, atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs, tradingTimeMs } from '@/lib/display/tradingDay';
 import { APP_URL, SUPPORT_TG_URL } from '@/lib/member/i18n';
+import { saHour, seatLink, ukDay, ukHour, upcomingSessions, WEBINAR_PAGE, type WebinarSession } from '@/lib/member/webinar';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -156,6 +157,28 @@ const CTA_GOAL: Record<string, string> = {
 };
 const VIDEO_AT = '19:30';
 
+// 🎤 LES WEBINAIRES DANS LE CANAL (24/10/2026, Mathieu : « forme bien le CM sur tout ça »). La veille d'une session, le
+// CTA « app » devient l'annonce du webinaire ; le jour J, les deux CTA aussi : « ce soir » au premier créneau, et le
+// second avancé à 15 min du début (« on commence dans 15 minutes », bouton droit sur le bot, qui envoie le lien Zoom
+// tout de suite). Toujours deux boutons par jour au plus, et la rotation des CTA reprend le lendemain là où elle était.
+// Le bonjour de la veille et du jour J peut en dire un mot, sans bouton.
+type WbPhase = 'tomorrow' | 'today' | 'last';
+const WB_LAST_CALL_MS = 15 * 60_000;
+function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal: string } {
+  const at = `${ukHour(s.starts_at)} UK time (${saHour(s.starts_at)} in South Africa)`;
+  if (phase === 'last') {
+    return {
+      ...post('webinar-last', ['🔴 <b>We go live in 15 minutes.</b>', '', 'Zoom, 45 minutes, in English, with me.', 'Tap below, press START, and the Zoom link comes straight away 👇'], '🎥 JOIN THE LIVE', seatLink(s.id)),
+      goal: `last call: Mathieu's free live webinar on Zoom starts in 15 minutes (${at}). The button opens Telegram: they press START and the Zoom link comes straight away. Short and urgent`,
+    };
+  }
+  const when = phase === 'tomorrow' ? `Tomorrow, ${ukDay(s.starts_at)}` : 'Tonight';
+  return {
+    ...post(`webinar-${phase}`, [`🎤 <b>${when}, I’m going live.</b>`, '', `${at}, on Zoom, in English.`, '45 minutes: how the AI trades gold, the real app on screen, real past results, and your questions.', '', '🎁 At the end, something reserved for the 10 people who are there live.', '', 'Free. Save your seat 👇'], '🎤 SAVE MY SEAT', `${WEBINAR_PAGE}?src=channel`),
+    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'}, at ${at}: 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now`,
+  };
+}
+
 const isWeekend = (day: string) => [0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay());
 const dayLabel = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -191,12 +214,25 @@ export async function planDay(db: Db, day: string): Promise<number> {
   };
   const now = Date.now();
   const winCards = await winCardsOn(db).catch(() => true);
+  // 🎤 le webinaire du lendemain ou du jour (voir webinarPost)
+  const wb = (await upcomingSessions(db, 1).catch(() => []))[0] as WebinarSession | undefined;
+  const wbStart = wb ? Date.parse(wb.starts_at) : 0;
+  const wbDay = wb && wbStart > now ? tradingDayOf(wbStart) : null;
+  const wbPhase: WbPhase | null = wbDay === day ? 'today' : wbDay && wbDay === addDaysCm(day, 1) ? 'tomorrow' : null;
+  let wbFirst = 0, wbLast = false; // le jour J : l'heure de « ce soir », et le dernier appel déjà prévu
   const rows: Array<Record<string, unknown>> = [];
   const briefs: Array<Brief | null> = [];
   for (const s of slots) {
-    const at = tradingTimeMs(day, s.at) + jitter(day, s.slot);
+    let at = tradingTimeMs(day, s.at) + jitter(day, s.slot);
     if (at <= now) continue; // créneau déjà passé (plan préparé en retard)
     const base = { day, slot: s.slot, kind: s.kind, scheduled_at: new Date(at).toISOString(), status: 'draft' };
+    // 🎤 ce CTA devient-il une annonce du webinaire ? La veille : le CTA « app ». Le jour J : « ce soir » au premier
+    // créneau qui tombe plus d'1 h avant le début, puis le dernier appel 15 min avant (au moins 1 h après « ce soir »).
+    const wbPick: WbPhase | null = s.kind !== 'cta' || !wb ? null
+      : wbPhase === 'tomorrow' ? (s.fam === 'app' ? 'tomorrow' : null)
+      : wbPhase !== 'today' ? null
+      : !wbFirst && at < wbStart - 60 * 60_000 ? 'today'
+      : !wbLast && wbStart - WB_LAST_CALL_MS > Math.max(now, wbFirst + 60 * 60_000) ? 'last' : null;
     if (s.kind === 'morning') {
       rows.push({ ...base, ref: 'morning', text: null });
       briefs.push({ kind: 'morning' });
@@ -207,6 +243,12 @@ export async function planDay(db: Db, day: string): Promise<number> {
       const p = HOWTO[hi];
       rows.push({ ...base, ref: p.id, text: p.text });
       briefs.push({ kind: 'howto', card: p.text });
+    } else if (wbPick && wb) {
+      if (wbPick === 'today') wbFirst = at;
+      if (wbPick === 'last') { wbLast = true; at = wbStart - WB_LAST_CALL_MS; }
+      const w = webinarPost(wb, wbPick);
+      rows.push({ day, slot: s.slot, kind: 'cta', scheduled_at: new Date(at).toISOString(), status: 'draft', ref: w.id, text: w.text, button_text: w.btn, button_url: w.url, report: { webinar: wb.id, goal: w.goal } });
+      briefs.push({ kind: 'cta', goal: w.goal, reference: w.text, button: w.btn });
     } else if (s.kind === 'cta') {
       const fam = s.fam ?? 'app';
       const i = nextIn(CTAS, ci[fam], (c) => c.fam === fam);
@@ -229,11 +271,13 @@ export async function planDay(db: Db, day: string): Promise<number> {
   // LA RÉDACTION : tous les posts du jour en parallèle (un appel chacun). Échec ou texte refusé par les garde-fous →
   // le texte de la banque ; pour le bonjour, pas de post (un bonjour en conserve, c'est ce qu'on veut éviter).
   const ctx = await dayContext(db, day).catch(() => null);
+  if (ctx && wb && wbPhase) ctx.webinar = `Mathieu's free live webinar on Zoom is ${wbPhase === 'today' ? 'TONIGHT' : `TOMORROW, ${ukDay(wb.starts_at)}`}, at ${ukHour(wb.starts_at)} UK time (${saHour(wb.starts_at)} in South Africa), 45 minutes in English. The call to action posts carry the button to save a seat; the morning post may mention it in one warm line (no link, no button); other posts do not mention it.`;
   const written = ctx ? await Promise.all(briefs.map((b) => (b ? writePost(ctx, b).catch(() => null) : Promise.resolve(null)))) : briefs.map(() => null);
   for (let k = rows.length - 1; k >= 0; k--) {
-    if (written[k]) { rows[k].text = written[k]; rows[k].report = { writer: 'ai' }; }
+    const rep = (rows[k].report as object | undefined) ?? {}; // garde le brief d'un CTA webinaire (briefOf)
+    if (written[k]) { rows[k].text = written[k]; rows[k].report = { ...rep, writer: 'ai' }; }
     else if (rows[k].kind === 'morning' || rows[k].kind === 'qa') rows.splice(k, 1); // pas de version en conserve
-    else if (rows[k].kind !== 'tp') rows[k].report = { writer: 'bank' };
+    else if (rows[k].kind !== 'tp') rows[k].report = { ...rep, writer: 'bank' };
   }
   if (!rows.length) return 0;
   // LE BONJOUR AVEC UNE PHOTO DE MATHIEU (15/10/2026), prise dans la banque qu'il remplit en envoyant ses photos au bot.
@@ -291,7 +335,7 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
   const tomorrow = day > tradingDayOf(Date.now());
   const parts: string[] = [`📣 <b>Canal public · ${tomorrow ? 'demain, ' : ''}${esc(dayLabel(day))}</b>`, tomorrow ? '<i>Valide ce soir : les posts partiront demain à leur heure, même si tu dors. Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>' : '<i>Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>'];
   posts.forEach((r, i) => {
-    const head = r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'qa' ? 'QUESTION DE LA SEMAINE' : r.kind === 'cta' ? 'CTA' : 'CARTE DE GAIN';
+    const head = r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'qa' ? 'QUESTION DE LA SEMAINE' : r.kind === 'cta' ? (r.ref?.startsWith('webinar-') ? 'CTA 🎤 WEBINAIRE' : 'CTA') : 'CARTE DE GAIN';
     const by = (r.report as { writer?: string } | null)?.writer;
     const tag = by === 'ai' ? ' · ✍️ IA' : by === 'fixed' ? ' · ✏️ corrigé' : by === 'bank' ? ' · 📄 banque' : '';
     const img = r.kind === 'tp' ? '' : r.photo_url ? ' · 📸 photo' : ' · 🖼 bannière';
@@ -455,6 +499,8 @@ function briefOf(r: Row): Brief | null {
   if (r.kind === 'morning') return { kind: 'morning' };
   if (r.kind === 'howto') { const p = HOWTO.find((x) => x.id === r.ref); return p ? { kind: 'howto', card: p.text } : null; }
   if (r.kind === 'qa') return { kind: 'qa' };
+  const wbGoal = (r.report as { goal?: string } | null)?.goal;
+  if (r.kind === 'cta' && r.ref?.startsWith('webinar-') && wbGoal) return { kind: 'cta', goal: wbGoal, reference: r.text ?? '', button: r.button_text ?? '' };
   if (r.kind === 'cta') { const c = CTAS.find((x) => x.id === r.ref); return c ? { kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn } : null; }
   return null;
 }

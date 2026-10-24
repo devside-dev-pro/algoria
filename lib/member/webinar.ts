@@ -25,12 +25,24 @@ const LATE_JOIN_MS = 45 * 60_000; // on peut encore s'inscrire (et recevoir le l
 const iso = (ms: number) => new Date(ms).toISOString();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** La page d'inscription (aussi servie sous app.getalgoria.com/webinar). */
+export const WEBINAR_PAGE = 'https://getalgoria.com/webinar';
 export const seatLink = (id: string) => `https://t.me/${process.env.NEXT_PUBLIC_TELEGRAM_BOT ?? ''}?start=wb_${id}`;
 export const calendarLink = (id: string) => `${APP_URL}/api/webinar/ics?s=${encodeURIComponent(id)}`;
 
 /** « Wednesday 28 October » et « 19:00 », à l'heure du Royaume-Uni (le public : UK, Afrique du Sud…). */
 export const ukDay = (at: string) => new Date(at).toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long' });
 export const ukHour = (at: string) => new Date(at).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+/** L'heure en Afrique du Sud, le 2e public (« 21:00 in South Africa »). */
+export const saHour = (at: string) => new Date(at).toLocaleTimeString('en-GB', { timeZone: 'Africa/Johannesburg', hour: '2-digit', minute: '2-digit' });
+const ukDate = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+/** « tonight », « tomorrow », « on Wednesday » : le jour de la session vu d'aujourd'hui (Royaume-Uni). */
+export function relDay(at: string, now = Date.now()): string {
+  const d = ukDate(Date.parse(at));
+  if (d === ukDate(now)) return Number(ukHour(at).slice(0, 2)) >= 17 ? 'tonight' : 'today';
+  if (d === ukDate(now + 86_400_000)) return 'tomorrow';
+  return `on ${new Date(at).toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long' })}`;
+}
 
 /** Les prochaines sessions ouvertes à l'inscription, la plus proche d'abord. */
 export async function upcomingSessions(db: Db, limit = 2): Promise<WebinarSession[]> {
@@ -125,4 +137,127 @@ export async function runWebinarReminders(db: Db): Promise<{ sessions: number; s
     }
   }
   return { sessions: (ss ?? []).length, sent };
+}
+
+// ── LE SUPPORT : CE QU'IL SAIT DU PROCHAIN WEBINAIRE ─────────────────────────────────────────────────────────────
+
+let factCache: { at: number; text: string } | null = null;
+/** Le bloc de faits du support (lib/member/replyDraft.ts) : la prochaine session, à l'heure près, et quand en parler.
+ *  Calculé depuis la base (cache 60 s) : le knowledge de Mathieu n'a jamais une date en retard. */
+export async function webinarFacts(db: Db): Promise<string> {
+  if (factCache && Date.now() - factCache.at < 60_000) return factCache.text;
+  const s = (await upcomingSessions(db, 1).catch(() => []))[0];
+  const text = !s
+    ? 'LIVE WEBINARS: no date is scheduled right now. Never invent one; if they ask, the next dates are announced in the Algoria channel.'
+    : [
+        `NEXT LIVE WEBINAR (Mathieu live on Zoom, in English, free, 45 minutes: his story, what the AI is and how it trades gold, the real app on screen, real past results, live questions): ${ukDay(s.starts_at)} at ${ukHour(s.starts_at)} UK time (${saHour(s.starts_at)} in South Africa)${Date.parse(s.starts_at) <= Date.now() ? '. IT IS LIVE RIGHT NOW: saving a seat sends the Zoom link straight away' : ''}. Seat: ${WEBINAR_PAGE} (one tap opens Telegram, START, done; the Zoom link comes privately 1 hour before). At the end, a pack reserved for 10 people who are there live: never say what is in it and never promise a spot, it is revealed live.`,
+        'WHEN TO INVITE THEM: a prospect who hesitates, doubts (scam ? martingale ?), wants to "think about it", wants to see who is behind Algoria or how the AI works, or is not ready to start yet: one short line inviting them, with the link. At most once per conversation (check the recent exchange), never to a member who is live, never between the welcome and their country. Never send a Zoom link yourself.',
+      ].join('\n');
+  factCache = { at: Date.now(), text };
+  return text;
+}
+
+// ── L'INVITATION DES PROSPECTS PAR LE BOT ────────────────────────────────────────────────────────────────────────
+//
+// Mathieu, 24/10/2026 : « un message du bot pour prévenir les prospects du webinaire ». Les prospects (status
+// 'onboarding', ~3 100) ont tous démarré le bot pour se connecter à l'app : il peut leur écrire. Rien ne part tant que
+// la session n'a pas d'invite_at (posé quand Mathieu a validé le texte et l'heure). Ensuite la cron du webinaire envoie
+// par lots (~45 s par passage, toutes les 5 min), les plus récents d'abord ; chaque personne est réservée dans
+// webinar_invites AVANT l'envoi : jamais deux invitations pour la même session. Le bouton inscrit en un tap, sans
+// quitter la conversation (handleWebinarCallback). Mathieu reçoit le bilan quand tout le monde est passé.
+
+const INVITE_BATCH = 150;
+const firstName = (n: string | null) => { const f = String(n ?? '').trim().split(/\s+/)[0] ?? ''; return /^[\p{L}][\p{L}'-]{1,20}$/u.test(f) ? f : ''; };
+
+/** Le texte de l'invitation (anglais, la voix de Mathieu). */
+export function inviteText(s: WebinarSession, name: string | null, now = Date.now()): string {
+  const rel = relDay(s.starts_at, now);
+  const when = rel.startsWith('on ') ? `on ${ukDay(s.starts_at)}` : rel;
+  const hey = firstName(name);
+  return [
+    `🎤 ${hey ? `Hey ${hey}, I’m` : 'I’m'} going live ${when} at ${ukHour(s.starts_at)} UK time (${saHour(s.starts_at)} in South Africa), on Zoom.`,
+    '',
+    '45 minutes with me: how the AI trades gold, the real app on screen, real past results, and your questions, live.',
+    '',
+    '🎁 At the end, something reserved for the 10 people who are there live.',
+    '',
+    'It’s free. One tap and your seat is saved 👇',
+  ].join('\n');
+}
+
+type TgResult = { ok: true } | { ok: false; error: string; retry?: boolean };
+async function sendInvite(token: string, chatId: number, text: string, sessionId: string): Promise<TgResult> {
+  const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000),
+    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, reply_markup: { inline_keyboard: [[{ text: '✅ Save my seat', callback_data: `wb:${sessionId}` }]] } }),
+  }).catch(() => null);
+  if (!r) return { ok: false, error: 'network', retry: true };
+  if (r.ok) return { ok: true };
+  const j = (await r.json().catch(() => ({}))) as { description?: string };
+  // 429 (trop vite) ou 5xx : on s'arrête là, la personne sera reprise au passage suivant
+  return { ok: false, error: j.description ?? `HTTP ${r.status}`, retry: r.status === 429 || r.status >= 500 };
+}
+
+/** Un passage d'invitations, jusqu'à `until` (ms). Appelé par la cron du webinaire, après les rappels. */
+export async function runWebinarInvites(db: Db, until: number): Promise<{ invited: number; failed: number }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const now = Date.now();
+  // pas d'invitation à moins de 2 h du début : les inscrits de dernière minute viennent du canal et de l'app
+  const { data: ss } = await db.from('webinar_sessions').select('id,starts_at,zoom_url').eq('active', true).not('invite_at', 'is', null)
+    .lte('invite_at', iso(now)).is('invite_done_at', null).gt('starts_at', iso(now + 2 * HOUR)).order('starts_at', { ascending: true }).limit(1);
+  const s = ss?.[0] as WebinarSession | undefined;
+  if (!s || !token) return { invited: 0, failed: 0 };
+  let invited = 0, failed = 0;
+  while (Date.now() < until) {
+    const { data: batch, error } = await db.rpc('webinar_invite_batch', { p_session: s.id, p_limit: INVITE_BATCH });
+    if (error) throw new Error(error.message);
+    const people = (batch ?? []) as Array<{ tg_id: number; tg_name: string | null }>;
+    if (!people.length) {
+      // tout le monde est passé : marqué une seule fois, et Mathieu reçoit le bilan
+      const { data: closed } = await db.from('webinar_sessions').update({ invite_done_at: iso(Date.now()) }).eq('id', s.id).is('invite_done_at', null).select('id');
+      if (closed?.length) {
+        const count = async (q: (b: Db) => Db) => (await q(db.from('webinar_invites').select('tg_id', { count: 'exact', head: true }).eq('session_id', s.id))).count ?? 0;
+        const [ok, ko] = await Promise.all([count((b) => b.is('error', null)), count((b) => b.not('error', 'is', null))]);
+        const { count: regs } = await db.from('webinar_registrations').select('id', { count: 'exact', head: true }).eq('session_id', s.id);
+        await notifyOwner({ title: `🎤 Invitations au webinar envoyées : ${ok} prospects`, lines: [`${ukDay(s.starts_at)}, ${ukHour(s.starts_at)} (UK)`, `${ko} injoignables (bot bloqué ou compte supprimé).`, `Inscrits à ce jour : ${regs ?? 0}.`], tag: 'webinar' });
+      }
+      break;
+    }
+    // réservés AVANT l'envoi : seules les lignes réellement créées ici partent
+    const { data: claimed } = await db.from('webinar_invites').upsert(people.map((p) => ({ session_id: s.id, tg_id: p.tg_id })), { onConflict: 'session_id,tg_id', ignoreDuplicates: true }).select('tg_id');
+    const mine = new Set(((claimed ?? []) as Array<{ tg_id: number }>).map((r) => Number(r.tg_id)));
+    const unsent: number[] = [];
+    let stop = false;
+    for (const p of people) {
+      if (!mine.has(Number(p.tg_id))) continue;
+      if (stop || Date.now() >= until) { unsent.push(p.tg_id); continue; }
+      const r = await sendInvite(token, Number(p.tg_id), inviteText(s, p.tg_name), s.id);
+      if (r.ok) invited++;
+      else if (r.retry) { stop = true; unsent.push(p.tg_id); }
+      else { failed++; await db.from('webinar_invites').update({ error: r.error.slice(0, 200) }).eq('session_id', s.id).eq('tg_id', p.tg_id); }
+      await sleep(45);
+    }
+    // réservés mais pas envoyés (temps écoulé, Telegram qui freine) : rendus au passage suivant
+    if (unsent.length) await db.from('webinar_invites').delete().eq('session_id', s.id).in('tg_id', unsent);
+    if (stop) break;
+  }
+  return { invited, failed };
+}
+
+/** « ✅ Save my seat » sous l'invitation : inscrit en un tap, sans quitter la conversation. Renvoie false si le bouton
+ *  n'est pas le nôtre. */
+export async function handleWebinarCallback(db: Db, cq: { id: string; data?: string; from?: { id: number; first_name?: string; last_name?: string; username?: string }; message?: { chat?: { id?: number }; message_id?: number } }): Promise<boolean> {
+  const m = /^wb:([a-z0-9-]{4,40})$/.exec(String(cq?.data ?? ''));
+  if (!m || !cq.from?.id) return false;
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const tg = (method: string, payload: Record<string, unknown>) => token ? fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000), body: JSON.stringify(payload) }).catch(() => null) : null;
+  const { data: already } = await db.from('webinar_registrations').select('id').eq('session_id', m[1]).eq('tg_id', cq.from.id).limit(1);
+  if (already?.length) await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'You’re already in ✅' });
+  else {
+    await registerForWebinar(db, cq.from, m[1]); // la confirmation (et le lien Zoom si c'est dans moins d'1 h) part en message
+    await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'You’re in ✅' });
+  }
+  // le bouton disparaît de l'invitation : la confirmation juste en dessous fait foi
+  if (cq.message?.chat?.id && cq.message.message_id) await tg('editMessageReplyMarkup', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, reply_markup: { inline_keyboard: [] } });
+  return true;
 }

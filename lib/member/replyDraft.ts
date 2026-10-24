@@ -22,6 +22,8 @@ import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from './activa
 import { APP_URL } from './i18n';
 import { getAgentDoc } from './agentDocs';
 import { trackFacts } from './trackFacts';
+import { webinarFacts } from './webinar';
+import { sdb } from './server';
 import { INCIDENT_NOTE, incidentActive } from './incident';
 
 const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
@@ -103,7 +105,7 @@ const memoryBlock = (memory: string | null) => memory
   ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS (in French — they win over the knowledge and the facts; if two lessons disagree, the later one wins):\n${memory}`
   : '';
 
-function businessSystem(knowledge: string | null, memory: string | null, track: string | null): string {
+function businessSystem(knowledge: string | null, memory: string | null, track: string | null, webinar: string | null): string {
   return `You write Telegram replies for Mathieu, founder of Algoria (an AI copy-trading service on gold and crypto). A prospect or client wrote to Mathieu's own support account. Your reply goes out FROM HIS ACCOUNT, as him: when you are sure it is sent automatically; when you are not, it is shown to Mathieu first and he decides.
 
 Write AS Mathieu, first person ("I", "my link"). YOU ARE MATHIEU: never mention Mathieu in the third person ("as Mathieu says", "Mathieu will confirm", "contact @mathieu_algoria") — where the knowledge says "Mathieu", write "I" / "me". No signature. Reply in the client's language (English by default, Italian if they write Italian).
@@ -120,7 +122,7 @@ Real messages of his (TONE ONLY — the facts in them may be outdated, the FACTS
 
 FACTS — use only these, never invent anything else:
 ${liveFacts()}
-${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${knowledge}` : `\n${facts()}`}${memoryBlock(memory)}${track ? `\n\n${track}` : ''}
+${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${knowledge}` : `\n${facts()}`}${memoryBlock(memory)}${track ? `\n\n${track}` : ''}${webinar ? `\n\n${webinar}` : ''}
 
 BROKER LINKS AND IDS — copy them EXACTLY, character for character:
 ${brokerLinks()}
@@ -154,12 +156,12 @@ RULES
   · "spam" (reply "") = an ad, a casino/crypto/"earn money" link, a scam, anything unrelated sent to farm clicks.`;
 }
 
-function system(locale: string, knowledge: string | null, memory: string | null, track: string | null): string {
+function system(locale: string, knowledge: string | null, memory: string | null, track: string | null, webinar: string | null): string {
   // LE CERVEAU (29/09/2026) : quand Mathieu a écrit son knowledge dans l'admin, c'est LUI la source — plus les
   // faits intégrés ci-dessus, qui restent le filet si la base est vide ou injoignable.
   const factsBlock = (knowledge
     ? `${liveFacts()}\n\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${knowledge}${memoryBlock(memory)}`
-    : `${facts()}${memoryBlock(memory)}`) + (track ? `\n\n${track}` : '');
+    : `${facts()}${memoryBlock(memory)}`) + (track ? `\n\n${track}` : '') + (webinar ? `\n\n${webinar}` : '');
   return `You write Telegram replies for the Algoria bot, the support channel of Algoria, an AI copy-trading service on gold (XAU/USD) and Bitcoin run by Mathieu. A prospect or member just wrote to the bot.
 
 You are Algoria AI, Algoria's AI support (you may say "we" for Algoria). Do NOT sign and do NOT add a way to reach Mathieu at the end: the signature "Algoria AI" and Mathieu's contact are added automatically under your reply. Warm, direct, no hype. Reply in the language of the incoming message (English or Italian). If the language is unclear, use ${locale === 'it' ? 'Italian' : 'English'}.
@@ -293,10 +295,11 @@ async function attempt(i: DraftInput, retry: string | null): Promise<Draft | nul
   const user = `${them}: ${i.member?.member_no != null ? `member #${i.member.member_no}` : biz ? 'not an Algoria member yet' : 'unknown'} ${i.member?.tg_username ? '@' + i.member.tg_username : (i.member?.tg_name ?? '')}\nStatus: ${statusLine}\nApp language: ${i.locale ?? 'en'}\n\nRecent exchange:\n${history}\n\nNew message from the ${them.toLowerCase()}${i.images?.length ? ` (with ${i.images.length} screenshot${i.images.length > 1 ? 's' : ''}, above)` : ''}:\n"""${i.text.slice(0, 1200)}"""${i.note ? `\n\nNote: ${i.note}` : ''}${retry ? `\n\nYour previous answer was rejected: ${retry}. Write it again.` : ''}\n\nReturn the JSON, on ONE line (write \\n inside the "reply" string for a line break).`;
   try {
     const client = new Anthropic({ timeout: i.timeoutMs ?? 8000, maxRetries: 0 });
-    const [knowledge, memory, trackNow] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('memory'), trackFacts()]);
+    // 🎤 la prochaine session de webinaire (24/10/2026) : sa date vient de la base, jamais du knowledge
+    const [knowledge, memory, trackNow, webinar] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('memory'), trackFacts(), webinarFacts(sdb()).catch(() => null)]);
     // 🚨 incident du 21-22/10 : la note remplace les chiffres du track record tant que la garde court
     const track = incidentActive() ? INCIDENT_NOTE : trackNow;
-    const sys = biz ? businessSystem(knowledge, memory, track) : system(i.locale ?? 'en', knowledge, memory, track);
+    const sys = biz ? businessSystem(knowledge, memory, track, webinar) : system(i.locale ?? 'en', knowledge, memory, track, webinar);
     // LE SUPPORT DE MATHIEU (16/10/2026) : ses réponses partent seules quand le modèle est sûr, donc le meilleur modèle
     // (ALGORIA_SUPPORT_MODEL). Le prompt système (faits, knowledge, mémoire) est le même d'un message à l'autre : mis en
     // cache, il ne se paie plein tarif qu'une fois toutes les quelques minutes.

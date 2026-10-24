@@ -8,7 +8,7 @@ import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
 import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
-import { WEBINAR_START_RE, registerForWebinar } from '@/lib/member/webinar';
+import { WEBINAR_START_RE, handleWebinarCallback, registerForWebinar } from '@/lib/member/webinar';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
 
@@ -399,6 +399,7 @@ export async function POST(req: Request) {
       if (await handleCmCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 posts du jour du canal (lib/channel/cm.ts)
       if (await handleSupportAssetCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles d'accueil (lib/member/supportAuto.ts)
       if (await handleDigestCallback(db, cq)) return NextResponse.json({ ok: true }); // 🌙 règles du récap du soir (lib/member/supportDigest.ts)
+      if (await handleWebinarCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎤 « Save my seat » sous l'invitation (lib/member/webinar.ts)
       const m = /^r([dxu]):([0-9a-f-]{36})$/i.exec(String(cq.data ?? ''));
       if (!m) { await answer(''); return NextResponse.json({ ok: true }); }
       const admins = await adminTgIds();
