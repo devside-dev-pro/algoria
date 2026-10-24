@@ -8,6 +8,7 @@ import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
 import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
+import { WEBINAR_START_RE, registerForWebinar } from '@/lib/member/webinar';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
 
@@ -515,6 +516,17 @@ export async function POST(req: Request) {
       }
     } catch (e) {
       console.error('[telegram] login code failed:', (e as { message?: string })?.message ?? e);
+    }
+  }
+
+  // 🎤 INSCRIPTION AU WEBINAIRE : /start wb_<session> (bouton de la page /webinar, lib/member/webinar.ts). Le bloc
+  // d'attribution juste en dessous enregistre aussi « wb_<session> » comme origine si c'est son premier contact.
+  const webinarPayload = typeof msg?.text === 'string' ? msg.text.trim().match(WEBINAR_START_RE) : null;
+  if (db && webinarPayload && msg?.from?.id && msg.chat?.type === 'private') {
+    try {
+      await registerForWebinar(db, msg.from, webinarPayload[1]);
+    } catch (e) {
+      console.error('[telegram] webinar registration failed:', (e as { message?: string })?.message ?? e);
     }
   }
 
