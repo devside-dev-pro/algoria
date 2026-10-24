@@ -46,6 +46,8 @@ export type DayContext = {
   week: { trades: number; net10: number } | null;
   recent: string[];
   questions: string[];
+  /** 🎤 le webinaire de ce soir ou de demain (posé par lib/channel/cm.ts, planDay) */
+  webinar?: string;
 };
 
 // LES SEULES ANNONCES QUI MÉRITENT UNE LIGNE (Mathieu, 15/10 : « à part un NFP day ou un truc hyper important, je vois
@@ -139,6 +141,7 @@ function contextBlock(c: DayContext): string {
   if (c.news.length) lines.push(`MAJOR EVENT TODAY (Paris time): ${c.news.map((n) => `${n.at}, ${n.title}`).join(' · ')}. Only the morning post may mention it, in one calm line, in plain words, never as a warning: Algoria simply stands aside around it, members have nothing to do.`);
   lines.push(c.lastSession ? `LAST SESSION (${longDate(c.lastSession.day)}): green, ${c.lastSession.trades} trades. Token {{YESTERDAY}} = its result.` : 'LAST SESSION: do not mention its result.');
   if (c.week) lines.push(`THIS WEEK SO FAR: green, ${c.week.trades} trades. Token {{WEEK}} = its result.`);
+  if (c.webinar) lines.push(`LIVE WEBINAR: ${c.webinar}`);
   if (c.questions.length) lines.push(`QUESTIONS PEOPLE ASKED MATHIEU THIS WEEK (do not quote them, use them to know what worries people):\n- ${c.questions.slice(0, 25).join('\n- ')}`);
   if (c.recent.length) lines.push(`RECENT POSTS (never repeat their openings or structure):\n---\n${c.recent.join('\n---\n')}`);
   return lines.join('\n\n');

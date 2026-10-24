@@ -25,6 +25,8 @@ export const FUNNEL_EVENTS = [
   'share_done',         // 📤 partage lancé (meta.channel : image | whatsapp | telegram | copy)
   'invite_open',        // 🤝 feuille « inviter un ami » ouverte (meta.from : home | profile)
   'invite_share',       // 🤝 lien de parrainage envoyé (meta.channel : native | whatsapp | telegram | copy)
+  'webinar_popup',      // 🎤 pop-up du webinaire affichée à un prospect (meta.session)
+  'webinar_seat',       // 🎤 « save my seat » touché dans la pop-up (meta.session)
 ] as const;
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];
 type Meta = Record<string, string | number | boolean | null>;

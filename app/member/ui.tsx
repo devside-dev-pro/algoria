@@ -378,6 +378,77 @@ function InstallPrompt() {
   );
 }
 
+// 🎤 LA POP-UP DU WEBINAIRE (24/10/2026, Mathieu : « on enverra une pop up sur l'app »). Le serveur décide
+// (/api/member/webinar) : un prospect pas encore inscrit, une session dans moins de 4 jours. Une fois par jour au plus et
+// par session (localStorage) ; jamais pendant les écrans-tunnels (onboarding, attente) : on ne coupe pas quelqu'un qui
+// est en train de s'installer. Le bouton ouvre le bot sur /start wb_<session> : START, il est inscrit.
+type WebinarNext = { id: string; startsAt: string; day: string; hour: string; sa: string; seat: string };
+function WebinarPopup() {
+  const [s, setS] = useState<WebinarNext | null>(null);
+  const [local, setLocal] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const today = new Date().toISOString().slice(0, 10);
+    const timer = window.setTimeout(() => {
+      void fetch('/api/member/webinar', { cache: 'no-store' }).then((r) => r.json()).then((d: { show?: boolean; session?: WebinarNext }) => {
+        if (!alive || !d?.show || !d.session) return;
+        try { if (localStorage.getItem(`alg_wb_${d.session.id}`) === today) return; } catch { /* stockage bloqué : on montre */ }
+        const opts = { weekday: 'short', hour: '2-digit', minute: '2-digit' } as const;
+        const mine = new Date(d.session.startsAt).toLocaleString('en-GB', opts);
+        setLocal(mine !== new Date(d.session.startsAt).toLocaleString('en-GB', { ...opts, timeZone: 'Europe/London' }) ? mine : null);
+        setS(d.session);
+        track('webinar_popup', null, { session: d.session.id });
+      }).catch(() => {});
+    }, 2500); // laisse l'écran s'afficher avant
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, []);
+  if (!s || typeof document === 'undefined') return null;
+  const close = () => { try { localStorage.setItem(`alg_wb_${s.id}`, new Date().toISOString().slice(0, 10)); } catch { /* rien */ } setS(null); };
+  return createPortal(
+    <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 95, background: 'rgba(3,7,15,.74)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div
+        className="cardIn"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 560, borderRadius: '22px 22px 0 0', borderBottom: 'none',
+          border: '1px solid rgba(43,227,245,.42)', background: 'linear-gradient(180deg, var(--panel-top) 0%, var(--panel-bottom) 100%)',
+          boxShadow: '0 -18px 60px var(--drop), 0 0 34px rgba(43,227,245,.12)',
+          padding: '18px 20px max(24px, env(safe-area-inset-bottom))', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, textAlign: 'center',
+          maxHeight: '86dvh', overflowY: 'auto',
+        }}
+      >
+        <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '5px 11px', borderRadius: 999, border: '1px solid rgba(255,45,85,.5)', background: 'rgba(255,45,85,.1)', fontSize: 10.5, fontWeight: 800, letterSpacing: 1.3, color: '#ff8a9a' }}>
+            <span className="pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#ff2d55' }} />
+            LIVE WEBINAR · FREE
+          </span>
+          <button onClick={close} aria-label="close" style={{ border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', borderRadius: 7, width: 26, height: 26, cursor: 'pointer', fontSize: 14, lineHeight: '22px' }}>×</button>
+        </div>
+        <img src="/webinar/mathieu.jpg" alt="Mathieu, founder of Algoria" width={84} height={84} style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover', objectPosition: 'top', border: '2px solid rgba(43,227,245,.5)' }} />
+        <h2 style={{ margin: 0, fontSize: 21, lineHeight: 1.2 }}>Trading gold without the 6 hours a day</h2>
+        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 }}>45 minutes live with Mathieu, on Zoom: how the AI trades gold, the real app on screen, real past results, and your questions.</p>
+        <div className="panel" style={{ width: '100%', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 16, fontWeight: 800 }}>{s.day}</span>
+          <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>{s.hour} UK time · {s.sa} in South Africa</span>
+          {local && <span style={{ fontSize: 12.5, color: 'var(--cyan)' }}>= {local} your time</span>}
+        </div>
+        <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5 }}>🎁 <b style={{ color: 'var(--gold)' }}>At the end: something reserved for 10 people,</b> only for those who are there live.</p>
+        <a
+          href={s.seat}
+          rel="noopener noreferrer"
+          onClick={(e) => { track('webinar_seat', null, { session: s.id }); tgHref(s.seat).onClick(e); close(); }}
+          style={{ ...sheetGoldCta, width: '100%', color: '#04223a', background: 'linear-gradient(90deg,#2be3f5,#39a0ff)', boxShadow: '0 10px 30px rgba(43,227,245,.28)' }}
+        >
+          ✈️ SAVE MY SEAT ON TELEGRAM
+        </a>
+        <span style={{ fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.5 }}>1 tap: Telegram opens, press START, you’re in. The Zoom link comes 1 hour before.</span>
+        <button onClick={close} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', fontSize: 13, cursor: 'pointer', padding: 4 }}>Not now</button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function MemberChrome({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
@@ -434,6 +505,7 @@ export function MemberChrome({ children }: { children: React.ReactNode }) {
     <div className="appShell" style={{ maxWidth: 560, margin: '0 auto', width: '100%' }}>
       <div className="appScroll" style={{ padding: bare ? '14px 14px 20px' : '14px 14px 96px' }}>{children}</div>
       {!preAuth && <InstallPrompt />}
+      {!preAuth && !bare && <WebinarPopup />}
       {!bare && (
         <nav
           style={{
