@@ -425,8 +425,8 @@ function WebinarPopup() {
           <button onClick={close} aria-label="close" style={{ border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', color: 'var(--muted)', borderRadius: 7, width: 26, height: 26, cursor: 'pointer', fontSize: 14, lineHeight: '22px' }}>×</button>
         </div>
         <img src="/webinar/mathieu.jpg" alt="Mathieu, founder of Algoria" width={84} height={84} style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover', objectPosition: 'top', border: '2px solid rgba(43,227,245,.5)' }} />
-        <h2 style={{ margin: 0, fontSize: 21, lineHeight: 1.2 }}>Trading gold without the 6 hours a day</h2>
-        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 }}>45 minutes live with Mathieu, on Zoom: how the AI trades gold, the real app on screen, real past results, and your questions.</p>
+        <h2 style={{ margin: 0, fontSize: 21, lineHeight: 1.2 }}>How an AI trades gold on your own account</h2>
+        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 }}>45 minutes live with Mathieu, on Zoom: the real app on screen, real past results, and your questions.</p>
         <div className="panel" style={{ width: '100%', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 3 }}>
           <span style={{ fontSize: 16, fontWeight: 800 }}>{s.day}</span>
           <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>{s.hour} UK time · {s.sa} in South Africa</span>
