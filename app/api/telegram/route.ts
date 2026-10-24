@@ -14,6 +14,9 @@ import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } f
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 60; // 25 s jusqu'au 15/10/2026 : la réécriture d'un post du canal (lib/channel/cm.ts) appelle le modèle après la réponse
+/** Le temps laissé à quelqu'un qui écrit au bot en plusieurs messages avant de lui répondre (voir « UNE PHRASE EN
+ *  PLUSIEURS MESSAGES ») : 20 s, la réponse et le brouillon restent bien sous les 60 s de la fonction. */
+const BOT_BATCH_MS = 20_000;
 
 // Webhook Telegram (bot admin du canal) → alimente la WAITLIST du widget /join.
 // Flux : un viewer clique le lien d'invitation "demander à rejoindre" → Telegram POSTe un chat_join_request ici
@@ -616,80 +619,102 @@ export async function POST(req: Request) {
     try {
       const text = (typeof msg.text === 'string' ? msg.text : typeof msg.caption === 'string' ? msg.caption : '').slice(0, 1500) || '[media]';
       const tgId = Number(msg.from.id);
+      const from = msg.from;
       const { data: mrow } = await (db as any).from('members').select('member_no,locale,status,strategy,broker,tg_name,tg_username').eq('tg_id', tgId).limit(1);
-      // ANTI-SPAM ramené de 6 h à 2 h (14/08) : à 6 h, quelqu'un qui repose une question deux heures plus
-      // tard n'avait plus RIEN en retour — donc exactement le silence qu'on cherche à supprimer. Deux
-      // heures suffisent à ne pas répéter le message dans un même échange, sans laisser une question
-      // ultérieure sans réponse.
-      const { data: recent } = await (db as any).from('member_actions').select('id').eq('tg_id', tgId).eq('kind', 'bot_reply')
-        .gte('created_at', new Date(Date.now() - 2 * 3_600_000).toISOString()).limit(1);
-      // LES DERNIERS ÉCHANGES (contexte du brouillon) — lus AVANT d'insérer le message courant.
-      const { data: past } = await (db as any).from('member_actions').select('kind,detail,created_at').eq('tg_id', tgId).in('kind', ['bot_reply', 'nudge']).eq('status', 'done')
-        .order('created_at', { ascending: false }).limit(6);
+      const baseDetail = { text, username: from.username ?? null, name: [from.first_name, from.last_name].filter(Boolean).join(' ') || null };
       const { data: inserted } = await (db as any).from('member_actions').insert({
-        tg_id: tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'bot_reply', status: 'done', done_by: 'telegram',
-        detail: { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null },
-      }).select('id');
+        tg_id: tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'bot_reply', status: 'done', done_by: 'telegram', detail: baseDetail,
+      }).select('id,created_at');
       const rowId = String((inserted as Array<{ id: string }> | null)?.[0]?.id ?? '');
-      const token = process.env.TELEGRAM_BOT_TOKEN;
-      const loc = asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale);
-      const tgSend = async (payload: Record<string, unknown>) => token ? fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000), body: JSON.stringify({ chat_id: tgId, disable_web_page_preview: true, ...payload }) }).catch(() => null) : null;
-      // RÉPONSE (03/09 brouillon, 06/09 autonomie sur les questions simples) — voir lib/member/replyDraft.ts.
-      const member = (mrow?.[0] as { member_no?: number | null; locale?: string | null; status?: string | null; strategy?: number | null; broker?: string | null; tg_name?: string | null; tg_username?: string | null } | undefined) ?? null;
-      const history = ((past ?? []) as Array<{ kind: string; detail: Record<string, unknown> | null }>).reverse()
-        .map((h) => ({ from: h.kind === 'bot_reply' ? 'member' as const : 'algoria' as const, text: String(h.detail?.text ?? h.detail?.note ?? '') }))
-        .filter((h) => h.text);
-      const draft = text === '[media]' ? null : await draftReply({ text, locale: member?.locale, member, history });
-      // GARDE-FOUS DU MODE AUTONOME : question jugée simple, mode ON, et pas plus d'UNE réponse automatique
-      // par 10 min ni de TROIS par 24 h pour la même personne — au-delà, c'est une conversation, donc Mathieu.
-      let autoOk = Boolean(draft?.auto) && AUTOREPLY_ON && !!token;
-      if (autoOk) {
-        const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
-        const { data: autos } = await (db as any).from('member_actions').select('created_at').eq('tg_id', tgId).eq('kind', 'nudge').eq('status', 'done').eq('detail->>via' as never, 'auto-reply' as never).gte('created_at', since);
-        const list = (autos ?? []) as Array<{ created_at: string }>;
-        if (list.length >= 3 || list.some((a) => Date.now() - Date.parse(a.created_at) < 10 * 60_000)) autoOk = false;
-      }
-      const baseDetail = { text, username: msg.from.username ?? null, name: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || null };
-      let autoMessageId: number | null = null;
-      if (autoOk && draft) {
-        const r = await tgSend({ text: draft.text });
-        const j = r?.ok ? ((await r.json().catch(() => ({}))) as { result?: { message_id?: number } }) : null;
-        autoMessageId = Number(j?.result?.message_id) || null;
-        if (autoMessageId) {
-          await (db as any).from('member_actions').insert({ tg_id: tgId, member_no: member?.member_no ?? null, kind: 'nudge', status: 'done', done_by: 'bot', detail: { via: 'auto-reply', note: 'AI auto-reply (simple question)', text: draft.text } });
-        } else autoOk = false; // Telegram a refusé → on retombe sur le brouillon à valider
-      }
-      if (!autoOk && token && !recent?.length && !draft?.spam) {
-        // ACCUSÉ DE RÉCEPTION (route vers l'humain) — seulement quand la réponse n'est pas partie seule
-        await tgSend({ text: INBOX_ACK[loc], reply_markup: { inline_keyboard: [[{ text: INBOX_ACK_BTN[loc], url: SUPPORT_TG_URL }]] } });
-      }
-      if (draft?.spam) {
-        // SPAM (29/09/2026, décision Mathieu : « on ignore ») : ni accusé de réception, ni notification ; la ligne
-        // reste en base, marquée, pour que Mathieu puisse vérifier qu'aucun vrai message n'y est tombé.
-        if (rowId) await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft_intent: 'spam' } }).eq('id', rowId);
-        return NextResponse.json({ ok: true });
-      }
-      if (draft && rowId) {
-        await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft: draft.text, draft_model: process.env.ALGORIA_REPLY_MODEL ?? 'haiku', draft_intent: draft.auto ? 'simple' : 'human', ...(autoOk && autoMessageId ? { auto_sent_at: new Date().toISOString(), auto_message_id: autoMessageId } : {}) } }).eq('id', rowId);
-      }
-      // Le propriétaire voit tout : le message, et soit la réponse partie (avec « Supprimer »), soit le
-      // brouillon à valider (« Envoyer » / « Écarter »).
-      const who = msg.from.username ? `@${msg.from.username}` : msg.from.first_name ?? 'quelqu’un';
-      if (autoOk && draft) {
-        await notifyOwner({
-          title: `🤖 Réponse automatique à ${who}`,
-          lines: [text.slice(0, 300), '', '↳ ' + draft.text],
-          path: '/', tag: 'owner-inbox',
-          ...(rowId ? { buttons: [{ text: '↩️ Supprimer la réponse', data: `ru:${rowId}` }] } : {}),
-        });
-      } else {
-        await notifyOwner({
-          title: `💬 ${who} a écrit au bot`,
-          lines: [text.slice(0, 300), ...(draft ? ['', '✍️ Réponse proposée :', draft.text] : [])],
-          path: '/', tag: 'owner-inbox',
-          ...(draft && rowId ? { buttons: [{ text: '✅ Envoyer la réponse', data: `rd:${rowId}` }, { text: '🗑 Écarter', data: `rx:${rowId}` }] } : {}),
-        });
-      }
+      const rowAt = String((inserted as Array<{ created_at: string }> | null)?.[0]?.created_at ?? new Date().toISOString());
+      // 🧩 UNE PHRASE EN PLUSIEURS MESSAGES (24/10/2026, Mathieu : « si une personne envoie "how" puis "are" puis "you?",
+      // il va répondre "me what ?" ») : on laisse la personne finir. La réponse se prépare BOT_BATCH_MS après son
+      // message ; si elle a réécrit entre-temps, c'est le traitement de son dernier message qui répond, à tout le paquet.
+      after(async () => {
+        try {
+          await new Promise((r) => setTimeout(r, BOT_BATCH_MS));
+          const { data: newer } = await (db as any).from('member_actions').select('id').eq('tg_id', tgId).eq('kind', 'bot_reply').gt('created_at', rowAt).limit(1);
+          if (newer?.length) return;
+          // le paquet : ses messages depuis notre dernière réponse (10 min au plus), lus ensemble
+          const { data: ours } = await (db as any).from('member_actions').select('created_at').eq('tg_id', tgId).eq('kind', 'nudge').eq('status', 'done').order('created_at', { ascending: false }).limit(1);
+          const since = new Date(Math.max(Date.parse(String(ours?.[0]?.created_at ?? '1970-01-01')), Date.now() - 10 * 60_000)).toISOString();
+          const { data: pack } = await (db as any).from('member_actions').select('id,detail,created_at').eq('tg_id', tgId).eq('kind', 'bot_reply').gt('created_at', since).lte('created_at', rowAt).order('created_at', { ascending: true }).limit(10);
+          const packRows = ((pack ?? []) as Array<{ id: string; created_at: string; detail: Record<string, unknown> | null }>);
+          const packIds = new Set(packRows.map((r) => String(r.id)));
+          const parts = packRows.map((r) => String(r.detail?.text ?? '')).filter((t) => t && t !== '[media]');
+          const said = parts.length ? parts.join('\n') : text;
+          // ANTI-SPAM ramené de 6 h à 2 h (14/08) : à 6 h, quelqu'un qui repose une question deux heures plus
+          // tard n'avait plus RIEN en retour — donc exactement le silence qu'on cherche à supprimer. Deux
+          // heures suffisent à ne pas répéter le message dans un même échange, sans laisser une question
+          // ultérieure sans réponse. (Compté AVANT le paquet : sinon le 2e message d'une rafale l'annulerait.)
+          const firstAt = packRows[0]?.created_at ?? rowAt;
+          const { data: recent } = await (db as any).from('member_actions').select('id').eq('tg_id', tgId).eq('kind', 'bot_reply')
+            .gte('created_at', new Date(Date.now() - 2 * 3_600_000).toISOString()).lt('created_at', firstAt).limit(1);
+          // LES DERNIERS ÉCHANGES (contexte du brouillon) : ceux d'AVANT le paquet.
+          const { data: past } = await (db as any).from('member_actions').select('id,kind,detail,created_at').eq('tg_id', tgId).in('kind', ['bot_reply', 'nudge']).eq('status', 'done')
+            .lte('created_at', rowAt).order('created_at', { ascending: false }).limit(16);
+          const token = process.env.TELEGRAM_BOT_TOKEN;
+          const loc = asLocale((mrow?.[0] as { locale?: string } | undefined)?.locale);
+          const tgSend = async (payload: Record<string, unknown>) => token ? fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000), body: JSON.stringify({ chat_id: tgId, disable_web_page_preview: true, ...payload }) }).catch(() => null) : null;
+          // RÉPONSE (03/09 brouillon, 06/09 autonomie sur les questions simples) — voir lib/member/replyDraft.ts.
+          const member = (mrow?.[0] as { member_no?: number | null; locale?: string | null; status?: string | null; strategy?: number | null; broker?: string | null; tg_name?: string | null; tg_username?: string | null } | undefined) ?? null;
+          const history = ((past ?? []) as Array<{ id: string; kind: string; detail: Record<string, unknown> | null }>).filter((h) => !packIds.has(String(h.id))).slice(0, 6).reverse()
+            .map((h) => ({ from: h.kind === 'bot_reply' ? 'member' as const : 'algoria' as const, text: String(h.detail?.text ?? h.detail?.note ?? '') }))
+            .filter((h) => h.text);
+          const draft = said === '[media]' ? null : await draftReply({ text: said, locale: member?.locale, member, history });
+          // GARDE-FOUS DU MODE AUTONOME : question jugée simple, mode ON, et pas plus d'UNE réponse automatique
+          // par 10 min ni de TROIS par 24 h pour la même personne — au-delà, c'est une conversation, donc Mathieu.
+          let autoOk = Boolean(draft?.auto) && AUTOREPLY_ON && !!token;
+          if (autoOk) {
+            const day = new Date(Date.now() - 24 * 3_600_000).toISOString();
+            const { data: autos } = await (db as any).from('member_actions').select('created_at').eq('tg_id', tgId).eq('kind', 'nudge').eq('status', 'done').eq('detail->>via' as never, 'auto-reply' as never).gte('created_at', day);
+            const list = (autos ?? []) as Array<{ created_at: string }>;
+            if (list.length >= 3 || list.some((a) => Date.now() - Date.parse(a.created_at) < 10 * 60_000)) autoOk = false;
+          }
+          let autoMessageId: number | null = null;
+          if (autoOk && draft) {
+            const r = await tgSend({ text: draft.text });
+            const j = r?.ok ? ((await r.json().catch(() => ({}))) as { result?: { message_id?: number } }) : null;
+            autoMessageId = Number(j?.result?.message_id) || null;
+            if (autoMessageId) {
+              await (db as any).from('member_actions').insert({ tg_id: tgId, member_no: member?.member_no ?? null, kind: 'nudge', status: 'done', done_by: 'bot', detail: { via: 'auto-reply', note: 'AI auto-reply (simple question)', text: draft.text } });
+            } else autoOk = false; // Telegram a refusé → on retombe sur le brouillon à valider
+          }
+          if (!autoOk && token && !recent?.length && !draft?.spam) {
+            // ACCUSÉ DE RÉCEPTION (route vers l'humain) — seulement quand la réponse n'est pas partie seule
+            await tgSend({ text: INBOX_ACK[loc], reply_markup: { inline_keyboard: [[{ text: INBOX_ACK_BTN[loc], url: SUPPORT_TG_URL }]] } });
+          }
+          if (draft?.spam) {
+            // SPAM (29/09/2026, décision Mathieu : « on ignore ») : ni accusé de réception, ni notification ; la ligne
+            // reste en base, marquée, pour que Mathieu puisse vérifier qu'aucun vrai message n'y est tombé.
+            if (rowId) await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft_intent: 'spam' } }).eq('id', rowId);
+            return;
+          }
+          if (draft && rowId) {
+            await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft: draft.text, draft_model: process.env.ALGORIA_REPLY_MODEL ?? 'haiku', draft_intent: draft.auto ? 'simple' : 'human', ...(autoOk && autoMessageId ? { auto_sent_at: new Date().toISOString(), auto_message_id: autoMessageId } : {}) } }).eq('id', rowId);
+          }
+          // Le propriétaire voit tout : le message (tout le paquet), et soit la réponse partie (avec « Supprimer »),
+          // soit le brouillon à valider (« Envoyer » / « Écarter »).
+          const who = from.username ? `@${from.username}` : from.first_name ?? 'quelqu’un';
+          if (autoOk && draft) {
+            await notifyOwner({
+              title: `🤖 Réponse automatique à ${who}`,
+              lines: [said.slice(0, 300), '', '↳ ' + draft.text],
+              path: '/', tag: 'owner-inbox',
+              ...(rowId ? { buttons: [{ text: '↩️ Supprimer la réponse', data: `ru:${rowId}` }] } : {}),
+            });
+          } else {
+            await notifyOwner({
+              title: `💬 ${who} a écrit au bot`,
+              lines: [said.slice(0, 300), ...(draft ? ['', '✍️ Réponse proposée :', draft.text] : [])],
+              path: '/', tag: 'owner-inbox',
+              ...(draft && rowId ? { buttons: [{ text: '✅ Envoyer la réponse', data: `rd:${rowId}` }, { text: '🗑 Écarter', data: `rx:${rowId}` }] } : {}),
+            });
+          }
+        } catch (e) {
+          console.error('[telegram] bot inbox reply failed:', (e as { message?: string })?.message ?? e);
+        }
+      });
     } catch (e) {
       console.error('[telegram] bot inbox failed:', (e as { message?: string })?.message ?? e);
     }

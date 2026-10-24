@@ -28,7 +28,7 @@ import { draftReply, lastDraftIssue } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
-import { INCIDENT_TOPIC, incidentActive, wasAffected } from './incident';
+import { INCIDENT_ESCALATE, INCIDENT_REPLY_NOTE, INCIDENT_TALK, INCIDENT_TOPIC, incidentActive, wasAffected } from './incident';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -395,6 +395,9 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const webinarLead = rows.some((r) => r.detail?.webinar_at && Date.now() - Date.parse(String(r.detail.webinar_at)) < WEBINAR_HOLD_MS);
   // 🔗 il demande le lien ou le code d'un broker : on le lui donne (voir brokerLinkAsk)
   const directAsk = newbie && !webinarLead && brokerLinkAsk(joined);
+  // 🚨 un membre touché par la nuit du 21-22/10, ou un message sur la nuit : la réponse d'attente de Mathieu, proposée
+  // (24/10/2026, voir INCIDENT_REPLY_NOTE et incidentHold plus bas)
+  const aboutIncident = incidentActive() && !webinarLead && ((await wasAffected(db, job.tg_id)) || INCIDENT_TALK.test(joined));
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
   // broker, le lien de l'app), une seule fois par conversation. Après l'accueil (bulle), ou dès son premier message
@@ -448,6 +451,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const firstNoWelcome = newbie && !ownerSpoke && !introduced && !legacy && !directAsk;
   if (legacy) note = 'This person probably already talked with Mathieu before (those older messages are not in the Recent exchange): never welcome them as a newcomer and never ask where they are from, answer their message directly.';
   if (directAsk && !introduced) note = DIRECT_NOTE;
+  if (aboutIncident) note = INCIDENT_REPLY_NOTE;
   if (webinarLead) note = WEBINAR_NOTE;
 
   const draft = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note });
@@ -492,11 +496,13 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   }
 
   const { data: recentAuto } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', 'auto').gte('created_at', iso(Date.now() - 3_600_000)).limit(MAX_AUTO_PER_HOUR + 1);
-  // 🚨 INCIDENT DU 21-22/10 (lib/member/incident.ts) : un membre touché, ou une question sur la nuit ou sur les
-  // résultats → toujours une carte, Mathieu répond lui-même. Le reste de l'onboarding repart en automatique.
+  // 🚨 INCIDENT DU 21-22/10 (lib/member/incident.ts). Depuis le 24/10, la nuit a sa réponse d'attente, rédigée avec les
+  // mots de Mathieu ; elle arrive chez lui en PROPOSITION (Mathieu : « au moins qu'il m'envoie les propositions de
+  // réponses »), un tap pour l'envoyer. Un retrait, une arnaque, un avocat : à lui, sans proposition imposée.
   const incidentHold = !incidentActive() ? null
-    : (await wasAffected(db, job.tg_id)) ? 'membre touché par l’incident du 22/10 : à toi de lui répondre'
-    : INCIDENT_TOPIC.test(joined) ? 'il parle de l’incident ou des résultats : à toi de répondre'
+    : aboutIncident && INCIDENT_ESCALATE.test(joined) ? 'incident : retrait, arnaque, avocat ou plainte : à toi de répondre'
+    : aboutIncident ? 'incident : réponse d’attente proposée, à toi de valider'
+    : INCIDENT_TOPIC.test(joined) ? 'il parle des résultats : à toi de répondre'
     : null;
   const why = !autopilot ? 'pilote automatique coupé'
     : webinarLead ? WEBINAR_WHY
