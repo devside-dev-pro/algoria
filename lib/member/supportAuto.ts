@@ -105,6 +105,14 @@ export function isPing(text: string): boolean {
 const HOLDING = /\b(let me check|i'?ll check|come back to you|get back to you|i'?ll look|look into it|i'?ll ask)\b/i;
 // un lien broker ou un montant de dépôt : jamais avant l'intro de Mathieu (20/10/2026)
 const BEFORE_INTRO = /partners\.raisefx|vtaffiliates|puprime\.partners|tradingsphere|xlence|\bdeposit\b|\$\s?\d{3}|\d{3}\s?\$/i;
+// 🔗 IL DEMANDE LE LIEN OU LE CODE D'UN BROKER (24/10/2026, Mathieu : Victor, inscrit dans l'app, écrit « what is the
+// referral code for VT markets » et reçoit la bulle d'accueil puis « where are you from ? » ; « il doit juste lui répondre :
+// oui, voici le lien »). Quelqu'un qui sait déjà ce qu'il veut reçoit ce qu'il demande : pas d'accueil, pas de question
+// sur son pays, le lien exact du broker, et la réponse peut partir seule.
+const BROKER_NAME = /\b(vt\s?markets?|vt|raise\s?fx|pu\s?prime|xlence|trading\s?sphere|broker)\b/i;
+const LINK_ASK = /\b(ref+er+al+|affiliate|partner|promo|bonus|invite|invitation|ib|cpa|link|code)\b/i;
+export const brokerLinkAsk = (t: string) => BROKER_NAME.test(t) && LINK_ASK.test(t);
+const DIRECT_NOTE = 'They ask for a partner broker\'s link or code: they already know what they want, so give it straight away, the way Mathieu would ("Yes, here\'s the link: …"). Copy the exact link from BROKER LINKS for the broker they name (the recommended one if they just say "the broker"). The CPA or affiliate code only if they say they already have an account at that broker; the bonus code if they ask for a bonus or promo code. One or two short lines. No welcome, never ask where they are from, no deposit amount. You may add that the app walks them through the rest.';
 // 🎤 LE MOT DU WEBINAIRE (24/10/2026) : sur la dernière slide du webinaire, Mathieu demande d'envoyer WEBINAR sur
 // Telegram pour une des 10 places du pack. Ces conversations sont les siennes, il prend chacun en privé : pas
 // d'accueil, de vocal ni d'intro du bot, jamais d'envoi seul, une alerte tout de suite (avec le rang) et une carte à
@@ -291,6 +299,8 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   // message d'après (c'est la réponse qui s'en charge)
   const said = firstTexts.map(detectCountry).find(Boolean) ?? null;
   if (said) return { status: 'done', result: { outcome: 'skip', reason: 'pays déjà dit', country_said: said } };
+  // il demande le lien d'un broker : la réponse le lui donne directement, sans accueil
+  if (firstTexts.some(brokerLinkAsk)) return { status: 'done', result: { outcome: 'skip', reason: 'il demande un lien de broker : la réponse le lui donne' } };
   // JAMAIS D'ACCUEIL EN TEXTE SEUL (19/10/2026, Mathieu) : pas de bulle enregistrée, ou Telegram la refuse → rien ne
   // part, la réponse arrive chez Mathieu en carte
   const situation = situationOf(member);
@@ -383,6 +393,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const legacy = !ownerSpoke && !welcomed && legacyContact(member, String(rows.find((r) => r.detail?.from === 'client')?.detail?.text ?? ''));
   // 🎤 il a envoyé WEBINAR il y a moins de 3 jours : la conversation est à Mathieu
   const webinarLead = rows.some((r) => r.detail?.webinar_at && Date.now() - Date.parse(String(r.detail.webinar_at)) < WEBINAR_HOLD_MS);
+  // 🔗 il demande le lien ou le code d'un broker : on le lui donne (voir brokerLinkAsk)
+  const directAsk = newbie && !webinarLead && brokerLinkAsk(joined);
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
   // broker, le lien de l'app), une seule fois par conversation. Après l'accueil (bulle), ou dès son premier message
@@ -433,8 +445,9 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
 
   // PREMIER CONTACT SANS ACCUEIL (pas de bulle enregistrée, ou l'accueil coupé) : pas de réponse en texte seul à un
   // nouveau venu, la carte va à Mathieu (19/10/2026)
-  const firstNoWelcome = newbie && !ownerSpoke && !introduced && !legacy;
+  const firstNoWelcome = newbie && !ownerSpoke && !introduced && !legacy && !directAsk;
   if (legacy) note = 'This person probably already talked with Mathieu before (those older messages are not in the Recent exchange): never welcome them as a newcomer and never ask where they are from, answer their message directly.';
+  if (directAsk && !introduced) note = DIRECT_NOTE;
   if (webinarLead) note = WEBINAR_NOTE;
 
   const draft = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note });
@@ -495,7 +508,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     : HOLDING.test(draft.text) ? 'réponse d’attente'
     : justWelcomed && /where (are|r) (you|u) from|which country|what country/i.test(draft.text) ? 'redemande son pays juste après l’accueil'
     // entre l'accueil et son intro : jamais de lien broker ni de montant de dépôt (20/10/2026, Riyaz)
-    : welcomed && !stepDone && !introduced && BEFORE_INTRO.test(draft.text) ? 'lien broker ou dépôt avant son intro (il n’a pas encore dit d’où il vient)'
+    : welcomed && !stepDone && !introduced && !directAsk && BEFORE_INTRO.test(draft.text) ? 'lien broker ou dépôt avant son intro (il n’a pas encore dit d’où il vient)'
     : media.length ? `il a aussi envoyé ${media.join(', ')}`
     : (recentAuto ?? []).length >= MAX_AUTO_PER_HOUR ? 'beaucoup de réponses automatiques dans l’heure'
     : !conn.canReply ? 'droit « Reply to messages » coupé dans Telegram Business'
