@@ -26,7 +26,7 @@
 // connexions dont le propriétaire est un admin (adminTgIds) — sinon on ignore tout, sans rédiger ni rien envoyer.
 import { adminTgIds } from './notifyOwner';
 import { appendAgentMemory } from './agentDocs';
-import { cancelPendingJobs, scheduleOnClientMessage } from './supportAuto';
+import { WEBINAR_HOLD_MS, WEBINAR_WORD, cancelPendingJobs, scheduleOnClientMessage, webinarAlert } from './supportAuto';
 
 export const BIZ_KIND = 'biz_msg';
 
@@ -170,10 +170,19 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
   const { data: past } = await db.from('member_actions').select('id').eq('tg_id', chatId).eq('kind', BIZ_KIND).limit(1);
   const { data: mrow } = await db.from('members').select('member_no,status').eq('tg_id', chatId).limit(1);
   const photo = photoId(m);
+  // 🎤 le mot du webinaire (lib/member/supportAuto.ts) : marqué et signalé à Mathieu la première fois en 3 jours
+  const webinar = WEBINAR_WORD.test(text);
+  let webinarFirst = false;
+  if (webinar) {
+    const { data: seen } = await db.from('member_actions').select('id').eq('tg_id', chatId).eq('kind', BIZ_KIND)
+      .not('detail->>webinar_at', 'is', null).gte('created_at', new Date(Date.now() - WEBINAR_HOLD_MS).toISOString()).limit(1);
+    webinarFirst = !seen?.length;
+  }
   // msg_id : pour marquer la conversation comme lue quand le bot l'a traitée seul (lib/member/supportAuto.ts)
-  const base = { from: 'client', text, conn: connId, name, username, msg_id: Number(m.message_id) || null, ...(photo ? { photo } : {}) };
+  const base = { from: 'client', text, conn: connId, name, username, msg_id: Number(m.message_id) || null, ...(photo ? { photo } : {}), ...(webinarFirst ? { webinar_at: new Date().toISOString() } : {}) };
   await db.from('member_actions').insert({ tg_id: chatId, member_no: mrow?.[0]?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'telegram', detail: base });
-  await scheduleOnClientMessage(db, { tgId: chatId, conn: connId, firstContact: !(past ?? []).length, firstName: m.chat.first_name ?? null, status: mrow?.[0]?.status ?? null });
+  if (webinarFirst) await webinarAlert(db, conn.userChatId, base, mrow?.[0] ?? null);
+  await scheduleOnClientMessage(db, { tgId: chatId, conn: connId, firstContact: !(past ?? []).length, firstName: m.chat.first_name ?? null, status: mrow?.[0]?.status ?? null, webinar });
 }
 
 /** La carte « à toi » chez Mathieu : la proposition, avec 📋 Copier / ✅ Envoyer / ❌ Écarter, pour un message client

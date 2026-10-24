@@ -105,15 +105,25 @@ export function isPing(text: string): boolean {
 const HOLDING = /\b(let me check|i'?ll check|come back to you|get back to you|i'?ll look|look into it|i'?ll ask)\b/i;
 // un lien broker ou un montant de dépôt : jamais avant l'intro de Mathieu (20/10/2026)
 const BEFORE_INTRO = /partners\.raisefx|vtaffiliates|puprime\.partners|tradingsphere|xlence|\bdeposit\b|\$\s?\d{3}|\d{3}\s?\$/i;
+// 🎤 LE MOT DU WEBINAIRE (24/10/2026) : sur la dernière slide du webinaire, Mathieu demande d'envoyer WEBINAR sur
+// Telegram pour une des 10 places du pack. Ces conversations sont les siennes, il prend chacun en privé : pas
+// d'accueil, de vocal ni d'intro du bot, jamais d'envoi seul, une alerte tout de suite (avec le rang) et une carte à
+// chaque message, pendant 3 jours.
+export const WEBINAR_WORD = /\bwebina(?:rs?|ire)\b/i;
+export const WEBINAR_HOLD_MS = 3 * 86_400_000;
+const WEBINAR_WHY = '🎤 vient du webinaire : à toi de le prendre en privé';
+const WEBINAR_NOTE = 'This person just watched Mathieu’s live webinar and sent the word WEBINAR on Telegram to claim one of the 10 spots of the webinar pack (Algoria free with a partner broker, a 100% deposit bonus that is trading credit and not cash, a private 1-to-1 call with Mathieu, the VIP Welcome Guide). Mathieu takes each of them personally. Write a short, warm reply as Mathieu: thank them for coming to the webinar and tell them he will set everything up with them personally in a moment. Do not welcome them as a stranger, do not ask where they are from, no broker link, no deposit amount, and never say that their spot is confirmed.';
 const iso = (ms: number) => new Date(ms).toISOString();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ── PLANIFIER (appelé par le webhook, lib/member/businessInbox.ts) ─────────────────────────────────────
 
 /** Un client vient d'écrire : accueil (premier contact) et réponse, repoussée à ~75 s après son dernier message. */
-export async function scheduleOnClientMessage(db: Db, o: { tgId: number; conn: string; firstContact: boolean; firstName: string | null; status: string | null }): Promise<void> {
+export async function scheduleOnClientMessage(db: Db, o: { tgId: number; conn: string; firstContact: boolean; firstName: string | null; status: string | null; webinar?: boolean }): Promise<void> {
   const now = Date.now();
-  if (o.firstContact && (await flag(db, 'welcome')) && !NO_WELCOME.has(o.status ?? '')) {
+  // 🎤 WEBINAR : ni accueil ni lien de l'app, même déjà prévus (« hi » puis « WEBINAR » dans la foulée)
+  if (o.webinar) await db.from('support_jobs').update({ status: 'canceled', result: { reason: 'webinar' }, updated_at: iso(now) }).eq('tg_id', o.tgId).in('kind', ['welcome', 'link']).eq('status', 'pending');
+  if (o.firstContact && !o.webinar && (await flag(db, 'welcome')) && !NO_WELCOME.has(o.status ?? '')) {
     const { data: w } = await db.from('support_jobs').select('id').eq('tg_id', o.tgId).eq('kind', 'welcome').limit(1);
     if (!w?.length) await db.from('support_jobs').insert({ tg_id: o.tgId, conn: o.conn, kind: 'welcome', due_at: iso(now + WELCOME_MIN_MS + Math.floor(Math.random() * WELCOME_SPREAD_MS)), payload: { firstName: o.firstName } });
   }
@@ -371,6 +381,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const welcomed = rows.some((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]');
   // rien d'enregistré de Mathieu, mais un compte de l'app de plus de 14 jours (ou d'avant le 29/09) : sans doute un ancien contact
   const legacy = !ownerSpoke && !welcomed && legacyContact(member, String(rows.find((r) => r.detail?.from === 'client')?.detail?.text ?? ''));
+  // 🎤 il a envoyé WEBINAR il y a moins de 3 jours : la conversation est à Mathieu
+  const webinarLead = rows.some((r) => r.detail?.webinar_at && Date.now() - Date.parse(String(r.detail.webinar_at)) < WEBINAR_HOLD_MS);
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
   // broker, le lien de l'app), une seule fois par conversation. Après l'accueil (bulle), ou dès son premier message
@@ -380,7 +392,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   let voiced = false;
   let introduced = false;
   const stepDone = rows.some((r) => r.detail?.via === 'country_voice' || r.detail?.via === 'intro');
-  if (said && canSend && newbie && !stepDone && (welcomed || (!ownerSpoke && !legacy))) {
+  if (said && canSend && newbie && !stepDone && !webinarLead && (welcomed || (!ownerSpoke && !legacy))) {
     const v = await pickVoice(db, said);
     if (v || welcomed) {
       const biz = { business_connection_id: job.conn, chat_id: job.tg_id };
@@ -423,6 +435,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // nouveau venu, la carte va à Mathieu (19/10/2026)
   const firstNoWelcome = newbie && !ownerSpoke && !introduced && !legacy;
   if (legacy) note = 'This person probably already talked with Mathieu before (those older messages are not in the Recent exchange): never welcome them as a newcomer and never ask where they are from, answer their message directly.';
+  if (webinarLead) note = WEBINAR_NOTE;
 
   const draft = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note });
   // le pays (stats, fiche) et le lead chaud
@@ -433,7 +446,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   }
   // 🔥 un PROSPECT qui n'a pas encore commencé, jamais un membre déjà en copie ni une plainte (19/10/2026 : Chris,
   // membre live, « my balance on the app is 1061 but on my MT5 it's 978 » était sorti en lead chaud)
-  const hot = newbie && !SENSITIVE.test(joined) && (hotAmount(joined) || !!draft?.hot);
+  const hot = newbie && !webinarLead && !SENSITIVE.test(joined) && (hotAmount(joined) || !!draft?.hot);
   if (hot && !rows.some((r) => r.detail?.hot_at)) {
     base = { ...base, hot_at: iso(Date.now()) };
     await hotAlert(conn.userChatId, base, member, joined, country);
@@ -442,8 +455,13 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const extra = { country, voiced, introduced, hot, images: images.length };
 
   if (!draft) {
-    await reviewCard(db, conn, last.id, base, member, null, `pas de proposition (${lastDraftIssue() ?? 'modèle indisponible ou réponse refusée'})`);
+    await reviewCard(db, conn, last.id, base, member, null, webinarLead ? WEBINAR_WHY : `pas de proposition (${lastDraftIssue() ?? 'modèle indisponible ou réponse refusée'})`);
     return { status: 'done', result: { outcome: 'review', reason: 'no draft', ...extra } };
+  }
+  // 🎤 « WEBINAR » tout seul n'appelle pas de réponse du modèle, mais il appelle Mathieu
+  if (webinarLead && (draft.skip || draft.spam)) {
+    await reviewCard(db, conn, last.id, base, member, null, WEBINAR_WHY);
+    return { status: 'done', result: { outcome: 'review', reason: 'webinar', ...extra } };
   }
   // un nouveau venu qui n'a reçu AUCUN accueil ne reste jamais sans rien, même pour un simple « hello »
   if (draft.skip && legacy) {
@@ -468,6 +486,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     : INCIDENT_TOPIC.test(joined) ? 'il parle de l’incident ou des résultats : à toi de répondre'
     : null;
   const why = !autopilot ? 'pilote automatique coupé'
+    : webinarLead ? WEBINAR_WHY
     : incidentHold ? incidentHold
     : manual ? 'tu as écrit dans cette conversation il y a moins de 2 h'
     : firstNoWelcome ? 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir'
@@ -673,6 +692,22 @@ async function hotAlert(chatId: number, base: Record<string, unknown>, member: M
   await tg('sendMessage', {
     chat_id: chatId, parse_mode: 'HTML', disable_web_page_preview: true,
     text: `🔥 <b>Lead chaud</b> · ${esc(who)}${country ? ` ${flagOf(country)}` : ''}${esc(tag)}\n« ${esc(text.slice(0, 400))} »\n\nUn vocal de toi dans sa conversation ? Le bot continue de lui répondre normalement.`,
+    ...(username ? { reply_markup: { inline_keyboard: [[{ text: '💬 Ouvrir la conversation', url: `https://t.me/${username}` }]] } } : {}),
+  });
+}
+
+/** 🎤 Il a envoyé WEBINAR : Mathieu est prévenu tout de suite, une fois par conversation, avec son rang sur 12 h
+ *  (les 10 places partent dans l'ordre où il les prend en privé, après le Zoom). */
+export async function webinarAlert(db: Db, chatId: number, base: Record<string, unknown>, member: { member_no?: number | null; status?: string | null } | null): Promise<void> {
+  const { tg } = await import('./businessInbox');
+  const { count } = await db.from('member_actions').select('id', { count: 'exact', head: true }).eq('kind', BIZ_KIND)
+    .not('detail->>webinar_at', 'is', null).gte('created_at', iso(Date.now() - 12 * 3_600_000));
+  const username = base.username ? String(base.username) : '';
+  const who = username ? `@${username}` : String(base.name ?? 'Client');
+  const tag = member?.member_no != null ? ` · #${member.member_no} ${member.status ?? ''}`.trimEnd() : ' · prospect';
+  await tg('sendMessage', {
+    chat_id: chatId, parse_mode: 'HTML', disable_web_page_preview: true,
+    text: `🎤 <b>WEBINAR</b> · demande n° ${count ?? 1} sur 12 h\n💬 <b>${esc(who)}</b>${esc(tag)}\n« ${esc(String(base.text ?? '').slice(0, 300))} »\n\nIl veut une des 10 places : le bot ne lui envoie rien, à toi de le prendre en privé.`,
     ...(username ? { reply_markup: { inline_keyboard: [[{ text: '💬 Ouvrir la conversation', url: `https://t.me/${username}` }]] } } : {}),
   });
 }
