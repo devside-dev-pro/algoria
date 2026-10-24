@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     `DTSTART:${stamp(start)}`,
     `DTEND:${stamp(start + 45 * 60_000)}`,
     'SUMMARY:Algoria live webinar with Mathieu',
-    'DESCRIPTION:Trading gold without the 6 hours a day. The Zoom link is sent to you on Telegram 1 hour before.',
+    'DESCRIPTION:How an AI trades gold on your own account. The Zoom link is sent to you on Telegram 1 hour before.',
     'URL:https://getalgoria.com/webinar',
     'BEGIN:VALARM', 'TRIGGER:-PT30M', 'ACTION:DISPLAY', 'DESCRIPTION:Algoria webinar in 30 minutes', 'END:VALARM',
     'END:VEVENT', 'END:VCALENDAR',

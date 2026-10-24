@@ -9,10 +9,11 @@ import { LocalTime, SeatButton } from './parts';
 
 export const dynamic = 'force-dynamic';
 // l'aperçu du lien quand il est partagé dans le canal ou en DM (sinon celui de la page d'accueil)
-const SHARE = { title: 'Live webinar: trading gold without the 6 hours a day', description: '45 minutes live with Mathieu, founder of Algoria. Free, on Zoom.' };
+// l'accroche se comprend sans contexte (Mathieu, 24/10 : « les 6 heures par jour », c'est son histoire, pas une accroche)
+const SHARE = { title: 'Live webinar: how an AI trades gold on your own account', description: '45 minutes live with Mathieu, founder of Algoria. Free, on Zoom.' };
 export const metadata: Metadata = {
   title: 'Live webinar · Algoria',
-  description: 'Trading gold without the 6 hours a day: 45 minutes live with Mathieu, founder of Algoria.',
+  description: 'How an AI trades gold on your own account: 45 minutes live with Mathieu, founder of Algoria.',
   openGraph: { ...SHARE, url: 'https://getalgoria.com/webinar', siteName: 'Algoria AI', type: 'website', images: [{ url: 'https://getalgoria.com/webinar/mathieu.jpg', width: 640, height: 800, alt: 'Mathieu, founder of Algoria' }] },
   twitter: { card: 'summary_large_image', ...SHARE, images: ['https://getalgoria.com/webinar/mathieu.jpg'] },
 };
@@ -57,11 +58,11 @@ export default async function Webinar() {
         </span>
 
         <h1 style={{ fontSize: 34, lineHeight: 1.12, fontWeight: 800, margin: 0 }}>
-          Trading gold without the{' '}
-          <span style={{ background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>6 hours a day</span>
+          How an AI trades gold{' '}
+          <span style={{ background: 'linear-gradient(90deg,#2be3f5,#2e8bf0)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>on your own account</span>
         </h1>
         <p style={{ fontSize: 15.5, color: 'var(--muted)', margin: 0, maxWidth: 420, lineHeight: 1.55 }}>
-          45 minutes live with Mathieu, founder of Algoria: how an AI trades gold, and how your own account can copy it.
+          45 minutes live with Mathieu, founder of Algoria: his story, the real app on screen, real past results, and your questions.
         </p>
 
         <div style={{ ...card, position: 'relative', overflow: 'hidden', aspectRatio: '4 / 5', maxWidth: 360 }}>
