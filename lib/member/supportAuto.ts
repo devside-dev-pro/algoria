@@ -395,8 +395,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const webinarLead = rows.some((r) => r.detail?.webinar_at && Date.now() - Date.parse(String(r.detail.webinar_at)) < WEBINAR_HOLD_MS);
   // 🔗 il demande le lien ou le code d'un broker : on le lui donne (voir brokerLinkAsk)
   const directAsk = newbie && !webinarLead && brokerLinkAsk(joined);
-  // 🚨 un membre touché par la nuit du 21-22/10, ou un message sur la nuit : la réponse d'attente de Mathieu part seule
-  // (24/10/2026, voir INCIDENT_REPLY_NOTE) ; un retrait, une arnaque, un avocat restent à lui
+  // 🚨 un membre touché par la nuit du 21-22/10, ou un message sur la nuit : la réponse d'attente de Mathieu, proposée
+  // (24/10/2026, voir INCIDENT_REPLY_NOTE et incidentHold plus bas)
   const aboutIncident = incidentActive() && !webinarLead && ((await wasAffected(db, job.tg_id)) || INCIDENT_TALK.test(joined));
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
@@ -496,11 +496,13 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   }
 
   const { data: recentAuto } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', 'auto').gte('created_at', iso(Date.now() - 3_600_000)).limit(MAX_AUTO_PER_HOUR + 1);
-  // 🚨 INCIDENT DU 21-22/10 (lib/member/incident.ts). Depuis le 24/10, la nuit elle-même a sa réponse d'attente, qui part
-  // seule ; restent à Mathieu : un retrait, une arnaque, un avocat, une plainte, et les questions sur les résultats.
+  // 🚨 INCIDENT DU 21-22/10 (lib/member/incident.ts). Depuis le 24/10, la nuit a sa réponse d'attente, rédigée avec les
+  // mots de Mathieu ; elle arrive chez lui en PROPOSITION (Mathieu : « au moins qu'il m'envoie les propositions de
+  // réponses »), un tap pour l'envoyer. Un retrait, une arnaque, un avocat : à lui, sans proposition imposée.
   const incidentHold = !incidentActive() ? null
     : aboutIncident && INCIDENT_ESCALATE.test(joined) ? 'incident : retrait, arnaque, avocat ou plainte : à toi de répondre'
-    : !aboutIncident && INCIDENT_TOPIC.test(joined) ? 'il parle des résultats : à toi de répondre'
+    : aboutIncident ? 'incident : réponse d’attente proposée, à toi de valider'
+    : INCIDENT_TOPIC.test(joined) ? 'il parle des résultats : à toi de répondre'
     : null;
   const why = !autopilot ? 'pilote automatique coupé'
     : webinarLead ? WEBINAR_WHY
@@ -508,9 +510,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     : manual ? 'tu as écrit dans cette conversation il y a moins de 2 h'
     : firstNoWelcome ? 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir'
     : !draft.auto ? 'Claude n’est pas sûr'
-    // la réponse d'attente de l'incident parle de pertes et dit « je reviens vers toi » : c'est voulu
-    : !aboutIncident && SENSITIVE.test(joined) ? 'sujet sensible (argent, plainte, paiement…)'
-    : !aboutIncident && HOLDING.test(draft.text) ? 'réponse d’attente'
+    : SENSITIVE.test(joined) ? 'sujet sensible (argent, plainte, paiement…)'
+    : HOLDING.test(draft.text) ? 'réponse d’attente'
     : justWelcomed && /where (are|r) (you|u) from|which country|what country/i.test(draft.text) ? 'redemande son pays juste après l’accueil'
     // entre l'accueil et son intro : jamais de lien broker ni de montant de dépôt (20/10/2026, Riyaz)
     : welcomed && !stepDone && !introduced && !directAsk && BEFORE_INTRO.test(draft.text) ? 'lien broker ou dépôt avant son intro (il n’a pas encore dit d’où il vient)'

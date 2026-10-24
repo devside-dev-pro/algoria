@@ -35,7 +35,8 @@ export const INCIDENT_TOPIC = /\b(blown|wiped|liquidat\w*|margin call|stop ?out|
  *  patienter et les prévenir que j'ai mis en place des sécurités supplémentaires, que j'ai contacté le broker, que
  *  j'attends un retour, qu'ils ne s'inquiètent pas, on devrait trouver des solutions dans les prochains jours »).
  *  Un message sur la nuit elle-même (plus étroit que INCIDENT_TOPIC, qui couvre aussi les questions sur les résultats),
- *  ou n'importe quel message d'un membre touché : le bot répond seul avec ce message d'attente. */
+ *  ou n'importe quel message d'un membre touché : le bot rédige ce message d'attente, et il arrive chez Mathieu en
+ *  proposition (« au moins qu'il m'envoie les propositions de réponses »). */
 export const INCIDENT_TALK = /\b(incident|blown|wiped|liquidat\w*|margin call|stop ?out|stopped out|account (?:was |got |is |has been )?(?:closed|gone|empty|blown|wiped)|what happened|last night|yesterday night|crash\w*|bug|glitch|malfunction\w*|compensat\w*|refund\w*|money back|lost (?:my|all|everything|it|money)|losses?)\b/i;
 /** … sauf ce qui reste à Mathieu même là : un retrait, une arnaque, un avocat, une plainte. */
 export const INCIDENT_ESCALATE = /\b(withdraw\w*|scam\w*|fraud\w*|stolen|hack\w*|police|lawyer|solicitor|court|sue|legal action|chargeback|regulator|fsca|fca|ritir\w*|truffa)\b/i;
