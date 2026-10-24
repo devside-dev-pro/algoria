@@ -13,7 +13,7 @@
 // LES SESSIONS : table webinar_sessions (migration 0035), une ligne par webinaire : id = sa date (ex. 2026-10-28),
 // début en UTC, lien Zoom. Le lien Zoom n'est jamais sur la page publique : il part en privé aux inscrits.
 import { APP_URL } from './i18n';
-import { notifyOwner } from './notifyOwner';
+import { adminTgIds, notifyOwner } from './notifyOwner';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -140,34 +140,105 @@ export async function runWebinarReminders(db: Db): Promise<{ sessions: number; s
   return { sessions: (ss ?? []).length, sent };
 }
 
+// ── LE PILOTE AUTOMATIQUE : LE CALENDRIER ET LES RÉGLAGES ───────────────────────────────────────────────────────
+//
+// Mathieu, 24/10/2026 : « il faut un système automatique qui se répète toutes les semaines, je vais pas à chaque fois
+// te dire de déclencher les invitations, mettre la bonne date… ». Les sessions des 8 prochains jours se créent seules
+// (WEEKLY), avec le lien de la réunion Zoom récurrente (le même chaque semaine). Une session annulée (active = false)
+// n'est jamais recréée. Mathieu pilote en écrivant au bot (handleWebinarAdmin) : « webinar » pour l'état, « webinar
+// off / on », « webinar invites on / off », « webinar skip », « webinar zoom <lien> ».
+
+/** Les webinaires de chaque semaine, heure du Royaume-Uni (0 = dimanche, 3 = mercredi). */
+const WEEKLY: Array<{ weekday: number; at: string }> = [{ weekday: 3, at: '19:00' }, { weekday: 0, at: '19:00' }];
+const AHEAD_DAYS = 8;
+/** Le premier webinaire (Mathieu : mercredi 28/10) : aucune session automatique avant. */
+const FIRST_DAY = '2026-10-28';
+
+async function setting(db: Db, key: string, fallback: string): Promise<string> {
+  const { data } = await db.from('support_settings').select('value').eq('key', key).limit(1);
+  return String((data?.[0] as { value?: string } | undefined)?.value ?? fallback).trim().toLowerCase();
+}
+const setSetting = (db: Db, key: string, value: string, by: string) =>
+  db.from('support_settings').upsert({ key, value, updated_at: iso(Date.now()), updated_by: by }, { onConflict: 'key' });
+
+/** Décalage de Londres par rapport à UTC, en minutes (0 l'hiver, +60 l'été). */
+const londonOffsetMin = (ms: number) => {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/London', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(ms);
+  const g = (t: string) => Number(p.find((x) => x.type === t)?.value);
+  return (Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute')) - ms) / 60_000;
+};
+/** Instant (ms) d'une heure du Royaume-Uni 'HH:MM' le jour `day`, juste aussi les jours de changement d'heure. */
+function ukTimeMs(day: string, hhmm: string): number {
+  const naive = Date.parse(`${day}T${hhmm}:00Z`);
+  return naive - londonOffsetMin(naive - londonOffsetMin(naive) * 60_000) * 60_000;
+}
+
+/** Crée les sessions des 8 prochains jours qui manquent (rien si Mathieu a coupé les webinaires). Appelé par la cron. */
+export async function ensureSessions(db: Db): Promise<number> {
+  if ((await setting(db, 'webinars', 'on')) === 'off') return 0;
+  const now = Date.now();
+  const want: Array<{ id: string; starts_at: string }> = [];
+  for (let d = 0; d <= AHEAD_DAYS; d++) {
+    const day = ukDate(now + d * 86_400_000);
+    if (day < FIRST_DAY) continue;
+    const wd = new Date(`${day}T12:00:00Z`).getUTCDay();
+    for (const w of WEEKLY) {
+      const at = ukTimeMs(day, w.at);
+      if (w.weekday === wd && at > now) want.push({ id: day, starts_at: iso(at) });
+    }
+  }
+  if (!want.length) return 0;
+  const { data: have } = await db.from('webinar_sessions').select('id').in('id', want.map((w) => w.id));
+  const known = new Set(((have ?? []) as Array<{ id: string }>).map((h) => h.id));
+  const missing = want.filter((w) => !known.has(w.id));
+  if (!missing.length) return 0;
+  // le lien de la réunion Zoom récurrente : celui de la dernière session qui en avait un
+  const { data: last } = await db.from('webinar_sessions').select('zoom_url').not('zoom_url', 'is', null).order('starts_at', { ascending: false }).limit(1);
+  const zoom = (last?.[0] as { zoom_url?: string } | undefined)?.zoom_url ?? null;
+  await db.from('webinar_sessions').upsert(missing.map((m) => ({ ...m, zoom_url: zoom })), { onConflict: 'id', ignoreDuplicates: true });
+  return missing.length;
+}
+
 // ── LE SUPPORT : CE QU'IL SAIT DU PROCHAIN WEBINAIRE ─────────────────────────────────────────────────────────────
 
 let factCache: { at: number; text: string } | null = null;
 /** Le bloc de faits du support (lib/member/replyDraft.ts) : la prochaine session, à l'heure près, et quand en parler.
- *  Calculé depuis la base (cache 60 s) : le knowledge de Mathieu n'a jamais une date en retard. */
+ *  Calculé depuis la base (cache 60 s) : le support n'a jamais une date en retard, et les règles du webinaire vivent
+ *  ici, avec le webinaire, plutôt que dans le knowledge. */
 export async function webinarFacts(db: Db): Promise<string> {
   if (factCache && Date.now() - factCache.at < 60_000) return factCache.text;
   const s = (await upcomingSessions(db, 1).catch(() => []))[0];
-  const text = !s
-    ? 'LIVE WEBINARS: no date is scheduled right now. Never invent one; if they ask, the next dates are announced in the Algoria channel.'
-    : [
-        `NEXT LIVE WEBINAR (Mathieu live on Zoom, in English, free, 45 minutes: his story, what the AI is and how it trades gold, the real app on screen, real past results, live questions): ${ukDay(s.starts_at)} at ${ukHour(s.starts_at)} UK time (${saHour(s.starts_at)} in South Africa)${Date.parse(s.starts_at) <= Date.now() ? '. IT IS LIVE RIGHT NOW: saving a seat sends the Zoom link straight away' : ''}. Seat: ${WEBINAR_PAGE} (one tap opens Telegram, START, done; the Zoom link comes privately 1 hour before). At the end, a pack reserved for 10 people who are there live: never say what is in it and never promise a spot, it is revealed live.`,
-        'WHEN TO INVITE THEM: a prospect who hesitates, doubts (scam ? martingale ?), wants to "think about it", wants to see who is behind Algoria or how the AI works, or is not ready to start yet: one short line inviting them, with the link. At most once per conversation (check the recent exchange), never to a member who is live, never between the welcome and their country. Never send a Zoom link yourself.',
-      ].join('\n');
+  const text = [
+    !s
+      ? 'LIVE WEBINARS: no date is scheduled right now. Never invent one; if they ask, the next dates are announced in the Algoria channel.'
+      : `NEXT LIVE WEBINAR (Mathieu live on Zoom, in English, free, 45 minutes: his story, gold trader since 2016, what the AI is and why 2026 changes everything, how Algoria works with real screenshots of the app and MetaTrader, real past results, live questions): ${ukDay(s.starts_at)} at ${ukHour(s.starts_at)} UK time (${saHour(s.starts_at)} in South Africa)${Date.parse(s.starts_at) <= Date.now() ? '. IT IS LIVE RIGHT NOW: saving a seat sends the Zoom link straight away' : ''}. Seat: ${WEBINAR_PAGE} (one tap opens Telegram, START, done; the Zoom link comes privately 1 hour before, then again when it starts). At the end, a pack reserved for 10 people who are there live: never say what is in it and never promise a spot, it is revealed live. After the webinar, people who want it write WEBINAR to Mathieu.`,
+    'WHEN TO INVITE THEM: a prospect who hesitates, doubts (scam ? martingale ?), wants to "think about it", wants to see who is behind Algoria or how the AI works, or is not ready to start yet: one short line inviting them, with the link. At most once per conversation (check the recent exchange), never to a member who is live, never between the welcome and their country. Someone who missed it: invite them to the next one. Never send a Zoom link yourself. (The knowledge rule "do not talk about the lives yet" is about TikTok lives only: these Zoom webinars are to be talked about.)',
+  ].join('\n');
   factCache = { at: Date.now(), text };
   return text;
 }
 
 // ── L'INVITATION DES PROSPECTS PAR LE BOT ────────────────────────────────────────────────────────────────────────
 //
-// Mathieu, 24/10/2026 : « un message du bot pour prévenir les prospects du webinaire ». Les prospects (status
-// 'onboarding', ~3 100) ont tous démarré le bot pour se connecter à l'app : il peut leur écrire. Rien ne part tant que
-// la session n'a pas d'invite_at (posé quand Mathieu a validé le texte et l'heure). Ensuite la cron du webinaire envoie
-// par lots (~45 s par passage, toutes les 5 min), les plus récents d'abord ; chaque personne est réservée dans
-// webinar_invites AVANT l'envoi : jamais deux invitations pour la même session. Le bouton inscrit en un tap, sans
-// quitter la conversation (handleWebinarCallback). Mathieu reçoit le bilan quand tout le monde est passé.
+// LES RÈGLES (Mathieu : « qu'on ne se fasse pas ban le bot à spammer des milliers de gens, il faut être méthodique ») :
+//   · le jour même, de 7 h à 2 h avant le début (12h-17h UK pour 19h) : un prospect invité à midi a encore le
+//     webinaire en tête le soir, et le rappel d'1 h puis celui du début le ramènent ;
+//   · seulement les prospects (status 'onboarding'), les plus récents d'abord (les plus chauds) ;
+//   · une invitation par personne toutes les 3 semaines au plus, jamais quelqu'un qui a bloqué le bot
+//     (webinar_invite_batch, migration 0036) ;
+//   · 500 par session au plus : en 3 semaines, tout le fichier a reçu une invitation, les nouveaux inscrits d'abord ;
+//   · ~8 messages par seconde (Telegram en tolère 30) ;
+//   · COUPE-CIRCUIT : si plus de 4 % des invités d'une session bloquent le bot dans la foulée, la campagne s'arrête et
+//     Mathieu est prévenu. C'est le taux de blocage qui fait passer un bot pour du spam, pas le volume.
+// Chaque personne est réservée dans webinar_invites AVANT l'envoi : jamais deux invitations pour la même session. Le
+// bouton inscrit en un tap, sans quitter la conversation (handleWebinarCallback). Mathieu reçoit le bilan à la fin.
+// L'interrupteur 'webinar_invites' coupe tout ; il reste sur 'off' tant que Mathieu n'a pas validé.
 
-const INVITE_BATCH = 150;
+const INVITE_FROM = 7 * HOUR;
+const INVITE_UNTIL = 2 * HOUR;
+const INVITE_CAP = 500;
+const INVITE_BATCH = 100;
+const BREAKER = { minSent: 80, rate: 0.04 };
 const firstName = (n: string | null) => { const f = String(n ?? '').trim().split(/\s+/)[0] ?? ''; return /^[\p{L}][\p{L}'-]{1,20}$/u.test(f) ? f : ''; };
 
 /** Le texte de l'invitation (anglais, la voix de Mathieu). */
@@ -199,31 +270,44 @@ async function sendInvite(token: string, chatId: number, text: string, sessionId
   return { ok: false, error: j.description ?? `HTTP ${r.status}`, retry: r.status === 429 || r.status >= 500 };
 }
 
+/** Les chiffres de la campagne d'une session. */
+async function inviteStats(db: Db, sessionId: string): Promise<{ total: number; sent: number; unreachable: number; blocked: number; registered: number }> {
+  const count = async (q: (b: Db) => Db) => (await q(db.from('webinar_invites').select('tg_id', { count: 'exact', head: true }).eq('session_id', sessionId))).count ?? 0;
+  const [total, sent, blocked, reg] = await Promise.all([
+    count((b) => b), count((b) => b.is('error', null)), count((b) => b.not('blocked_at', 'is', null)),
+    db.from('webinar_registrations').select('id', { count: 'exact', head: true }).eq('session_id', sessionId),
+  ]);
+  return { total, sent, unreachable: total - sent, blocked, registered: reg.count ?? 0 };
+}
+
 /** Un passage d'invitations, jusqu'à `until` (ms). Appelé par la cron du webinaire, après les rappels. */
 export async function runWebinarInvites(db: Db, until: number): Promise<{ invited: number; failed: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const now = Date.now();
-  // pas d'invitation à moins de 2 h du début : les inscrits de dernière minute viennent du canal et de l'app
-  const { data: ss } = await db.from('webinar_sessions').select('id,starts_at,zoom_url').eq('active', true).not('invite_at', 'is', null)
-    .lte('invite_at', iso(now)).is('invite_done_at', null).gt('starts_at', iso(now + 2 * HOUR)).order('starts_at', { ascending: true }).limit(1);
+  if (!token || (await setting(db, 'webinar_invites', 'off')) !== 'on') return { invited: 0, failed: 0 };
+  const { data: ss } = await db.from('webinar_sessions').select('id,starts_at,zoom_url').eq('active', true).is('invite_done_at', null)
+    .gt('starts_at', iso(now + INVITE_UNTIL)).lte('starts_at', iso(now + INVITE_FROM)).order('starts_at', { ascending: true }).limit(1);
   const s = ss?.[0] as WebinarSession | undefined;
-  if (!s || !token) return { invited: 0, failed: 0 };
+  if (!s) return { invited: 0, failed: 0 };
+  // la campagne se ferme une seule fois, et Mathieu reçoit le bilan
+  const close = async (note: string, title: string) => {
+    const { data: closed } = await db.from('webinar_sessions').update({ invite_done_at: iso(Date.now()), invite_note: note }).eq('id', s.id).is('invite_done_at', null).select('id');
+    if (!closed?.length) return;
+    const st = await inviteStats(db, s.id);
+    await notifyOwner({ title, lines: [`${ukDay(s.starts_at)}, ${ukHour(s.starts_at)} (UK)`, `${st.sent} invitations envoyées · ${st.unreachable} injoignables (bot déjà bloqué, compte supprimé)`, `${st.blocked} ont bloqué le bot après l’invitation`, `Inscrits à ce jour : ${st.registered}`], tag: 'webinar' });
+  };
   let invited = 0, failed = 0;
   while (Date.now() < until) {
-    const { data: batch, error } = await db.rpc('webinar_invite_batch', { p_session: s.id, p_limit: INVITE_BATCH });
-    if (error) throw new Error(error.message);
-    const people = (batch ?? []) as Array<{ tg_id: number; tg_name: string | null }>;
-    if (!people.length) {
-      // tout le monde est passé : marqué une seule fois, et Mathieu reçoit le bilan
-      const { data: closed } = await db.from('webinar_sessions').update({ invite_done_at: iso(Date.now()) }).eq('id', s.id).is('invite_done_at', null).select('id');
-      if (closed?.length) {
-        const count = async (q: (b: Db) => Db) => (await q(db.from('webinar_invites').select('tg_id', { count: 'exact', head: true }).eq('session_id', s.id))).count ?? 0;
-        const [ok, ko] = await Promise.all([count((b) => b.is('error', null)), count((b) => b.not('error', 'is', null))]);
-        const { count: regs } = await db.from('webinar_registrations').select('id', { count: 'exact', head: true }).eq('session_id', s.id);
-        await notifyOwner({ title: `🎤 Invitations au webinar envoyées : ${ok} prospects`, lines: [`${ukDay(s.starts_at)}, ${ukHour(s.starts_at)} (UK)`, `${ko} injoignables (bot bloqué ou compte supprimé).`, `Inscrits à ce jour : ${regs ?? 0}.`], tag: 'webinar' });
-      }
+    const st = await inviteStats(db, s.id);
+    if (st.sent >= BREAKER.minSent && st.blocked / st.sent > BREAKER.rate) {
+      await close('coupe-circuit', `⚠️ Invitations au webinar arrêtées : ${Math.round((100 * st.blocked) / st.sent)} % des invités ont bloqué le bot`);
       break;
     }
+    const room = INVITE_CAP - st.total;
+    const { data: batch, error } = room > 0 ? await db.rpc('webinar_invite_batch', { p_session: s.id, p_limit: Math.min(INVITE_BATCH, room) }) : { data: [], error: null };
+    if (error) throw new Error(error.message);
+    const people = (batch ?? []) as Array<{ tg_id: number; tg_name: string | null }>;
+    if (!people.length) { await close(room > 0 ? 'tout le monde' : 'plafond', '🎤 Invitations au webinar terminées'); break; }
     // réservés AVANT l'envoi : seules les lignes réellement créées ici partent
     const { data: claimed } = await db.from('webinar_invites').upsert(people.map((p) => ({ session_id: s.id, tg_id: p.tg_id })), { onConflict: 'session_id,tg_id', ignoreDuplicates: true }).select('tg_id');
     const mine = new Set(((claimed ?? []) as Array<{ tg_id: number }>).map((r) => Number(r.tg_id)));
@@ -243,6 +327,65 @@ export async function runWebinarInvites(db: Db, until: number): Promise<{ invite
     if (stop) break;
   }
   return { invited, failed };
+}
+
+/** Quelqu'un a bloqué le bot (my_chat_member « kicked », webhook) : noté sur ses invitations des 3 derniers jours. Il
+ *  n'en recevra plus, et la campagne en cours le compte pour son coupe-circuit. */
+export async function noteBotBlocked(db: Db, tgId: number): Promise<void> {
+  await db.from('webinar_invites').update({ blocked_at: iso(Date.now()) }).eq('tg_id', tgId).is('blocked_at', null).gt('sent_at', iso(Date.now() - 3 * 86_400_000));
+}
+
+// ── LES COMMANDES DE MATHIEU (en écrivant au bot) ────────────────────────────────────────────────────────────────
+
+const parisDubai = (at: string) => ['Europe/Paris', 'Asia/Dubai'].map((tz) => new Date(at).toLocaleTimeString('fr-FR', { timeZone: tz, hour: '2-digit', minute: '2-digit' }));
+const frDay = (at: string) => new Date(at).toLocaleDateString('fr-FR', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long' });
+
+/** « webinar », « webinar off / on », « webinar invites on / off », « webinar skip », « webinar zoom <lien> » : écrits au
+ *  bot, en privé, par un admin. Renvoie false si le message n'est pas une de ces commandes. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function handleWebinarAdmin(db: Db, msg: any): Promise<boolean> {
+  const text = typeof msg?.text === 'string' ? msg.text.trim() : '';
+  const m = /^\/?webina(?:r|ire)s?(?:\s+(.+))?$/i.exec(text);
+  if (msg?.chat?.type !== 'private' || msg.reply_to_message || !m) return false;
+  if (!(await adminTgIds()).includes(Number(msg.from?.id))) return false;
+  const by = msg.from?.username ? `@${msg.from.username}` : String(msg.from?.id ?? 'admin');
+  const arg = String(m[1] ?? '').trim();
+  const reply = (t: string) => send(Number(msg.chat.id), t);
+  let note = '';
+  if (/^(off|on)$/i.test(arg)) {
+    await setSetting(db, 'webinars', arg.toLowerCase(), by);
+    note = arg.toLowerCase() === 'on' ? '✅ Webinaires automatiques rallumés : les sessions se recréent chaque mercredi et dimanche.' : '⏸ Webinaires automatiques coupés : plus aucune nouvelle session. Celles déjà prévues restent (« webinar skip » pour annuler la prochaine).';
+  } else if (/^invit\w*\s+(on|off)$/i.test(arg)) {
+    const v = /on$/i.test(arg) ? 'on' : 'off';
+    await setSetting(db, 'webinar_invites', v, by);
+    note = v === 'on' ? '✅ Invitations allumées : le bot invite les prospects le jour de chaque session, de 12h à 17h UK.' : '⏸ Invitations coupées : le bot n’invite plus personne.';
+  } else if (/^(skip|annule\w*|cancel)$/i.test(arg)) {
+    const next = (await upcomingSessions(db, 1))[0];
+    if (!next || Date.parse(next.starts_at) <= Date.now()) note = 'Aucune session à venir à annuler.';
+    else {
+      await db.from('webinar_sessions').update({ active: false }).eq('id', next.id);
+      const { data: regs } = await db.from('webinar_registrations').select('tg_id').eq('session_id', next.id);
+      let told = 0;
+      for (const r of (regs ?? []) as Array<{ tg_id: number }>) { if (await send(r.tg_id, `⚠️ Sorry, the live webinar of ${ukDay(next.starts_at)} is cancelled 🙏🏼 I’ll send you the next date right here.`)) told++; await sleep(60); }
+      note = `🗑 Session du ${frDay(next.starts_at)} annulée${told ? `, ${told} inscrit${told > 1 ? 's' : ''} prévenu${told > 1 ? 's' : ''}` : ''}.`;
+    }
+  } else if (/^zoom\s+https:\/\/\S*zoom\.us\/\S+$/i.test(arg)) {
+    const url = arg.replace(/^zoom\s+/i, '');
+    const { data } = await db.from('webinar_sessions').update({ zoom_url: url }).eq('active', true).gt('starts_at', iso(Date.now())).select('id');
+    note = `✅ Lien Zoom mis à jour sur ${(data ?? []).length} session${(data ?? []).length > 1 ? 's' : ''} à venir.`;
+  } else if (arg) note = 'Commande inconnue.';
+  // l'état, toujours
+  const [auto, inv, ss] = await Promise.all([setting(db, 'webinars', 'on'), setting(db, 'webinar_invites', 'off'), upcomingSessions(db, 2)]);
+  const lines = [note, note ? '' : null, `🎤 Webinaires · automatiques ${auto === 'off' ? '⏸ OFF' : '✅ ON'} · invitations ${inv === 'on' ? '✅ ON' : '⏸ OFF'}`].filter((l) => l != null) as string[];
+  for (const [i, s] of ss.entries()) {
+    const [paris, dubai] = parisDubai(s.starts_at);
+    lines.push('', `${i === 0 ? 'Prochaine' : 'Ensuite'} : ${frDay(s.starts_at)}, ${ukHour(s.starts_at)} UK (${paris} Paris · ${dubai} Dubaï)${s.zoom_url ? '' : ' · ⚠️ pas de lien Zoom'}`);
+    if (i === 0) { const st = await inviteStats(db, s.id); lines.push(`${st.registered} inscrit${st.registered > 1 ? 's' : ''} · ${st.sent} invitation${st.sent > 1 ? 's' : ''} envoyée${st.sent > 1 ? 's' : ''}`); }
+  }
+  if (!ss.length) lines.push('', 'Aucune session prévue.');
+  lines.push('', 'Commandes : « webinar off » / « webinar on » · « webinar invites on » / « off » · « webinar skip » (annule la prochaine) · « webinar zoom <lien> »');
+  await reply(lines.join('\n'));
+  return true;
 }
 
 /** « ✅ Save my seat » sous l'invitation : inscrit en un tap, sans quitter la conversation. Renvoie false si le bouton

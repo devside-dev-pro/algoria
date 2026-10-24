@@ -8,7 +8,7 @@ import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
 import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
-import { WEBINAR_START_RE, handleWebinarCallback, registerForWebinar } from '@/lib/member/webinar';
+import { WEBINAR_START_RE, handleWebinarAdmin, handleWebinarCallback, noteBotBlocked, registerForWebinar } from '@/lib/member/webinar';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
 
@@ -293,6 +293,14 @@ export async function POST(req: Request) {
     ).then(() => {}, () => {});
   }
 
+  // 🎤 QUELQU'UN BLOQUE LE BOT (conversation privée) : noté sur ses invitations au webinaire récentes. Il n'en recevra
+  // plus, et le coupe-circuit des invitations le compte (lib/member/webinar.ts, runWebinarInvites).
+  const mcm = update?.my_chat_member;
+  if (db && mcm?.chat?.type === 'private' && mcm.new_chat_member?.status === 'kicked' && mcm.from?.id) {
+    await noteBotBlocked(db, Number(mcm.from.id)).catch(() => {});
+    return NextResponse.json({ ok: true });
+  }
+
   // POST DE CANAL → pont de traduction EN → IT (channel_post doit être dans allowed_updates du webhook).
   // edited_channel_post volontairement IGNORÉ : republier une correction créerait un second post italien
   // sans supprimer le premier — la CM corrige à la main les rares cas.
@@ -467,6 +475,8 @@ export async function POST(req: Request) {
   if (db && msg?.chat?.type === 'private' && (msg.reply_to_message?.video_note || msg.reply_to_message?.voice) && (await handleSupportVideoRemove(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message?.reply_markup && (await handleSupportAssetReply(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (await handleSupportLibrary(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
+  // 🎤 « webinar », « webinar off », « webinar invites on », « webinar skip »… : Mathieu pilote les webinaires (lib/member/webinar.ts)
+  if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (await handleWebinarAdmin(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 🌙 le récap du soir (lib/member/supportDigest.ts) : « 3 sa version » / « 3 # remarque », ou sa version d'une règle.
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message && (await handleDigestReply(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 🧠 Mathieu forme l'agent : réponse à une carte de proposition (sa version ou « # remarque »), ou « # leçon » seule.
