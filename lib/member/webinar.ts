@@ -5,9 +5,10 @@
 // peut écrire qu'à quelqu'un qui l'a démarré : c'est ce qui permet la confirmation, puis les rappels qui font venir
 // les gens le jour J.
 //
-// LES RAPPELS (app/api/cron/webinar, toutes les 5 min) : la veille (seulement pour qui s'est inscrit plus de 24 h
-// avant), 1 h avant avec le lien Zoom, puis au début. Mathieu reçoit le nombre d'inscrits 1 h avant, et une alerte
-// 3 h avant si la session n'a pas encore de lien Zoom (sans lien, ni le rappel d'1 h ni celui du début ne partent).
+// LES RAPPELS (app/api/cron/webinar, toutes les 5 min) : 1 h avant avec le lien Zoom, puis pile à l'heure du début,
+// encore avec le lien. Plus de rappel la veille (Mathieu, 24/10/2026 : « un rappel trop en avance ça ne sert à rien,
+// les gens oublient et passent à autre chose »). Mathieu reçoit le nombre d'inscrits 1 h avant, et une alerte 3 h avant
+// si la session n'a pas encore de lien Zoom (sans lien, ni le rappel d'1 h ni celui du début ne partent).
 //
 // LES SESSIONS : table webinar_sessions (migration 0035), une ligne par webinaire : id = sa date (ex. 2026-10-28),
 // début en UTC, lien Zoom. Le lien Zoom n'est jamais sur la page publique : il part en privé aux inscrits.
@@ -94,7 +95,7 @@ export async function registerForWebinar(db: Db, from: { id: number; first_name?
 export async function runWebinarReminders(db: Db): Promise<{ sessions: number; sent: number }> {
   const now = Date.now();
   const { data: ss } = await db.from('webinar_sessions').select('id,starts_at,zoom_url,alert_zoom_at,alert_count_at').eq('active', true)
-    .gt('starts_at', iso(now - LATE_JOIN_MS)).lt('starts_at', iso(now + 25 * HOUR));
+    .gt('starts_at', iso(now - LATE_JOIN_MS)).lt('starts_at', iso(now + 4 * HOUR));
   let sent = 0;
   for (const s of (ss ?? []) as Array<WebinarSession & { alert_zoom_at: string | null; alert_count_at: string | null }>) {
     const start = Date.parse(s.starts_at);
@@ -111,28 +112,28 @@ export async function runWebinarReminders(db: Db): Promise<{ sessions: number; s
       await db.from('webinar_sessions').update({ alert_count_at: iso(now) }).eq('id', s.id);
     }
 
-    const stages: Array<{ col: 'reminded_24h_at' | 'reminded_1h_at' | 'reminded_live_at'; due: boolean; text: string; button: Button }> = [
-      { col: 'reminded_24h_at', due: left <= 24 * HOUR && left > 2 * HOUR,
-        text: `📅 Reminder: live webinar with Mathieu, ${when}.\n45 minutes: how an AI trades gold, and how your own account can copy it.\n\nI’ll send you the Zoom link here, 1 hour before 🙏🏼`,
-        button: { text: '📅 Add to my calendar', url: calendarLink(s.id) } },
-      { col: 'reminded_1h_at', due: !!s.zoom_url && left <= HOUR && left > 5 * 60_000,
-        text: `⏰ In about an hour: live webinar with Mathieu, at ${ukHour(s.starts_at)} (UK time).\nHere’s your Zoom link 👇 Stay until the end: something is reserved for 10 people.`,
+    // pg_cron tourne à :00, :05… : le rappel d'1 h part à 18:00 pour 19:00, et celui du début à 19:00 (la marge d'une
+    // minute couvre une cron qui arriverait une fraction de seconde avant l'heure)
+    const stages: Array<{ col: 'reminded_1h_at' | 'reminded_live_at'; due: boolean; text: string; button: Button }> = [
+      { col: 'reminded_1h_at', due: !!s.zoom_url && left <= HOUR && left > 60_000,
+        text: `⏰ In 1 hour: live webinar with Mathieu, at ${ukHour(s.starts_at)} (UK time).\nHere’s your Zoom link 👇 Stay until the end: something is reserved for 10 people.`,
         button: { text: '🎥 Join the webinar', url: s.zoom_url ?? '' } },
-      { col: 'reminded_live_at', due: !!s.zoom_url && left <= 5 * 60_000 && left > -30 * 60_000,
-        text: '🔴 We’re going live! Join now 👇',
+      { col: 'reminded_live_at', due: !!s.zoom_url && left <= 60_000 && left > -30 * 60_000,
+        text: '🔴 The live is starting now! Here’s your Zoom link 👇',
         button: { text: '🎥 Join the webinar', url: s.zoom_url ?? '' } },
     ];
     for (const st of stages) {
       if (!st.due) continue;
-      const { data: regs } = await db.from('webinar_registrations').select('id,tg_id,created_at').eq('session_id', s.id).is(st.col, null).limit(200);
-      for (const r of (regs ?? []) as Array<{ id: number; tg_id: number; created_at: string }>) {
-        // marqué AVANT l'envoi, et seulement s'il ne l'était pas : deux passages en même temps n'envoient jamais deux fois
-        const { data: mine } = await db.from('webinar_registrations').update({ [st.col]: iso(now) }).eq('id', r.id).is(st.col, null).select('id');
-        if (!mine?.length) continue;
-        // la veille : seulement pour qui s'est inscrit plus de 24 h avant (sinon il vient de recevoir sa confirmation)
-        if (st.col === 'reminded_24h_at' && Date.parse(r.created_at) > start - 24 * HOUR) continue;
-        if (await send(r.tg_id, st.text, [st.button])) sent++;
-        await sleep(60);
+      const { data: regs } = await db.from('webinar_registrations').select('id').eq('session_id', s.id).is(st.col, null).limit(1000);
+      const ids = ((regs ?? []) as Array<{ id: number }>).map((r) => r.id);
+      // par paquets de 20 en parallèle (~25 messages/s, sous la limite de Telegram) : tout le monde reçoit le lien du
+      // début dans la même minute, même avec quelques centaines d'inscrits
+      for (let k = 0; k < ids.length && Date.now() - now < 40_000; k += 20) {
+        // marqués AVANT l'envoi, et seulement s'ils ne l'étaient pas : deux passages en même temps n'envoient jamais deux fois
+        const { data: mine } = await db.from('webinar_registrations').update({ [st.col]: iso(now) }).in('id', ids.slice(k, k + 20)).is(st.col, null).select('tg_id');
+        const ok = await Promise.all(((mine ?? []) as Array<{ tg_id: number }>).map((r) => send(r.tg_id, st.text, [st.button])));
+        sent += ok.filter(Boolean).length;
+        await sleep(800);
       }
     }
   }
