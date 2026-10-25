@@ -50,12 +50,14 @@ export async function wasAffected(db: Db, tgId: number): Promise<boolean> {
 
 /** Ce que le modèle doit savoir pour rédiger (à la place des chiffres du track record, tant que la garde court :
  *  octobre affiche la chute, et citer un « +X % depuis le lancement » ce jour-là serait trompeur). Les faits sont
- *  ceux du message VIP de Mathieu du 22/10. */
+ *  ceux du message VIP de Mathieu du 22/10. Depuis le 25/10 (Mathieu : « le nouvel EA est bien connecté, le service
+ *  peut reprendre ») : le trading reprend le 26/10 sur un nouveau master, surveillé par les garde-fous du runner, et
+ *  l'onboarding n'attend plus. */
 export const INCIDENT_NOTE = `IMPORTANT CONTEXT, since 22 October 2026 (it overrides any results or performance figures you may know):
-On the night of 21 to 22 October, a failure in our trading system opened far too many buy positions on gold, almost all without a stop loss. The main account lost about 85%, and most members who were copying it took a very heavy loss; many accounts were closed by the broker. All trading is stopped until the failure is found, fixed and tested. Mathieu told the full truth in the VIP channel and is contacting every affected member personally.
+On the night of 21 to 22 October, a failure in our trading system opened far too many buy positions on gold, almost all without a stop loss. The main account lost about 85%, and most members who were copying it took a very heavy loss; many accounts were closed by the broker. Trading was stopped while the failure was fixed. Since 26 October, the new version of Algoria AI trades again, on a new main account, with the extra safeguards described below. Mathieu told the full truth in the VIP channel and is contacting every affected member personally.
 - If someone mentions it: acknowledge it plainly, never minimise it, never blame the market or the broker, never promise a refund or compensation. Since then (24 October): extra safeguards run on Algoria AI (a trade without a stop loss gets one automatically within 2 minutes, never more than 10 trades open at once, everything closes if the day reaches −5%); Mathieu has contacted the broker about the incident and is waiting for their answer; we should be able to find solutions in the next few days, nothing is confirmed yet. He will come back to them personally.
 - Do not quote ANY past results, percentages or win rates right now.
-- New people can still open their account and get set up; access to the VIP and the copy start in a few days, once the new setup is ready. Never say the copy is running today.
+- Onboarding works as usual again: new people open their account, connect it in the app, and the copy starts once their account is verified.
 - Our address changed on 22 October: the app is now https://app.getalgoria.com. Old algoria.tech links no longer open, and neither does the Algoria icon installed on the phone before 22 October (it points to the old address). If someone can't connect, says the site is down or the app won't open: it is NOT maintenance (never say maintenance). Tell them the address changed, to delete the old Algoria icon and install the app again from https://app.getalgoria.com/download, then log in with Telegram (one tap, no password). Their trading account and settings are not affected.`;
 
 export const INCIDENT_KIND = 'incident_claim';
