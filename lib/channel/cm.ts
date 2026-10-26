@@ -34,6 +34,7 @@
 import { liveTrades, type Trade } from './recap';
 import { publishToChannels, sourceChannel } from './publish';
 import { adminTgIds } from '@/lib/member/notifyOwner';
+import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { appendAgentMemory } from '@/lib/member/agentDocs';
 import { dayContext, writePost, type Brief, type DayContext } from './writer';
 import { atOneLot, atRef } from '@/lib/display/scale';
@@ -96,6 +97,13 @@ export const CTAS: Array<CmPost & { fam: 'app' | 'mathieu' }> = [
   { ...post('brokerq', ['🌍 <b>Not sure which broker to pick ?</b>', '', "Tell me which country you're in and I'll tell you which one to choose. It takes me 30 seconds 🙏🏼"], '💬 ASK MATHIEU', L.me), fam: 'mathieu' },
   { ...post('question', ['💬 <b>Any question about Algoria ?</b>', '', 'How the copy works, which broker to pick, how to connect your trading account: ask me. A real human answers, I reply myself 🙏🏼'], '💬 ASK MATHIEU', L.me), fam: 'mathieu' },
 ];
+
+/** 🛠 TANT QUE L'HISTORIQUE EST EN MAINTENANCE pour les prospects (lib/member/historyMaintenance.ts), aucun post ne les
+ *  envoie vers un track record ou un historique qu'ils ne peuvent pas voir (26/10/2026 : « Are you only showing me the
+ *  good days ? … nothing hidden » est parti alors que la page du track record affichait « maintenance »). Ces fiches
+ *  reviennent d'elles-mêmes quand HISTORY_MAINTENANCE repasse à false. */
+const NEEDS_HISTORY = new Set(['track', 'theapp', 'results', 'trackcta']);
+const shown = (id: string) => !HISTORY_MAINTENANCE || !NEEDS_HISTORY.has(id);
 
 type Slot = { slot: string; at: string; kind: 'morning' | 'howto' | 'cta' | 'tp' | 'qa'; fam?: 'app' | 'mathieu' };
 // heures de Paris. Le soir compte : l'audience (Afrique du Sud, Royaume-Uni) a fini sa journée.
@@ -239,7 +247,7 @@ export async function planDay(db: Db, day: string): Promise<number> {
       continue;
     }
     if (s.kind === 'howto') {
-      hi = nextIn(HOWTO, hi, () => true);
+      hi = nextIn(HOWTO, hi, (p) => shown(p.id));
       const p = HOWTO[hi];
       rows.push({ ...base, ref: p.id, text: p.text });
       briefs.push({ kind: 'howto', card: p.text });
@@ -251,14 +259,14 @@ export async function planDay(db: Db, day: string): Promise<number> {
       briefs.push({ kind: 'cta', goal: w.goal, reference: w.text, button: w.btn });
     } else if (s.kind === 'cta') {
       const fam = s.fam ?? 'app';
-      const i = nextIn(CTAS, ci[fam], (c) => c.fam === fam);
+      const i = nextIn(CTAS, ci[fam], (c) => c.fam === fam && shown(c.id));
       if (i < 0) continue;
       ci[fam] = i;
       const c = CTAS[i];
       rows.push({ ...base, ref: c.id, text: c.text, button_text: c.btn, button_url: c.url });
       briefs.push({ kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn });
     } else if (!winCards && s.slot === 'tp1') { // master à l'arrêt : un 2e How it works à la place de la carte de 14 h
-      hi = nextIn(HOWTO, hi, () => true);
+      hi = nextIn(HOWTO, hi, (p) => shown(p.id));
       const p = HOWTO[hi];
       rows.push({ ...base, slot: 'howto2', kind: 'howto', ref: p.id, text: p.text });
       briefs.push({ kind: 'howto', card: p.text });
