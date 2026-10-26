@@ -170,7 +170,9 @@ const VIDEO_AT = '19:30';
 // second avancé à 15 min du début (« on commence dans 15 minutes », bouton droit sur le bot, qui envoie le lien Zoom
 // tout de suite). Toujours deux boutons par jour au plus, et la rotation des CTA reprend le lendemain là où elle était.
 // Le bonjour de la veille et du jour J peut en dire un mot, sans bouton.
-type WbPhase = 'tomorrow' | 'today' | 'last';
+// 'soon' = J-2 (26/10/2026, Mathieu : « il faut commencer à teaser le webinaire… prévenir tout le monde que y'a un webinaire
+// dans 2 jours ») : le mercredi s'annonce le lundi, le dimanche le vendredi
+type WbPhase = 'soon' | 'tomorrow' | 'today' | 'last';
 const WB_LAST_CALL_MS = 15 * 60_000;
 function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal: string } {
   const at = `${ukHour(s.starts_at)} UK time (${saHour(s.starts_at)} in South Africa)`;
@@ -180,10 +182,10 @@ function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal: string
       goal: `last call: Mathieu's free live webinar on Zoom starts in 15 minutes (${at}). The button opens Telegram: they press START and the Zoom link comes straight away. Short and urgent`,
     };
   }
-  const when = phase === 'tomorrow' ? `Tomorrow, ${ukDay(s.starts_at)}` : 'Tonight';
+  const when = phase === 'soon' ? ukDay(s.starts_at) : phase === 'tomorrow' ? `Tomorrow, ${ukDay(s.starts_at)}` : 'Tonight';
   return {
-    ...post(`webinar-${phase}`, [`🎤 <b>${when}, I’m going live.</b>`, '', `${at}, on Zoom, in English.`, '45 minutes: how the AI trades gold, the real app on screen, real past results, and your questions.', '', '🎁 At the end, something reserved for the 10 people who are there live.', '', 'Free. Save your seat 👇'], '🎤 SAVE MY SEAT', `${WEBINAR_PAGE}?src=channel`),
-    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'}, at ${at}: 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now`,
+    ...post(`webinar-${phase}`, [`🎤 <b>${when}, I’m going live.</b>`, '', `${phase === 'soon' ? 'In 2 days, ' : ''}${at}, on Zoom, in English.`, '45 minutes: how the AI trades gold, the real app on screen, real past results, and your questions.', '', '🎁 At the end, something reserved for the 10 people who are there live.', '', 'Free. Save your seat 👇'], '🎤 SAVE MY SEAT', `${WEBINAR_PAGE}?src=channel`),
+    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'soon' ? `IN 2 DAYS, on ${ukDay(s.starts_at)}` : phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'}, at ${at}: 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now`,
   };
 }
 
@@ -222,11 +224,11 @@ export async function planDay(db: Db, day: string): Promise<number> {
   };
   const now = Date.now();
   const winCards = await winCardsOn(db).catch(() => true);
-  // 🎤 le webinaire du lendemain ou du jour (voir webinarPost)
+  // 🎤 le webinaire dans 2 jours, du lendemain ou du jour (voir webinarPost)
   const wb = (await upcomingSessions(db, 1).catch(() => []))[0] as WebinarSession | undefined;
   const wbStart = wb ? Date.parse(wb.starts_at) : 0;
   const wbDay = wb && wbStart > now ? tradingDayOf(wbStart) : null;
-  const wbPhase: WbPhase | null = wbDay === day ? 'today' : wbDay && wbDay === addDaysCm(day, 1) ? 'tomorrow' : null;
+  const wbPhase: WbPhase | null = wbDay === day ? 'today' : wbDay && wbDay === addDaysCm(day, 1) ? 'tomorrow' : wbDay && wbDay === addDaysCm(day, 2) ? 'soon' : null;
   let wbFirst = 0, wbLast = false; // le jour J : l'heure de « ce soir », et le dernier appel déjà prévu
   const rows: Array<Record<string, unknown>> = [];
   const briefs: Array<Brief | null> = [];
@@ -234,10 +236,10 @@ export async function planDay(db: Db, day: string): Promise<number> {
     let at = tradingTimeMs(day, s.at) + jitter(day, s.slot);
     if (at <= now) continue; // créneau déjà passé (plan préparé en retard)
     const base = { day, slot: s.slot, kind: s.kind, scheduled_at: new Date(at).toISOString(), status: 'draft' };
-    // 🎤 ce CTA devient-il une annonce du webinaire ? La veille : le CTA « app ». Le jour J : « ce soir » au premier
+    // 🎤 ce CTA devient-il une annonce du webinaire ? Deux jours avant et la veille : le CTA « app ». Le jour J : « ce soir » au premier
     // créneau qui tombe plus d'1 h avant le début, puis le dernier appel 15 min avant (au moins 1 h après « ce soir »).
     const wbPick: WbPhase | null = s.kind !== 'cta' || !wb ? null
-      : wbPhase === 'tomorrow' ? (s.fam === 'app' ? 'tomorrow' : null)
+      : wbPhase === 'tomorrow' || wbPhase === 'soon' ? (s.fam === 'app' ? wbPhase : null)
       : wbPhase !== 'today' ? null
       : !wbFirst && at < wbStart - 60 * 60_000 ? 'today'
       : !wbLast && wbStart - WB_LAST_CALL_MS > Math.max(now, wbFirst + 60 * 60_000) ? 'last' : null;
@@ -279,7 +281,7 @@ export async function planDay(db: Db, day: string): Promise<number> {
   // LA RÉDACTION : tous les posts du jour en parallèle (un appel chacun). Échec ou texte refusé par les garde-fous →
   // le texte de la banque ; pour le bonjour, pas de post (un bonjour en conserve, c'est ce qu'on veut éviter).
   const ctx = await dayContext(db, day).catch(() => null);
-  if (ctx && wb && wbPhase) ctx.webinar = `Mathieu's free live webinar on Zoom is ${wbPhase === 'today' ? 'TONIGHT' : `TOMORROW, ${ukDay(wb.starts_at)}`}, at ${ukHour(wb.starts_at)} UK time (${saHour(wb.starts_at)} in South Africa), 45 minutes in English. The call to action posts carry the button to save a seat; the morning post may mention it in one warm line (no link, no button); other posts do not mention it.`;
+  if (ctx && wb && wbPhase) ctx.webinar = `Mathieu's free live webinar on Zoom is ${wbPhase === 'today' ? 'TONIGHT' : wbPhase === 'tomorrow' ? `TOMORROW, ${ukDay(wb.starts_at)}` : `IN 2 DAYS, on ${ukDay(wb.starts_at)}`}, at ${ukHour(wb.starts_at)} UK time (${saHour(wb.starts_at)} in South Africa), 45 minutes in English. The call to action posts carry the button to save a seat; the morning post may mention it in one warm line (no link, no button); other posts do not mention it.`;
   const written = ctx ? await Promise.all(briefs.map((b) => (b ? writePost(ctx, b).catch(() => null) : Promise.resolve(null)))) : briefs.map(() => null);
   for (let k = rows.length - 1; k >= 0; k--) {
     const rep = (rows[k].report as object | undefined) ?? {}; // garde le brief d'un CTA webinaire (briefOf)
