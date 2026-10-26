@@ -13,6 +13,7 @@ import { inMaintenance, LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { atRef } from '@/lib/display/scale';
 import { adminTgIds, notifyOwner } from '@/lib/member/notifyOwner';
 import { publishToChannels, sourceChannel } from '@/lib/channel/publish';
+import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -93,17 +94,20 @@ export async function buildRecap(db: Db, day = parisDay(new Date())): Promise<Re
       `🔵💙 DAY RECAP · ${label(day)}`,
       'No clean setup on gold today, so no trade. 🧘',
       `That's not a bug, that's the plan: Algoria never forces a trade. Quiet days are part of the strategy.${liveLine}`,
-      `📊 Every trade it ever took is in the app, trade by trade:\n${APP}`,
+      // historique en maintenance pour les prospects (lib/member/historyMaintenance.ts) : on ne leur promet pas ce qu'ils ne verront pas
+      HISTORY_MAINTENANCE ? APP : `📊 Every trade it ever took is in the app, trade by trade:\n${APP}`,
     ].join('\n\n') };
   }
   if (net10 < 0) {
     // OPTION A (Mathieu, 02/10) : pas de chiffres un jour rouge — mais pas de mensonge non plus : on dit que tout
     // est dans l'app, jours rouges compris, et on n'annonce aucun gain.
+    // TANT QUE L'HISTORIQUE EST EN MAINTENANCE pour les prospects (26/10/2026), cette phrase serait fausse : elle saute.
+    // Le brouillon arrive aux admins comme tous les soirs ; publier ou non un soir rouge reste leur clic.
     return { ...base, kind: 'red', text: [
       `🔵💙 DAY RECAP · ${label(day)}`,
       // plus de « every one with its stop loss » (22/10/2026) : faux en mode copie, rien ne l'impose aujourd'hui
-      `🤖 Algoria AI managed today's gold session, ${today.length} trade${today.length > 1 ? 's' : ''}.`,
-      `📊 Every trade it takes is in the app, trade by trade, red days included. No filter, no screenshots: the real copied account.${liveLine}`,
+      `🤖 Algoria AI managed today's gold session, ${today.length} trade${today.length > 1 ? 's' : ''}.${HISTORY_MAINTENANCE ? liveLine : ''}`,
+      ...(HISTORY_MAINTENANCE ? [] : [`📊 Every trade it takes is in the app, trade by trade, red days included. No filter, no screenshots: the real copied account.${liveLine}`]),
       APP,
     ].join('\n\n') };
   }
