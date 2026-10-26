@@ -1535,8 +1535,12 @@ async function main() {
       // demandes VIP restent en file, Mathieu fait patienter les nouveaux 2-3 jours. Le canal public, lui, continue.
       // Repassé à 'on' : la file entière est approuvée au passage suivant (aucun âge maximum).
       const vipOpen = Number.isFinite(vipId) && (await runnerSwitch('vip_autojoin')) === 'on';
+      // ÉCHANGES DE PUBS (26/10/2026, Mathieu : « on doit pouvoir compter les demandes précisément ») : support_settings
+      // 'public_autojoin' = 'off' → les demandes du canal public restent en attente, Telegram les compte par lien.
+      // Interrupteur dans l'admin (Tools). Repassé à 'on' : la file entière est approuvée au passage suivant.
+      const publicOpen = (await runnerSwitch('public_autojoin')) !== 'off';
       const [publiques, vip] = await Promise.all([
-        listRipeJoinRequests(AUTOJOIN_MIN, 25, Number.isFinite(vipId) ? [vipId] : []),
+        publicOpen ? listRipeJoinRequests(AUTOJOIN_MIN, 25, Number.isFinite(vipId) ? [vipId] : []) : Promise.resolve([]),
         vipOpen ? listRipeVipRequests(AUTOJOIN_MIN, vipId, 25) : Promise.resolve([]),
       ]);
       const ripe = [...publiques, ...vip];
