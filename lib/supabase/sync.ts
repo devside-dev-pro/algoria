@@ -255,12 +255,14 @@ export async function setSetting(key: string, value: string): Promise<boolean> {
 /** INTERRUPTEURS DU RUNNER EN BASE (22/10/2026). support_settings 'nudges' = 'off' → pas de relance quotidienne ;
  *  'sth_autorepair' = 'off' → l'audit STH de 7 h ne rebranche personne, même avec ALGORIA_STH_AUTOREPAIR=1 (après
  *  une mise en pause générale sur STH, il rebrancherait tous les membres encore « live » chez nous) ;
- *  'vip_autojoin' = 'off' → les demandes d'entrée au VIP restent en attente (le canal public continue).
+ *  'vip_autojoin' = 'off' → les demandes d'entrée au VIP restent en attente (le canal public continue) ;
+ *  'public_autojoin' = 'off' → les demandes d'adhésion au canal public restent en attente aussi (26/10/2026, échanges
+ *  de pubs : Mathieu veut compter les demandes de chaque lien dans Telegram) ; interrupteur dans l'admin, onglet Tools.
  *  Né de l'incident de la nuit du 21 au 22/10 : ce jour-là, relancer les inscrits « reviens brancher ton compte »
  *  pendant que les membres découvraient leurs pertes était le pire message possible, et la seule façon de l'arrêter
  *  était de couper le runner sur Railway. Ligne absente → 'on' (comportement d'avant). Lecture impossible → null :
  *  l'appelant ne relance pas et réessaie au passage suivant (une relance ratée ne coûte rien, une de trop si). */
-export async function runnerSwitch(key: 'nudges' | 'sth_autorepair' | 'vip_autojoin' = 'nudges'): Promise<'on' | 'off' | null> {
+export async function runnerSwitch(key: 'nudges' | 'sth_autorepair' | 'vip_autojoin' | 'public_autojoin' = 'nudges'): Promise<'on' | 'off' | null> {
   try {
     const raw = db as unknown as { from: (t: string) => any };
     const { data, error } = await raw.from('support_settings').select('value').eq('key', key).limit(1);

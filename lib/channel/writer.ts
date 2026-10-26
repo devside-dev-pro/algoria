@@ -18,6 +18,7 @@ import { humanize } from '@/lib/member/replyDraft';
 import { atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingTimeMs } from '@/lib/display/tradingDay';
 import { liveTrades } from './recap';
+import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -122,7 +123,12 @@ AUDIENCE: beginners, mostly in South Africa and the UK. Many arrived from an ad 
 HARD RULES (a post that breaks one is thrown away):
 - English only. Telegram HTML only: <b>bold</b> and <i>italic</i>, nothing else. No markdown, no hashtags, no links in the text (when a post has a button, the system adds it).
 - Never an em dash or an en dash. Put a space before "?" and "!" (that's how Mathieu writes).
-- Short: every line short, the whole post easy to read on a phone. Emojis: a few, never a wall.
+- LAYOUT, AIR FIRST (Mathieu: a block of text with no space, nobody reads it). Telegram puts no space between two lines: the only air is an EMPTY line (\\n\\n). So:
+  · the header line and the hook (in <b>bold</b>) together, then an EMPTY line;
+  · then short blocks of 1 or 2 lines, one idea each, with an EMPTY line between every block; NEVER 3 lines of text in a row;
+  · a list (1️⃣ 2️⃣, ✅ ❌, 📏) stays in one block, with its intro line if it has one;
+  · a token ({{AMOUNTS}}, {{YESTERDAY}}) or the risk sentence is a block of its own, the risk sentence last, in <i>italic</i>.
+- Short: the whole post fits on one phone screen, read in 5 seconds. Say less, not more: every line short. Emojis: a few, never a wall.
 - Never write a number about results, profits or percentages yourself. Use the tokens you are given ({{AMOUNTS}}, {{YESTERDAY}}) exactly as written; the system replaces them with the real figures.
 - No promises and no projections: never say people will earn, make money, double, get rich, or that today will be green. Past results only.
 - Nothing negative in this public channel: no losses, red days, drawdowns, maintenance, pauses, bugs.
@@ -154,13 +160,51 @@ const PROMISE = /guarantee|risk[- ]?free|passive income|get rich|easy money|fina
 const MONEY_IN = /\b(deposit(?:s|ed|ing)?|fund(?:s|ed|ing)?\b(?! manager)|minimum|balance|top[- ]?up|invest(?:ed|ing|ment)?)\b|\bfund it\b|\bhow much\b/i;
 const NEGATIVE = /\b(loss|losses|losing|lost|red day|drawdown|maintenance|paused?|bug|outage|down day)\b/i;
 
-type GuardOpts = { tokens: Record<string, string>; required?: string[]; allowNegative?: boolean; noButton?: boolean; allowedUsd?: number[]; allowedNumbers?: number[]; maxChars?: number };
+// L'AIR (26/10/2026, Mathieu, sur un How it works de 8 lignes collées : « aucune mise en page… on dirait un gros pavé
+// de texte, ça donne pas envie de lire du tout »). Telegram ne met aucun espace entre deux lignes : l'air ne vient que
+// des lignes VIDES. Un bloc = des lignes sans ligne vide entre elles. Une ligne « de texte » commence par une lettre, un
+// chiffre, un guillemet ou une balise ; une puce (1️⃣, ✅, 📏…), l'en-tête (🔵💙) ou un jeton n'en est pas une.
+const MAX_PROSE = 2; // lignes de texte par bloc (1 pour le bloc d'en-tête : l'en-tête et son accroche)
+const MAX_BLOCK = 5; // lignes par bloc, puces comprises : une liste tient avec sa phrase d'intro
+const isProse = (l: string) => !/^\s*[A-Z0-9#*]\uFE0F?\u20E3/.test(l) && /^\s*(?:<[bi]>)*["“'«A-Za-z0-9]/.test(l);
+const blocksOf = (t: string) => t.split(/\n[ \t]*\n/).map((b) => b.split('\n').filter((l) => l.trim())).filter((b) => b.length);
+const proseCap = (b: string[], first: boolean) => (first && !isProse(b[0]) ? 1 : MAX_PROSE);
+
+function wallIssue(t: string): string | null {
+  return blocksOf(t).some((b, i) => b.filter(isProse).length > proseCap(b, i === 0) || b.length > MAX_BLOCK)
+    ? 'it is a wall of text: put an EMPTY line between the blocks, never more than 2 lines of text in a row, and an empty line right after the header and its hook'
+    : null;
+}
+
+/** Le dernier recours, si le 2e essai est encore un pavé : on coupe les blocs trop longs, dans l'ordre des lignes. */
+function airify(t: string): string {
+  const out: string[][] = [];
+  for (const b of blocksOf(t)) {
+    let g: string[] = [];
+    let prose = 0;
+    for (const l of b) {
+      const cap = out.length === 0 && g.length ? proseCap(g, true) : MAX_PROSE;
+      // la phrase de risque et une ligne en italique ont toujours leur propre bloc
+      const alone = l.includes(RISK) || /^\s*<i>/.test(l);
+      if (g.length && (alone || (isProse(l) && prose + 1 > cap) || g.length >= MAX_BLOCK)) { out.push(g); g = []; prose = 0; }
+      g.push(l);
+      if (isProse(l)) prose++;
+    }
+    if (g.length) out.push(g);
+  }
+  return out.map((g) => g.join('\n')).join('\n\n');
+}
+
+type GuardOpts = { tokens: Record<string, string>; required?: string[]; allowNegative?: boolean; noButton?: boolean; allowedUsd?: number[]; allowedNumbers?: number[]; maxChars?: number; fixLayout?: boolean };
 
 /** Nettoie et contrôle un texte du modèle : le texte prêt, ou la raison du refus (renvoyée au modèle pour un 2e essai). */
 export function check(raw: string, o: GuardOpts): { ok: true; text: string } | { ok: false; why: string } {
   // humanize : tiret long → virgule, gras markdown retiré ; puis l'espace de Mathieu avant ? et !, même collés à du gras
   let t = humanize(raw.replace(/\r/g, ''), true).replace(/([^\s?!])([?!]+)(?=<\/[bi]>)/g, '$1 $2');
+  if (o.fixLayout) t = airify(t);
   if (/<(?!\/?(?:b|i)>)[^>]*>/i.test(t)) return { ok: false, why: 'only <b> and <i> tags are allowed' };
+  const wall = wallIssue(t);
+  if (wall) return { ok: false, why: wall };
   if (/https?:\/\/|t\.me\/|\.tech\b|www\./i.test(t)) return { ok: false, why: 'no links in the text' };
   if (o.noButton && /👇|\b(?:tap|click|press)\s+(?:the\s+)?(?:button|below|here|link)\b|\bbutton below\b/i.test(t)) return { ok: false, why: 'there is no button under this post: never point below (no 👇, no "tap the button")' };
   if (PROMISE.test(t.replace(RISK, ''))) return { ok: false, why: 'it sounds like a promise of gains' };
@@ -182,7 +226,8 @@ export function check(raw: string, o: GuardOpts): { ok: true; text: string } | {
   if (unknown.length) return { ok: false, why: `unknown token {{${unknown[0]}}}` };
   for (const [k, v] of Object.entries(o.tokens)) t = t.split(`{{${k}}}`).join(v);
   t = t.replace(/&(?!amp;|lt;|gt;|quot;)/g, '&amp;');
-  if (t.length > (o.maxChars ?? 900) || t.split('\n').length > 16) return { ok: false, why: 'too long' };
+  // les lignes vides ne comptent pas : c'est l'air qu'on demande
+  if (t.length > (o.maxChars ?? 700) || t.split('\n').filter((l) => l.trim()).length > 12) return { ok: false, why: 'too long' };
   return { ok: true, text: t.trim() };
 }
 export const guard = (raw: string, o: GuardOpts): string | null => { const r = check(raw, o); return r.ok ? r.text : null; };
@@ -211,13 +256,13 @@ export type Brief =
   | { kind: 'recap'; recapKind: 'win' | 'record' | 'week' | 'quiet' | 'red'; trades: number; wins: number; liveMembers: number[]; weekLabel?: string };
 
 const BRIEFS: Record<Brief['kind'], (b: Brief) => string> = {
-  morning: () => `Write the MORNING post that kickstarts the day in the channel. 3 to 6 short lines, warm and human, like Mathieu saying hi to his community.
+  morning: () => `Write the MORNING post that kickstarts the day in the channel. 2 or 3 short blocks (5 lines of text at most), warm and human, like Mathieu saying hi to his community.
 Make it feel written for today, not a generic "good morning, let's go": use what is true today. Ideas (pick one or two, vary from the recent posts): the AI is on and working for the members while they live their day; the LAST SESSION result with the token {{YESTERDAY}} (written exactly like that, only if it is given); a one-line answer to a question people asked this week; on a weekend, enjoy it, the AI is back Monday. If a MAJOR EVENT is given, you may add one calm line about it.
 End with something light and human (reply, say hi). There is NO button under this post: never point below (no 👇, no "tap the button"). No promise about today's results.`,
   howto: (b) => {
     const x = b as Extract<Brief, { kind: 'howto' }>;
     return `Write today's HOW IT WORKS post. First line exactly: 🔵💙 HOW IT WORKS
-Rewrite this fact card in fresh words, with a new hook. Keep exactly its facts, add no other fact. 4 to 9 short lines. If the card ends with the risk sentence, keep it word for word as the last line.
+Rewrite this fact card in fresh words, with a new hook. Keep exactly its facts, add no other fact. The header and the hook, then 2 or 3 short blocks (6 lines of text at most), laid out with the same air as the card. If the card ends with the risk sentence, keep it word for word as the last block.
 There is NO button under this post: never point below (no 👇, no "tap the button"). It informs, it does not sell.
 FACT CARD:
 ${x.card}`;
@@ -225,11 +270,11 @@ ${x.card}`;
   // LA QUESTION DE LA SEMAINE (23/10/2026) : remplace la carte de gain de 19 h tant que le master est à l'arrêt
   qa: () => `Write today's YOU ASKED post. First line exactly: 💬 YOU ASKED
 Pick ONE beginner question that people really asked this week (QUESTIONS PEOPLE ASKED MATHIEU THIS WEEK): how Algoria works, the app, the broker, the trading account, the setup, the copy. Never a question about results, profits, the last days, a loss, a complaint or one person's own account. If none fits, take a classic beginner question that the knowledge answers ("Do I need to know trading ?").
-Second line: the question in <b>bold</b>, rewritten in your own words (never a name, never their exact message). Then answer it in 3 to 6 short lines, using ONLY facts from Mathieu's knowledge, like Mathieu answering a friend.
+Second line: the question in <b>bold</b>, rewritten in your own words (never a name, never their exact message). Then an empty line, and answer it in 2 or 3 short blocks (5 lines of text at most), using ONLY facts from Mathieu's knowledge, like Mathieu answering a friend.
 There is NO button under this post: never point below (no 👇, no "tap the button"). It informs, it does not sell.`,
   cta: (b) => {
     const x = b as Extract<Brief, { kind: 'cta' }>;
-    return `Write a short CALL TO ACTION post. 2 to 5 short lines. Goal: ${x.goal}
+    return `Write a short CALL TO ACTION post. 2 or 3 short blocks (4 lines of text at most). Goal: ${x.goal}
 The button "${x.button}" is added below by the system: end by pointing to it (👇).
 You may tie it lightly to TODAY if it is natural. Facts you may use are in this reference version (rewrite it, don't copy it):
 ${x.reference}`;
@@ -242,9 +287,10 @@ ${x.reference}`;
       record: `First line: 🔵💙 WHAT A DAY 🥇. Best day of the month so far, ${x.trades} trades. Put the token {{AMOUNTS}} on its own line, exactly once.`,
       week: `First line: 🔵💙 WEEK RECAP${x.weekLabel ? ` · ${x.weekLabel}` : ''}. The week is green, ${x.trades} trades this week. Put the token {{AMOUNTS}} on its own line, exactly once (it is the week's result). Wish a good weekend: the AI is back Monday.`,
       quiet: 'First line: 🔵💙 DAY RECAP. No clean setup on gold today, so no trade: that is the plan, Algoria never forces a trade. No amount, no token.',
-      red: `First line: 🔵💙 DAY RECAP. Today is not a day to show figures: say Algoria managed today's gold session, ${x.trades} trades, and that every trade is in the app, trade by trade, the real copied account. No amount, no token, no word like loss or red.`,
+      // historique en maintenance pour les prospects : pas de « tout est dans l'app » (lib/member/historyMaintenance.ts)
+      red: `First line: 🔵💙 DAY RECAP. Today is not a day to show figures: say Algoria managed today's gold session, ${x.trades} trades${HISTORY_MAINTENANCE ? '. Never say that the trades or the history can be seen in the app or on a track record' : ', and that every trade is in the app, trade by trade, the real copied account'}. No amount, no token, no word like loss or red.`,
     };
-    return `Write tonight's RECAP post, shorter and more human than usual: 3 to 6 short lines, Mathieu's voice.
+    return `Write tonight's RECAP post, shorter and more human than usual: 3 or 4 short blocks (5 lines of text at most), Mathieu's voice.
 ${head[x.recapKind]}
 ${live}
 Last line exactly: 👉 app.getalgoria.com
@@ -267,7 +313,7 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
         allowNegative: b.kind === 'howto',
         noButton: b.kind === 'morning' || b.kind === 'howto' || b.kind === 'qa',
         allowedUsd: [],
-        ...(b.kind === 'morning' ? { allowedNumbers: [c.lastSession?.trades ?? -1, c.week?.trades ?? -1, ...dateNums], maxChars: 600 } : { maxChars: 900 }),
+        ...(b.kind === 'morning' ? { allowedNumbers: [c.lastSession?.trades ?? -1, c.week?.trades ?? -1, ...dateNums], maxChars: 500 } : { maxChars: 700 }),
       };
   const sys = await systemPrompt();
   // deux essais : un texte refusé par les garde-fous repart au modèle avec la raison du refus
@@ -275,7 +321,8 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await ask(sys, prompt);
     if (!raw) return null;
-    const r = check(b.kind === 'recap' ? raw.replace(/\n*👉\s*app\.algoria\.tech\s*$/i, '') : raw, opts);
+    // au 2e essai, un texte encore en pavé est aéré par le code plutôt que perdu (airify)
+    const r = check(b.kind === 'recap' ? raw.replace(/\n*👉\s*app\.algoria\.tech\s*$/i, '') : raw, { ...opts, fixLayout: attempt === 1 });
     if (r.ok) return r.text;
     console.error(`[cm writer] ${b.kind} refusé (${r.why})`);
     prompt = `${user}\n\nYOUR PREVIOUS DRAFT WAS REJECTED BECAUSE ${r.why.toUpperCase()}. Write it again and fix that.\nPrevious draft:\n${raw}`;

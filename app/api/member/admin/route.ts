@@ -336,7 +336,7 @@ type Body = {
     deleteDeposit?: string;
     customPush?: { title: string; body: string; url?: string; audience: string; tg_id?: number };
     memberDetail?: number; addNote?: { tg_id: number; text: string }; deleteNote?: string;
-    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; resetOnboarding?: number; offboardBatch?: Array<{ tg_id: number; reason?: string }>; connectSth?: string; winbackList?: boolean; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
+    setLegalName?: { tg_id: number; name: string }; revealMember?: number; revealAccount?: string; offboard?: number; resetOnboarding?: number; offboardBatch?: Array<{ tg_id: number; reason?: string }>; connectSth?: string; winbackList?: boolean; reconnectSth?: number; sthStatusCheck?: number; sthAudit?: string; channelAutojoin?: 'get' | 'on' | 'off'; moveSth?: string; dismiss?: string; nudged?: number; lotsOk?: string; lots?: number; notify?: boolean; channelPost?: { chatId: string; text: string; buttonText?: string; buttonUrl?: string };
     setupTgWebhook?: boolean; botDm?: { tg_id: number; text: string; cta?: boolean };
     botBroadcast?: { audience: 'pending' | 'live' | 'stalled' | 'incident'; text: string; tag: string; cta?: boolean };
     setCountry?: { tg_id: number; country: string };
@@ -1338,6 +1338,39 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
     // `master` remonte la configuration elle-même : si elle est vide, ou si tout le monde est « wrong-master »,
     // le problème n'est pas chez les membres — il est dans STH_MASTER_ID.
     return NextResponse.json({ rows, master: configuredMaster || null, summary: { checked: rows.length, ok: count('ok'), orphan: count('orphan'), repaired: count('repaired'), failed: count('failed'), unknown: count('unknown'), error: count('error'), wrongMaster: count('wrong-master') } });
+  }
+  if (body.channelAutojoin) {
+    // 🚪 ACCEPTATION AUTOMATIQUE DES DEMANDES D'ADHÉSION AU CANAL PUBLIC (26/10/2026, Mathieu : « on fait des échanges
+    // de pubs, on doit pouvoir compter les demandes précisément »). Le runner lit support_settings 'public_autojoin' à
+    // chaque passage (runner/index.ts, autoApproveJoins). Coupée, les demandes restent en attente dans Telegram ; le
+    // panneau les compte par lien d'invitation depuis la coupure. Le VIP a son propre interrupteur ('vip_autojoin').
+    if (body.channelAutojoin !== 'get') {
+      const { error } = await db.from('support_settings').upsert({ key: 'public_autojoin', value: body.channelAutojoin, updated_at: new Date().toISOString(), updated_by: who }, { onConflict: 'key' });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    const { data: st } = await db.from('support_settings').select('value,updated_at').eq('key', 'public_autojoin').limit(1);
+    const row = (st?.[0] ?? null) as { value?: string; updated_at?: string } | null;
+    const on = String(row?.value ?? 'on').trim().toLowerCase() !== 'off';
+    // depuis la coupure (ou les 7 derniers jours quand elle est active) ; le VIP n'est pas compté s'il est connu ici
+    const since = !on && row?.updated_at ? row.updated_at : new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const vip = Number(process.env.TELEGRAM_VIP_CHAT ?? '');
+    let q = db.from('telegram_joins').select('invite_name,invite_link,status,approved_at').gte('joined_at', since).not('chat_id', 'is', null);
+    if (Number.isFinite(vip) && vip !== 0) q = q.neq('chat_id', vip);
+    const { data: joins } = await q.limit(5000);
+    const rows = (joins ?? []) as Array<{ invite_name: string | null; invite_link: string | null; status: string; approved_at: string | null }>;
+    const byLink = new Map<string, { requests: number; waiting: number }>();
+    for (const j of rows) {
+      const k = j.invite_name || (j.invite_link ? j.invite_link.replace(/^https?:\/\//, '').slice(0, 32) : '(no link)');
+      const e = byLink.get(k) ?? { requests: 0, waiting: 0 };
+      e.requests++;
+      if (j.status === 'waiting' && !j.approved_at) e.waiting++;
+      byLink.set(k, e);
+    }
+    return NextResponse.json({
+      on, changedAt: row?.updated_at ?? null, since, total: rows.length,
+      waiting: rows.filter((j) => j.status === 'waiting' && !j.approved_at).length,
+      links: [...byLink.entries()].map(([link, v]) => ({ link, ...v })).sort((a, b) => b.requests - a.requests),
+    });
   }
   if (body.sthStatusCheck) {
     // DIAGNOSTIC STH — la vérité directement depuis leur API : compte MT connecté ? abonné à quels masters ?

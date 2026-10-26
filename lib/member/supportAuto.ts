@@ -28,7 +28,7 @@ import { draftReply, lastDraftIssue } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
-import { INCIDENT_ESCALATE, INCIDENT_REPLY_NOTE, INCIDENT_TALK, INCIDENT_TOPIC, incidentActive, wasAffected } from './incident';
+import { INCIDENT_ESCALATE, INCIDENT_REPLY_NOTE, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, wasAffected } from './incident';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -398,6 +398,9 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // 🚨 un membre touché par la nuit du 21-22/10, ou un message sur la nuit : la réponse d'attente de Mathieu, proposée
   // (24/10/2026, voir INCIDENT_REPLY_NOTE et incidentHold plus bas)
   const aboutIncident = incidentActive() && !webinarLead && ((await wasAffected(db, job.tg_id)) || INCIDENT_TALK.test(joined));
+  // 📊 un PROSPECT qui demande les résultats : le bot répond seul (26/10/2026, voir RESULTS_REPLY_NOTE) ; un membre, lui,
+  // reste à Mathieu
+  const resultsAsk = incidentActive() && newbie && !webinarLead && !aboutIncident && INCIDENT_TOPIC.test(joined);
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
   // broker, le lien de l'app), une seule fois par conversation. Après l'accueil (bulle), ou dès son premier message
@@ -451,6 +454,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const firstNoWelcome = newbie && !ownerSpoke && !introduced && !legacy && !directAsk;
   if (legacy) note = 'This person probably already talked with Mathieu before (those older messages are not in the Recent exchange): never welcome them as a newcomer and never ask where they are from, answer their message directly.';
   if (directAsk && !introduced) note = DIRECT_NOTE;
+  if (resultsAsk) note = note ? `${note}\n${RESULTS_REPLY_NOTE}` : RESULTS_REPLY_NOTE;
   if (aboutIncident) note = INCIDENT_REPLY_NOTE;
   if (webinarLead) note = WEBINAR_NOTE;
 
@@ -502,7 +506,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const incidentHold = !incidentActive() ? null
     : aboutIncident && INCIDENT_ESCALATE.test(joined) ? 'incident : retrait, arnaque, avocat ou plainte : à toi de répondre'
     : aboutIncident ? 'incident : réponse d’attente proposée, à toi de valider'
-    : INCIDENT_TOPIC.test(joined) ? 'il parle des résultats : à toi de répondre'
+    : INCIDENT_TOPIC.test(joined) && !resultsAsk ? 'il parle des résultats : à toi de répondre'
     : null;
   const why = !autopilot ? 'pilote automatique coupé'
     : webinarLead ? WEBINAR_WHY
