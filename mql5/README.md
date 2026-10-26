@@ -232,7 +232,7 @@ première bougie du nouveau jour ; dans MT5, le prix réel des premières second
 | | `InpMaxHoldMinutes` | 90 | ferme le trade s'il n'a touché ni stop ni TP au bout de N minutes (à la clôture de bougie) ; 0 = off. Bon de 30 à 120 min sur les 6 derniers mois |
 | Risque | `InpFixedLots` | 0,01 | lot fixe par trade ; 0 = calcul au risque |
 | | `InpRiskPercent` | 0,5 % | risque par trade, utilisé seulement si le lot fixe vaut 0 |
-| | `InpDailyLossPct` | 2 % | plus d'entrée dans la journée au-delà de cette perte (clôturé + latent) |
+| | `InpDailyLossPct` | 4 % | plus de nouveau trade dans la journée quand les trades clôturés perdent ce % du solde du matin (2 000 $ sur 50 000 $, 20 $ sur 500 $). Le trade en cours n'est pas fermé : il garde sa chance d'aller au TP, donc une journée peut finir un peu au-delà |
 | | `InpMaxSpread` | 0,50 $ | pas d'entrée au-delà de ce spread ; un pic au premier tick est réessayé pendant une minute |
 | | `InpSlippagePoints` | 30 | glissement toléré, en points |
 | | `InpMagic` | 26102201 | à changer si deux instances tournent sur le même compte |
