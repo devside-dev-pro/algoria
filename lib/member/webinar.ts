@@ -221,8 +221,10 @@ export async function webinarFacts(db: Db): Promise<string> {
 // ── L'INVITATION DES PROSPECTS PAR LE BOT ────────────────────────────────────────────────────────────────────────
 //
 // LES RÈGLES (Mathieu : « qu'on ne se fasse pas ban le bot à spammer des milliers de gens, il faut être méthodique ») :
-//   · le jour même, de 7 h à 2 h avant le début (12h-17h UK pour 19h) : un prospect invité à midi a encore le
-//     webinaire en tête le soir, et le rappel d'1 h puis celui du début le ramènent ;
+//   · dès la veille au soir, de 25 h à 2 h avant le début (à partir de 18h UK la veille pour 19h) : la campagne part en
+//     quelques minutes, donc le mardi vers 18h UK (20h en Afrique du Sud) pour le mercredi. Mathieu, 26/10/2026 :
+//     « lance les invitations dès mardi soir », pour laisser une soirée de plus pour s'inscrire (c'était le jour même,
+//     de 12h à 17h UK) ; le rappel d'1 h puis celui du début ramènent les inscrits le jour J ;
 //   · seulement les prospects (status 'onboarding'), les plus récents d'abord (les plus chauds) ;
 //   · une invitation par personne toutes les 3 semaines au plus, jamais quelqu'un qui a bloqué le bot
 //     (webinar_invite_batch, migration 0036) ;
@@ -234,7 +236,7 @@ export async function webinarFacts(db: Db): Promise<string> {
 // bouton inscrit en un tap, sans quitter la conversation (handleWebinarCallback). Mathieu reçoit le bilan à la fin.
 // L'interrupteur 'webinar_invites' coupe tout ; il reste sur 'off' tant que Mathieu n'a pas validé.
 
-const INVITE_FROM = 7 * HOUR;
+const INVITE_FROM = 25 * HOUR; // la veille, 18h UK pour un webinaire à 19h (7 h avant jusqu'au 26/10/2026)
 const INVITE_UNTIL = 2 * HOUR;
 const INVITE_CAP = 500;
 const INVITE_BATCH = 100;
@@ -358,7 +360,7 @@ export async function handleWebinarAdmin(db: Db, msg: any): Promise<boolean> {
   } else if (/^invit\w*\s+(on|off)$/i.test(arg)) {
     const v = /on$/i.test(arg) ? 'on' : 'off';
     await setSetting(db, 'webinar_invites', v, by);
-    note = v === 'on' ? '✅ Invitations allumées : le bot invite les prospects le jour de chaque session, de 12h à 17h UK.' : '⏸ Invitations coupées : le bot n’invite plus personne.';
+    note = v === 'on' ? '✅ Invitations allumées : le bot invite les prospects la veille de chaque session, à partir de 18h UK.' : '⏸ Invitations coupées : le bot n’invite plus personne.';
   } else if (/^(skip|annule\w*|cancel)$/i.test(arg)) {
     const next = (await upcomingSessions(db, 1))[0];
     if (!next || Date.parse(next.starts_at) <= Date.now()) note = 'Aucune session à venir à annuler.';

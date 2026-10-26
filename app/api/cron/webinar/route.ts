@@ -9,7 +9,7 @@ export const maxDuration = 60;
 // 🎤 LES RAPPELS DES WEBINAIRES (24/10/2026) — voir lib/member/webinar.ts.
 // Appelé par pg_cron toutes les 5 min (migration 0035). Sans secret, comme support-jobs : chaque rappel est marqué
 // avant d'être envoyé, un appel de trop ne renvoie rien. Avant : les sessions des 8 prochains jours qui manquent sont
-// créées (pilote automatique). Après, avec le temps qui reste : un lot d'invitations des prospects, le jour même.
+// créées (pilote automatique). Après, avec le temps qui reste : un lot d'invitations des prospects, dès la veille au soir.
 export async function GET() {
   const t0 = Date.now();
   try {
