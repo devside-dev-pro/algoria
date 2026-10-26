@@ -61,7 +61,10 @@ export const E = (n: number) => emaCache.get(n) ?? emaCache.set(n, ema(n)).get(n
 export interface Cfg {
   fast: number; slow: number; trend: number; adxMin: number; di: boolean; rr: number; sl: number; catchUp: boolean;
   minTpCost?: number; sess?: [number, number]; maxBars?: number; beAt?: number; body?: boolean; catchUpHour?: number;
+  dayLossPct?: number; // InpDailyLossPct de l'EA : quand les trades clôturés du jour perdent ce % du solde du matin, plus de
+                       // nouveau trade jusqu'au lendemain ; le trade en cours continue jusqu'à son stop, son TP ou sa sortie
 }
+export const CAPITAL = 50_000; // compte de référence à 1 lot (= 500 $ à 0,01 lot) pour les limites exprimées en % du solde
 export const label = (c: Cfg) => `EMA ${c.fast}/${c.slow}/${c.trend || '-'} · ADX ${c.adxMin ? `≥${c.adxMin}${c.di ? '+DI' : ''}` : c.di ? 'DI' : 'off'} · SL ${c.sl} ATR · RR ${c.rr}${c.catchUp ? '' : ' · sans rattrapage'}`;
 export function signal(c: Cfg, i: number, withTrend: boolean): 1 | -1 | 0 {
   const f = E(c.fast), s = E(c.slow);
@@ -75,46 +78,52 @@ export function signal(c: Cfg, i: number, withTrend: boolean): 1 | -1 | 0 {
 }
 
 // ===== Moteur (identique à mabb-arena.ts : pire cas, le stop passe avant le TP dans une même bougie ; trou servi à l'ouverture) =====
-export interface Trade { openT: number; closeT: number; dir: 1 | -1; pnl: number; r: number; catchUp: boolean }
+export interface Trade { openT: number; closeT: number; dir: 1 | -1; pnl: number; r: number; catchUp: boolean; risk: number; day: number; entry: number; sl: number; tp: number; exit: number; why: string }
 export function run(c: Cfg, opts: { randomDir: boolean; seed: number; cost?: number } = { randomDir: false, seed: 7 }) {
   const cost = opts.cost ?? COST;
-  const trades: Trade[] = []; const perDay = new Map<number, number>();
-  let pos: { dir: 1 | -1; entry: number; sl: number; sl0: number; tp: number; openT: number; i0: number; day: number; catchUp: boolean; be: boolean } | null = null;
+  const trades: Trade[] = []; const perDay = new Map<number, number>(); const blocked = new Set<number>();
+  let pos: { dir: 1 | -1; entry: number; sl: number; sl0: number; tp: number; openT: number; i0: number; day: number; d: number; catchUp: boolean; be: boolean } | null = null;
+  // limite de perte du jour, comme DailyLossHit de l'EA (vérifiée à l'entrée, à plat) : clôturé du jour contre le solde du matin
+  let realized = 0, dayKey = -1, dayPnl = 0, dayStart = CAPITAL;
   const [sessStart, sessEnd] = c.sess ?? [SESSION_START, SESSION_END], catchUpHour = c.catchUpHour ?? CATCHUP_HOUR;
   let rnd = opts.seed >>> 0; // mulberry32
   const rand = () => { rnd = (rnd + 0x6d2b79f5) >>> 0; let z = rnd; z = Math.imul(z ^ (z >>> 15), z | 1); z ^= z + Math.imul(z ^ (z >>> 7), z | 61); return ((z ^ (z >>> 14)) >>> 0) / 4294967296; };
-  const close = (px: number, t: number) => { const p = pos!; const gross = (px - p.entry) * p.dir;
-    trades.push({ openT: p.openT, closeT: t, dir: p.dir, pnl: (gross - cost) * LOT, r: gross / Math.abs(p.entry - p.sl0), catchUp: p.catchUp }); pos = null; };
+  const close = (px: number, t: number, why: string) => { const p = pos!; const gross = (px - p.entry) * p.dir, pnl = (gross - cost) * LOT;
+    trades.push({ openT: p.openT, closeT: t, dir: p.dir, pnl, r: gross / Math.abs(p.entry - p.sl0), catchUp: p.catchUp, risk: Math.abs(p.entry - p.sl0) * LOT, day: p.d,
+      entry: p.entry, sl: p.sl0, tp: p.tp, exit: px, why });
+    realized += pnl; dayPnl += pnl; pos = null; };
   for (let i = START; i < m5.length; i++) {
     const b = m5[i];
-    if (pos && T.openDay[i] !== pos.day) close(b.open, b.time); // nouveau jour serveur : l'EA ferme au premier tick
+    if (T.openDay[i] !== dayKey) { dayKey = T.openDay[i]; dayPnl = 0; dayStart = CAPITAL + realized; }
+    if (pos && T.openDay[i] !== pos.day) close(b.open, b.time, 'jour suivant'); // nouveau jour serveur : l'EA ferme au premier tick
     if (pos) {
       if (pos.dir === 1) {
-        if (b.open >= pos.tp || b.open <= pos.sl) close(b.open, b.time);
-        else if (b.low <= pos.sl) close(pos.sl, b.time); else if (b.high >= pos.tp) close(pos.tp, b.time);
+        if (b.open >= pos.tp || b.open <= pos.sl) close(b.open, b.time, b.open >= pos.tp ? 'TP (trou)' : 'stop (trou)');
+        else if (b.low <= pos.sl) close(pos.sl, b.time, 'stop'); else if (b.high >= pos.tp) close(pos.tp, b.time, 'TP');
       } else {
-        if (b.open <= pos.tp || b.open >= pos.sl) close(b.open, b.time);
-        else if (b.high >= pos.sl) close(pos.sl, b.time); else if (b.low <= pos.tp) close(pos.tp, b.time);
+        if (b.open <= pos.tp || b.open >= pos.sl) close(b.open, b.time, b.open <= pos.tp ? 'TP (trou)' : 'stop (trou)');
+        else if (b.high >= pos.sl) close(pos.sl, b.time, 'stop'); else if (b.low <= pos.tp) close(pos.tp, b.time, 'TP');
       }
     }
     const hr = T.closeHour[i], d = T.openDay[i];
     const friday = T.closeDow[i] === 5 && hr >= FRIDAY_FLAT;
-    if (pos && (hr >= FLAT_HOUR || friday)) { close(b.close, b.time); continue; }
-    if (pos && c.maxBars && i - pos.i0 >= c.maxBars) { close(b.close, b.time); continue; } // sortie au temps, à la clôture
+    if (pos && (hr >= FLAT_HOUR || friday)) { close(b.close, b.time, 'mise à plat'); continue; }
+    if (pos && c.maxBars && i - pos.i0 >= c.maxBars) { close(b.close, b.time, 'sortie au temps'); continue; } // à la clôture
     if (pos && c.beAt && !pos.be && (b.close - pos.entry) * pos.dir >= c.beAt * Math.abs(pos.tp - pos.entry)) { pos.sl = pos.entry; pos.be = true; }
     if (pos || friday || hr < sessStart || hr >= sessEnd) continue;
     const n = perDay.get(d) ?? 0; if (n >= MAX_PER_DAY) continue;
     let sigDir = signal(c, i, true), catchUp = false;
     if (!sigDir && c.catchUp && hr >= catchUpHour && n < MIN_PER_DAY) { sigDir = signal(c, i, false); catchUp = sigDir !== 0; }
     if (!sigDir) continue;
+    if (c.dayLossPct && dayPnl <= -dayStart * c.dayLossPct / 100) { blocked.add(d); continue; } // limite du jour atteinte
     const dist = c.sl * atr[i]; if (!(dist > 0)) continue;
     if (c.minTpCost && c.rr * dist < c.minTpCost * cost) continue; // TP trop court face aux coûts
     const dir: 1 | -1 = opts.randomDir ? (rand() < 0.5 ? 1 : -1) : sigDir;
-    pos = { dir, entry: b.close, sl: b.close - dir * dist, sl0: b.close - dir * dist, tp: b.close + dir * c.rr * dist, openT: b.time, i0: i, day: T.closeDay[i], catchUp, be: false };
+    pos = { dir, entry: b.close, sl: b.close - dir * dist, sl0: b.close - dir * dist, tp: b.close + dir * c.rr * dist, openT: b.time, i0: i, day: T.closeDay[i], d, catchUp, be: false };
     perDay.set(d, n + 1);
   }
-  if (pos) close(m5[m5.length - 1].close, m5[m5.length - 1].time);
-  return { trades, perDay };
+  if (pos) close(m5[m5.length - 1].close, m5[m5.length - 1].time, 'fin des données');
+  return { trades, perDay, blocked };
 }
 
 // ===== Mesures, par moitié =====

@@ -8,7 +8,7 @@
 // (la v1.10, BASE ci-dessous) sur la moitié qui n'a pas servi à le choisir.
 //
 //   npx tsx backtest/mabb-6m.ts XAUUSD --months 6        (bougies : node scripts/pull-cache.mjs XAUUSD M5)
-import { COST, MIN_TRADES_PER_DAY, START, T, cell, cutDay, daysIn, fmt, label, m5, run, spearman, st, sym, type Cfg, type Half, type St } from './mabb-core';
+import { CAPITAL, COST, MIN_TRADES_PER_DAY, START, T, cell, cutDay, daysIn, fmt, label, m5, run, spearman, st, sym, type Cfg, type Half, type St } from './mabb-core';
 
 if (START <= 300) { console.error('--months N manquant : ce labo ne regarde que les derniers mois'); process.exit(1); }
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
@@ -135,6 +135,26 @@ const NEIGHBOURS: [string, Cfg, number?][] = [
 for (const [name, c, cost] of NEIGHBOURS) {
   const res = run(c, { randomDir: false, seed: 7, cost }), h1 = st(res, 'h1'), h2 = st(res, 'h2'), all = st(res, 'all');
   console.log(`      ${name.padEnd(28)} │ PF ${h1.pf.toFixed(2)} / ${h2.pf.toFixed(2)} │ 6 mois PF ${all.pf.toFixed(2)} · ${fmt(all.net).padStart(8)} $ · DD ${fmt(all.dd).padStart(8)} $ · ${all.perDay.toFixed(1)} tr/j · ≥4 ${Math.round(100 * all.ge4)} %`);
+}
+
+// ===== 6. La limite de perte du jour (InpDailyLossPct), absente des sections précédentes. Mathieu (26/10) : 2 000 $ par
+// jour sur son compte maître de 50 000 $ à 1 lot, soit 4 % (20 $ pour un abonné à 500 $ et 0,01 lot). Une fois atteinte, plus
+// de nouveau trade ; le trade en cours garde sa chance d'aller au TP, donc un jour peut finir au-delà de la limite.
+// À 2 %, un seul stop (1 à 3 % du compte) suffisait à couper la journée.
+console.log(`\n── LIMITE DE PERTE DU JOUR (réglage retenu ; compte de ${fmt(CAPITAL)} $ à 1 lot, soit 500 $ à 0,01 lot)`);
+{
+  const ts = chosen.res.trades, pct = (v: number) => (100 * v) / CAPITAL;
+  const risks = ts.map((t) => pct(t.risk)).sort((a, b) => a - b), q = (p: number) => risks[Math.min(risks.length - 1, Math.floor(p * risks.length))];
+  console.log(`   un stop coûte : médiane ${q(0.5).toFixed(1)} % du compte, 9 trades sur 10 sous ${q(0.9).toFixed(1)} %, au plus ${q(1).toFixed(1)} %`);
+  const days = new Map<number, number>(); for (const t of ts) days.set(t.day, (days.get(t.day) ?? 0) + t.pnl);
+  const dv = [...days.values()], worst = Math.min(...dv);
+  console.log(`   sans limite : ${dv.length} jours tradés, jours à −2 % ou pire : ${dv.filter((v) => pct(v) <= -2).length}, à −4 % ou pire : ${dv.filter((v) => pct(v) <= -4).length}, pire jour ${fmt(worst)} $ (${pct(worst).toFixed(1)} %)`);
+}
+for (const lim of [0, 2, 3, 4, 5, 6]) {
+  const c: Cfg = { ...CHOSEN, dayLossPct: lim || undefined }, res = run(c), h1 = st(res, 'h1'), h2 = st(res, 'h2'), all = st(res, 'all');
+  const days = new Map<number, number>(); for (const t of res.trades) days.set(t.day, (days.get(t.day) ?? 0) + t.pnl);
+  const over = lim ? [...days.values()].filter((v) => v <= (-CAPITAL * lim) / 100).length : 0;
+  console.log(`   ${(lim ? `limite ${lim} % (${fmt((CAPITAL * lim) / 100)} $)` : 'sans limite').padEnd(26)} │ PF ${h1.pf.toFixed(2)} / ${h2.pf.toFixed(2)} │ 6 mois PF ${all.pf.toFixed(2)} · ${fmt(all.net).padStart(8)} $ · DD ${fmt(all.dd).padStart(8)} $ · ${all.perDay.toFixed(1)} tr/j · ≥4 ${Math.round(100 * all.ge4)} % │ jours bloqués ${res.blocked.size}, jours finis au-delà de la limite ${over}, pire jour ${fmt(Math.min(...days.values()))} $`);
 }
 
 console.log(`\nVerdict des choix automatiques (section 3) : ${verdicts.length ? `${verdicts.length} combinaison(s) sur 2 passe(nt) la règle sur la moitié jugée.` : 'aucune amélioration ne tient sur la moitié qu’elle n’a pas vue.'} Le réglage retenu (section 5) a été choisi après lecture : il n'est pas jugé par la règle.`);

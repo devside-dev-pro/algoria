@@ -82,7 +82,7 @@ input int               InpMaxHoldMinutes  = 90;               // Fermer à la c
 input group "Risque"
 input double            InpFixedLots       = 0.01;             // Lot fixe par trade (0 = calcul au risque ci-dessous)
 input double            InpRiskPercent     = 0.5;              // Risque par trade, % de l'équité (seulement si lot fixe = 0)
-input double            InpDailyLossPct    = 2.0;              // Perte du jour max, % du solde (0 = off)
+input double            InpDailyLossPct    = 4.0;              // Perte du jour max, % du solde du matin : plus de nouveau trade, le trade en cours continue (0 = off)
 input double            InpMaxSpread       = 0.50;             // Spread max en prix, soit $ par once sur l'or (0 = off)
 input int               InpSlippagePoints  = 30;               // Glissement toléré en points
 input ulong             InpMagic           = 26102201;         // Numéro magique
