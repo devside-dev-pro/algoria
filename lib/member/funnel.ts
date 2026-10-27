@@ -26,7 +26,7 @@ export const FUNNEL_EVENTS = [
   'invite_open',        // 🤝 feuille « inviter un ami » ouverte (meta.from : home | profile)
   'invite_share',       // 🤝 lien de parrainage envoyé (meta.channel : native | whatsapp | telegram | copy)
   'webinar_popup',      // 🎤 pop-up du webinaire affichée à un prospect (meta.session)
-  'webinar_seat',       // 🎤 « save my seat » touché dans la pop-up (meta.session)
+  'webinar_seat',       // 🎤 place réservée : pop-up (meta.session), mot LIVE (meta.via=keyword), clic canal (meta.via=channel)
 ] as const;
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];
 type Meta = Record<string, string | number | boolean | null>;
@@ -41,6 +41,19 @@ export function track(event: FunnelEvent, step: number | null = null, meta: Meta
     if (navigator.sendBeacon && navigator.sendBeacon('/api/member/track', new Blob([body], { type: 'application/json' }))) return;
     void fetch('/api/member/track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
   } catch { /* mesure perdue : sans importance */ }
+}
+
+/** Mesure côté serveur (webhook du bot). Même table que track(), jamais bloquante. */
+export async function logFunnelEvent(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  tgId: number,
+  event: FunnelEvent,
+  meta: Meta = {},
+): Promise<void> {
+  try {
+    await db.from('funnel_events').insert({ tg_id: tgId, event, step: null, meta });
+  } catch { /* une mesure perdue ne doit jamais bloquer le message */ }
 }
 
 /** Une seule fois par chargement de page pour cette clé (un écran ré-affiché par un re-rendu ne compte pas double). */

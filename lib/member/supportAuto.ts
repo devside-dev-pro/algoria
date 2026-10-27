@@ -29,6 +29,8 @@ import { adminTgIds } from './notifyOwner';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
 import { HISTORY_LOSS_NOTE, INCIDENT_ESCALATE, INCIDENT_REPLY_NOTE, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, resultsPolicy, wasAffected } from './incident';
+import { isLiveKeyword, liveSeatReply, upcomingSessions } from './webinar';
+import type { Conn } from './businessInbox';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -340,6 +342,60 @@ async function doWelcome(db: Db, job: Job): Promise<JobResult> {
   return { status: 'done', result: { outcome: 'welcome', video: video.id, situation, lang, state: member?.status ?? 'no account' } };
 }
 
+/** « LIVE » seul, session à venir : pas de brouillon du modèle. On envoie la phrase et le bouton START, ou une carte
+ *  « À toi » si un garde-fou l'interdit (pilote coupé, Mathieu a écrit depuis moins de 2 h, hold WEBINAR, plafond,
+ *  droit de réponse coupé). Le texte n'est jamais un lien Zoom. null = ce n'est pas ce cas, le brouillon suit. */
+async function answerLiveKeyword(
+  db: Db,
+  job: Job,
+  conn: Conn,
+  last: BizRow,
+  base: Record<string, unknown>,
+  member: MemberRow | null,
+  autopilot: boolean,
+  manual: boolean,
+  webinarLead: boolean,
+): Promise<JobResult | null> {
+  const session = (await upcomingSessions(db, 1).catch(() => []))[0];
+  if (!session) return null;
+  const { reviewCard, tg } = await import('./businessInbox');
+  const seat = liveSeatReply(session);
+  const since = iso(Date.now() - 3_600_000);
+  const countVia = async (via: string) => ((await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', via).gte('created_at', since).limit(MAX_AUTO_PER_HOUR + 1)).data ?? []).length;
+  const capped = (await countVia('auto')) + (await countVia('live_keyword')) >= MAX_AUTO_PER_HOUR;
+  // la carte doit pouvoir partir telle quelle (le bouton Envoyer n'ajoute pas de clavier) : le lien t.me y est, pas Zoom
+  const suggestion = `${seat.text}\n${seat.button.url}`;
+  const why = !autopilot ? 'pilote automatique coupé'
+    : manual ? 'tu as écrit dans cette conversation il y a moins de 2 h'
+    : webinarLead ? WEBINAR_WHY
+    : !conn.canReply ? 'droit « Reply to messages » coupé dans Telegram Business'
+    : capped ? 'beaucoup de réponses automatiques dans l’heure'
+    : null;
+  if (why) {
+    await reviewCard(db, conn, last.id, base, member, suggestion, why);
+    return { status: 'done', result: { outcome: 'review', reason: why, via: 'live_keyword' } };
+  }
+  const r = await tg('sendMessage', {
+    business_connection_id: job.conn,
+    chat_id: job.tg_id,
+    text: seat.text,
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: [[{ text: seat.button.text, url: seat.button.url }]] },
+  });
+  if (!r.ok) {
+    await reviewCard(db, conn, last.id, base, member, suggestion, `envoi refusé par Telegram : ${r.description ?? 'refusé'}`);
+    return { status: 'done', result: { outcome: 'review', reason: r.description ?? 'refusé', via: 'live_keyword' } };
+  }
+  const now = iso(Date.now());
+  await db.from('member_actions').insert({
+    tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai',
+    detail: { from: 'owner', via: 'live_keyword', text: seat.text, conn: job.conn },
+  });
+  await db.from('member_actions').update({ detail: { ...base, answered_at: now, owner_reply: seat.text, draft_intent: 'live' } }).eq('id', last.id);
+  await markRead(conn, job.conn, job.tg_id, last);
+  return { status: 'done', result: { outcome: 'auto', via: 'live_keyword' } };
+}
+
 async function doReply(db: Db, job: Job): Promise<JobResult> {
   const { connection, reviewCard, sendAsOwner, stamp, tg } = await import('./businessInbox');
   // l'accueil d'abord
@@ -407,6 +463,13 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const legacy = !ownerSpoke && !welcomed && legacyContact(member, String(rows.find((r) => r.detail?.from === 'client')?.detail?.text ?? ''));
   // 🎤 il a envoyé WEBINAR il y a moins de 3 jours : la conversation est à Mathieu
   const webinarLead = rows.some((r) => r.detail?.webinar_at && Date.now() - Date.parse(String(r.detail.webinar_at)) < WEBINAR_HOLD_MS);
+  // 🎤 « LIVE » seul : inscription déjà faite à la réception si la personne a un compte (businessInbox). Ici, la
+  // réponse dans le chat de Mathieu, sans brouillon. Pas de session → le brouillon habituel. L'accueil ne change pas.
+  const bareLive = batch.length > 0 && batch.every((b) => isLiveKeyword(String(b.detail?.text ?? '')) && !b.detail?.photo);
+  if (bareLive) {
+    const live = await answerLiveKeyword(db, job, conn, last, base, member, autopilot, manual, webinarLead);
+    if (live) return live;
+  }
   // 🔗 il demande le lien ou le code d'un broker : on le lui donne (voir brokerLinkAsk)
   const directAsk = newbie && !webinarLead && brokerLinkAsk(joined);
   // 🚨 un membre touché par la nuit du 21-22/10, ou un message sur la nuit : la réponse d'attente de Mathieu, proposée

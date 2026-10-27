@@ -20,7 +20,11 @@ type Db = any;
 
 export interface WebinarSession { id: string; starts_at: string; zoom_url: string | null }
 
-export const WEBINAR_START_RE = /^\/start\s+wb_([a-z0-9-]{4,40})$/i;
+// /start wb_<session>, avec un suffixe facultatif « -ch » (clic venu du canal). Le suffixe N'EST PAS l'id :
+// il faut le retirer avant la recherche (parseWebinarStart). L'ancien repli (id inconnu → prochaine session)
+// reste dans registerForWebinar.
+export const WEBINAR_START_RE = /^\/start\s+wb_[a-z0-9-]{4,43}$/i;
+const CHANNEL_SUFFIX = '-ch';
 const HOUR = 3_600_000;
 const LATE_JOIN_MS = 45 * 60_000; // on peut encore s'inscrire (et recevoir le lien) 45 min après le début
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -28,8 +32,48 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** La page d'inscription (aussi servie sous app.getalgoria.com/webinar). */
 export const WEBINAR_PAGE = 'https://getalgoria.com/webinar';
-export const seatLink = (id: string) => `https://t.me/${process.env.NEXT_PUBLIC_TELEGRAM_BOT ?? ''}?start=wb_${id}`;
+/** Deep link du bot. `via: 'channel'` ajoute « -ch » pour mesurer le clic du canal (parseWebinarStart). */
+export const seatLink = (id: string, via?: 'channel') =>
+  `https://t.me/${process.env.NEXT_PUBLIC_TELEGRAM_BOT ?? ''}?start=wb_${id}${via === 'channel' ? CHANNEL_SUFFIX : ''}`;
 export const calendarLink = (id: string) => `${APP_URL}/api/webinar/ics?s=${encodeURIComponent(id)}`;
+
+// 🎤 LE MOT « LIVE » (inscription à la prochaine session). Rien à voir avec WEBINAR (lib/member/supportAuto.ts) :
+// WEBINAR = le pack d'après-webinaire, 10 places, Mathieu en privé. LIVE = « garde-moi une place » pour la prochaine
+// session. Uniquement le mot seul, majuscules indifférentes, ponctuation ou emoji de fin facultatifs.
+// « is it live ? », « live account » ne matchent pas.
+export const LIVE_KEYWORD_RE = /^\s*live\s*[!.?🙏🙌🏻\uFE0F]*\s*$/i;
+export const isLiveKeyword = (text: string): boolean => LIVE_KEYWORD_RE.test(String(text ?? ''));
+/** Cookie alg_src ou ?src= du post : « channel », ou « channel:campagne ». « channels » ne compte pas. */
+export const isChannelSource = (src: string): boolean => src.toLowerCase().split(':')[0] === 'channel';
+
+/** La ligne du canal (soon / tomorrow / tonight). Un seul bouton reste sous le post ; pas de lien Zoom. */
+export const LIVE_DM_LINE = 'Or just DM me <b>LIVE</b> (@mathieu_algoria) and I’ll save your seat 🙌🏻';
+
+/** « /start wb_<id> » ou « /start wb_<id>-ch ». null si ce n'est pas ce deep link. */
+export function parseWebinarStart(text: string): { sessionId: string; via: 'channel' | null } | null {
+  const m = WEBINAR_START_RE.exec(String(text ?? '').trim());
+  if (!m) return null;
+  let sessionId = m[0].replace(/^\/start\s+wb_/i, '').toLowerCase();
+  let via: 'channel' | null = null;
+  if (sessionId.endsWith(CHANNEL_SUFFIX)) {
+    sessionId = sessionId.slice(0, -CHANNEL_SUFFIX.length);
+    via = 'channel';
+  }
+  if (sessionId.length < 4 || sessionId.length > 40) return null;
+  return { sessionId, via };
+}
+
+/** Réponse de Mathieu dans le chat Business : le bouton ouvre le bot (START), jamais le lien Zoom. */
+export function liveSeatReply(s: WebinarSession): { text: string; button: { text: string; url: string } } {
+  const text = `You’re in ✅ ${ukDay(s.starts_at)} ${ukHour(s.starts_at)} UK. Tap START below so I can send you the Zoom link 1 hour before 👇`;
+  return { text, button: { text: 'START', url: seatLink(s.id) } };
+}
+
+/** Pas de session à venir : une phrase neutre, sans date inventée. */
+export const NO_UPCOMING_WEBINAR = 'The next webinar date will be announced soon.';
+export async function notifyNoUpcomingWebinar(chatId: number): Promise<void> {
+  await send(chatId, NO_UPCOMING_WEBINAR);
+}
 
 /** « Wednesday 28 October » et « 19:00 », à l'heure du Royaume-Uni (le public : UK, Afrique du Sud…). */
 export const ukDay = (at: string) => new Date(at).toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long' });
