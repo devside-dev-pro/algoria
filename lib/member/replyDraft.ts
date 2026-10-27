@@ -28,11 +28,8 @@ import { ALLOWED_RESULT_LINKS, HISTORY_RESULTS_NOTE, INCIDENT_NOTE, INCIDENT_TAL
 
 const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
 const SUPPORT_MODEL = process.env.ALGORIA_SUPPORT_MODEL ?? 'claude-sonnet-5-5';
-/** 27/10/2026 : température explicite, basse. Le défaut Anthropic est 1, et c'est ce 1 qui disperse le JSON
- *  (reply vide, guillemets intérieurs non échappés) sur un texte qu'on veut court et tenu. 0,3 laisse assez de
- *  variation pour ne pas recracher la même formule à chaque « merci », sans relâcher aucun garde-fou : un texte
- *  qui ne passe pas les gardes ne part toujours pas. Le CM (lib/channel/writer.ts) n'est pas concerné. */
-const DRAFT_TEMPERATURE = 0.3;
+/** 27/10/2026 (hotfix) : pas de `temperature` sur l'appel du brouillon. claude-sonnet-5-5 (ALGORIA_SUPPORT_MODEL) la
+ *  refuse (400 invalid_request_error) : toutes les cartes Business arrivaient « sans proposition ». */
 /** Mode autonome : OFF par défaut depuis le 09/09/2026 (bloc B, décision Mathieu : « le bot parle trop, les gens
  *  ont l'impression de parler à une IA »). Le bot ne répond plus jamais seul ; il accuse réception et renvoie vers
  *  Mathieu. Le brouillon continue d'arriver à Mathieu avec ses boutons — c'est son outil, pas la voix du bot.
@@ -635,7 +632,6 @@ async function attempt(i: DraftInput, retry: string | null): Promise<{ draft: Dr
     const res = await client.messages.create({
       model: requested,
       max_tokens: biz ? 700 : 350,
-      temperature: DRAFT_TEMPERATURE,
       system: [{ type: 'text', text: built.system, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: biz && i.images?.length
         ? [...i.images.slice(0, 3).map((im) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: im.media_type, data: im.data } })), { type: 'text' as const, text: user }]
