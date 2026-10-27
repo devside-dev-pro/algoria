@@ -15,6 +15,7 @@
 //               Le bot Telegram ne le lit pas.
 // Cache 60 s : une modification est prise en compte en une minute, sans redéploiement, et le bot ne relit pas la
 // base à chaque message.
+import { createHash } from 'node:crypto';
 import { sdb } from './server';
 
 export const AGENT_DOC_KEYS = ['knowledge', 'memory', 'ads_memory', 'cm_memory', 'live_welcome', 'support_welcome', 'support_intro', 'support_followup'] as const;
@@ -22,21 +23,37 @@ export type AgentDocKey = (typeof AGENT_DOC_KEYS)[number];
 /** Plafond d'un document : au-delà, le prompt s'alourdit (coût, lenteur) et l'agent s'y perd. */
 export const AGENT_DOC_MAX = 20_000;
 
-const cache = new Map<AgentDocKey, { at: number; text: string | null }>();
+// 27/10/2026 : une mauvaise réponse du support ne se comprend qu'avec la VERSION du cerveau qui était dans le prompt.
+// `updated_at` est l'horodatage de la ligne (une sauvegarde admin crée une version au même instant ; une leçon
+// ajoutée à la mémoire, elle, met à jour le document SANS nouvelle ligne dans agent_doc_versions). Le hash (12 hex
+// de sha256) est l'empreinte du texte exact injecté : on retrouve la version même si le document a bougé depuis.
+type Cached = { at: number; text: string | null; updatedAt: string | null; hash: string | null };
+const cache = new Map<AgentDocKey, Cached>();
+const docHash = (text: string | null) => (text ? createHash('sha256').update(text).digest('hex').slice(0, 12) : null);
+
+export interface AgentDocMeta { text: string | null; updatedAt: string | null; hash: string | null }
+
+/** Le document et son empreinte, ou un texte vide si la ligne est vide. En panne de base : la dernière version en cache. */
+export async function getAgentDocMeta(key: AgentDocKey): Promise<AgentDocMeta> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < 60_000) return { text: hit.text, updatedAt: hit.updatedAt, hash: hit.hash };
+  try {
+    const { data, error } = await sdb().from('agent_docs').select('content,updated_at').eq('key', key).limit(1);
+    if (error) throw error;
+    const row = (data?.[0] ?? null) as { content?: string; updated_at?: string } | null;
+    const text = String(row?.content ?? '').trim() || null;
+    const updatedAt = row?.updated_at ? String(row.updated_at) : null;
+    const hash = docHash(text);
+    cache.set(key, { at: Date.now(), text, updatedAt, hash });
+    return { text, updatedAt, hash };
+  } catch {
+    return { text: hit?.text ?? null, updatedAt: hit?.updatedAt ?? null, hash: hit?.hash ?? null };
+  }
+}
 
 /** Le document, ou null s'il est vide / illisible — l'appelant retombe alors sur ses faits intégrés. */
 export async function getAgentDoc(key: AgentDocKey): Promise<string | null> {
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < 60_000) return hit.text;
-  try {
-    const { data, error } = await sdb().from('agent_docs').select('content').eq('key', key).limit(1);
-    if (error) throw error;
-    const text = String((data?.[0] as { content?: string } | undefined)?.content ?? '').trim() || null;
-    cache.set(key, { at: Date.now(), text });
-    return text;
-  } catch {
-    return hit?.text ?? null; // base indisponible : la dernière version connue plutôt que rien
-  }
+  return (await getAgentDocMeta(key)).text;
 }
 
 const MEMORY_HEADER = '# Algoria AI — mémoire\nLeçons tirées des corrections de Mathieu, une par ligne. En cas de contradiction, la plus récente gagne.\n';

@@ -8,6 +8,8 @@
 // trouver une solution… il ne faut pas qu'ils pensent qu'ils vont être remboursés à 100 % ». Ici : qui était
 // touché (calculé côté serveur, jamais fourni par le navigateur), et ce que chacun déclare (solde avant / après,
 // capture, commentaire). Une déclaration n'est PAS une demande de remboursement et le texte le dit.
+import { HISTORY_MAINTENANCE } from './historyMaintenance';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
 
@@ -42,11 +44,51 @@ export const INCIDENT_TALK = /\b(incident|blown|wiped|liquidat\w*|margin call|st
 export const INCIDENT_ESCALATE = /\b(withdraw\w*|scam\w*|fraud\w*|stolen|hack\w*|police|lawyer|solicitor|court|sue|legal action|chargeback|regulator|fsca|fca|ritir\w*|truffa)\b/i;
 export const INCIDENT_REPLY_NOTE = `This person was affected by the incident of 21-22 October, or writes about it. If their message is about the incident or their loss, answer with Mathieu's message of 24 October, in your own words, short, warm and calm, as Mathieu: he is really sorry for what happened; extra safeguards now run on Algoria AI (a trade without a stop loss gets one automatically within 2 minutes, never more than 10 trades open at once, and everything closes if the day reaches −5%); he has contacted the broker about the incident and is waiting for their answer; they should not worry, we should be able to find solutions in the next few days; he will come back to them personally. Never promise a refund, a compensation, an amount or a date, never blame the broker or the market, no figure about their loss. If they have not told where they stand yet, you may invite them to do it in the app: https://app.getalgoria.com/member/incident (it is not a refund request). If this was already said in the recent exchange, do not repeat it: answer only what is new, or intent "skip" for a simple thanks or ok. If their message is about something else, answer that normally.`;
 
+/** MYFXBOOK DU NOUVEAU MASTER (27/10/2026). Compte réel RaiseFX, MT5, vérifié par un tiers. Mathieu vient de le
+ *  créer : ce lien REMPLACE la promesse « track record vérifiable à venir » (guide §13). Une seule constante :
+ *  le support et le bot de l'app la recopient, les garde-fous ne laissent passer qu'elle. Aucun chiffre de
+ *  résultat — le lien est la preuve. Pas le CM, pas la page /track-record, pas HISTORY_MAINTENANCE. */
+export const MYFXBOOK_URL = 'https://www.myfxbook.com/members/AlgoriaAI/algoria-ai/12279938';
+/** Liste fermée des liens de résultats. Tout autre Myfxbook, et la page track record de l'app, sont refusés. */
+export const ALLOWED_RESULT_LINKS = [MYFXBOOK_URL] as const;
+
+const MYFXBOOK_LINE = `the track record is followed in full transparency by a third party on Myfxbook: ${MYFXBOOK_URL}`;
+
 /** UN PROSPECT DEMANDE LES RÉSULTATS (26/10/2026). Mathieu garde l'historique en maintenance tant que le nouveau compte
  *  n'a pas quelques semaines de trades (option B), et il veut que le support en parle seul : « oui il peut en parler tout
- *  seul ». Réponse du bot, sans carte : la nouvelle version, son compte depuis le 26/10, ses garde-fous, le track record
- *  vérifiable à venir (Mathieu prépare un Myfxbook : son lien remplacera la promesse quand il sera prêt). */
-export const RESULTS_REPLY_NOTE = `This person has not started yet and asks about results, performance, profits or the track record. Answer it yourself, short and calm, as Mathieu, in your own words: the new version of Algoria AI started trading on 26 October on a new account, with new safeguards (a trade without a stop loss gets one automatically within 2 minutes, never more than 10 trades open at once, everything closes if the day reaches −5%); you will share its verifiable track record once it has a few weeks of real trades, you'd rather show something solid than a few days. No result figure or percentage, no day's result, no link to the track record page, never what someone could make, and no "I'll get back to you" or "let me check": the answer is complete as it is. If they also ask something else, answer that too. This is a routine answer: intent "auto".`;
+ *  seul ». Depuis le 27/10/2026 le Myfxbook tient lieu de track record : plus de promesse « à venir », toujours aucun
+ *  chiffre et jamais la page /track-record. */
+export const RESULTS_REPLY_NOTE = `This person has not started yet and asks about results, performance, profits, proof or the track record. Answer it yourself, short and calm, as Mathieu, in your own words: the new version of Algoria AI started trading on 26 October on a new account, with new safeguards (a trade without a stop loss gets one automatically within 2 minutes, never more than 10 trades open at once, everything closes if the day reaches −5%); ${MYFXBOOK_LINE}. No result figure or percentage, no day's result, no link to the track record page (the Myfxbook link replaces the figures), never what someone could make, and no "I'll get back to you" or "let me check": the answer is complete as it is. If they also ask something else, answer that too. This is a routine answer: intent "auto".`;
+
+/** Prospect qui demande ce qui s'est passé en octobre, une fois la garde de l'incident terminée mais tant que
+ *  l'historique reste masqué (27/10/2026). La réponse « nouvelle version » ne doit PAS recouvrir la perte :
+ *  on la dit telle quelle, on ne l'appelle pas « maintenance ». Le Myfxbook vient après, sans autre chiffre. */
+export const HISTORY_LOSS_NOTE = `This person asks what happened in October, about the previous account, or why there is a new account. Answer honestly, short and calm, as Mathieu: on the night of 21 to 22 October a failure opened far too many buy positions on gold, almost all without a stop loss; the main account lost about 85%, and most members who were copying it took a heavy loss. Do not hide that loss, do not minimise it, do not blame the market or the broker, and never call it "maintenance" or a pause. Then one line: the new version of Algoria AI started trading on 26 October on a new account, with the new safeguards, and ${MYFXBOOK_LINE}. No other figure, no link to the track record page, never what someone could make. This is a routine answer: intent "auto".`;
+
+/** Le bloc qui REMPLACE les chiffres du track record pour un prospect tant que l'historique est en maintenance
+ *  (27/10/2026). Après le 05/11, incidentActive() devient faux et l'ancien code réinjectait REAL PAST RESULTS
+ *  plus la consigne « cite les chiffres et le lien » de la page. L'historique de l'app reste masqué. Ici : la
+ *  nouvelle version, les garde-fous, le Myfxbook à la place des chiffres, et la perte d'octobre dite franchement
+ *  si on la demande. */
+export const HISTORY_RESULTS_NOTE = `IMPORTANT — RESULTS, for someone who has not started and cannot see the history yet (this overrides the PAST RESULTS rule, the KNOWLEDGE and any older lesson about quoting results or sending the track record page):
+Do NOT quote any result figure, percentage, win rate or dollar P&L, and do NOT send any link to the track record page. Do not say the history is in the app. Never answer a results question with the word "maintenance". The only results link you may send is ${MYFXBOOK_URL}, copied exactly.
+If they ask about results, performance, profits, proof or the track record: the new version of Algoria AI started trading on 26 October on a new account, with new safeguards (a trade without a stop loss gets one automatically within 2 minutes, never more than 10 trades open at once, everything closes if the day reaches −5%); ${MYFXBOOK_LINE}. Never what someone could make, and no "I'll get back to you". If they also ask something else, answer that too. Routine answer: intent "auto" when you write as Mathieu, "simple" when you are the Algoria bot.
+If they ask what happened in October, about the previous account, or why there is a new account: do not hide it and do not dress it up. On the night of 21 to 22 October a failure opened far too many buy positions on gold, almost all without a stop loss. The main account lost about 85%, and most members who were copying it took a heavy loss; many accounts were closed by the broker. Never call that loss "maintenance" or a pause, never minimise it, never blame the market or the broker, never promise a refund or a compensation. Then the new version and the Myfxbook link, as above. No other figure.`;
+
+export type ResultsPolicy = 'incident' | 'maintenance' | 'open';
+
+/** Quel traitement des résultats. Jusqu'au 05/11 (incidentActive) : tout le monde, la note d'incident, aucun chiffre.
+ *  Après : tant que l'historique est en maintenance, un prospect (ni live ni en pause) n'a ni chiffre de
+ *  performance ni lien vers la page track record : la preuve est MYFXBOOK_URL. Un membre live ou en pause revoit
+ *  les vrais chiffres, perte d'octobre comprise — on ne la retire pas. `historyMaintenance` ne sert qu'au script
+ *  de contrôle ; en production on lit la constante HISTORY_MAINTENANCE. */
+export function resultsPolicy(opts: { now?: number; status?: string | null; historyMaintenance?: boolean } = {}): ResultsPolicy {
+  const now = opts.now ?? Date.now();
+  if (incidentActive(now)) return 'incident';
+  const maintenance = opts.historyMaintenance ?? HISTORY_MAINTENANCE;
+  if (maintenance && opts.status !== 'live' && opts.status !== 'paused') return 'maintenance';
+  return 'open';
+}
 
 /** Était-il sur la liste figée des membres touchés ? (une requête, pour la garde du pilote automatique) */
 export async function wasAffected(db: Db, tgId: number): Promise<boolean> {
@@ -59,12 +101,13 @@ export async function wasAffected(db: Db, tgId: number): Promise<boolean> {
  *  ceux du message VIP de Mathieu du 22/10. Depuis le 25/10 (Mathieu : « le nouvel EA est bien connecté, le service
  *  peut reprendre ») : le trading reprend le 26/10 sur un nouveau master, surveillé par les garde-fous du runner, et
  *  l'onboarding n'attend plus. Depuis le 26/10 (option B de Mathieu, historique en maintenance) : une question sur les
- *  résultats reçoit la nouvelle version et le track record vérifiable à venir, sans chiffre ni lien. */
+ *  résultats reçoit la nouvelle version, sans chiffre de performance. Depuis le 27/10, la preuve est le Myfxbook
+ *  (MYFXBOOK_URL), pas la page /track-record et plus une promesse « à venir ». */
 export const INCIDENT_NOTE = `IMPORTANT CONTEXT, since 22 October 2026 (it overrides any results or performance figures you may know):
 On the night of 21 to 22 October, a failure in our trading system opened far too many buy positions on gold, almost all without a stop loss. The main account lost about 85%, and most members who were copying it took a very heavy loss; many accounts were closed by the broker. Trading was stopped while the failure was fixed. Since 26 October, the new version of Algoria AI trades again, on a new main account, with the extra safeguards described below. Mathieu told the full truth in the VIP channel and is contacting every affected member personally.
 - If someone mentions it: acknowledge it plainly, never minimise it, never blame the market or the broker, never promise a refund or compensation. Since then (24 October): extra safeguards run on Algoria AI (a trade without a stop loss gets one automatically within 2 minutes, never more than 10 trades open at once, everything closes if the day reaches −5%); Mathieu has contacted the broker about the incident and is waiting for their answer; we should be able to find solutions in the next few days, nothing is confirmed yet. He will come back to them personally.
 - Do not quote ANY past results, percentages or win rates right now.
-- If someone asks about results, performance, profits or the track record: the new version of Algoria AI started trading on 26 October 2026 on a new account, with the safeguards below; Mathieu will share its verifiable track record once it has a few weeks of real trades (he would rather show something solid than a few days). No figure, no link to the track record page for now, never what someone could make. If they ask about the previous version or why a new account, answer honestly with the facts above.
+- If someone asks about results, performance, profits, proof or the track record: the new version of Algoria AI started trading on 26 October 2026 on a new account, with the safeguards below; ${MYFXBOOK_LINE}. No result figure, no link to the track record page (the Myfxbook link replaces the figures), never what someone could make. If they ask about the previous version or why a new account, answer honestly with the facts above.
 - Onboarding works as usual again: new people open their account, connect it in the app, and the copy starts once their account is verified.
 - Our address changed on 22 October: the app is now https://app.getalgoria.com. Old algoria.tech links no longer open, and neither does the Algoria icon installed on the phone before 22 October (it points to the old address). If someone can't connect, says the site is down or the app won't open: it is NOT maintenance (never say maintenance). Tell them the address changed, to delete the old Algoria icon and install the app again from https://app.getalgoria.com/download, then log in with Telegram (one tap, no password). Their trading account and settings are not affected.`;
 
