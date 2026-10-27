@@ -5,8 +5,8 @@
 // d'une raison d'échec d'un appel à l'autre, la règle résultats avant et après le 05/11, et que le lien
 // Myfxbook du 27/10/2026 passe les garde-fous sans qu'un chiffre de résultat passe avec lui.
 import { readFileSync } from 'node:fs';
-import { HISTORY_RESULTS_NOTE, INCIDENT_NOTE, MYFXBOOK_URL, RESULTS_REPLY_NOTE, resultsPolicy } from '../../lib/member/incident';
-import { assessModelOutput, buildDraftSystem, parseModelJson, settleAttempt } from '../../lib/member/replyDraft';
+import { HISTORY_LOSS_NOTE, HISTORY_RESULTS_NOTE, INCIDENT_NOTE, INCIDENT_REPLY_NOTE, MYFXBOOK_URL, RESULTS_REPLY_NOTE, resultsPolicy } from '../../lib/member/incident';
+import { assessModelOutput, buildDraftSystem, mentionsPositionCap, parseModelJson, settleAttempt } from '../../lib/member/replyDraft';
 
 let failed = 0;
 function check(name: string, ok: boolean, detail?: string): void {
@@ -19,8 +19,9 @@ function check(name: string, ok: boolean, detail?: string): void {
 }
 
 const TRACK = 'REAL PAST RESULTS: the account did +12.4% in September. https://getalgoria.com/track-record';
-const KNOWLEDGE = 'Ancien fait à ne pas citer : +40% et https://getalgoria.com/track-record pour les prospects.';
-const GOOD = `The new version of Algoria AI started trading on 26 October on a new account, with new safeguards, a stop within 2 minutes, never more than 10 trades, and everything closes if the day reaches −5%. The track record is followed in full transparency by a third party on Myfxbook: ${MYFXBOOK_URL}`;
+// Le knowledge cite encore le plafond : le prompt d'un prospect doit le retirer, sinon le modèle le recopie.
+const KNOWLEDGE = 'Ancien fait à ne pas citer : +40% et https://getalgoria.com/track-record pour les prospects. Plafond : never more than 10 trades open at once, et 10 positions max.';
+const GOOD = `The new version of Algoria AI started trading on 26 October on a new account, with new safeguards, a stop within 2 minutes, and everything closes if the day reaches −5%. The track record is followed in full transparency by a third party on Myfxbook: ${MYFXBOOK_URL}`;
 
 function sysOf(now: string, status: string | null, historyMaintenance: boolean, biz = true) {
   return buildDraftSystem({
@@ -111,6 +112,8 @@ function held(now: string, status: string | null, biz = true) {
 // ── prompt ───────────────────────────────────────────────────────────────────
 {
   check('RESULTS_REPLY_NOTE porte le Myfxbook et le 26 octobre', RESULTS_REPLY_NOTE.includes(MYFXBOOK_URL) && /26 October/.test(RESULTS_REPLY_NOTE) && /third party/i.test(RESULTS_REPLY_NOTE) && !RESULTS_REPLY_NOTE.includes('getalgoria.com/track-record') && !/few weeks/i.test(RESULTS_REPLY_NOTE));
+  check('aucune note ne cite un plafond de 10 trades ou positions', [RESULTS_REPLY_NOTE, HISTORY_RESULTS_NOTE, HISTORY_LOSS_NOTE, INCIDENT_NOTE, INCIDENT_REPLY_NOTE].every((n) => !mentionsPositionCap(n)));
+  check('les sécurités restantes restent : stop sous 2 minutes, fermeture à −5 %', [RESULTS_REPLY_NOTE, HISTORY_RESULTS_NOTE, INCIDENT_NOTE, INCIDENT_REPLY_NOTE].every((n) => /2 minutes/.test(n) && n.includes('−5%')));
 
   const inc = held('2026-11-04T12:00:00Z', null);
   check('avant le 05/11, politique incident', inc.policy === 'incident');
@@ -131,6 +134,7 @@ function held(now: string, status: string | null, biz = true) {
 
   const bot = held('2026-11-06T12:00:00Z', null, false);
   check('bot de l\'app, prospect après le 05/11 : même retenue', bot.policy === 'maintenance' && bot.system.includes(MYFXBOOK_URL) && !bot.system.includes('+12.4%') && !bot.system.includes('track-record') && !bot.system.includes('you MAY quote'));
+  check('le prompt prospect retire le plafond, même s\'il est dans le knowledge', mentionsPositionCap(KNOWLEDGE) && !mentionsPositionCap(inc.system) && !mentionsPositionCap(maint.system) && !mentionsPositionCap(bot.system) && maint.system.includes('2 minutes') && maint.system.includes('−5%'));
 }
 
 // ── garde-fous, dont le lien prévu ───────────────────────────────────────────
@@ -153,7 +157,7 @@ function held(now: string, status: string | null, biz = true) {
   check('reply sur deux lignes', nl.issue === null && (nl.draft?.text.includes('All good') ?? false));
 
   const good = judge(JSON.stringify({ intent: 'auto', reply: GOOD }), 'what are your results?');
-  check('réponse prévue (26/10 + Myfxbook, aucun chiffre de résultat) passe', good.issue === null && good.draft != null && good.draft.text.includes(MYFXBOOK_URL) && good.draft.auto === true, good.issue ?? '');
+  check('réponse prévue (26/10 + Myfxbook, aucun chiffre de résultat) passe', good.issue === null && good.draft != null && good.draft.text.includes(MYFXBOOK_URL) && good.draft.auto === true && !mentionsPositionCap(good.draft.text), good.issue ?? '');
   console.log('--- réponse prévue ---');
   console.log(good.draft?.text ?? '(aucune)');
   console.log('--- fin ---');
@@ -181,6 +185,12 @@ function held(now: string, status: string | null, biz = true) {
 
   const missing = judge(JSON.stringify({ intent: 'auto', reply: 'The new version started on 26 October on a new account, with new safeguards.' }), 'can you prove the results?');
   check('question de preuve sans le lien → refusé', missing.issue === 'lien myfxbook manquant');
+
+  const cap = judge(JSON.stringify({ intent: 'auto', reply: `${GOOD} Never more than 10 trades open at once.` }), 'what are your results?');
+  check('plafond de 10 trades refusé, même collé à la bonne réponse', cap.issue === 'plafond de positions' && cap.draft === null);
+
+  const capFr = judge(JSON.stringify({ intent: 'auto', reply: `Nouvelle version depuis le 26 octobre, 10 positions max. ${MYFXBOOK_URL}` }), 'proof of results');
+  check('« 10 positions » refusé', capFr.issue === 'plafond de positions' && capFr.draft === null);
 
   const named = judge(JSON.stringify({ intent: 'auto', reply: `I am Claude. ${MYFXBOOK_URL}` }), 'results');
   check('nom du modèle refusé', named.issue === 'nomme le modèle');

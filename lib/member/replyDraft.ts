@@ -435,6 +435,8 @@ const RETRY_HINT: Record<string, string> = {
   'lien de résultats non autorisé': 'it used a Myfxbook URL that is not the one in the FACTS. Copy that URL exactly, or send no results link.',
   'lien myfxbook manquant': 'they asked for results or proof and the reply has no Myfxbook link. Add the exact Myfxbook URL from the FACTS. No result figure.',
   'chiffre de résultat': 'it quoted 85% but they did not ask about October or the previous account. Remove that figure. The Myfxbook link replaces result figures.',
+  // L'indice ne redit pas le chiffre : sinon la 2e tentative le recopie.
+  'plafond de positions': 'it mentioned a limit on how many trades or positions can be open at once. Delete that limit. The only safeguards to name are a stop within 2 minutes and closing everything if the day reaches −5%.',
 };
 
 /** 2e tentative locale à CET appel (27/10/2026). L'indice vient de l'issue de ce run, jamais d'une variable de module. */
@@ -479,6 +481,24 @@ function hideTrackLinks(s: string): string {
     .replace(/\b(?:getalgoria\.com|algoria\.tech)\/track-record\b/gi, 'the in-app history (do not link it)');
 }
 
+/** 27/10/2026, Mathieu : on envoie environ 5 trades par jour, la limite de 10 positions n'apporte rien à un
+ *  prospect. On l'enlève des faits, et aussi du knowledge s'il l'écrit encore : sinon le modèle la recopie.
+ *  Le plafond du runner, lui, ne change pas. */
+const positionCap = () => /\b(?:(?:never|no) more than|maximum of|max(?:imum)?|up to|limit of|cap of|plafond de|pas plus de|jamais plus de)\s+10\s+(?:open\s+|simultaneous\s+|ouvertes?\s+)?(?:trades?|positions?)\b(?:\s+open(?:\s+at once)?|\s+en même temps)?|\b10\s+(?:open\s+|simultaneous\s+|ouvertes?\s+)?(?:trades?|positions?)\b(?:\s+open(?:\s+at once)?|\s+max(?:imum)?|\s+en même temps)?/gi;
+
+export function mentionsPositionCap(text: string): boolean {
+  return positionCap().test(text);
+}
+
+function hidePositionCap(s: string): string {
+  return s
+    .replace(positionCap(), '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\(\s*,/g, '(')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*\)/g, ')');
+}
+
 export interface DraftSystemInput {
   biz: boolean;
   locale?: string | null;
@@ -504,7 +524,8 @@ export function buildDraftSystem(o: DraftSystemInput): { system: string; policy:
   // Calculés AVANT hideTrackLinks : ce remplacement peut casser la sous-chaîne du knowledge.
   const pctSource = hold && o.knowledge ? raw.split(o.knowledge).join('') : raw;
   const knownPct = [...new Set((pctSource.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map(normPct))];
-  return { system: hold ? hideTrackLinks(raw) : raw, policy, knowledge: o.knowledge, knownPct };
+  const shown = hold ? hidePositionCap(hideTrackLinks(raw)) : raw;
+  return { system: shown, policy, knowledge: o.knowledge, knownPct };
 }
 
 /** Garde-fous de sortie, les mêmes qu'avant pour le mode ouvert, plus le lien Myfxbook quand les résultats sont
@@ -547,6 +568,7 @@ export function assessModelOutput(raw: string, opts: {
     const asksLoss = INCIDENT_TALK.test(opts.userText) || ASKS_LOSS.test(opts.userText);
     if (/\b85\s?%/.test(out) && !asksLoss) return { draft: null, issue: 'chiffre de résultat' };
     if (WANTS_PROOF.test(opts.userText) && !out.includes(MYFXBOOK_URL)) return { draft: null, issue: 'lien myfxbook manquant' };
+    if (mentionsPositionCap(out)) return { draft: null, issue: 'plafond de positions' };
   }
   const known = new Set(opts.knownPct ?? (() => {
     const src = opts.holdResults && opts.knowledge ? opts.sys.split(opts.knowledge).join('') : opts.sys;
