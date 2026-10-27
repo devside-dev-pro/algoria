@@ -20,14 +20,19 @@ import { STRATEGY_MIN_DEPOSIT, RECOMMENDED_DEPOSIT } from './minimums';
 import { LIVE_STRATEGY } from './maintenance';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL, WITHDRAW_LOCK_DAYS } from './activation';
 import { APP_URL } from './i18n';
-import { getAgentDoc } from './agentDocs';
+import { getAgentDocMeta } from './agentDocs';
 import { trackFacts } from './trackFacts';
 import { webinarFacts } from './webinar';
 import { sdb } from './server';
-import { INCIDENT_NOTE, incidentActive } from './incident';
+import { ALLOWED_RESULT_LINKS, HISTORY_RESULTS_NOTE, INCIDENT_NOTE, INCIDENT_TALK, MYFXBOOK_URL, resultsPolicy, type ResultsPolicy } from './incident';
 
 const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
 const SUPPORT_MODEL = process.env.ALGORIA_SUPPORT_MODEL ?? 'claude-sonnet-5-5';
+/** 27/10/2026 : température explicite, basse. Le défaut Anthropic est 1, et c'est ce 1 qui disperse le JSON
+ *  (reply vide, guillemets intérieurs non échappés) sur un texte qu'on veut court et tenu. 0,3 laisse assez de
+ *  variation pour ne pas recracher la même formule à chaque « merci », sans relâcher aucun garde-fou : un texte
+ *  qui ne passe pas les gardes ne part toujours pas. Le CM (lib/channel/writer.ts) n'est pas concerné. */
+const DRAFT_TEMPERATURE = 0.3;
 /** Mode autonome : OFF par défaut depuis le 09/09/2026 (bloc B, décision Mathieu : « le bot parle trop, les gens
  *  ont l'impression de parler à une IA »). Le bot ne répond plus jamais seul ; il accuse réception et renvoie vers
  *  Mathieu. Le brouillon continue d'arriver à Mathieu avec ses boutons — c'est son outil, pas la voix du bot.
@@ -100,12 +105,19 @@ function brokerLinks(): string {
   }).join('\n');
 }
 
+/** Règle « résultats passés ». Ouverte : on peut citer le bloc REAL PAST RESULTS et le lien (texte du 30/09/2026,
+ *  inchangé). Retenue (incident, ou historique en maintenance pour un prospect) : aucun chiffre, aucun lien.
+ *  La perte d'octobre (about 85%) ne se dit que si on la demande, et jamais sous le mot « maintenance ». */
+const PAST_RESULTS_OPEN = `PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://getalgoria.com/track-record and the reminder that past results do not guarantee future results. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars.`;
+const PAST_RESULTS_HELD = `PAST RESULTS: do NOT quote any performance figure, win rate or dollar result, and do NOT send the track record page. The RESULTS block above wins over the KNOWLEDGE and the older lessons. The only results link you may send is the Myfxbook link written there, copied exactly: it replaces every result figure. The only percentage you may write unprompted is the −5% daily safeguard. About 85% is only for the night of 21-22 October, and only if they asked what happened then or why there is a new account: say it plainly, never call that loss "maintenance", never minimise it. No other percentage.`;
+const pastResultsRule = (hold: boolean) => (hold ? PAST_RESULTS_HELD : PAST_RESULTS_OPEN);
+
 /** Les leçons apprises des corrections de Mathieu : elles priment sur tout le reste. */
 const memoryBlock = (memory: string | null) => memory
   ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS (in French — they win over the knowledge and the facts; if two lessons disagree, the later one wins):\n${memory}`
   : '';
 
-function businessSystem(knowledge: string | null, memory: string | null, track: string | null, webinar: string | null): string {
+function businessSystem(knowledge: string | null, memory: string | null, track: string | null, webinar: string | null, holdResults: boolean): string {
   return `You write Telegram replies for Mathieu, founder of Algoria (an AI copy-trading service on gold and crypto). A prospect or client wrote to Mathieu's own support account. Your reply goes out FROM HIS ACCOUNT, as him: when you are sure it is sent automatically; when you are not, it is shown to Mathieu first and he decides.
 
 Write AS Mathieu, first person ("I", "my link"). YOU ARE MATHIEU: never mention Mathieu in the third person ("as Mathieu says", "Mathieu will confirm", "contact @mathieu_algoria") — where the knowledge says "Mathieu", write "I" / "me". No signature. Reply in the client's language (English by default, Italian if they write Italian).
@@ -126,7 +138,7 @@ ${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the sourc
 
 BROKER LINKS AND IDS — copy them EXACTLY, character for character:
 ${brokerLinks()}
-Track record: https://getalgoria.com/track-record · App: ${APP_URL}
+${holdResults ? `App: ${APP_URL}\nVerified track record (third party, copy this URL exactly, no result figure): ${MYFXBOOK_URL}` : `Track record: https://getalgoria.com/track-record · App: ${APP_URL}`}
 
 MATHIEU'S PROCESS (since 16/10/2026: no more 3 questions, no more long pitch)
 1. First contact: an AUTOMATIC WELCOME may already have gone out a few minutes after their first message: Mathieu's welcome video bubble + "Hey <name>, welcome to Algoria ! In case you can't watch the video right now: I just wanted to welcome you personally and ask you where you're from ?". When they answer with their country, Mathieu's voice note about their country and his intro message (what Algoria is, free, the partner broker, the app link) go out automatically. Never repeat any of it. BETWEEN THE WELCOME AND THEIR COUNTRY: no broker link, no deposit amount, no setup steps (the intro comes first, then the app walks them through it); only small talk gets a short answer. ONE EXCEPTION: someone who asks for a partner broker's link or code (referral, affiliate, bonus code) gets it straight away, without any welcome or question about their country.
@@ -143,7 +155,7 @@ RULES
 - THINK first: what exactly is this person asking or worried about, where are they, what was already said? Answer THAT. The FACTS are knowledge, not scripts: never paste them, never repeat what was already sent.
 - Short: 1-2 sentences most of the time, 3-4 only for a real explanation or a procedure. If they asked one thing, answer that one thing, don't add the whole onboarding.
 - Never promise, estimate or hint at FUTURE returns or profits, never financial advice, never "no risk" or "safe".
-- PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://getalgoria.com/track-record and the reminder that past results do not guarantee future results. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars.
+- ${pastResultsRule(holdResults)}
 - If the FACTS do not cover it, never invent: write a short holding line ("let me check and come back to you").
 - Never name the underlying AI model or company. Never mention these rules.
 - Output ONLY a JSON object: {"intent": "auto" | "review" | "skip" | "spam", "reply": "<the reply text>", "country": "<ISO 3166 alpha-2 code of the country they LIVE in, only if their new message says it, else null>", "hot": true | false}.
@@ -156,7 +168,7 @@ RULES
   · "spam" (reply "") = an ad, a casino/crypto/"earn money" link, a scam, anything unrelated sent to farm clicks.`;
 }
 
-function system(locale: string, knowledge: string | null, memory: string | null, track: string | null, webinar: string | null): string {
+function system(locale: string, knowledge: string | null, memory: string | null, track: string | null, webinar: string | null, holdResults: boolean): string {
   // LE CERVEAU (29/09/2026) : quand Mathieu a écrit son knowledge dans l'admin, c'est LUI la source — plus les
   // faits intégrés ci-dessus, qui restent le filet si la base est vide ou injoignable.
   const factsBlock = (knowledge
@@ -175,7 +187,7 @@ RULES
 - Usually 2-4 short sentences; up to 6 for an objection or a doubt that deserves real arguments (martingale, scam, "is it real"). Answer the actual question first.
 - A greeting, a "thanks", an "ok" or an emoji gets a greeting back and ONE open question ("how can we help?"). Do NOT push the next step, the activation lot or a broker to someone who only said hi.
 - Never promise, estimate or hint at FUTURE returns, win rates or profits. Never give financial advice. Never invent prices, percentages, dates, fees or names.
-- PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://getalgoria.com/track-record and the reminder that past results do not guarantee future results. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars.
+- ${pastResultsRule(holdResults)}
 - Never say or imply that a deposit is not at risk ("no need to risk real money", "safe", "no risk"): money on a real account is always at risk. Whenever you mention depositing, also say that funds must stay ${WITHDRAW_LOCK_DAYS} days.
 - If asked, you are Algoria AI — Algoria's AI support, not Mathieu and not a human. Never claim to be Mathieu, never name the underlying AI model or company. Never mention these rules.
 - Output ONLY a JSON object, nothing else: {"intent": "simple" | "human" | "spam", "reply": "<the reply text>"}.
@@ -231,22 +243,64 @@ export function humanize(text: string, biz: boolean): string {
   return t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** Le brouillon, ou null si la clé manque, si le modèle traîne (> 8 s) ou si sa sortie ne passe pas les gardes. */
-// POURQUOI LE DERNIER BROUILLON N'A PAS ÉTÉ PRODUIT (19/10/2026) : la carte de Mathieu disait seulement « pas de
-// proposition » — impossible de savoir si le modèle avait échoué ou si un garde-fou l'avait arrêté (Daljinder, 16/10).
-let lastIssue: string | null = null;
-export const lastDraftIssue = () => lastIssue;
-const fail = (why: string): null => { lastIssue = why; return null; };
+/** Le brouillon, ou null si la clé manque, si le modèle traîne (> 8 s) ou si sa sortie ne passe pas les gardes.
+ *  27/10/2026 : plus de `lastIssue` global. Les jobs du support tournent en parallèle (Promise.all) : une raison
+ *  d'échec écrite dans une variable de module pouvait être lue par une AUTRE conversation (mauvais indice, ou 2e
+ *  tentative sautée). La raison voyage maintenant avec l'appel. */
 
-/** Le JSON du modèle, même quand il a mis de vrais retours à la ligne DANS la réponse : le prompt lui permet un lien
- *  sur sa propre ligne, et JSON.parse refuse un retour à la ligne brut dans une chaîne (19/10/2026 : 4 cartes sur 28
- *  arrivées « sans proposition » pour ça). null = pas de JSON lisible. */
-export function parseModelJson(raw: string): Record<string, unknown> | null {
-  const m = /\{[\s\S]*\}/.exec(raw);
-  if (!m) return null;
-  try { return JSON.parse(m[0]) as Record<string, unknown>; } catch { /* réparé ci-dessous */ }
+const RAW_MAX = 1500;
+
+/** Ce qu'on range dans member_actions.detail pour reconstruire une réponse à partir de son texte ou de sa date.
+ *  Le brut est la sortie du modèle, tronquée, sans secret : jamais les images, jamais la requête. */
+export interface DraftTrace {
+  model: string | null;
+  stop: string | null;
+  raw: string | null;
+  issue: string | null;
+  retried: boolean;
+  knowledgeAt: string | null;
+  memoryAt: string | null;
+  knowledgeHash: string | null;
+  memoryHash: string | null;
+}
+
+export interface DraftResult { draft: Draft | null; trace: DraftTrace }
+
+export function draftTraceDetail(t: DraftTrace): Record<string, unknown> {
+  const d: Record<string, unknown> = {};
+  if (t.model) d.draft_model = t.model;
+  if (t.stop) d.draft_stop = t.stop;
+  if (t.raw) d.draft_raw = t.raw;
+  if (t.issue) d.draft_issue = t.issue;
+  if (t.retried) d.draft_retried = true;
+  if (t.knowledgeAt) d.docs_knowledge_at = t.knowledgeAt;
+  if (t.memoryAt) d.docs_memory_at = t.memoryAt;
+  if (t.knowledgeHash) d.docs_knowledge_hash = t.knowledgeHash;
+  if (t.memoryHash) d.docs_memory_hash = t.memoryHash;
+  return d;
+}
+
+/** sk-ant-… et un base64 long (une image, une clé) ne restent pas dans le détail. */
+function clipModelRaw(raw: string): string {
+  return raw
+    .replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, '[redacted]')
+    .replace(/[A-Za-z0-9+/]{100,}={0,2}/g, '[redacted]')
+    .slice(0, RAW_MAX);
+}
+
+function tryParse(s: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(s) as unknown;
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>;
+  } catch { /* pas du JSON */ }
+  return null;
+}
+
+/** Retours à la ligne et tabulations bruts DANS une chaîne (19/10/2026 : JSON.parse les refuse, le prompt autorise
+ *  un lien sur sa propre ligne). Ne change pas les guillemets. */
+function repairControls(src: string): string {
   let fixed = ''; let inStr = false; let escaped = false;
-  for (const ch of m[0]) {
+  for (const ch of src) {
     if (!inStr) { if (ch === '"') inStr = true; fixed += ch; continue; }
     if (escaped) { escaped = false; fixed += ch; continue; }
     if (ch === '\\') escaped = true;
@@ -256,29 +310,295 @@ export function parseModelJson(raw: string): Record<string, unknown> | null {
     else if (ch === '\t') { fixed += '\\t'; continue; }
     fixed += ch;
   }
-  try { return JSON.parse(fixed) as Record<string, unknown>; } catch { return null; }
+  return fixed;
+}
+
+/** Guillemet intérieur non échappé (« He said "it works" »). Un " n'est une fin de chaîne que si le prochain
+ *  caractère utile est , } ] : ou la fin. « "yes", then » ressemble à une fin (la virgule) : ce cas-là est repris
+ *  par extractLoose, pas ici. */
+function repairInteriorQuotes(src: string): string {
+  let out = ''; let inStr = false; let escaped = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (!inStr) { if (ch === '"') inStr = true; out += ch; continue; }
+    if (escaped) { escaped = false; out += ch; continue; }
+    if (ch === '\\') { escaped = true; out += ch; continue; }
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < src.length && /\s/.test(src[j])) j++;
+      const next = src[j];
+      const closer = next == null || next === ',' || next === '}' || next === ']' || next === ':';
+      if (closer) { inStr = false; out += '"'; }
+      else out += '\\"';
+      continue;
+    }
+    if (ch === '\n') { out += '\\n'; continue; }
+    if (ch === '\r') continue;
+    if (ch === '\t') { out += '\\t'; continue; }
+    out += ch;
+  }
+  return out;
+}
+
+/** Dernier recours, schéma connu (intent / reply / country / hot). La fin du reply est un " dont la suite est }
+ *  ou ,"country"|"hot"|"intent". Un reply jamais fermé donne null : on n'envoie pas un bout de phrase coupé.
+ *  Un JSON d'un autre schéma (le digest {"rules":…}) n'a ni intent ni reply : null, le parse strict a déjà eu
+ *  sa chance. */
+function extractLoose(src: string): Record<string, unknown> | null {
+  const intentM = /"intent"\s*:\s*"(auto|review|skip|spam|simple|human)"/.exec(src);
+  const intent = intentM?.[1] ?? null;
+  const reply = extractReply(src);
+  if (reply && !reply.closed) return null;
+  if (!reply && intent !== 'skip' && intent !== 'spam') return null;
+  if (!intent && !reply) return null;
+  const out: Record<string, unknown> = {};
+  if (intent) out.intent = intent;
+  out.reply = reply ? reply.value : '';
+  const countryM = /"country"\s*:\s*"([A-Za-z]{2})"/.exec(src);
+  if (countryM) out.country = countryM[1];
+  else if (/"country"\s*:\s*null/.test(src)) out.country = null;
+  if (/"hot"\s*:\s*true/.test(src)) out.hot = true;
+  else if (/"hot"\s*:\s*false/.test(src)) out.hot = false;
+  return out;
+}
+
+function extractReply(src: string): { value: string; closed: boolean } | null {
+  const start = /"reply"\s*:\s*"/.exec(src);
+  if (!start) return null;
+  let i = start.index + start[0].length;
+  let value = '';
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === '\\') {
+      const n = src[i + 1];
+      if (n === 'n') value += '\n';
+      else if (n === 't') value += '\t';
+      else if (n === 'r') { /* rien */ }
+      else if (n === 'u' && /^[0-9a-fA-F]{4}/.test(src.slice(i + 2, i + 6))) {
+        value += String.fromCharCode(parseInt(src.slice(i + 2, i + 6), 16));
+        i += 6;
+        continue;
+      } else if (n != null) value += n;
+      i += n != null ? 2 : 1;
+      continue;
+    }
+    if (ch === '"') {
+      const rest = src.slice(i + 1);
+      if (/^\s*\}/.test(rest) || /^\s*,\s*"(?:country|hot|intent)"\s*:/.test(rest)) return { value, closed: true };
+      value += '"';
+      i++;
+      continue;
+    }
+    value += ch;
+    i++;
+  }
+  return { value, closed: false };
+}
+
+function jsonObject(raw: string): string | null {
+  return /\{[\s\S]*\}/.exec(raw)?.[0] ?? null;
+}
+
+/** Parse strict : JSON.parse, puis la réparation des retours à la ligne. Pas l'extracteur lâche (un texte coupé
+ *  par max_tokens ne doit pas être « sauvé » et envoyé). */
+function parseStrict(raw: string): Record<string, unknown> | null {
+  const body = jsonObject(raw);
+  if (!body) return null;
+  return tryParse(body) ?? tryParse(repairControls(body));
+}
+
+/** Le JSON du modèle. `loose: false` s'arrête avant l'extracteur de schéma (max_tokens). null = illisible.
+ *  Le digest du soir ({"rules":…}) reste lu par le parse strict : l'extracteur ne le réinterprète pas. */
+export function parseModelJson(raw: string, opts?: { loose?: boolean }): Record<string, unknown> | null {
+  const strict = parseStrict(raw);
+  if (strict) return strict;
+  const body = jsonObject(raw);
+  if (!body) return null;
+  const quoted = tryParse(repairInteriorQuotes(body));
+  if (quoted) return quoted;
+  if (opts?.loose === false) return null;
+  return extractLoose(body);
 }
 
 /** UNE 2e TENTATIVE (19/10/2026) : quand un garde-fou refuse la réponse du support de Mathieu, le modèle la réécrit une
- *  fois en sachant pourquoi, au lieu d'une carte vide. Pas pour le bot (le webhook attend) ni si le modèle est tombé. */
+ *  fois en sachant pourquoi, au lieu d'une carte vide. Pas pour le bot (le webhook attend) ni si le modèle est tombé.
+ *  « nomme le modèle », « se prend pour Mathieu », un refus ou une panne ne se réessaient pas. */
 const RETRY_HINT: Record<string, string> = {
-  'réponse vide ou illisible du modèle': 'it was not a valid JSON object with a non-empty "reply"',
+  'réponse vide du modèle': 'the JSON parsed but "reply" was empty. If there is nothing to send, use intent "skip" and reply "". Otherwise write 1 or 2 short sentences.',
+  'réponse illisible du modèle': 'it was not valid JSON. Return ONLY the JSON object, on one line.',
+  'réponse coupée (max_tokens)': 'the answer was cut off. Return a shorter JSON object, on one line.',
   'pourcentage introuvable dans les faits': 'it quoted a percentage that is not in the FACTS (quote none, or one written exactly in the REAL PAST RESULTS block)',
   'réponse trop longue': 'it was too long (1 to 3 short sentences)',
   'parle de gains futurs': 'it talked about what someone will make (never the future)',
   'promesse ou abonnement (« guarantee », « per month »)': 'it used "guarantee" or "per month"',
+  'lien du track record': 'it included a track record page link. Remove it. No result figure. The only results link is the Myfxbook URL from the FACTS, copied exactly.',
+  'lien de résultats non autorisé': 'it used a Myfxbook URL that is not the one in the FACTS. Copy that URL exactly, or send no results link.',
+  'lien myfxbook manquant': 'they asked for results or proof and the reply has no Myfxbook link. Add the exact Myfxbook URL from the FACTS. No result figure.',
+  'chiffre de résultat': 'it quoted 85% but they did not ask about October or the previous account. Remove that figure. The Myfxbook link replaces result figures.',
+  // L'indice ne redit pas le chiffre : sinon la 2e tentative le recopie.
+  'plafond de positions': 'it mentioned a limit on how many trades or positions can be open at once. Delete that limit. The only safeguards to name are a stop within 2 minutes and closing everything if the day reaches −5%.',
 };
 
-export async function draftReply(i: DraftInput): Promise<Draft | null> {
-  const first = await attempt(i, null);
-  if (first || i.mode !== 'business' || !lastIssue || !RETRY_HINT[lastIssue]) return first;
-  // la cron a 60 s en tout : la 2e tentative en a au plus 20
-  return attempt({ ...i, timeoutMs: Math.min(i.timeoutMs ?? 8000, 20_000) }, RETRY_HINT[lastIssue]);
+/** 2e tentative locale à CET appel (27/10/2026). L'indice vient de l'issue de ce run, jamais d'une variable de module. */
+export async function settleAttempt<T>(
+  mode: 'bot' | 'business' | undefined,
+  run: (hint: string | null) => Promise<{ value: T | null; issue: string | null }>,
+): Promise<{ value: T | null; issue: string | null; retried: boolean }> {
+  const first = await run(null);
+  if (first.value || mode !== 'business' || !first.issue || !RETRY_HINT[first.issue]) {
+    return { value: first.value, issue: first.issue, retried: false };
+  }
+  const second = await run(RETRY_HINT[first.issue]);
+  return { value: second.value, issue: second.issue, retried: true };
 }
 
-async function attempt(i: DraftInput, retry: string | null): Promise<Draft | null> {
-  lastIssue = null;
-  if (!process.env.ANTHROPIC_API_KEY) return fail('clé du modèle absente');
+const normPct = (x: string) => x.replace(/\s/g, '').replace(',', '.');
+
+/** Page track record de l'app, et tout Myfxbook qui n'est pas dans ALLOWED_RESULT_LINKS. Appelé seulement quand les
+ *  résultats sont retenus (prospect, ou incident). Les liens broker ne sont pas des liens de résultats. */
+export function resultLinkIssue(text: string): string | null {
+  if (/getalgoria\.com\/track-record|algoria\.tech\/track-record/i.test(text)) return 'lien du track record';
+  const found = text.match(/https?:\/\/(?:www\.)?myfxbook\.com\/[^\s)>"']+/gi) ?? [];
+  for (const raw of found) {
+    const got = raw.replace(/[.,;:!?)]+$/g, '').replace(/\/+$/g, '').replace(/^https?:\/\/(?:www\.)?/i, '').toLowerCase();
+    const ok = ALLOWED_RESULT_LINKS.some((allowed) => {
+      const want = allowed.replace(/\/+$/g, '').replace(/^https?:\/\/(?:www\.)?/i, '').toLowerCase();
+      return got === want;
+    });
+    if (!ok) return 'lien de résultats non autorisé';
+  }
+  return null;
+}
+
+const WANTS_PROOF = /\b(results?|performance|profits?|track ?record|win ?rate|myfxbook|proof|prove)\b/i;
+const ASKS_LOSS = /\b(october|oct\b|previous account|old account|why .{0,40}new account)\b/i;
+
+/** La page track record, écrite ou en lien, ne doit pas arriver au modèle quand les résultats sont retenus.
+ *  Le Myfxbook n'est pas concerné : c'est le lien qu'on veut qu'il recopie. */
+function hideTrackLinks(s: string): string {
+  return s
+    .replace(/https?:\/\/(?:www\.)?(?:getalgoria\.com|algoria\.tech)\/track-record\b/gi, 'the in-app history (do not link it)')
+    .replace(/\b(?:getalgoria\.com|algoria\.tech)\/track-record\b/gi, 'the in-app history (do not link it)');
+}
+
+/** 27/10/2026, Mathieu : on envoie environ 5 trades par jour, la limite de 10 positions n'apporte rien à un
+ *  prospect. On l'enlève des faits, et aussi du knowledge s'il l'écrit encore : sinon le modèle la recopie.
+ *  Le plafond du runner, lui, ne change pas. */
+const positionCap = () => /\b(?:(?:never|no) more than|maximum of|max(?:imum)?|up to|limit of|cap of|plafond de|pas plus de|jamais plus de)\s+10\s+(?:open\s+|simultaneous\s+|ouvertes?\s+)?(?:trades?|positions?)\b(?:\s+open(?:\s+at once)?|\s+en même temps)?|\b10\s+(?:open\s+|simultaneous\s+|ouvertes?\s+)?(?:trades?|positions?)\b(?:\s+open(?:\s+at once)?|\s+max(?:imum)?|\s+en même temps)?/gi;
+
+export function mentionsPositionCap(text: string): boolean {
+  return positionCap().test(text);
+}
+
+function hidePositionCap(s: string): string {
+  return s
+    .replace(positionCap(), '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\(\s*,/g, '(')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*\)/g, ')');
+}
+
+export interface DraftSystemInput {
+  biz: boolean;
+  locale?: string | null;
+  knowledge: string | null;
+  memory: string | null;
+  trackNow: string | null;
+  webinar: string | null;
+  status?: string | null;
+  now?: number;
+  /** Uniquement pour le script de contrôle. En production, la constante HISTORY_MAINTENANCE. */
+  historyMaintenance?: boolean;
+}
+
+/** Le prompt réellement envoyé, et la politique qui l'a choisi. Le script de contrôle appelle ÇA, pas une copie. */
+export function buildDraftSystem(o: DraftSystemInput): { system: string; policy: ResultsPolicy; knowledge: string | null; knownPct: string[] } {
+  const policy = resultsPolicy({ now: o.now, status: o.status, historyMaintenance: o.historyMaintenance });
+  const hold = policy !== 'open';
+  const track = policy === 'incident' ? INCIDENT_NOTE : policy === 'maintenance' ? HISTORY_RESULTS_NOTE : o.trackNow;
+  const raw = o.biz
+    ? businessSystem(o.knowledge, o.memory, track, o.webinar, hold)
+    : system(o.locale ?? 'en', o.knowledge, o.memory, track, o.webinar, hold);
+  // Les % du knowledge (un +40 % qu'il a écrit un jour) ne sont pas citables quand les résultats sont retenus.
+  // Calculés AVANT hideTrackLinks : ce remplacement peut casser la sous-chaîne du knowledge.
+  const pctSource = hold && o.knowledge ? raw.split(o.knowledge).join('') : raw;
+  const knownPct = [...new Set((pctSource.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map(normPct))];
+  const shown = hold ? hidePositionCap(hideTrackLinks(raw)) : raw;
+  return { system: shown, policy, knowledge: o.knowledge, knownPct };
+}
+
+/** Garde-fous de sortie, les mêmes qu'avant pour le mode ouvert, plus le lien Myfxbook quand les résultats sont
+ *  retenus. Un texte refusé ne devient jamais un brouillon envoyable : la carte n'a pas de bouton Envoyer dessus. */
+export function assessModelOutput(raw: string, opts: {
+  biz: boolean;
+  locale?: string | null;
+  sys: string;
+  userText: string;
+  holdResults: boolean;
+  knowledge?: string | null;
+  knownPct?: string[];
+  stopReason?: string | null;
+}): { draft: Draft | null; issue: string | null } {
+  if (opts.stopReason === 'refusal') return { draft: null, issue: 'modèle a refusé' };
+  const strict = parseStrict(raw);
+  if (opts.stopReason === 'max_tokens' && !strict) return { draft: null, issue: 'réponse coupée (max_tokens)' };
+  const j = strict ?? parseModelJson(raw);
+  if (!j) return { draft: null, issue: 'réponse illisible du modèle' };
+  const intent = typeof j.intent === 'string' ? j.intent : 'human';
+  let country: string | null = null;
+  let hot = false;
+  if (opts.biz) {
+    if (typeof j.country === 'string' && /^[A-Za-z]{2}$/.test(j.country)) country = j.country.toUpperCase();
+    hot = j.hot === true;
+  }
+  if (intent === 'spam') return { draft: { text: '', auto: false, spam: true }, issue: null };
+  if (opts.biz && intent === 'skip') return { draft: { text: '', auto: false, skip: true, country, hot }, issue: null };
+  const reply = j.reply == null ? '' : String(j.reply);
+  const out = humanize(reply.trim().replace(/^["“«]\s*|\s*["”»]$/g, ''), opts.biz);
+  if (!out) return { draft: null, issue: 'réponse vide du modèle' };
+  if (out.length > (opts.biz ? 1400 : 900)) return { draft: null, issue: 'réponse trop longue' };
+  if (/\b(language model|chatgpt|openai|anthropic|claude)\b/i.test(out)) return { draft: null, issue: 'nomme le modèle' };
+  if (!opts.biz && /\b(i am mathieu|i'm mathieu|sono mathieu)\b/i.test(out)) return { draft: null, issue: 'se prend pour Mathieu' };
+  const noDisclaimer = out.replace(/(past|previous) (results?|performance)[^.!?\n]*?(do not|don't|does not|doesn't|never|can't|cannot) (guarantee|predict)[^.!?\n]*/gi, '');
+  if (/\b(guarantee|garantit|garantisc|guaranteed|monthly fee|subscription fee|per month)\b/i.test(noDisclaimer)) return { draft: null, issue: 'promesse ou abonnement (« guarantee », « per month »)' };
+  if (opts.holdResults) {
+    const linkIssue = resultLinkIssue(out);
+    if (linkIssue) return { draft: null, issue: linkIssue };
+    const asksLoss = INCIDENT_TALK.test(opts.userText) || ASKS_LOSS.test(opts.userText);
+    if (/\b85\s?%/.test(out) && !asksLoss) return { draft: null, issue: 'chiffre de résultat' };
+    if (WANTS_PROOF.test(opts.userText) && !out.includes(MYFXBOOK_URL)) return { draft: null, issue: 'lien myfxbook manquant' };
+    if (mentionsPositionCap(out)) return { draft: null, issue: 'plafond de positions' };
+  }
+  const known = new Set(opts.knownPct ?? (() => {
+    const src = opts.holdResults && opts.knowledge ? opts.sys.split(opts.knowledge).join('') : opts.sys;
+    return (src.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map(normPct);
+  })());
+  if ((out.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).some((x) => !known.has(normPct(x)))) return { draft: null, issue: 'pourcentage introuvable dans les faits' };
+  if (/\b(you(?:'ll| will| could| can) (?:make|earn|get|expect)|expected (?:return|profit)|per (?:day|week) on average|on average per (?:day|week))\b/i.test(out)) return { draft: null, issue: 'parle de gains futurs' };
+  if (opts.biz) return { draft: { text: out, auto: intent === 'auto', country, hot }, issue: null };
+  const loc = (opts.locale ?? 'en') === 'it' ? 'it' : 'en';
+  return { draft: { text: `${out}\n\n${SIGNATURE[loc]}`, auto: intent === 'simple' }, issue: null };
+}
+
+export async function draftReply(i: DraftInput): Promise<DraftResult> {
+  let partial: Omit<DraftTrace, 'issue' | 'retried'> = emptyPartial();
+  const settled = await settleAttempt(i.mode, async (hint) => {
+    const req = hint ? { ...i, timeoutMs: Math.min(i.timeoutMs ?? 8000, 20_000) } : i;
+    const r = await attempt(req, hint);
+    partial = r.partial;
+    return { value: r.draft, issue: r.issue };
+  });
+  return { draft: settled.value, trace: { ...partial, issue: settled.issue, retried: settled.retried } };
+}
+
+function emptyPartial(): Omit<DraftTrace, 'issue' | 'retried'> {
+  return { model: null, stop: null, raw: null, knowledgeAt: null, memoryAt: null, knowledgeHash: null, memoryHash: null };
+}
+
+async function attempt(i: DraftInput, retry: string | null): Promise<{ draft: Draft | null; issue: string | null; partial: Omit<DraftTrace, 'issue' | 'retried'> }> {
+  const partial = emptyPartial();
+  if (!process.env.ANTHROPIC_API_KEY) return { draft: null, issue: 'clé du modèle absente', partial };
   const statusLine = (() => {
     if (!i.member) return 'no account in the app yet';
     const st = i.member?.status ?? 'unknown';
@@ -290,62 +610,50 @@ async function attempt(i: DraftInput, retry: string | null): Promise<Draft | nul
     return st;
   })();
   const biz = i.mode === 'business';
+  const requested = biz ? SUPPORT_MODEL : MODEL;
   const [them, us] = biz ? ['Client', 'Mathieu'] : ['Member', 'Algoria'];
   const history = i.history.length ? i.history.map((h) => `${h.from === 'member' ? them : us}: ${h.text.replace(/\s+/g, ' ').slice(0, 300)}`).join('\n') : '(none)';
   const user = `${them}: ${i.member?.member_no != null ? `member #${i.member.member_no}` : biz ? 'not an Algoria member yet' : 'unknown'} ${i.member?.tg_username ? '@' + i.member.tg_username : (i.member?.tg_name ?? '')}\nStatus: ${statusLine}\nApp language: ${i.locale ?? 'en'}\n\nRecent exchange:\n${history}\n\nNew message from the ${them.toLowerCase()} (people often split one sentence over several messages, like "how" / "are" / "you ?": read the lines below together as ONE message, with the Recent exchange, and answer the whole; never answer one piece on its own)${i.images?.length ? ` (with ${i.images.length} screenshot${i.images.length > 1 ? 's' : ''}, above)` : ''}:\n"""${i.text.slice(0, 1200)}"""${i.note ? `\n\nNote: ${i.note}` : ''}${retry ? `\n\nYour previous answer was rejected: ${retry}. Write it again.` : ''}\n\nReturn the JSON, on ONE line (write \\n inside the "reply" string for a line break).`;
   try {
     const client = new Anthropic({ timeout: i.timeoutMs ?? 8000, maxRetries: 0 });
     // 🎤 la prochaine session de webinaire (24/10/2026) : sa date vient de la base, jamais du knowledge
-    const [knowledge, memory, trackNow, webinar] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('memory'), trackFacts(), webinarFacts(sdb()).catch(() => null)]);
-    // 🚨 incident du 21-22/10 : la note remplace les chiffres du track record tant que la garde court
-    const track = incidentActive() ? INCIDENT_NOTE : trackNow;
-    const sys = biz ? businessSystem(knowledge, memory, track, webinar) : system(i.locale ?? 'en', knowledge, memory, track, webinar);
+    const [kMeta, mMeta, trackNow, webinar] = await Promise.all([
+      getAgentDocMeta('knowledge'), getAgentDocMeta('memory'), trackFacts(), webinarFacts(sdb()).catch(() => null),
+    ]);
+    partial.knowledgeAt = kMeta.updatedAt;
+    partial.memoryAt = mMeta.updatedAt;
+    partial.knowledgeHash = kMeta.hash;
+    partial.memoryHash = mMeta.hash;
+    // 27/10/2026 : la politique (incident / maintenance / ouvert) choisit le bloc, pas seulement incidentActive().
+    // Après le 05/11 un prospect ne revoit ni les chiffres ni la page track record tant que l'historique est masqué.
+    const built = buildDraftSystem({
+      biz, locale: i.locale, knowledge: kMeta.text, memory: mMeta.text, trackNow, webinar, status: i.member?.status ?? null,
+    });
     // LE SUPPORT DE MATHIEU (16/10/2026) : ses réponses partent seules quand le modèle est sûr, donc le meilleur modèle
     // (ALGORIA_SUPPORT_MODEL). Le prompt système (faits, knowledge, mémoire) est le même d'un message à l'autre : mis en
     // cache, il ne se paie plein tarif qu'une fois toutes les quelques minutes.
     const res = await client.messages.create({
-      model: biz ? SUPPORT_MODEL : MODEL,
+      model: requested,
       max_tokens: biz ? 700 : 350,
-      system: [{ type: 'text', text: sys, cache_control: { type: 'ephemeral' } }],
+      temperature: DRAFT_TEMPERATURE,
+      system: [{ type: 'text', text: built.system, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: biz && i.images?.length
         ? [...i.images.slice(0, 3).map((im) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: im.media_type, data: im.data } })), { type: 'text' as const, text: user }]
         : user }],
     });
+    partial.model = res.model || requested;
+    partial.stop = res.stop_reason ?? null;
     const raw = res.content.map((c) => (c.type === 'text' ? c.text : '')).join('').trim();
-    // JSON ou rien : une sortie qui n'en est pas (préambule, refus) devient un brouillon à valider, jamais un envoi.
-    const j = parseModelJson(raw);
-    let intent = 'human'; let out = ''; let country: string | null = null; let hot = false;
-    if (j) {
-      intent = String(j.intent ?? 'human'); out = String(j.reply ?? '');
-      if (typeof j.country === 'string' && /^[A-Za-z]{2}$/.test(j.country)) country = j.country.toUpperCase();
-      hot = j.hot === true;
-    }
-    if (intent === 'spam') return { text: '', auto: false, spam: true };
-    if (biz && intent === 'skip') return { text: '', auto: false, skip: true, country, hot };
-    out = humanize(out.trim().replace(/^["“«]\s*|\s*["”»]$/g, ''), biz);
-    // GARDES DE SORTIE : un modèle qui parle de lui-même, qui garantit, ou qui s'étale n'envoie rien.
-    if (!out) return fail('réponse vide ou illisible du modèle');
-    if (out.length > (biz ? 1400 : 900)) return fail('réponse trop longue');
-    // 29/09/2026 : le bot SIGNE « Algoria AI » (décision Mathieu) — il peut dire qu'il est une IA ; il ne doit
-    // toujours pas se prendre pour Mathieu ni nommer le modèle / la société derrière. En mode business, c'est
-    // Mathieu qui parle : seul le nom du modèle reste interdit.
-    if (/\b(language model|chatgpt|openai|anthropic|claude)\b/i.test(out)) return fail('nomme le modèle');
-    if (!biz && /\b(i am mathieu|i'm mathieu|sono mathieu)\b/i.test(out)) return fail('se prend pour Mathieu');
-    // l'avertissement obligatoire (« past results don't guarantee future results ») n'est PAS une garantie : retiré avant le test
-    const noDisclaimer = out.replace(/(past|previous) (results?|performance)[^.!?\n]*?(do not|don't|does not|doesn't|never|can't|cannot) (guarantee|predict)[^.!?\n]*/gi, '');
-    if (/\b(guarantee|garantit|garantisc|guaranteed|monthly fee|subscription fee|per month)\b/i.test(noDisclaimer)) return fail('promesse ou abonnement (« guarantee », « per month »)');
-    // RÉSULTATS PASSÉS AUTORISÉS (30/09/2026), JAMAIS INVENTÉS : tout pourcentage de la réponse doit exister tel
-    // quel dans ce qu'on a donné au modèle (bloc REAL PAST RESULTS, knowledge, faits). Un % introuvable = un
-    // chiffre inventé → pas d'envoi. Et rien qui parle de ce que quelqu'un VA gagner.
-    const known = new Set((sys.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map((x) => x.replace(/\s/g, '').replace(',', '.')));
-    if ((out.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).some((x) => !known.has(x.replace(/\s/g, '').replace(',', '.')))) return fail('pourcentage introuvable dans les faits');
-    if (/\b(you(?:'ll| will| could| can) (?:make|earn|get|expect)|expected (?:return|profit)|per (?:day|week) on average|on average per (?:day|week))\b/i.test(out)) return fail('parle de gains futurs');
-    if (biz) return { text: out, auto: intent === 'auto', country, hot };
-    // SIGNATURE (29/09/2026, décision Mathieu) : chaque message part signé Algoria AI, avec le contact de
-    // Mathieu — ajoutée ICI, par le code, jamais laissée au modèle (elle ne peut ni manquer ni varier).
-    return { text: `${out}\n\n${SIGNATURE[(i.locale ?? 'en') === 'it' ? 'it' : 'en']}`, auto: intent === 'simple' };
+    partial.raw = clipModelRaw(raw);
+    const judged = assessModelOutput(raw, {
+      biz, locale: i.locale, sys: built.system, userText: i.text, holdResults: built.policy !== 'open',
+      knowledge: built.knowledge, knownPct: built.knownPct, stopReason: res.stop_reason,
+    });
+    return { ...judged, partial };
   } catch (e) {
-    console.error('[replyDraft] failed:', (e as { message?: string })?.message ?? e);
-    return fail(`modèle indisponible (${String((e as { message?: string })?.message ?? e).slice(0, 80)})`);
+    const msg = String((e as { message?: string })?.message ?? e);
+    console.error('[replyDraft] failed:', msg);
+    partial.model = requested;
+    return { draft: null, issue: `modèle indisponible (${msg.slice(0, 80)})`, partial };
   }
 }

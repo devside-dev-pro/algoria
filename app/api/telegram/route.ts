@@ -4,7 +4,7 @@ import { JOIN_DM, JOIN_DM_BUTTONS, INBOX_ACK, INBOX_ACK_BTN, SUPPORT_TG_URL, SIG
 import { issueShortCode } from '@/lib/member/login';
 import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
-import { draftReply, AUTOREPLY_ON } from '@/lib/member/replyDraft';
+import { draftReply, draftTraceDetail, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
 import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
@@ -661,7 +661,8 @@ export async function POST(req: Request) {
           const history = ((past ?? []) as Array<{ id: string; kind: string; detail: Record<string, unknown> | null }>).filter((h) => !packIds.has(String(h.id))).slice(0, 6).reverse()
             .map((h) => ({ from: h.kind === 'bot_reply' ? 'member' as const : 'algoria' as const, text: String(h.detail?.text ?? h.detail?.note ?? '') }))
             .filter((h) => h.text);
-          const draft = said === '[media]' ? null : await draftReply({ text: said, locale: member?.locale, member, history });
+          const outcome = said === '[media]' ? null : await draftReply({ text: said, locale: member?.locale, member, history });
+          const draft = outcome?.draft ?? null;
           // GARDE-FOUS DU MODE AUTONOME : question jugée simple, mode ON, et pas plus d'UNE réponse automatique
           // par 10 min ni de TROIS par 24 h pour la même personne — au-delà, c'est une conversation, donc Mathieu.
           let autoOk = Boolean(draft?.auto) && AUTOREPLY_ON && !!token;
@@ -687,11 +688,13 @@ export async function POST(req: Request) {
           if (draft?.spam) {
             // SPAM (29/09/2026, décision Mathieu : « on ignore ») : ni accusé de réception, ni notification ; la ligne
             // reste en base, marquée, pour que Mathieu puisse vérifier qu'aucun vrai message n'y est tombé.
-            if (rowId) await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft_intent: 'spam' } }).eq('id', rowId);
+            if (rowId) await (db as any).from('member_actions').update({ detail: { ...baseDetail, ...(outcome ? draftTraceDetail(outcome.trace) : {}), draft_intent: 'spam' } }).eq('id', rowId);
             return;
           }
-          if (draft && rowId) {
-            await (db as any).from('member_actions').update({ detail: { ...baseDetail, draft: draft.text, draft_model: process.env.ALGORIA_REPLY_MODEL ?? 'haiku', draft_intent: draft.auto ? 'simple' : 'human', ...(autoOk && autoMessageId ? { auto_sent_at: new Date().toISOString(), auto_message_id: autoMessageId } : {}) } }).eq('id', rowId);
+          // 27/10/2026 : le modèle réellement renvoyé par l'API (plus l'étiquette « haiku »), et la trace même
+          // quand il n'y a pas de brouillon envoyable. Un média seul n'a pas appelé le modèle : rien à tracer.
+          if (rowId && outcome) {
+            await (db as any).from('member_actions').update({ detail: { ...baseDetail, ...draftTraceDetail(outcome.trace), ...(draft ? { draft: draft.text, draft_intent: draft.auto ? 'simple' : 'human', ...(autoOk && autoMessageId ? { auto_sent_at: new Date().toISOString(), auto_message_id: autoMessageId } : {}) } : {}) } }).eq('id', rowId);
           }
           // Le propriétaire voit tout : le message (tout le paquet), et soit la réponse partie (avec « Supprimer »),
           // soit le brouillon à valider (« Envoyer » / « Écarter »).

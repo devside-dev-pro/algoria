@@ -13,7 +13,7 @@
 // promesse, une balise inconnue ou un tiret long ne part pas : on retombe sur le texte de la banque (lib/channel/cm.ts),
 // ou sur rien pour le bonjour du matin. Et rien ne part sans le clic de Mathieu.
 import Anthropic from '@anthropic-ai/sdk';
-import { getAgentDoc } from '@/lib/member/agentDocs';
+import { AGENT_DOC_MAX, getAgentDoc } from '@/lib/member/agentDocs';
 import { humanize } from '@/lib/member/replyDraft';
 import { atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingTimeMs } from '@/lib/display/tradingDay';
@@ -112,6 +112,9 @@ export async function dayContext(db: Db, day: string): Promise<DayContext> {
 
 // ── LES RÈGLES ────────────────────────────────────────────────────────────────────────────────────────
 
+// 27/10/2026 : le knowledge dépasse déjà 12 000 caractères, la fin n'arrivait donc jamais au CM. Le plafond de
+// l'admin est AGENT_DOC_MAX (20 000) : tout ce que Mathieu peut enregistrer est lu, et on ne va pas au-delà.
+// La mémoire du CM reste à 6 000. Le Myfxbook du support n'est pas injecté ici.
 async function systemPrompt(): Promise<string> {
   const [knowledge, memory] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('cm_memory')]);
   return `You write the posts of Algoria's public Telegram channel. Algoria is an AI that trades gold; members copy it automatically on their own broker account (MetaTrader 5), at their own size. Mathieu built it and runs the community.
@@ -139,7 +142,7 @@ HARD RULES (a post that breaks one is thrown away):
 - Never repeat an opening, a structure or a joke from the RECENT POSTS. Every post must feel written today, for today.
 
 OUTPUT: only a JSON object {"text": "..."} with the post (use \\n for line breaks). No comment before or after.
-${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu, the source of truth for facts):\n${knowledge.slice(0, 12000)}` : ''}${memory ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS ON CHANNEL POSTS (in French; they win over everything except the hard rules; the later one wins):\n${memory.slice(0, 6000)}` : ''}`;
+${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu, the source of truth for facts):\n${knowledge.slice(0, AGENT_DOC_MAX)}` : ''}${memory ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS ON CHANNEL POSTS (in French; they win over everything except the hard rules; the later one wins):\n${memory.slice(0, 6000)}` : ''}`;
 }
 
 function contextBlock(c: DayContext): string {

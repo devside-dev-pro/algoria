@@ -24,11 +24,11 @@
 //
 // Coupe-circuits (env Vercel, sans redéploiement de code) : SUPPORT_WELCOME=off (plus d'accueil auto),
 // SUPPORT_AUTOPILOT=off (plus d'envoi seul : toutes les réponses redeviennent des cartes à valider).
-import { draftReply, lastDraftIssue } from './replyDraft';
+import { draftReply, draftTraceDetail } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
-import { INCIDENT_ESCALATE, INCIDENT_REPLY_NOTE, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, wasAffected } from './incident';
+import { HISTORY_LOSS_NOTE, INCIDENT_ESCALATE, INCIDENT_REPLY_NOTE, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, resultsPolicy, wasAffected } from './incident';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -95,6 +95,20 @@ export function hotAmount(text: string): boolean {
 // 19/10/2026 (benchmark : 8 cartes sur 28 avaient une bonne réponse bloquée) : la demande d'appel (« book a quick call »
 // préremplie par l'app), la QUESTION sur la licence ou la prop firm, et « partner broker » partent seules.
 const SENSITIVE = /\b(withdraw\w*|refund\w*|money back|lost|losing|loss(es)?|scam\w*|fraud\w*|fake|stolen|hack\w*|police|lawyer|complain\w*|angry|disappointed|cheat\w*|liar|chargeback|partnership|collab\w*|deposited|funded|paid|payment|invoice|purchase\w*|(?:want|ready|like|how) to (?:pay|buy)|ritir\w*|truffa|rimbors\w*|pers[oi])\b/i;
+
+/** 27/10/2026 : le modèle renvoie parfois un JSON valide avec reply vide juste après l'accueil (la consigne dit
+ *  déjà « skip » pour un bonjour, le bouton de l'app, ou une question d'étapes). On ne fait pas de carte vide pour
+ *  ça. La politesse (« how are you ? ») et un sujet sensible restent une carte : le modèle aurait dû répondre. */
+function welcomeEmptyIsSkip(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.length > 180 || SENSITIVE.test(t)) return false;
+  if (APP_BUTTON.test(t)) return true;
+  if (/\b(how are you|how r you|how're you|ça va|ca va|come stai)\b/i.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (/^(hi+|hello+|hey+|yo|hola|ciao|salve|bonjour|good\s+(?:morning|afternoon|evening))\b/i.test(t) && words.length <= 4) return true;
+  if (/\b(how (?:does |do )?it works?|what is algoria|the steps|guide me|(?:create|open) an account|which broker|what broker|the minimum|how much does it cost|what(?:'s| is) the price)\b/i.test(t)) return true;
+  return false;
+}
 // 🔁 UNE RELANCE (« Hi », « any update ? », « Mathieu ? ») : rien de nouveau à répondre, la question d'avant attend
 const PING_WORDS = new Set(['hi', 'hii', 'hiii', 'hello', 'helo', 'hey', 'yo', 'bro', 'brother', 'mate', 'dear', 'mathieu', 'sir', 'any', 'update', 'updates', 'news', 'answer', 'reply', 'still', 'waiting', 'wait', 'i', 'im', "i'm", 'am', 'are', 'you', 'u', 'there', 'please', 'pls', 'plz', 'again', 'did', 'check', 'checked', 'it', 'so', 'what', 'about', 'good', 'morning', 'afternoon', 'evening', 'ciao', 'buongiorno']);
 export function isPing(text: string): boolean {
@@ -398,9 +412,11 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // 🚨 un membre touché par la nuit du 21-22/10, ou un message sur la nuit : la réponse d'attente de Mathieu, proposée
   // (24/10/2026, voir INCIDENT_REPLY_NOTE et incidentHold plus bas)
   const aboutIncident = incidentActive() && !webinarLead && ((await wasAffected(db, job.tg_id)) || INCIDENT_TALK.test(joined));
-  // 📊 un PROSPECT qui demande les résultats : le bot répond seul (26/10/2026, voir RESULTS_REPLY_NOTE) ; un membre, lui,
-  // reste à Mathieu
-  const resultsAsk = incidentActive() && newbie && !webinarLead && !aboutIncident && INCIDENT_TOPIC.test(joined);
+  // 📊 un PROSPECT qui demande les résultats (26/10, puis 27/10 : le Myfxbook remplace « à venir »). Tant que la
+  // politique n'est pas ouverte (incident, ou historique en maintenance après le 05/11), la note part. Un membre
+  // live ou en pause, lui, reste à Mathieu quand l'incident est encore chaud.
+  const resultsPolicyNow = resultsPolicy({ status: member?.status });
+  const resultsAsk = resultsPolicyNow !== 'open' && newbie && !webinarLead && !aboutIncident && INCIDENT_TOPIC.test(joined);
 
   // 🌍 IL DIT D'OÙ IL VIENT : le vocal de Mathieu pour son pays, puis son message d'après (ce qu'est Algoria, gratuit, le
   // broker, le lien de l'app), une seule fois par conversation. Après l'accueil (bulle), ou dès son premier message
@@ -454,11 +470,20 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const firstNoWelcome = newbie && !ownerSpoke && !introduced && !legacy && !directAsk;
   if (legacy) note = 'This person probably already talked with Mathieu before (those older messages are not in the Recent exchange): never welcome them as a newcomer and never ask where they are from, answer their message directly.';
   if (directAsk && !introduced) note = DIRECT_NOTE;
-  if (resultsAsk) note = note ? `${note}\n${RESULTS_REPLY_NOTE}` : RESULTS_REPLY_NOTE;
+  if (resultsAsk) {
+    // Après le 05/11, une question sur octobre ne doit pas être recouverte par « nouvelle version » seule :
+    // on dit la perte (~85 %), puis le Myfxbook. Pendant l'incident, aboutIncident a déjà pris ce cas.
+    const resultsNote = resultsPolicyNow === 'maintenance' && INCIDENT_TALK.test(joined) ? HISTORY_LOSS_NOTE : RESULTS_REPLY_NOTE;
+    note = note ? `${note}\n${resultsNote}` : resultsNote;
+  }
   if (aboutIncident) note = INCIDENT_REPLY_NOTE;
   if (webinarLead) note = WEBINAR_NOTE;
 
-  const draft = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note });
+  const outcome = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note });
+  const draft = outcome.draft;
+  // La trace (modèle réel, stop, brut, version du cerveau) est sur la ligne quoi qu'il arrive ensuite : carte,
+  // envoi, ou rien. Un texte refusé par un garde-fou n'est pas mis dans `draft` (le bouton Envoyer l'enverrait).
+  base = { ...base, ...draftTraceDetail(outcome.trace) };
   // le pays (stats, fiche) et le lead chaud
   const country = said ?? draft?.country ?? null;
   if (country) {
@@ -476,7 +501,14 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const extra = { country, voiced, introduced, hot, images: images.length };
 
   if (!draft) {
-    await reviewCard(db, conn, last.id, base, member, null, webinarLead ? WEBINAR_WHY : `pas de proposition (${lastDraftIssue() ?? 'modèle indisponible ou réponse refusée'})`);
+    // Reply vide après l'accueil, sur un bonjour ou une question que l'intro couvrira : on n'envoie rien et on ne
+    // laisse pas une carte « réponse vide ». Un JSON cassé ou un garde-fou, lui, reste une carte.
+    if (outcome.trace.issue === 'réponse vide du modèle' && justWelcomed && !images.length && !SENSITIVE.test(joined) && welcomeEmptyIsSkip(joined)) {
+      await db.from('member_actions').update({ detail: { ...base, draft_intent: 'skip' } }).eq('id', last.id);
+      await markRead(conn, job.conn, job.tg_id, last);
+      return { status: 'done', result: { outcome: 'skip', reason: 'accueil : rien à ajouter', ...extra } };
+    }
+    await reviewCard(db, conn, last.id, base, member, null, webinarLead ? WEBINAR_WHY : `pas de proposition (${outcome.trace.issue ?? 'modèle indisponible ou réponse refusée'})`);
     return { status: 'done', result: { outcome: 'review', reason: 'no draft', ...extra } };
   }
   // 🎤 « WEBINAR » tout seul n'appelle pas de réponse du modèle, mais il appelle Mathieu
