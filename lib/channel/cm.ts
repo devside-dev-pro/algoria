@@ -40,7 +40,7 @@ import { dayContext, writePost, type Brief, type DayContext } from './writer';
 import { atOneLot, atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs, tradingTimeMs } from '@/lib/display/tradingDay';
 import { APP_URL, SUPPORT_TG_URL } from '@/lib/member/i18n';
-import { saHour, seatLink, ukDay, ukHour, upcomingSessions, WEBINAR_PAGE, type WebinarSession } from '@/lib/member/webinar';
+import { LIVE_DM_LINE, saHour, seatLink, ukDay, ukHour, upcomingSessions, WEBINAR_PAGE, type WebinarSession } from '@/lib/member/webinar';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -172,20 +172,31 @@ const VIDEO_AT = '19:30';
 // Le bonjour de la veille et du jour J peut en dire un mot, sans bouton.
 // 'soon' = J-2 (26/10/2026, Mathieu : « il faut commencer à teaser le webinaire… prévenir tout le monde que y'a un webinaire
 // dans 2 jours ») : le mercredi s'annonce le lundi, le dimanche le vendredi
-type WbPhase = 'soon' | 'tomorrow' | 'today' | 'last';
+export type WbPhase = 'soon' | 'tomorrow' | 'today' | 'last';
 const WB_LAST_CALL_MS = 15 * 60_000;
-function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal: string } {
+export function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal: string } {
   const at = `${ukHour(s.starts_at)} UK time (${saHour(s.starts_at)} in South Africa)`;
   if (phase === 'last') {
     return {
-      ...post('webinar-last', ['🔴 <b>We go live in 15 minutes.</b>', '', 'Zoom, 45 minutes, in English, with me.', 'Tap below, press START, and the Zoom link comes straight away 👇'], '🎥 JOIN THE LIVE', seatLink(s.id)),
+      ...post('webinar-last', ['🔴 <b>We go live in 15 minutes.</b>', '', 'Zoom, 45 minutes, in English, with me.', 'Tap below, press START, and the Zoom link comes straight away 👇'], '🎥 JOIN THE LIVE', seatLink(s.id, 'channel')),
       goal: `last call: Mathieu's free live webinar on Zoom starts in 15 minutes (${at}). The button opens Telegram: they press START and the Zoom link comes straight away. Short and urgent`,
     };
   }
   const when = phase === 'soon' ? ukDay(s.starts_at) : phase === 'tomorrow' ? `Tomorrow, ${ukDay(s.starts_at)}` : 'Tonight';
   return {
-    ...post(`webinar-${phase}`, [`🎤 <b>${when}, I’m going live.</b>`, '', `${phase === 'soon' ? 'In 2 days, ' : ''}${at}, on Zoom, in English.`, '45 minutes: how the AI trades gold, the real app on screen, real past results, and your questions.', '', '🎁 At the end, something reserved for the 10 people who are there live.', '', 'Free. Save your seat 👇'], '🎤 SAVE MY SEAT', `${WEBINAR_PAGE}?src=channel`),
-    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'soon' ? `IN 2 DAYS, on ${ukDay(s.starts_at)}` : phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'}, at ${at}: 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now`,
+    ...post(`webinar-${phase}`, [
+      `🎤 <b>${when}, I’m going live.</b>`,
+      '',
+      `${phase === 'soon' ? 'In 2 days, ' : ''}${at}, on Zoom, in English.`,
+      '45 minutes: how the AI trades gold, the real app on screen, real past results, and your questions.',
+      '',
+      '🎁 At the end, something reserved for the 10 people who are there live.',
+      '',
+      'Free. Save your seat 👇',
+      '',
+      LIVE_DM_LINE,
+    ], '🎤 SAVE MY SEAT', `${WEBINAR_PAGE}?src=channel`),
+    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'soon' ? `IN 2 DAYS, on ${ukDay(s.starts_at)}` : phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'}, at ${at}: 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now. Keep one line, in substance: or just DM @mathieu_algoria the single word LIVE (write LIVE in <b>bold</b>) and their seat is saved. One button only, the system adds it. No Zoom link in the text, no second button, no figure you were not given, nothing negative, no promise of gains`,
   };
 }
 
@@ -281,7 +292,7 @@ export async function planDay(db: Db, day: string): Promise<number> {
   // LA RÉDACTION : tous les posts du jour en parallèle (un appel chacun). Échec ou texte refusé par les garde-fous →
   // le texte de la banque ; pour le bonjour, pas de post (un bonjour en conserve, c'est ce qu'on veut éviter).
   const ctx = await dayContext(db, day).catch(() => null);
-  if (ctx && wb && wbPhase) ctx.webinar = `Mathieu's free live webinar on Zoom is ${wbPhase === 'today' ? 'TONIGHT' : wbPhase === 'tomorrow' ? `TOMORROW, ${ukDay(wb.starts_at)}` : `IN 2 DAYS, on ${ukDay(wb.starts_at)}`}, at ${ukHour(wb.starts_at)} UK time (${saHour(wb.starts_at)} in South Africa), 45 minutes in English. The call to action posts carry the button to save a seat; the morning post may mention it in one warm line (no link, no button); other posts do not mention it.`;
+  if (ctx && wb && wbPhase) ctx.webinar = `Mathieu's free live webinar on Zoom is ${wbPhase === 'today' ? 'TONIGHT' : wbPhase === 'tomorrow' ? `TOMORROW, ${ukDay(wb.starts_at)}` : `IN 2 DAYS, on ${ukDay(wb.starts_at)}`}, at ${ukHour(wb.starts_at)} UK time (${saHour(wb.starts_at)} in South Africa), 45 minutes in English. The announcement posts carry one button to save a seat, and one line: or just DM @mathieu_algoria the single word LIVE and the seat is saved. The final reminder (we go live in a few minutes) does not add that line. The morning post may mention the webinar in one warm line (no link, no button, no pointing below); other posts do not mention it. Never a Zoom link in the channel, never a second button, nothing negative, no promise of gains.`;
   const written = ctx ? await Promise.all(briefs.map((b) => (b ? writePost(ctx, b).catch(() => null) : Promise.resolve(null)))) : briefs.map(() => null);
   for (let k = rows.length - 1; k >= 0; k--) {
     const rep = (rows[k].report as object | undefined) ?? {}; // garde le brief d'un CTA webinaire (briefOf)

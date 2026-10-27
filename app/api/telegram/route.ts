@@ -8,7 +8,8 @@ import { draftReply, draftTraceDetail, AUTOREPLY_ON } from '@/lib/member/replyDr
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
 import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
-import { WEBINAR_START_RE, handleWebinarAdmin, handleWebinarCallback, noteBotBlocked, registerForWebinar } from '@/lib/member/webinar';
+import { handleWebinarAdmin, handleWebinarCallback, isLiveKeyword, noteBotBlocked, notifyNoUpcomingWebinar, parseWebinarStart, registerForWebinar, upcomingSessions } from '@/lib/member/webinar';
+import { logFunnelEvent } from '@/lib/member/funnel';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
 
@@ -533,14 +534,41 @@ export async function POST(req: Request) {
     }
   }
 
-  // 🎤 INSCRIPTION AU WEBINAIRE : /start wb_<session> (bouton de la page /webinar, lib/member/webinar.ts). Le bloc
-  // d'attribution juste en dessous enregistre aussi « wb_<session> » comme origine si c'est son premier contact.
-  const webinarPayload = typeof msg?.text === 'string' ? msg.text.trim().match(WEBINAR_START_RE) : null;
-  if (db && webinarPayload && msg?.from?.id && msg.chat?.type === 'private') {
+  // 🎤 INSCRIPTION AU WEBINAIRE : /start wb_<session> (bouton de la page /webinar, lib/member/webinar.ts).
+  // Un suffixe « -ch » (clic du canal) est retiré avant la recherche : l'id inconnu retombe toujours sur la
+  // prochaine session. Le bloc d'attribution juste en dessous enregistre l'origine si c'est son premier contact.
+  const webinarStart = typeof msg?.text === 'string' && msg.chat?.type === 'private' ? parseWebinarStart(msg.text) : null;
+  if (db && webinarStart && msg?.from?.id) {
     try {
-      await registerForWebinar(db, msg.from, webinarPayload[1]);
+      await registerForWebinar(db, msg.from, webinarStart.sessionId);
+      if (webinarStart.via === 'channel') {
+        await logFunnelEvent(db, Number(msg.from.id), 'webinar_seat', { via: 'channel', session: webinarStart.sessionId });
+      }
     } catch (e) {
       console.error('[telegram] webinar registration failed:', (e as { message?: string })?.message ?? e);
+    }
+  }
+
+  // 🎤 LE MOT « LIVE » SEUL, en privé au bot (pas un admin). Chemin déterministe, sans modèle : on inscrit à la
+  // prochaine session (confirmation + .ics déjà envoyées par registerForWebinar) et on s'arrête. Pas de session :
+  // une phrase neutre, puis la boîte de réception comme d'habitude. Jamais de setWebhook : cette route reçoit déjà tout.
+  if (db && msg?.chat?.type === 'private' && msg.from?.id && !msg.from.is_bot && typeof msg.text === 'string' && isLiveKeyword(msg.text)) {
+    const admin = (await adminTgIds()).includes(Number(msg.from.id));
+    if (!admin) {
+      let sessions: Awaited<ReturnType<typeof upcomingSessions>> | null = null;
+      try { sessions = await upcomingSessions(db, 1); } catch (e) {
+        console.error('[telegram] live keyword lookup failed:', (e as { message?: string })?.message ?? e);
+      }
+      if (sessions?.[0]) {
+        try {
+          await registerForWebinar(db, msg.from, sessions[0].id);
+          await logFunnelEvent(db, Number(msg.from.id), 'webinar_seat', { via: 'keyword', session: sessions[0].id });
+        } catch (e) {
+          console.error('[telegram] live keyword registration failed:', (e as { message?: string })?.message ?? e);
+        }
+        return NextResponse.json({ ok: true });
+      }
+      if (sessions && !sessions.length) await notifyNoUpcomingWebinar(Number(msg.chat.id)).catch(() => {});
     }
   }
 
@@ -564,8 +592,11 @@ export async function POST(req: Request) {
   const adPayload = typeof msg?.text === 'string' ? msg.text.trim().match(/^\/start\s+(?!lg_)([a-z0-9][a-z0-9_:-]{1,39})$/i) : null;
   if (db && adPayload && msg?.from?.id) {
     try {
+      // wb_<id>-ch (clic du canal) se range comme « channel », pas comme le tag brut : mesurable dans
+      // acquisition_sources puis sur la fiche membre. Les autres /start gardent leur tag.
+      const source = webinarStart?.via === 'channel' ? 'channel' : adPayload[1].toLowerCase();
       await (db as any).from('acquisition_sources')
-        .insert({ tg_id: Number(msg.from.id), source: adPayload[1].toLowerCase() });
+        .insert({ tg_id: Number(msg.from.id), source });
     } catch { /* doublon = premier contact déjà enregistré : c'est le comportement voulu */ }
   }
 

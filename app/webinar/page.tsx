@@ -2,8 +2,9 @@
 // Le bouton ouvre le bot sur /start wb_<session> : un tap, START, inscrit (voir lib/member/webinar.ts). Les sessions
 // viennent de la table webinar_sessions ; le lien Zoom n'apparaît jamais ici, il part en privé aux inscrits.
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { sdb } from '@/lib/member/server';
-import { calendarLink, seatLink, ukDay, ukHour, upcomingSessions, type WebinarSession } from '@/lib/member/webinar';
+import { calendarLink, isChannelSource, seatLink, ukDay, ukHour, upcomingSessions, type WebinarSession } from '@/lib/member/webinar';
 import { LegalLinks } from '@/components/LegalLinks';
 import { LocalTime, SeatButton } from './parts';
 
@@ -36,12 +37,19 @@ const FAQ: Array<[string, string]> = [
 const card = { width: '100%', borderRadius: 16, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' } as const;
 const label = { fontSize: 11.5, fontWeight: 800, letterSpacing: 2, color: 'var(--dim)' } as const;
 
-export default async function Webinar() {
+type Search = Promise<Record<string, string | string[] | undefined>>;
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
+
+export default async function Webinar({ searchParams }: { searchParams: Search }) {
   let sessions: WebinarSession[] = [];
   // UNE SEULE SESSION À LA FOIS (24/10/2026, Mathieu) : avec deux dates au choix, on remet au dimanche ce qu'on
   // pourrait faire mercredi. La suivante n'apparaît qu'une fois celle-ci passée (45 min après son début).
   try { sessions = await upcomingSessions(sdb(), 1); } catch { /* base injoignable : la page reste lisible */ }
   const next = sessions[0];
+  const sp = await searchParams;
+  const srcCookie = (await cookies()).get('alg_src')?.value ?? '';
+  // ?src=channel sur CE clic, ou le cookie alg_src déjà posé (le middleware ne le réécrit pas : premier contact)
+  const seat = (id: string) => seatLink(id, isChannelSource(one(sp.src)) || isChannelSource(srcCookie) ? 'channel' : undefined);
 
   return (
     <main style={{ minHeight: '100dvh', color: 'var(--text)', position: 'relative', overflowX: 'hidden', background: 'radial-gradient(90% 60% at 50% -10%, #0e1c33 0%, var(--bg,#070b12) 60%)' }}>
@@ -82,7 +90,7 @@ export default async function Webinar() {
                 <span style={{ fontSize: 15, color: 'var(--muted)' }}>{ukHour(s.starts_at)} UK time · 45 min</span>
                 <LocalTime at={s.starts_at} />
               </div>
-              <SeatButton href={seatLink(s.id)} label="✈️ SAVE MY SEAT ON TELEGRAM" />
+              <SeatButton href={seat(s.id)} label="✈️ SAVE MY SEAT ON TELEGRAM" />
               <a href={calendarLink(s.id)} style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>📅 Add to my calendar</a>
             </div>
           )) : (
@@ -119,7 +127,7 @@ export default async function Webinar() {
           ))}
         </section>
 
-        {next && <SeatButton href={seatLink(next.id)} label={`✈️ SAVE MY SEAT · ${ukDay(next.starts_at).toUpperCase()}`} />}
+        {next && <SeatButton href={seat(next.id)} label={`✈️ SAVE MY SEAT · ${ukDay(next.starts_at).toUpperCase()}`} />}
 
         <p style={{ fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.6, margin: 0 }}>
           Educational webinar, not financial advice. Trading involves risk: you can lose part or all of your capital. Past results do not guarantee future results.

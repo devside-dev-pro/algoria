@@ -27,6 +27,7 @@
 import { adminTgIds } from './notifyOwner';
 import { appendAgentMemory } from './agentDocs';
 import { WEBINAR_HOLD_MS, WEBINAR_WORD, cancelPendingJobs, scheduleOnClientMessage, webinarAlert } from './supportAuto';
+import { isLiveKeyword, registerForWebinar, upcomingSessions } from './webinar';
 
 export const BIZ_KIND = 'biz_msg';
 
@@ -170,6 +171,17 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
   const { data: past } = await db.from('member_actions').select('id').eq('tg_id', chatId).eq('kind', BIZ_KIND).limit(1);
   const { data: mrow } = await db.from('members').select('member_no,status').eq('tg_id', chatId).limit(1);
   const photo = photoId(m);
+  // 🎤 « LIVE » seul (pas WEBINAR) : s'il a déjà démarré le bot, on l'inscrit tout de suite. La confirmation part
+  // dans le chat du bot. La réponse dans CE chat (bouton START, ou carte « À toi ») est le job de réponse
+  // (lib/member/supportAuto.ts) : l'accueil du premier contact, lui, ne change pas.
+  if (typeof m.text === 'string' && isLiveKeyword(m.text) && !photo) {
+    try {
+      const next = (await upcomingSessions(db, 1))[0];
+      if (next && mrow?.[0] && m.from?.id) await registerForWebinar(db, m.from, next.id);
+    } catch (e) {
+      console.error('[business] live keyword registration failed:', (e as { message?: string })?.message ?? e);
+    }
+  }
   // 🎤 le mot du webinaire (lib/member/supportAuto.ts) : marqué et signalé à Mathieu la première fois en 3 jours
   const webinar = WEBINAR_WORD.test(text);
   let webinarFirst = false;
