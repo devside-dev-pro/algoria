@@ -313,7 +313,9 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
         allowNegative: b.kind === 'howto',
         noButton: b.kind === 'morning' || b.kind === 'howto' || b.kind === 'qa',
         allowedUsd: [],
-        ...(b.kind === 'morning' ? { allowedNumbers: [c.lastSession?.trades ?? -1, c.week?.trades ?? -1, ...dateNums], maxChars: 500 } : { maxChars: 700 }),
+        // les chiffres du webinaire (sa date, ses heures, ses 45 minutes) sont des chiffres donnés : le bonjour qui l'annonce
+        // ne doit pas être refusé pour « 28 » ou « 45 » (27/10/2026, veille du premier webinaire)
+        ...(b.kind === 'morning' ? { allowedNumbers: [c.lastSession?.trades ?? -1, c.week?.trades ?? -1, ...dateNums, ...(c.webinar?.match(/\d+/g) ?? []).map(Number)], maxChars: 500 } : { maxChars: 700 }),
       };
   const sys = await systemPrompt();
   // deux essais : un texte refusé par les garde-fous repart au modèle avec la raison du refus
