@@ -119,15 +119,19 @@ export async function registerForWebinar(db: Db, from: { id: number; first_name?
   }
   const name = [from.first_name, from.last_name].filter(Boolean).join(' ') || null;
   await db.from('webinar_registrations').upsert({ session_id: s.id, tg_id: from.id, name, username: from.username ?? null }, { onConflict: 'session_id,tg_id', ignoreDuplicates: true });
+  // il vient de (re)démarrer le bot : il est de nouveau joignable (migration 0039 ; sans elle, l'erreur est ignorée)
+  await db.from('webinar_registrations').update({ unreachable_at: null }).eq('session_id', s.id).eq('tg_id', from.id).not('unreachable_at', 'is', null);
 
   const start = Date.parse(s.starts_at);
   // inscrit à moins d'une heure du début : le rappel d'1 h est déjà passé, le lien part tout de suite
   if (start - now < HOUR && s.zoom_url) {
     const live = start <= now;
-    await send(from.id, live
+    const ok = await send(from.id, live
       ? '✅ You’re in! The live webinar with Mathieu has started. Join now 👇'
       : `✅ You’re in! The live webinar with Mathieu starts at ${ukHour(s.starts_at)} (UK time). Here’s your Zoom link 👇`, [{ text: '🎥 Join the webinar', url: s.zoom_url }]);
-    await db.from('webinar_registrations').update({ reminded_24h_at: iso(now), reminded_1h_at: iso(now), ...(live ? { reminded_live_at: iso(now) } : {}) }).eq('session_id', s.id).eq('tg_id', from.id);
+    // marqué SEULEMENT si le lien est parti (28/10/2026) : sinon la cron des rappels le renvoie au passage suivant
+    // (rappel d'1 h s'il reste plus d'1 min, sinon celui du début)
+    if (ok) await db.from('webinar_registrations').update({ reminded_24h_at: iso(now), reminded_1h_at: iso(now), ...(live ? { reminded_live_at: iso(now) } : {}) }).eq('session_id', s.id).eq('tg_id', from.id);
     return;
   }
   await send(from.id,
@@ -135,12 +139,76 @@ export async function registerForWebinar(db: Db, from: { id: number; first_name?
     [{ text: '📅 Add to my calendar', url: calendarLink(s.id) }]);
 }
 
+// ── LES RAPPELS : CHAQUE ENVOI A SON RÉSULTAT (28/10/2026) ──────────────────────────────────────────────────────
+//
+// Le 28/10, rappel d'1 h : 181 envois réussis sur 193 inscrits, 12 échecs MUETS. La personne était marquée avant
+// l'envoi (pour ne jamais envoyer deux fois), puis le résultat de Telegram était jeté : pas de 2e essai, et personne
+// ne savait qui n'avait pas reçu le lien. Le marquage avant l'envoi reste (aucun doublon possible) ; on garde
+// maintenant le résultat de chaque envoi, sur le modèle des invitations (sendInvite) :
+//   · erreur passagère (429, 5xx, réseau, délai de 5 s dépassé) : le rappel est rendu (colonne remise à null) et le
+//     passage suivant, 5 min plus tard, réessaie. REMINDER_MAX_RETRIES reprises au plus par rappel, et seulement tant
+//     que le rappel est dans sa fenêtre : le rappel d'1 h n'arrive jamais après le début (fenêtre « plus d'1 min avant »),
+//     celui du début jamais plus de 30 min après. Sur un 429, le passage s'arrête là pour ce rappel (Telegram freine) ;
+//   · erreur définitive (bot bloqué, compte supprimé, chat introuvable) : le rappel reste marqué, la personne est notée
+//     injoignable (unreachable_at) et n'est plus sollicitée pour les rappels suivants ; un blocage est aussi reporté sur
+//     ses invitations (noteBotBlocked, la convention du coupe-circuit). Si elle redémarre le bot (inscription), la
+//     marque saute ;
+//   · autre refus (requête rejetée) : noté, pas de reprise (il échouerait pareil).
+// L'erreur est gardée dans last_reminder_error (préfixée par le rappel : « 1h: » ou « live: »). La cron renvoie les
+// compteurs (sent / failed / retry / unreachable), et Mathieu reçoit le bilan de chaque rappel une fois que plus
+// personne n'est en attente.
+//
+// AVANT LA MIGRATION 0039 : les colonnes de suivi n'existent pas. Le passage le détecte (une lecture de sondage) et
+// garde alors l'ancien comportement, compteurs en plus : marqué avant l'envoi, pas de reprise. Rien ne casse si le
+// code part avant la migration ; la reprise et le suivi ne marchent qu'une fois la migration appliquée.
+
+export const REMINDER_MAX_RETRIES = 2; // 3 essais au plus par rappel : le 1er, puis 2 reprises (une par passage de 5 min)
+const REMINDER_BUDGET_MS = 40_000;
+export type ReminderOutcome = 'sent' | 'retry' | 'unreachable' | 'failed';
+const PERMANENT_RE = /blocked by the user|user is deactivated|chat not found|bot was kicked|peer_id_invalid|bot can'?t initiate conversation/i;
+
+/** Le refus de Telegram → reprendre plus tard, injoignable pour de bon, ou refus simple. */
+export function classifyTelegramError(status: number, description: string): Exclude<ReminderOutcome, 'sent'> {
+  if (status === 429 || status >= 500) return 'retry';
+  if (status === 403 || PERMANENT_RE.test(description)) return 'unreachable';
+  return 'failed';
+}
+
+type ReminderResult = { outcome: ReminderOutcome; error: string; throttled?: boolean };
+async function sendReminder(token: string, chatId: number, text: string, button: Button): Promise<ReminderResult> {
+  let r: Response;
+  try {
+    r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000),
+      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, reply_markup: { inline_keyboard: [[button]] } }),
+    });
+  } catch (e) {
+    const name = (e as { name?: string })?.name ?? '';
+    return { outcome: 'retry', error: name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network' };
+  }
+  if (r.ok) return { outcome: 'sent', error: '' };
+  const j = (await r.json().catch(() => ({}))) as { description?: string; parameters?: { retry_after?: number } };
+  const retryAfter = j.parameters?.retry_after;
+  const error = `${j.description ?? `HTTP ${r.status}`}${retryAfter ? ` (retry_after ${retryAfter}s)` : ''}`.slice(0, 200);
+  return { outcome: classifyTelegramError(r.status, error), error, throttled: r.status === 429 };
+}
+
+/** Les colonnes de suivi (migration 0039) sont-elles là ? Sinon, l'ancien comportement. */
+async function reminderTracking(db: Db): Promise<boolean> {
+  const { error } = await db.from('webinar_registrations').select('id,unreachable_at,reminder_retries,last_reminder_error,last_reminder_error_at').limit(1);
+  return !error;
+}
+
+export type ReminderCounts = { sent: number; failed: number; retry: number; unreachable: number };
+
 /** Les rappels arrivés à échéance, et les deux alertes de Mathieu. Appelé toutes les 5 min. */
-export async function runWebinarReminders(db: Db): Promise<{ sessions: number; sent: number }> {
+export async function runWebinarReminders(db: Db): Promise<{ sessions: number; tracking: boolean } & ReminderCounts> {
   const now = Date.now();
+  const token = process.env.TELEGRAM_BOT_TOKEN;
   const { data: ss } = await db.from('webinar_sessions').select('id,starts_at,zoom_url,alert_zoom_at,alert_count_at').eq('active', true)
     .gt('starts_at', iso(now - LATE_JOIN_MS)).lt('starts_at', iso(now + 4 * HOUR));
-  let sent = 0;
+  const total: ReminderCounts = { sent: 0, failed: 0, retry: 0, unreachable: 0 };
+  const tracking = (ss ?? []).length ? await reminderTracking(db) : false;
   for (const s of (ss ?? []) as Array<WebinarSession & { alert_zoom_at: string | null; alert_count_at: string | null }>) {
     const start = Date.parse(s.starts_at);
     const left = start - now;
@@ -155,33 +223,96 @@ export async function runWebinarReminders(db: Db): Promise<{ sessions: number; s
       await notifyOwner({ title: `🎤 Webinar dans 1 h : ${count ?? 0} inscrit${(count ?? 0) > 1 ? 's' : ''}`, lines: [when, s.zoom_url ? 'Le lien Zoom part maintenant aux inscrits.' : '⚠️ Toujours pas de lien Zoom.'], tag: 'webinar' });
       await db.from('webinar_sessions').update({ alert_count_at: iso(now) }).eq('id', s.id);
     }
+    // sans jeton, rien n'est réservé : personne n'est marqué « rappelé » pour un message jamais parti
+    if (!token) continue;
 
     // pg_cron tourne à :00, :05… : le rappel d'1 h part à 18:00 pour 19:00, et celui du début à 19:00 (la marge d'une
     // minute couvre une cron qui arriverait une fraction de seconde avant l'heure)
-    const stages: Array<{ col: 'reminded_1h_at' | 'reminded_live_at'; due: boolean; text: string; button: Button }> = [
-      { col: 'reminded_1h_at', due: !!s.zoom_url && left <= HOUR && left > 60_000,
+    const stages: Array<{ col: 'reminded_1h_at' | 'reminded_live_at'; tag: '1h' | 'live'; label: string; due: boolean; text: string; button: Button }> = [
+      { col: 'reminded_1h_at', tag: '1h', label: 'd’1 h', due: !!s.zoom_url && left <= HOUR && left > 60_000,
         text: `⏰ In 1 hour: live webinar with Mathieu, at ${ukHour(s.starts_at)} (UK time).\nHere’s your Zoom link 👇 Stay until the end: something is reserved for 10 people.`,
         button: { text: '🎥 Join the webinar', url: s.zoom_url ?? '' } },
-      { col: 'reminded_live_at', due: !!s.zoom_url && left <= 60_000 && left > -30 * 60_000,
+      { col: 'reminded_live_at', tag: 'live', label: 'du début', due: !!s.zoom_url && left <= 60_000 && left > -30 * 60_000,
         text: '🔴 The live is starting now! Here’s your Zoom link 👇',
         button: { text: '🎥 Join the webinar', url: s.zoom_url ?? '' } },
     ];
     for (const st of stages) {
       if (!st.due) continue;
-      const { data: regs } = await db.from('webinar_registrations').select('id').eq('session_id', s.id).is(st.col, null).limit(1000);
+      const pending = () => {
+        const q = db.from('webinar_registrations').select('id').eq('session_id', s.id).is(st.col, null);
+        return tracking ? q.is('unreachable_at', null) : q;
+      };
+      const { data: regs } = await pending().limit(1000);
       const ids = ((regs ?? []) as Array<{ id: number }>).map((r) => r.id);
+      const pass: ReminderCounts = { sent: 0, failed: 0, retry: 0, unreachable: 0 };
+      let claimed = 0;
+      let throttled = false;
       // par paquets de 20 en parallèle (~25 messages/s, sous la limite de Telegram) : tout le monde reçoit le lien du
       // début dans la même minute, même avec quelques centaines d'inscrits
-      for (let k = 0; k < ids.length && Date.now() - now < 40_000; k += 20) {
+      for (let k = 0; k < ids.length && !throttled && Date.now() - now < REMINDER_BUDGET_MS; k += 20) {
         // marqués AVANT l'envoi, et seulement s'ils ne l'étaient pas : deux passages en même temps n'envoient jamais deux fois
-        const { data: mine } = await db.from('webinar_registrations').update({ [st.col]: iso(now) }).in('id', ids.slice(k, k + 20)).is(st.col, null).select('tg_id');
-        const ok = await Promise.all(((mine ?? []) as Array<{ tg_id: number }>).map((r) => send(r.tg_id, st.text, [st.button])));
-        sent += ok.filter(Boolean).length;
+        const { data: mine } = await db.from('webinar_registrations').update({ [st.col]: iso(now) }).in('id', ids.slice(k, k + 20)).is(st.col, null)
+          .select(tracking ? 'id,tg_id,reminder_retries' : 'id,tg_id');
+        const rows = (mine ?? []) as Array<{ id: number; tg_id: number; reminder_retries?: number | null }>;
+        claimed += rows.length;
+        const results = await Promise.all(rows.map((r) => sendReminder(token, Number(r.tg_id), st.text, st.button)));
+        for (const [i, res] of results.entries()) {
+          const r = rows[i];
+          const tries = Number(r.reminder_retries ?? 0);
+          const err = { last_reminder_error: `${st.tag}: ${res.error}`.slice(0, 240), last_reminder_error_at: iso(Date.now()) };
+          if (res.outcome === 'sent') {
+            pass.sent++;
+            // reçu après une reprise : l'erreur passagère de CE rappel ne compte plus
+            if (tracking && tries > 0) await db.from('webinar_registrations').update({ reminder_retries: null, last_reminder_error: null, last_reminder_error_at: null }).eq('id', r.id);
+          } else if (res.outcome === 'unreachable') {
+            pass.unreachable++;
+            if (tracking) await db.from('webinar_registrations').update({ unreachable_at: iso(Date.now()), reminder_retries: null, ...err }).eq('id', r.id);
+            if (/blocked/i.test(res.error)) await noteBotBlocked(db, Number(r.tg_id)).catch(() => {});
+          } else if (res.outcome === 'retry' && tracking && tries < REMINDER_MAX_RETRIES) {
+            // rendu : le passage suivant le reprend, s'il est encore dans la fenêtre du rappel
+            pass.retry++;
+            await db.from('webinar_registrations').update({ [st.col]: null, reminder_retries: tries + 1, ...err }).eq('id', r.id).eq(st.col, iso(now));
+          } else {
+            pass.failed++;
+            const why = res.outcome === 'retry' ? `${err.last_reminder_error} (abandon après ${tries + 1} essais)`.slice(0, 240) : err.last_reminder_error;
+            if (tracking) await db.from('webinar_registrations').update({ reminder_retries: null, last_reminder_error: why, last_reminder_error_at: err.last_reminder_error_at }).eq('id', r.id);
+          }
+        }
+        if (results.some((x) => x.throttled)) throttled = true; // Telegram freine : on s'arrête, le reste attend le passage suivant
         await sleep(800);
+      }
+      for (const k of Object.keys(pass) as Array<keyof ReminderCounts>) total[k] += pass[k];
+      // le bilan du rappel, une fois que plus personne n'attend (après les reprises éventuelles)
+      if (claimed > 0) {
+        const { data: left_ } = await pending().limit(1);
+        if (!(left_ ?? []).length) await notifyOwner(await reminderReport(db, s, st, pass, tracking)).catch(() => null);
       }
     }
   }
-  return { sessions: (ss ?? []).length, sent };
+  return { sessions: (ss ?? []).length, tracking, ...total };
+}
+
+/** Le bilan d'un rappel pour Mathieu : reçus, injoignables, échecs (avec la base si la migration 0039 est là). */
+async function reminderReport(db: Db, s: WebinarSession, st: { col: string; tag: string; label: string }, pass: ReminderCounts, tracking: boolean) {
+  const lines = [`${ukDay(s.starts_at)}, ${ukHour(s.starts_at)} (UK)`];
+  let title = `🎤 Rappel ${st.label} : ${pass.sent} envoyé${pass.sent > 1 ? 's' : ''} ce passage`;
+  if (tracking) {
+    const count = async (f: (q: Db) => Db) => (await f(db.from('webinar_registrations').select('id', { count: 'exact', head: true }).eq('session_id', s.id))).count ?? 0;
+    const [all, marked, unreachable, failedHere] = await Promise.all([
+      count((q) => q),
+      count((q) => q.not(st.col, 'is', null)),
+      count((q) => q.not('unreachable_at', 'is', null)),
+      count((q) => q.not(st.col, 'is', null).is('unreachable_at', null).like('last_reminder_error', `${st.tag}:%`)),
+    ]);
+    const unreachableHere = await count((q) => q.not(st.col, 'is', null).not('unreachable_at', 'is', null).like('last_reminder_error', `${st.tag}:%`));
+    const received = marked - failedHere - unreachableHere;
+    title = `🎤 Rappel ${st.label} : ${received}/${all} inscrits l’ont reçu`;
+    lines.push(`${unreachable} injoignable${unreachable > 1 ? 's' : ''} (bot bloqué, compte supprimé)`);
+    if (failedHere) lines.push(`${failedHere} en échec après les reprises (détail : last_reminder_error)`);
+  } else {
+    lines.push(`Ce passage : ${pass.sent} envoyés · ${pass.unreachable} injoignables · ${pass.failed} en échec`, 'Suivi détaillé indisponible : migration 0039 pas encore appliquée.');
+  }
+  return { title, lines, tag: 'webinar' };
 }
 
 // ── LE PILOTE AUTOMATIQUE : LE CALENDRIER ET LES RÉGLAGES ───────────────────────────────────────────────────────
