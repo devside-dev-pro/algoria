@@ -28,6 +28,7 @@ import { draftReply, draftTraceDetail } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { batchPromptText, splitBatch } from './supportBatch';
 import { runUnansweredAlert } from './supportUnanswered';
+import { REPLAY_KIND, REPLAY_STALE_RUNNING_MS, runReplayJob } from './replay';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
 import { HISTORY_LOSS_NOTE, INCIDENT, INCIDENT_ESCALATE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, incidentReplyNote, resultsPolicy, wasAffected } from './incident';
@@ -161,8 +162,9 @@ export async function scheduleOnClientMessage(db: Db, o: { tgId: number; conn: s
 }
 
 /** Mathieu a écrit lui-même dans la conversation : plus rien de prévu n'y part. */
+// Le replay promis (kind 'replay', lib/member/replay.ts) n'est jamais annulé ici : la personne l'attend.
 export async function cancelPendingJobs(db: Db, tgId: number, reason: string): Promise<void> {
-  await db.from('support_jobs').update({ status: 'canceled', result: { reason }, updated_at: iso(Date.now()) }).eq('tg_id', tgId).eq('status', 'pending');
+  await db.from('support_jobs').update({ status: 'canceled', result: { reason }, updated_at: iso(Date.now()) }).eq('tg_id', tgId).eq('status', 'pending').neq('kind', REPLAY_KIND);
 }
 
 // ── L'ACCUEIL ──────────────────────────────────────────────────────────────────────────────────────────
@@ -260,11 +262,14 @@ type Job = { id: number; tg_id: number; conn: string; kind: string; due_at: stri
 type BizRow = { id: string; tg_id: number; member_no: number | null; done_by: string | null; created_at: string; detail: Record<string, unknown> };
 
 /** Traite les envois arrivés à échéance. Appelé chaque minute par pg_cron (/api/cron/support-jobs). */
-export async function runSupportJobs(db: Db): Promise<{ done: number; review: number; auto: number; welcome: number; link: number; failed: number }> {
-  const out = { done: 0, review: 0, auto: 0, welcome: 0, link: 0, failed: 0 };
+export async function runSupportJobs(db: Db): Promise<{ done: number; review: number; auto: number; welcome: number; link: number; replay: number; failed: number }> {
+  const out = { done: 0, review: 0, auto: 0, welcome: 0, link: 0, replay: 0, failed: 0 };
   // un passage coupé net (timeout Vercel) laisse des lignes « running » : on les reprend. Sans risque de doublon : la
   // réponse ne repart pas si une réponse a déjà été enregistrée depuis, l'accueil vérifie ce qui est déjà parti.
   await db.from('support_jobs').update({ status: 'pending', updated_at: iso(Date.now()) }).eq('status', 'running').lte('updated_at', iso(Date.now() - STALE_RUNNING_MS));
+  // 🎥 un replay coupé (after() du webhook arrêté à 60 s) est repris plus vite : la personne attend la vidéo. L'accusé
+  // déjà parti est noté sur la ligne (payload.ack_sent_at) : seule la vidéo repart (lib/member/replay.ts).
+  await db.from('support_jobs').update({ status: 'pending', updated_at: iso(Date.now()) }).eq('status', 'running').eq('kind', REPLAY_KIND).lte('updated_at', iso(Date.now() - REPLAY_STALE_RUNNING_MS));
   const { data } = await db.from('support_jobs').select('*').eq('status', 'pending').lte('due_at', iso(Date.now())).order('due_at', { ascending: true }).limit(12);
   // les conversations en parallèle (un jour de pub, 20 contacts arrivent en 10 min) ; dans une même conversation,
   // la réponse attend l'accueil (« later » tant qu'il est en cours)
@@ -278,7 +283,7 @@ export async function runSupportJobs(db: Db): Promise<{ done: number; review: nu
     const { data: locked } = await db.from('support_jobs').update({ status: 'running', updated_at: iso(Date.now()) }).eq('id', job.id).eq('status', 'pending').select('id');
     if (!locked?.length) return;
     try {
-      const r = job.kind === 'welcome' ? await doWelcome(db, job) : job.kind === 'link' ? await doLink(db, job) : await doReply(db, job);
+      const r = job.kind === REPLAY_KIND ? await runReplayJob(db, job) : job.kind === 'welcome' ? await doWelcome(db, job) : job.kind === 'link' ? await doLink(db, job) : await doReply(db, job);
       if (r.status === 'later') { await db.from('support_jobs').update({ status: 'pending', due_at: iso(Date.now() + 60_000), updated_at: iso(Date.now()) }).eq('id', job.id); return; }
       await db.from('support_jobs').update({ status: r.status, result: r.result, updated_at: iso(Date.now()) }).eq('id', job.id);
       if (r.status === 'done') out.done++;
@@ -287,6 +292,7 @@ export async function runSupportJobs(db: Db): Promise<{ done: number; review: nu
       if (r.result?.outcome === 'auto') out.auto++;
       if (r.result?.outcome === 'welcome') out.welcome++;
       if (r.result?.outcome === 'link') out.link++;
+      if (r.result?.outcome === 'replay') out.replay++;
     } catch (e) {
       out.failed++;
       await db.from('support_jobs').update({ status: 'failed', result: { error: String((e as Error).message).slice(0, 300) }, updated_at: iso(Date.now()) }).eq('id', job.id);

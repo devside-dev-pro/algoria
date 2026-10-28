@@ -6,6 +6,7 @@ import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, draftTraceDetail, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
+import { handleReplayAdmin, handleReplayUpload, isReplayRequest, replayLang, requestReplay, runReplaySoon } from '@/lib/member/replay';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
 import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
 import { handleWebinarAdmin, handleWebinarCallback, isLiveKeyword, noteBotBlocked, notifyNoUpcomingWebinar, parseWebinarStart, registerForWebinar, upcomingSessions } from '@/lib/member/webinar';
@@ -256,6 +257,7 @@ async function bridgeChannelPost(db: any, post: any, dst: string): Promise<void>
 }
 
 export async function POST(req: Request) {
+  const t0 = Date.now(); // réception : le replay (lib/member/replay.ts) part avant la limite des 60 s, sinon la cron
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (secret && req.headers.get('x-telegram-bot-api-secret-token') !== secret) {
     return NextResponse.json({ ok: false }, { status: 401 });
@@ -280,7 +282,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
   if (update?.business_message) {
-    if (db) await handleBusinessMessage(db, update.business_message).catch((e) => console.error('[telegram] business message failed:', (e as { message?: string })?.message ?? e));
+    if (db) await handleBusinessMessage(db, update.business_message, { later: (fn) => after(() => fn().then(() => undefined).catch((e) => console.error('[telegram] business replay failed:', (e as { message?: string })?.message ?? e))), t0 }).catch((e) => console.error('[telegram] business message failed:', (e as { message?: string })?.message ?? e));
     return NextResponse.json({ ok: true });
   }
 
@@ -490,6 +492,10 @@ export async function POST(req: Request) {
   if (db && msg?.chat?.type === 'private' && (msg.reply_to_message?.video_note || msg.reply_to_message?.voice) && (await handleSupportVideoRemove(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message?.reply_markup && (await handleSupportAssetReply(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (await handleSupportLibrary(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
+  // 🎥 le replay du webinaire (lib/member/replay.ts) : une vidéo envoyée au bot par un admin devient LE replay (le bot
+  // répond « Replay enregistré ✅ » et la renvoie en aperçu) ; « replay » montre l'état, « replay off » coupe.
+  if (db && msg?.chat?.type === 'private' && (msg.video || msg.document) && (await handleReplayUpload(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
+  if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (await handleReplayAdmin(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 🎤 « webinar », « webinar off », « webinar invites on », « webinar skip »… : Mathieu pilote les webinaires (lib/member/webinar.ts)
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (await handleWebinarAdmin(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 🌙 le récap du soir (lib/member/supportDigest.ts) : « 3 sa version » / « 3 # remarque », ou sa version d'une règle.
@@ -581,6 +587,25 @@ export async function POST(req: Request) {
       }
       if (sessions && !sessions.length) await notifyNoUpcomingWebinar(Number(msg.chat.id)).catch(() => {});
     }
+  }
+
+  // 🎥 LE MOT « REPLAY » SEUL, en privé au bot (pas un admin : lui voit l'état, plus haut). Chemin déterministe, sans
+  // modèle : ~50 s plus tard le texte puis la vidéo du replay (lib/member/replay.ts), et on s'arrête : pas de réponse
+  // de l'IA à ce message. Le même mot écrit à Mathieu sur son compte support passe par lib/member/businessInbox.ts.
+  if (db && msg?.chat?.type === 'private' && msg.from?.id && !msg.from.is_bot && typeof msg.text === 'string' && isReplayRequest(msg.text)
+    && !(await adminTgIds()).includes(Number(msg.from.id))) {
+    try {
+      const tgId = Number(msg.from.id);
+      const { data: mrow } = await db.from('members').select('member_no,locale').eq('tg_id', tgId).limit(1);
+      const who = msg.from.username ? `@${msg.from.username}` : ([msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || String(tgId));
+      await db.from('member_actions').insert({ tg_id: tgId, member_no: mrow?.[0]?.member_no ?? null, kind: 'webinar_replay', status: 'done', done_by: 'telegram', detail: { via: 'bot', step: 'request', text: msg.text.slice(0, 200) } });
+      const out = await requestReplay(db, { tgId, conn: null, lang: replayLang({ locale: mrow?.[0]?.locale ?? null, languageCode: msg.from.language_code ?? null, text: msg.text }), who, memberNo: mrow?.[0]?.member_no ?? null });
+      const { jobId, dueMs } = out;
+      if (jobId && dueMs) after(() => runReplaySoon(db, jobId, dueMs, t0).then(() => undefined).catch((e) => console.error('[telegram] replay failed:', (e as { message?: string })?.message ?? e)));
+    } catch (e) {
+      console.error('[telegram] replay request failed:', (e as { message?: string })?.message ?? e);
+    }
+    return NextResponse.json({ ok: true });
   }
 
   // ATTRIBUTION PUBLICITAIRE : /start <tag> (deep-link de pub, ex. t.me/<bot>?start=ad_sa).
