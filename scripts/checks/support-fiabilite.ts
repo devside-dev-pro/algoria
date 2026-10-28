@@ -5,7 +5,7 @@
 // d'une raison d'échec d'un appel à l'autre, la règle résultats avant et après le 05/11, et que le lien
 // Myfxbook du 27/10/2026 passe les garde-fous sans qu'un chiffre de résultat passe avec lui.
 import { readFileSync } from 'node:fs';
-import { HISTORY_LOSS_NOTE, HISTORY_RESULTS_NOTE, INCIDENT_NOTE, INCIDENT_REPLY_NOTE, MYFXBOOK_URL, RESULTS_REPLY_NOTE, resultsPolicy } from '../../lib/member/incident';
+import { HISTORY_LOSS_NOTE, HISTORY_RESULTS_NOTE, INCIDENT_NOTE, INCIDENT_REPLY_NOTE, LOSSES_LINE, MYFXBOOK_URL, RESULTS_REPLY_NOTE, resultsPolicy } from '../../lib/member/incident';
 import { assessModelOutput, buildDraftSystem, mentionsPositionCap, parseModelJson, settleAttempt } from '../../lib/member/replyDraft';
 
 let failed = 0;
@@ -117,12 +117,13 @@ function held(now: string, status: string | null, biz = true) {
 
   const inc = held('2026-11-04T12:00:00Z', null);
   check('avant le 05/11, politique incident', inc.policy === 'incident');
-  check('avant le 05/11, le prompt a 85 %, Myfxbook, 26 octobre', inc.system.includes('85%') && inc.system.includes(MYFXBOOK_URL) && inc.system.includes('26 October'));
+  // 28/10/2026 (Mathieu) : plus de « about 85% », la phrase unique sur la perte à la place
+  check('avant le 05/11, le prompt a la phrase sur la perte, Myfxbook, 26 octobre, plus de 85 %', !/\b85\s?%/.test(inc.system) && inc.system.includes(LOSSES_LINE) && inc.system.includes(MYFXBOOK_URL) && inc.system.includes('26 October'));
   check('avant le 05/11, ni +12.4 %, ni page, ni « you MAY quote »', !inc.system.includes('+12.4%') && !inc.system.includes('track-record') && !inc.system.includes('you MAY quote') && inc.system.includes(INCIDENT_NOTE.slice(0, 40)));
 
   const maint = held('2026-11-06T12:00:00Z', 'onboarding');
   check('après le 05/11, prospect → maintenance', maint.policy === 'maintenance');
-  check('maintenance : 26 octobre, tiers, 85 %, perte non appelée maintenance', maint.system.includes('26 October') && maint.system.includes(MYFXBOOK_URL) && /third party/i.test(maint.system) && maint.system.includes('85%') && /never call that loss/i.test(maint.system));
+  check('maintenance : 26 octobre, tiers, phrase sur la perte sans 85 %, jamais « maintenance »', maint.system.includes('26 October') && maint.system.includes(MYFXBOOK_URL) && /third party/i.test(maint.system) && !/\b85\s?%/.test(maint.system) && maint.system.includes(LOSSES_LINE) && /never call it "maintenance"/i.test(maint.system));
   check('maintenance : pas les chiffres du track, pas la page, pas « few weeks »', !maint.system.includes('+12.4%') && !maint.system.includes('track-record') && !maint.system.includes('you MAY quote') && !/few weeks/i.test(maint.system) && maint.system.includes(HISTORY_RESULTS_NOTE.slice(0, 40)));
   check('le +40 % du knowledge n\'est pas dans les % autorisés', !maint.knownPct.includes('40%'));
 
@@ -181,7 +182,9 @@ function held(now: string, status: string | null, biz = true) {
   check('85 % sur une question de résultats refusé', eighty.issue === 'chiffre de résultat');
 
   const loss = judge(JSON.stringify({ intent: 'auto', reply: `On 21-22 October the main account lost about 85%. The new version started on 26 October. ${MYFXBOOK_URL}` }), 'what happened in October?');
-  check('85 % gardé si on demande octobre', loss.issue === null && (loss.draft?.text.includes('85%') ?? false), loss.issue ?? '');
+  check('85 % refusé même si on demande octobre (28/10)', loss.issue === 'chiffre de résultat' && loss.draft === null, loss.issue ?? '');
+  const sentence = judge(JSON.stringify({ intent: 'auto', reply: `${LOSSES_LINE} ${MYFXBOOK_URL}` }), 'what happened in October?');
+  check('la phrase unique passe, avertissement ajouté', sentence.issue === null && (sentence.draft?.text.endsWith("Past results don't guarantee future results.") ?? false), sentence.issue ?? '');
 
   const missing = judge(JSON.stringify({ intent: 'auto', reply: 'The new version started on 26 October on a new account, with new safeguards.' }), 'can you prove the results?');
   check('question de preuve sans le lien → refusé', missing.issue === 'lien myfxbook manquant');

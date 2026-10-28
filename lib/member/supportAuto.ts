@@ -28,7 +28,7 @@ import { draftReply, draftTraceDetail } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
-import { HISTORY_LOSS_NOTE, INCIDENT_ESCALATE, INCIDENT_REPLY_NOTE, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, resultsPolicy, wasAffected } from './incident';
+import { HISTORY_LOSS_NOTE, INCIDENT, INCIDENT_ESCALATE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, incidentReplyNote, resultsPolicy, wasAffected } from './incident';
 import { isLiveKeyword, liveSeatReply, upcomingSessions } from './webinar';
 import type { Conn } from './businessInbox';
 
@@ -474,7 +474,16 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   const directAsk = newbie && !webinarLead && brokerLinkAsk(joined);
   // 🚨 un membre touché par la nuit du 21-22/10, ou un message sur la nuit : la réponse d'attente de Mathieu, proposée
   // (24/10/2026, voir INCIDENT_REPLY_NOTE et incidentHold plus bas)
-  const aboutIncident = incidentActive() && !webinarLead && ((await wasAffected(db, job.tg_id)) || INCIDENT_TALK.test(joined));
+  // 28/10/2026 (audit) : le paragraphe d'incident partait sur un « 👋 », une question sur les pubs Telegram, une photo,
+  // parce qu'un membre touché recevait la note à CHAQUE message. La carte reste (la garde ne bouge pas), mais la note
+  // d'incident ne part que si son message en parle ; sinon on répond à sa question, sans parler de l'incident.
+  const incidentAffected = incidentActive() && !webinarLead && (await wasAffected(db, job.tg_id));
+  const incidentTalk = incidentActive() && !webinarLead && INCIDENT_TALK.test(joined);
+  const aboutIncident = incidentAffected || incidentTalk;
+  // ce qui lui a déjà été envoyé depuis la nuit du 21-22/10 (au-delà des 10 derniers messages) : jamais deux fois
+  const { data: sentRows } = await db.from('member_actions').select('detail').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'owner').gte('created_at', INCIDENT.start).order('created_at', { ascending: false }).limit(80);
+  const sentBefore = ((sentRows ?? []) as Array<{ detail: Record<string, unknown> }>).map((r) => String(r.detail?.text ?? '')).filter((t) => t && !t.startsWith('['));
+  const incidentAlreadySent = sentBefore.some((t) => INCIDENT_PARAGRAPH.test(t));
   // 📊 un PROSPECT qui demande les résultats (26/10, puis 27/10 : le Myfxbook remplace « à venir »). Tant que la
   // politique n'est pas ouverte (incident, ou historique en maintenance après le 05/11), la note part. Un membre
   // live ou en pause, lui, reste à Mathieu quand l'incident est encore chaud.
@@ -535,14 +544,16 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   if (directAsk && !introduced) note = DIRECT_NOTE;
   if (resultsAsk) {
     // Après le 05/11, une question sur octobre ne doit pas être recouverte par « nouvelle version » seule :
-    // on dit la perte (~85 %), puis le Myfxbook. Pendant l'incident, aboutIncident a déjà pris ce cas.
+    // on dit la perte (la phrase unique, sans chiffre depuis le 28/10), puis le Myfxbook. Pendant l'incident, aboutIncident a déjà pris ce cas.
     const resultsNote = resultsPolicyNow === 'maintenance' && INCIDENT_TALK.test(joined) ? HISTORY_LOSS_NOTE : RESULTS_REPLY_NOTE;
     note = note ? `${note}\n${resultsNote}` : resultsNote;
   }
-  if (aboutIncident) note = INCIDENT_REPLY_NOTE;
+  if (incidentTalk) note = incidentReplyNote(incidentAffected);
+  else if (incidentAffected) note = INCIDENT_OTHER_NOTE;
+  if (aboutIncident && incidentAlreadySent) note = `${note ?? ''}\nThe incident message (sorry, safeguards, broker contact) was ALREADY sent to this person: never repeat any of it. Answer only what is new in their message.`.trim();
   if (webinarLead) note = WEBINAR_NOTE;
 
-  const outcome = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note });
+  const outcome = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note, sentBefore });
   const draft = outcome.draft;
   // La trace (modèle réel, stop, brut, version du cerveau) est sur la ligne quoi qu'il arrive ensuite : carte,
   // envoi, ou rien. Un texte refusé par un garde-fou n'est pas mis dans `draft` (le bouton Envoyer l'enverrait).
@@ -600,7 +611,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // réponses »), un tap pour l'envoyer. Un retrait, une arnaque, un avocat : à lui, sans proposition imposée.
   const incidentHold = !incidentActive() ? null
     : aboutIncident && INCIDENT_ESCALATE.test(joined) ? 'incident : retrait, arnaque, avocat ou plainte : à toi de répondre'
-    : aboutIncident ? 'incident : réponse d’attente proposée, à toi de valider'
+    : incidentTalk ? 'incident : réponse d’attente proposée, à toi de valider'
+    : aboutIncident ? 'membre touché par l’incident (message sur autre chose) : à toi de valider'
     : INCIDENT_TOPIC.test(joined) && !resultsAsk ? 'il parle des résultats : à toi de répondre'
     : null;
   const why = !autopilot ? 'pilote automatique coupé'

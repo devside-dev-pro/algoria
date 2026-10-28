@@ -116,7 +116,10 @@ export async function dayContext(db: Db, day: string): Promise<DayContext> {
 // l'admin est AGENT_DOC_MAX (20 000) : tout ce que Mathieu peut enregistrer est lu, et on ne va pas au-delà.
 // La mémoire du CM reste à 6 000. Le Myfxbook du support n'est pas injecté ici.
 async function systemPrompt(): Promise<string> {
-  const [knowledge, memory] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('cm_memory')]);
+  const [rawKnowledge, memory] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('cm_memory')]);
+  // 28/10/2026 : la migration 0038 ajoute le Myfxbook au knowledge (pour le support). Décision #554 : le CM ne le
+  // reçoit pas (canal public, pas de pertes ni de track record) → on retire la ligne qui le porte avant de lui donner.
+  const knowledge = rawKnowledge ? rawKnowledge.split('\n').filter((l) => !/myfxbook/i.test(l)).join('\n') : rawKnowledge;
   return `You write the posts of Algoria's public Telegram channel. Algoria is an AI that trades gold; members copy it automatically on their own broker account (MetaTrader 5), at their own size. Mathieu built it and runs the community.
 
 VOICE: you write AS Mathieu, the founder, in the first person when it is personal ("I", "my"). Warm, direct, simple, like a friend who runs this and talks to his community every day. Never corporate, never hype. The AI is "Algoria" or "the AI".

@@ -131,7 +131,8 @@ function Curve({ days }: { days: TrackDay[] }) {
 
 const GREETINGS = [
   'Hi, I’m Algoria AI. Ask me anything below.',
-  'I trade gold and crypto, only on clean setups.',
+  // 28/10/2026 : or seul (XAU/USD) depuis la semaine du 19/10, plus de crypto.
+  'I trade gold only, on clean setups.',
   'Every trade I take has a stop loss.',
   'Your money never leaves your own broker account.',
 ];
@@ -168,7 +169,7 @@ export default function AlgoriaAI() {
     <main style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 6 }}>
       <section className="panel" style={{ padding: '14px 14px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: 'radial-gradient(90% 80% at 50% 30%, var(--panel-top) 0%, var(--panel-bottom) 100%)' }}>
         <div className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--up)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span className="liveGlow" style={{ width: 7, height: 7, borderRadius: 4, background: 'var(--up)', display: 'inline-block' }} /> ONLINE · WATCHING GOLD &amp; CRYPTO
+          <span className="liveGlow" style={{ width: 7, height: 7, borderRadius: 4, background: 'var(--up)', display: 'inline-block' }} /> ONLINE · WATCHING GOLD
         </div>
         <Orb energy={answering ? 1 : 0} onTap={() => { setAsk(null); setGreet((g) => (g + 1) % GREETINGS.length); }} />
         <div style={{ fontWeight: 800, letterSpacing: 2, fontSize: 15 }}>ALGORIA <span style={{ color: 'var(--cyan)' }}>AI</span></div>
