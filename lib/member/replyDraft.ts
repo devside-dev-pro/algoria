@@ -489,11 +489,30 @@ const RETRY_HINT: Record<string, string> = {
 };
 
 /** 2e tentative locale à CET appel (27/10/2026). L'indice vient de l'issue de ce run, jamais d'une variable de module. */
+/** 28/10/2026 : une erreur passagère d'Anthropic (529 surchargé, 500-504, connexion coupée) mérite un 2e essai, sans
+ *  indice. Jamais un délai dépassé (30 s + 30 s dépasseraient les 60 s de Vercel), jamais un 400 (la requête est
+ *  fausse : retenter ne change rien, cf. la temperature refusée du 27/10, #555). */
+export function transientModelError(issue: string | null): boolean {
+  if (!issue || !issue.startsWith('modèle indisponible')) return false;
+  if (/time(?:d)? ?out|timeout|aborted/i.test(issue)) return false;
+  return /\b(?:529|50[0-4])\b|overloaded|connection error|econnreset|socket hang up|fetch failed/i.test(issue);
+}
+/** Au-delà de 15 s, la 1re tentative a déjà mangé le budget : pas de 2e essai sur une erreur passagère. */
+const TRANSIENT_RETRY_BUDGET_MS = 15_000;
+
 export async function settleAttempt<T>(
   mode: 'bot' | 'business' | undefined,
   run: (hint: string | null) => Promise<{ value: T | null; issue: string | null }>,
+  clock: () => number = Date.now,
 ): Promise<{ value: T | null; issue: string | null; retried: boolean }> {
+  const t0 = clock();
   const first = await run(null);
+  // la réponse vide du modèle a déjà son 2e essai depuis #554 (RETRY_HINT['réponse vide du modèle'])
+  if (!first.value && mode === 'business' && transientModelError(first.issue) && clock() - t0 < TRANSIENT_RETRY_BUDGET_MS) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const again = await run(null);
+    return { value: again.value, issue: again.issue, retried: true };
+  }
   if (first.value || mode !== 'business' || !first.issue || !RETRY_HINT[first.issue]) {
     return { value: first.value, issue: first.issue, retried: false };
   }
@@ -761,7 +780,7 @@ async function attempt(i: DraftInput, retry: string | null): Promise<{ draft: Dr
   const requested = biz ? SUPPORT_MODEL : MODEL;
   const [them, us] = biz ? ['Client', 'Mathieu'] : ['Member', 'Algoria'];
   const history = i.history.length ? i.history.map((h) => `${h.from === 'member' ? them : us}: ${h.text.replace(/\s+/g, ' ').slice(0, 300)}`).join('\n') : '(none)';
-  const user = `${them}: ${i.member?.member_no != null ? `member #${i.member.member_no}` : biz ? 'not an Algoria member yet' : 'unknown'} ${i.member?.tg_username ? '@' + i.member.tg_username : (i.member?.tg_name ?? '')}\nStatus: ${statusLine}\nApp language: ${i.locale ?? 'en'}\n\nRecent exchange:\n${history}\n\nNew message from the ${them.toLowerCase()} (people often split one sentence over several messages, like "how" / "are" / "you ?": read the lines below together as ONE message, with the Recent exchange, and answer the whole; never answer one piece on its own)${i.images?.length ? ` (with ${i.images.length} screenshot${i.images.length > 1 ? 's' : ''}, above)` : ''}:\n"""${i.text.slice(0, 1200)}"""${i.note ? `\n\nNote: ${i.note}` : ''}${retry ? `\n\nYour previous answer was rejected: ${retry}. Write it again.` : ''}\n\nReturn the JSON, on ONE line (write \\n inside the "reply" string for a line break).`;
+  const user = `${them}: ${i.member?.member_no != null ? `member #${i.member.member_no}` : biz ? 'not an Algoria member yet' : 'unknown'} ${i.member?.tg_username ? '@' + i.member.tg_username : (i.member?.tg_name ?? '')}\nStatus: ${statusLine}\nApp language: ${i.locale ?? 'en'}\n\nRecent exchange:\n${history}\n\nNew message from the ${them.toLowerCase()} (people often split one sentence over several messages, like "how" / "are" / "you ?": read the lines below together as ONE message, with the Recent exchange, and answer the whole; never answer one piece on its own. When they are split into EARLIER and LATEST, answer the LATEST first, and the EARLIER part only if it is still unanswered)${i.images?.length ? ` (with ${i.images.length} screenshot${i.images.length > 1 ? 's' : ''}, above)` : ''}:\n"""${i.text.slice(0, 1200)}"""${i.note ? `\n\nNote: ${i.note}` : ''}${retry ? `\n\nYour previous answer was rejected: ${retry}. Write it again.` : ''}\n\nReturn the JSON, on ONE line (write \\n inside the "reply" string for a line break).`;
   try {
     const client = new Anthropic({ timeout: i.timeoutMs ?? 8000, maxRetries: 0 });
     // 🎤 la prochaine session de webinaire (24/10/2026) : sa date vient de la base, jamais du knowledge
