@@ -183,7 +183,7 @@ export function ToolsTab() {
               <h2 style={secH}>📡 CHANNEL POST — PUBLIC, WITH A BUTTON</h2>
               <p style={dimP}>
                 Telegram only lets a <b>bot</b> attach a button, which is why you can&rsquo;t do it by hand. Pick the
-                <b> source channel</b> and this posts to <b>all three</b> in one go: source and UK mirror as written,
+                <b> source channel</b> and this posts to <b>every wired channel</b> in one go: source and English mirrors (UK, Cashflow once set) as written,
                 IT channel translated — same button everywhere. The button label itself stays in English, as you type it.
               </p>
               {/* MODÈLES — deux familles, parce qu'elles ne servent pas au même moment : « → app » pour

@@ -12,6 +12,7 @@ import { handleWebinarAdmin, handleWebinarCallback, isLiveKeyword, noteBotBlocke
 import { logFunnelEvent } from '@/lib/member/funnel';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
+import { extraMirrors } from '@/lib/channel/mirrors';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 60; // 25 s jusqu'au 15/10/2026 : la réécriture d'un post du canal (lib/channel/cm.ts) appelle le modèle après la réponse
@@ -316,6 +317,16 @@ export async function POST(req: Request) {
     const it = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
     if (mirror) await mirrorChannelPost(db, update.channel_post, mirror);
     if (it) await bridgeChannelPost(db, update.channel_post, it);
+    // MIROIRS SUPPLÉMENTAIRES (28/10/2026, Cashflow — lib/channel/mirrors.ts) : la même copie conforme que le miroir
+    // UK, avec SON verrou (channel_translations est unique par src_chat_id, src_message_id, dst_chat_id). En dernier
+    // et sous try/catch : une panne ici ne touche ni le miroir UK ni l'italien, déjà servis. Non posé → rien.
+    for (const x of extraMirrors()) {
+      try {
+        await mirrorChannelPost(db, update.channel_post, x.chat);
+      } catch (e) {
+        console.error(`[telegram] ${x.label} failed:`, (e as { message?: string })?.message ?? e);
+      }
+    }
   }
 
   // DEMANDE d'adhésion → entre en waitlist (status 'waiting') + DM instantané au demandeur.
