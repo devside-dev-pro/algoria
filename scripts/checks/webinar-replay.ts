@@ -6,7 +6,7 @@
 // Aucune base, aucun appel Telegram : une fausse base en mémoire, et fetch remplacé (rien ne sort de la machine).
 import { readFileSync } from 'node:fs';
 import {
-  REPLAY_DELAY_MIN_MS, REPLAY_DELAY_SPREAD_MS, REPLAY_TEXTS, finishReplayJob, getReplayAsset, handleReplayAdmin, handleReplayUpload,
+  REPLAY_DELAY_MIN_MS, REPLAY_DELAY_SPREAD_MS, REPLAY_REMINDER, REPLAY_TEXTS, finishReplayJob, getReplayAsset, handleReplayAdmin, handleReplayUpload,
   isReplayRequest, replayLang, replayTexts, requestReplay, runReplayJob, runReplaySoon, type ReplayJob,
 } from '../../lib/member/replay';
 
@@ -95,6 +95,10 @@ async function main() {
   check('textes EN finaux', REPLAY_TEXTS.en.ack === 'No problem 🙌🏻 I\'m sending you the replay 🎥' && REPLAY_TEXTS.en.caption === '🎥 Here\'s the replay of the live (25 min). Any question after watching? Just reply here 👇');
   check('textes DE finaux', REPLAY_TEXTS.de.ack === 'Kein Problem 🙌🏻 Ich schicke dir gleich das Replay 🎥' && REPLAY_TEXTS.de.caption === '🎥 Hier ist das Replay des Lives (25 Min.). Fragen nach dem Anschauen? Antworte einfach hier 👇');
   check('textes IT finaux', REPLAY_TEXTS.it.ack === 'Nessun problema 🙌🏻 Ti mando subito il replay 🎥' && REPLAY_TEXTS.it.caption === '🎥 Ecco il replay del live (25 min). Domande dopo averlo visto? Rispondi pure qui 👇');
+  check('rappel < 24 h final (29/10), mot pour mot', REPLAY_REMINDER.en === 'You already have it 🙌🏻 The replay is just above in our chat 👆 Any question after watching? Just reply here 👇'
+    && REPLAY_REMINDER.de === 'Du hast es schon 🙌🏻 Das Replay ist direkt oben in unserem Chat 👆 Fragen nach dem Anschauen? Antworte einfach hier 👇'
+    && REPLAY_REMINDER.it === "Ce l'hai già 🙌🏻 Il replay è qui sopra nella nostra chat 👆 Domande dopo averlo visto? Rispondi pure qui 👇");
+  check('rappel par défaut quand le document admin est vide', replayTexts('en', null).reminder === REPLAY_REMINDER.en && replayTexts('en', 'a\n---\nb').reminder === REPLAY_REMINDER.en);
   const ov = replayTexts('en', 'Sure 🙌🏻\n---\n\n---\nAlready sent 👆');
   check('admin : le document remplace l’anglais partie par partie', ov.ack === 'Sure 🙌🏻' && ov.caption === REPLAY_TEXTS.en.caption && ov.reminder === 'Already sent 👆', JSON.stringify(ov));
   check('admin : jamais l’italien ni l’allemand', replayTexts('it', 'Sure').ack === REPLAY_TEXTS.it.ack && replayTexts('de', 'Sure').ack === REPLAY_TEXTS.de.ack);
@@ -148,7 +152,7 @@ async function main() {
   check('dans les 24 h : rappel', o2.status === 'reminder');
   calls.length = 0;
   await lockAndRun(o2.jobId!);
-  check('rappel seul (pas de vidéo)', toMember().length === 1 && toMember()[0].method === 'sendMessage' && /just above/.test(String(toMember()[0].body.text)));
+  check('rappel seul (pas de vidéo)', toMember().length === 1 && toMember()[0].method === 'sendMessage' && toMember()[0].body.text === REPLAY_REMINDER.en);
   check('rappel répété aussitôt : rien', (await requestReplay(db, req)).status === 'ignored');
 
   // 9. bot (sans compte support), en italien : un échec de la vidéo → un nouvel essai, sans renvoyer l'accusé

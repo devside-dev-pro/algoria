@@ -27,7 +27,7 @@
 //     « sans réponse ») ; l'accusé déjà parti n'est jamais renvoyé, seule la vidéo est retentée ;
 //   · chaque envoi est noté dans member_actions (compte support : biz_msg « from owner », comme les autres envois).
 //
-// LES TEXTES (CM Algoria, validés par Mathieu le 28/10 à 23:57, à garder tels quels) : anglais par défaut, allemand,
+// LES TEXTES (CM Algoria, validés par Mathieu le 28/10 à 23:57, le rappel le 29/10 ; à garder tels quels) : anglais par défaut, allemand,
 // italien. L'anglais est modifiable sans code dans l'admin (TOOLS → 🎥 SUPPORT — WEBINAR REPLAY, agent_docs
 // 'support_replay' : accusé --- légende --- rappel), comme les autres textes du support ; l'allemand et l'italien restent
 // ici, comme l'italien des autres textes.
@@ -59,11 +59,11 @@ export const REPLAY_TEXTS: Record<ReplayLang, { ack: string; caption: string }> 
   de: { ack: 'Kein Problem 🙌🏻 Ich schicke dir gleich das Replay 🎥', caption: '🎥 Hier ist das Replay des Lives (25 Min.). Fragen nach dem Anschauen? Antworte einfach hier 👇' },
   it: { ack: 'Nessun problema 🙌🏻 Ti mando subito il replay 🎥', caption: '🎥 Ecco il replay del live (25 min). Domande dopo averlo visto? Rispondi pure qui 👇' },
 };
-/** ⚠️ PROVISOIRE (pas encore fourni par CM Algoria) : le rappel quand le replay a déjà été envoyé dans les 24 h. */
+/** FINAL (validé mot pour mot par Mathieu le 29/10/2026) : le rappel quand le replay a déjà été envoyé dans les 24 h. */
 export const REPLAY_REMINDER: Record<ReplayLang, string> = {
-  en: 'I sent you the replay just above 👆 Any question after watching? Just reply here.',
-  de: 'Ich habe dir das Replay gerade oben geschickt 👆 Fragen nach dem Anschauen? Antworte einfach hier.',
-  it: 'Ti ho mandato il replay qui sopra 👆 Domande dopo averlo visto? Rispondi pure qui.',
+  en: 'You already have it 🙌🏻 The replay is just above in our chat 👆 Any question after watching? Just reply here 👇',
+  de: 'Du hast es schon 🙌🏻 Das Replay ist direkt oben in unserem Chat 👆 Fragen nach dem Anschauen? Antworte einfach hier 👇',
+  it: 'Ce l\'hai già 🙌🏻 Il replay è qui sopra nella nostra chat 👆 Domande dopo averlo visto? Rispondi pure qui 👇',
 };
 
 /** Les textes d'une langue. `doc` (agent_docs 'support_replay', anglais seulement) : accusé --- légende --- rappel ;

@@ -52,7 +52,7 @@ const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?
   support_replay: {
     title: '🎥 SUPPORT — WEBINAR REPLAY',
     intro: 'When someone writes REPLAY to you or to the bot in private, about 1 minute later they get the first text, then the replay video with the second text as its caption. A third text is sent instead if they ask again within 24 h. Three texts, separated by a line with only ---. English only: German and Italian contacts get the validated German / Italian versions. The video itself: send it to the bot in private (it replies « Replay enregistré ✅ »).',
-    empty: 'Empty: the validated texts are used (« No problem 🙌🏻 I’m sending you the replay 🎥 », « 🎥 Here’s the replay of the live (25 min)… »).',
+    empty: 'Empty: the validated texts are used (« No problem 🙌🏻 I’m sending you the replay 🎥 », « 🎥 Here’s the replay of the live (25 min)… », « You already have it 🙌🏻 The replay is just above in our chat 👆… »).',
   },
   ads_memory: {
     title: '🧠 ADS STUDIO — WHAT CLAUDE LEARNED',
