@@ -26,6 +26,8 @@
 // SUPPORT_AUTOPILOT=off (plus d'envoi seul : toutes les réponses redeviennent des cartes à valider).
 import { draftReply, draftTraceDetail } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
+import { batchPromptText, splitBatch } from './supportBatch';
+import { runUnansweredAlert } from './supportUnanswered';
 import { APP_URL } from './i18n';
 import { detectCountry } from './countries';
 import { HISTORY_LOSS_NOTE, INCIDENT, INCIDENT_ESCALATE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, incidentReplyNote, resultsPolicy, wasAffected } from './incident';
@@ -268,6 +270,9 @@ export async function runSupportJobs(db: Db): Promise<{ done: number; review: nu
   // la réponse attend l'accueil (« later » tant qu'il est en cours)
   // 🔁 les relances (24 h), toutes les 5 minutes
   if (new Date().getUTCMinutes() % 5 === 0) await runFollowups(db).catch((e) => console.error('[support] relances :', (e as Error).message));
+  // ⏰ un message qui attend depuis plus de N h (support_settings 'unanswered_alert_hours', 3 par défaut) : alerte
+  // admin, toutes les 15 minutes (28/10/2026, voir supportUnanswered.ts)
+  if (new Date().getUTCMinutes() % 15 === 1) await runUnansweredAlert(db).catch((e) => console.error('[support] sans réponse :', (e as Error).message));
   await Promise.all(((data ?? []) as Job[]).map(async (job) => {
     // verrou : un seul passage traite une ligne donnée
     const { data: locked } = await db.from('support_jobs').update({ status: 'running', updated_at: iso(Date.now()) }).eq('id', job.id).eq('status', 'pending').select('id');
@@ -409,7 +414,9 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // les messages du client depuis la dernière VRAIE réponse (l'accueil, le vocal du pays, le lien ne répondent à rien)
   let cut = -1;
   rows.forEach((r, k) => { if (r.detail?.from === 'owner' && !NOT_AN_ANSWER.has(String(r.detail?.via ?? ''))) cut = k; });
-  const batch = rows.slice(cut + 1).filter((r) => r.detail?.from === 'client');
+  // 28/10/2026 : un message écrit plus de 12 h avant le dernier passe en historique (« Uk » de la veille ne doit plus
+  // ouvrir la réponse à « Why I can't log in ? », tg 8036168859, 22/10). Voir supportBatch.ts.
+  const { fresh: batch } = splitBatch(rows.slice(cut + 1).filter((r) => r.detail?.from === 'client'));
   if (!batch.length) return { status: 'done', result: { outcome: 'answered' } };
   const last = batch[batch.length - 1];
   const inBatch = new Set(batch.map((b) => b.id));
@@ -553,7 +560,10 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   if (aboutIncident && incidentAlreadySent) note = `${note ?? ''}\nThe incident message (sorry, safeguards, broker contact) was ALREADY sent to this person: never repeat any of it. Answer only what is new in their message.`.trim();
   if (webinarLead) note = WEBINAR_NOTE;
 
-  const outcome = await draftReply({ text: joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note, sentBefore });
+  // le dernier message d'abord (LATEST), le reste en contexte (EARLIER) quand le lot s'étale ; les tests (pays,
+  // incident, lien broker…) restent sur `joined`
+  const promptText = batchPromptText(batch.map((b) => ({ created_at: b.created_at, text: String(b.detail?.text ?? '') })).filter((l) => l.text && !l.text.startsWith('[')));
+  const outcome = await draftReply({ text: promptText || joined || '(no text, only the screenshot)', locale: member?.locale ?? null, member, history, mode: 'business', timeoutMs: 30_000, images, note, sentBefore });
   const draft = outcome.draft;
   // La trace (modèle réel, stop, brut, version du cerveau) est sur la ligne quoi qu'il arrive ensuite : carte,
   // envoi, ou rien. Un texte refusé par un garde-fou n'est pas mis dans `draft` (le bouton Envoyer l'enverrait).
