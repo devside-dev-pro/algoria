@@ -16,6 +16,7 @@ import { isPermanentTelegramFailure } from '@/lib/member/telegramErrors';
 import { personalise } from '@/lib/member/personalise';
 import { TG_ALLOWED_UPDATES } from '@/lib/member/tgWebhook';
 import { publishToChannels } from '@/lib/channel/publish';
+import { extraMirrors } from '@/lib/channel/mirrors';
 import { sendLiveWelcome } from '@/lib/member/liveWelcome';
 
 export const runtime = 'nodejs';
@@ -207,6 +208,8 @@ export async function GET(req: NextRequest) {
     const v = (process.env[env] ?? '').trim();
     if (v) roles[v] = role;
   }
+  // miroirs supplémentaires (28/10/2026, Cashflow — lib/channel/mirrors.ts) : étiquetés « mirror Cashflow » une fois posés
+  for (const x of extraMirrors()) if (!roles[x.chat]) roles[x.chat] = x.label;
   const chatRows = (chatRowsQ as { data: Array<{ chat_id: number; title: string | null; type: string | null; username: string | null; last_seen_at: string }> | null }).data;
   // Attendre un post de canal pour découvrir un canal serait absurde : le bot y reçoit DÉJÀ les demandes
   // d'adhésion, donc telegram_joins connaît son ID depuis le premier jour. On complète la liste avec ces

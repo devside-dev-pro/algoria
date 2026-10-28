@@ -15,6 +15,8 @@
 // malgré tout, mirrorChannelPost et bridgeChannelPost verraient la ligne déjà là et s'arrêteraient —
 // c'est l'insert qui gagne la course dans leur logique, pas une lecture.
 
+import { extraMirrors } from './mirrors';
+
 export type ChannelReport = Array<{ channel: string; ok: boolean; error?: string }>;
 export type PublishResult = { ok: true; messageId: number | null; report: ChannelReport } | { ok: false; error: string; report: ChannelReport };
 
@@ -87,6 +89,19 @@ export async function publishToChannels(db: any, p: { chatId: string; text: stri
         const i = await send(it, translated);
         report.push({ channel: 'canale IT', ok: i.ok, ...(i.ok ? {} : { error: i.error }) });
         await lock(it, i.messageId, 'text_api', i.ok ? undefined : i.error);
+      }
+    }
+    // MIROIRS SUPPLÉMENTAIRES (28/10/2026, Cashflow — voir lib/channel/mirrors.ts) : même langue, donc le texte
+    // tel quel, comme le miroir UK. EN DERNIER, après l'italien : un Cashflow lent ou en panne ne retarde ni ne
+    // bloque la source, le miroir UK ou l'italien, déjà servis. Chacun a son verrou, son libellé, et son échec
+    // reste dans SA ligne du rapport. Variable non posée → boucle vide, rien ne change.
+    for (const x of extraMirrors()) {
+      try {
+        const m = await send(x.chat, text);
+        report.push({ channel: x.label, ok: m.ok, ...(m.ok ? {} : { error: m.error }) });
+        await lock(x.chat, m.messageId, 'mirror_api', m.ok ? undefined : m.error);
+      } catch (e) {
+        report.push({ channel: x.label, ok: false, error: String((e as { message?: string })?.message ?? e).slice(0, 200) });
       }
     }
   }

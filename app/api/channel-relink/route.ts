@@ -18,6 +18,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { sourceChannel } from '@/lib/channel/publish';
+import { extraMirrors } from '@/lib/channel/mirrors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,6 +55,11 @@ export async function GET(req: NextRequest) {
   const src = sourceChannel();
   const mirror = (process.env.TELEGRAM_CHANNEL_MIRROR ?? '').trim();
   const it = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
+  // MIROIRS SUPPLÉMENTAIRES (28/10/2026, Cashflow — lib/channel/mirrors.ts) : leurs copies se corrigent comme celles du
+  // miroir UK, sous leur propre nom dans le rapport. Non posés → liste vide, la route fait exactement ce qu'elle faisait.
+  const extras = extraMirrors();
+  const extraName = new Map(extras.map((x) => [x.chat, x.name]));
+  const chatName = (t: Target) => (t.it ? 'IT' : t.chat === src ? 'source' : extraName.get(t.chat) ?? 'mirror');
 
   // ── ce qu'il reste à corriger ────────────────────────────────────────────────────────────────────────────
   const [{ data: posts }, { data: recaps }, { data: admin }] = await Promise.all([
@@ -88,7 +94,7 @@ export async function GET(req: NextRequest) {
       const targets: Target[] = [
         { chat: src, id: row.messageId, it: false },
         ...((copies ?? []) as Array<{ dst_chat_id: number; dst_message_id: number }>)
-          .filter((c) => String(c.dst_chat_id) === mirror || String(c.dst_chat_id) === it)
+          .filter((c) => String(c.dst_chat_id) === mirror || String(c.dst_chat_id) === it || extraName.has(String(c.dst_chat_id)))
           .map((c) => ({ chat: String(c.dst_chat_id), id: Number(c.dst_message_id), it: String(c.dst_chat_id) === it })),
       ];
       const markup = row.btnText && row.btnUrl ? { inline_keyboard: [[{ text: row.btnText, url: fix(row.btnUrl) }]] } : undefined;
@@ -100,10 +106,10 @@ export async function GET(req: NextRequest) {
         else if (textChanged && row.photo) d = await tg('editMessageCaption', { chat_id: t.chat, message_id: t.id, caption: fix(row.html).slice(0, 1024), parse_mode: 'HTML', ...(markup ? { reply_markup: markup } : {}) });
         else if (textChanged) d = await tg('editMessageText', { chat_id: t.chat, message_id: t.id, text: fix(row.html).slice(0, 4000), parse_mode: 'HTML', disable_web_page_preview: true, ...(markup ? { reply_markup: markup } : {}) });
         else if (markup && has(row.btnUrl)) d = await tg('editMessageReplyMarkup', { chat_id: t.chat, message_id: t.id, reply_markup: markup });
-        else { edits.push({ chat: t.it ? 'IT' : t.chat === src ? 'source' : 'mirror', ok: true, error: 'nothing to change here' }); continue; }
+        else { edits.push({ chat: chatName(t), ok: true, error: 'nothing to change here' }); continue; }
         const notModified = /not modified|message to edit not found/i.test(d.description ?? ''); // supprimé : plus rien à corriger
         if (d.parameters?.retry_after) rateLimited = true;
-        edits.push({ chat: t.it ? 'IT' : t.chat === src ? 'source' : 'mirror', ok: !!d.ok || notModified, ...(d.ok || notModified ? {} : { error: d.description }) });
+        edits.push({ chat: chatName(t), ok: !!d.ok || notModified, ...(d.ok || notModified ? {} : { error: d.description }) });
       }
       report.push({ kind: row.kind, key: row.key, edits });
       // la source est corrigée → la ligne aussi (elle ne sera plus reprise ; le texte stocké suit le message)
@@ -126,7 +132,7 @@ export async function GET(req: NextRequest) {
       const s = await tg(setM, { [field]: fix(cur) });
       profile.push({ what: field, ok: !!s.ok, changed: true, ...(s.ok ? {} : { error: s.description }) });
     }
-    for (const [name, chat] of [['source', src], ['mirror', mirror], ['IT', it]] as const) {
+    for (const [name, chat] of [['source', src], ['mirror', mirror], ['IT', it], ...extras.map((x) => [x.name, x.chat] as const)] as const) {
       if (!chat) continue;
       const g = await tg('getChat', { chat_id: chat });
       const cur = String((g.result as { description?: string } | undefined)?.description ?? '');
@@ -136,7 +142,7 @@ export async function GET(req: NextRequest) {
     }
     // LE MESSAGE ÉPINGLÉ : son bouton est corrigé si on peut l'éditer ; un lien dans son TEXTE est seulement signalé
     // (le reconstruire avec sa mise en forme demanderait ses entités — à corriger à la main)
-    for (const [name, chat] of [['source', src], ['mirror', mirror], ['IT', it]] as const) {
+    for (const [name, chat] of [['source', src], ['mirror', mirror], ['IT', it], ...extras.map((x) => [x.name, x.chat] as const)] as const) {
       if (!chat) continue;
       const g = await tg('getChat', { chat_id: chat });
       const pin = (g.result as { pinned_message?: { message_id: number; text?: string; caption?: string; reply_markup?: { inline_keyboard?: Array<Array<{ text: string; url?: string }>> } } } | undefined)?.pinned_message;
