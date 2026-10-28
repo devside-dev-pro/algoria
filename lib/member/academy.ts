@@ -107,9 +107,10 @@ export const ACADEMY: AcademyModule[] = [
   {
     key: 'myths', label: 'Myth vs Fact', icon: '🧐', blurb: 'What people think, and what is true.',
     lessons: [
+      // 28/10/2026 : Algoria trade l'or seul depuis la semaine du 19/10 (plus de BTC) → plus de « crypto » ici.
       {
         id: 'hand', kicker: 'Myth vs Fact', title: 'Who’s really trading ?',
-        body: 'Algoria is **100% driven by AI**, on gold and crypto. Mathieu built it, he never places a trade by hand. Every trade you get is the AI’s decision.',
+        body: 'Algoria is **100% driven by AI**, on gold (XAU/USD) only. Mathieu built it, he never places a trade by hand. Every trade you get is the AI’s decision.',
         facts: [{ ok: false, t: 'Someone trades by hand behind the screen' }, { ok: true, t: '100% AI. Zero manual trades.' }],
       },
       {
@@ -135,8 +136,8 @@ export const ACADEMY: AcademyModule[] = [
       },
       {
         id: 'days', kicker: 'Myth vs Fact', title: 'A trade open for days ?',
-        body: 'Crypto positions aren’t intraday, one can stay open a few days. **Every one still has its stop loss**, the AI manages it the whole time.',
-        facts: [{ ok: false, t: 'A trade open for days means it’s stuck' }, { ok: true, t: 'Crypto isn’t intraday. Stop loss always on.' }],
+        body: 'Some positions aren’t closed the same day, one can stay open longer. **Every one still has its stop loss**, the AI manages it the whole time.',
+        facts: [{ ok: false, t: 'A trade open for days means it’s stuck' }, { ok: true, t: 'Not every trade is intraday. Stop loss always on.' }],
       },
     ],
   },
