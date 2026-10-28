@@ -26,6 +26,7 @@
 // connexions dont le propriétaire est un admin (adminTgIds) — sinon on ignore tout, sans rédiger ni rien envoyer.
 import { adminTgIds } from './notifyOwner';
 import { appendAgentMemory } from './agentDocs';
+import { isReplayRequest, replayLang, requestReplay, runReplaySoon } from './replay';
 import { WEBINAR_HOLD_MS, WEBINAR_WORD, cancelPendingJobs, scheduleOnClientMessage, webinarAlert } from './supportAuto';
 import { isLiveKeyword, registerForWebinar, upcomingSessions } from './webinar';
 
@@ -133,8 +134,9 @@ export async function handleBusinessConnection(bc: any): Promise<void> {
 }
 
 // ===== business_message : un message dans une conversation du compte support (reçu OU envoyé par Mathieu).
+/** `opts.later` : after() du webhook (le replay part de là, ~50 s plus tard) ; `opts.t0` : réception du webhook. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
+export async function handleBusinessMessage(db: Db, m: any, opts: { later?: (fn: () => Promise<unknown>) => void; t0?: number } = {}): Promise<void> {
   const connId = String(m?.business_connection_id ?? '');
   if (!connId || m?.chat?.type !== 'private') return;
   if (m.sender_business_bot) return; // envoyé par nous au nom de Mathieu : déjà enregistré à l'envoi
@@ -169,8 +171,18 @@ export async function handleBusinessMessage(db: Db, m: any): Promise<void> {
   // repousse la réponse à ~75 s après le dernier (on attend que la personne ait fini d'écrire). C'est la cron
   // /api/cron/support-jobs qui rédige, puis envoie seule si le modèle est sûr, ou montre la carte à Mathieu sinon.
   const { data: past } = await db.from('member_actions').select('id').eq('tg_id', chatId).eq('kind', BIZ_KIND).limit(1);
-  const { data: mrow } = await db.from('members').select('member_no,status').eq('tg_id', chatId).limit(1);
+  const { data: mrow } = await db.from('members').select('member_no,status,locale').eq('tg_id', chatId).limit(1);
   const photo = photoId(m);
+  // 🎥 « REPLAY » seul (lib/member/replay.ts) : ~50 s plus tard le texte puis la vidéo du replay. Le support automatique
+  // ne répond pas à ce message (ses réponses prévues pour cette conversation sont annulées, rien n'est planifié).
+  if (typeof m.text === 'string' && !photo && isReplayRequest(m.text)) {
+    await db.from('member_actions').insert({ tg_id: chatId, member_no: mrow?.[0]?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'telegram', detail: { from: 'client', text, conn: connId, name, username, msg_id: Number(m.message_id) || null, replay_at: new Date().toISOString() } });
+    await cancelPendingJobs(db, chatId, 'replay request');
+    const out = await requestReplay(db, { tgId: chatId, conn: connId, lang: replayLang({ locale: mrow?.[0]?.locale ?? null, languageCode: m.from?.language_code ?? null, text }), who: username ? `@${username}` : (name ?? String(chatId)), memberNo: mrow?.[0]?.member_no ?? null });
+    const { jobId, dueMs } = out;
+    if (jobId && dueMs && opts.later) opts.later(() => runReplaySoon(db, jobId, dueMs, opts.t0 ?? Date.now()));
+    return;
+  }
   // 🎤 « LIVE » seul (pas WEBINAR) : s'il a déjà démarré le bot, on l'inscrit tout de suite. La confirmation part
   // dans le chat du bot. La réponse dans CE chat (bouton START, ou carte « À toi ») est le job de réponse
   // (lib/member/supportAuto.ts) : l'accueil du premier contact, lui, ne change pas.

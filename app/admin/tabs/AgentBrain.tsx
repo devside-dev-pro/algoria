@@ -11,7 +11,7 @@ import { dimP, inp, miniBtn, okBtn, secH } from '../_shared';
 interface Version { id: number; created_at: string; created_by: string | null; size: number }
 interface Doc { content: string; updated_at: string | null; updated_by: string | null; versions: Version[]; max: number }
 
-type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory' | 'live_welcome' | 'support_welcome' | 'support_intro' | 'support_followup';
+type DocKey = 'knowledge' | 'memory' | 'ads_memory' | 'cm_memory' | 'live_welcome' | 'support_welcome' | 'support_intro' | 'support_followup' | 'support_replay';
 const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?: string }> = {
   knowledge: {
     title: '🧠 ALGORIA AI — KNOWLEDGE',
@@ -48,6 +48,11 @@ const COPY: Record<DocKey, { title: string; intro: string; empty: string; saved?
     title: '🔁 SUPPORT — FOLLOW-UP',
     intro: 'Sent from your Telegram account about 23 h after a contact’s last message, when your last message was waiting for an answer and they never replied (once per silence: Telegram blocks automatic messages after 24 h). Three texts, separated by a line with only ---: after the welcome bubble, after your intro or the app link, after anything else. {name} = their first name. Italian contacts get the Italian version.',
     empty: 'Empty: the default texts are used (« did you get a chance to watch my video ? Where are you from ? », « did you get a chance to check the app ? », « did you see my last message ? »).',
+  },
+  support_replay: {
+    title: '🎥 SUPPORT — WEBINAR REPLAY',
+    intro: 'When someone writes REPLAY to you or to the bot in private, about 1 minute later they get the first text, then the replay video with the second text as its caption. A third text is sent instead if they ask again within 24 h. Three texts, separated by a line with only ---. English only: German and Italian contacts get the validated German / Italian versions. The video itself: send it to the bot in private (it replies « Replay enregistré ✅ »).',
+    empty: 'Empty: the validated texts are used (« No problem 🙌🏻 I’m sending you the replay 🎥 », « 🎥 Here’s the replay of the live (25 min)… »).',
   },
   ads_memory: {
     title: '🧠 ADS STUDIO — WHAT CLAUDE LEARNED',
