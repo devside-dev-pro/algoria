@@ -272,20 +272,52 @@ export async function webinarFacts(db: Db): Promise<string> {
 //   · seulement les prospects (status 'onboarding'), les plus récents d'abord (les plus chauds) ;
 //   · une invitation par personne toutes les 3 semaines au plus, jamais quelqu'un qui a bloqué le bot
 //     (webinar_invite_batch, migration 0036) ;
-//   · 500 par session au plus : en 3 semaines, tout le fichier a reçu une invitation, les nouveaux inscrits d'abord ;
+//   · 500 invitations REÇUES par session au plus (réglable, voir plus bas) : en 3 semaines, tout le fichier a reçu une
+//     invitation, les nouveaux inscrits d'abord ;
 //   · ~8 messages par seconde (Telegram en tolère 30) ;
 //   · COUPE-CIRCUIT : si plus de 4 % des invités d'une session bloquent le bot dans la foulée, la campagne s'arrête et
 //     Mathieu est prévenu. C'est le taux de blocage qui fait passer un bot pour du spam, pas le volume.
 // Chaque personne est réservée dans webinar_invites AVANT l'envoi : jamais deux invitations pour la même session. Le
 // bouton inscrit en un tap, sans quitter la conversation (handleWebinarCallback). Mathieu reçoit le bilan à la fin.
 // L'interrupteur 'webinar_invites' coupe tout ; il reste sur 'off' tant que Mathieu n'a pas validé.
+//
+// LE PLAFOND COMPTE LES INVITATIONS REÇUES, PAS LES ESSAIS (28/10/2026). Le 27/10 au soir, la session du 28/10 s'est
+// fermée sur « plafond » avec 402 invitations reçues seulement : le plafond comptait toutes les lignes de
+// webinar_invites, y compris les 98 personnes injoignables (bot déjà bloqué, compte supprimé). Il compte maintenant
+// les seules invitations parties sans erreur (st.sent). Les échecs ne peuvent pas tourner en boucle : une ligne en
+// erreur exclut la personne de webinar_invite_batch (même session, 3 semaines), et la campagne se ferme dès que le lot
+// revient vide (« tout le monde »). Mathieu a validé le jour même une 2e vague de 1 000 invitations reçues en plus,
+// pas avant 13h UK. D'où deux réglages de support_settings, lus à chaque passage, sans redéploiement :
+//   · 'webinar_invite_cap' : le plafond (entier, 500 si absent ou illisible, 3 000 au plus). Il est global : le
+//     remettre à 500 après une vague exceptionnelle, sinon la session suivante en profite aussi ;
+//   · 'webinar_invite_not_before' : une date ISO avec fuseau (ex. 2026-10-28T13:00:00Z). Avant elle, le passage ne
+//     fait rien et ne ferme rien. Absente ou illisible : ignorée.
+// Pour relancer une session fermée, il faut aussi remettre invite_done_at / invite_note à null (à la main).
 
 const INVITE_FROM = 25 * HOUR; // la veille, 18h UK pour un webinaire à 19h (7 h avant jusqu'au 26/10/2026)
 const INVITE_UNTIL = 2 * HOUR;
-const INVITE_CAP = 500;
+const INVITE_CAP = 500; // par défaut, si 'webinar_invite_cap' est absent ou illisible
+const INVITE_CAP_MAX = 3000;
 const INVITE_BATCH = 100;
 const BREAKER = { minSent: 80, rate: 0.04 };
 const firstName = (n: string | null) => { const f = String(n ?? '').trim().split(/\s+/)[0] ?? ''; return /^[\p{L}][\p{L}'-]{1,20}$/u.test(f) ? f : ''; };
+
+/** 'webinar_invite_cap' → le plafond d'invitations reçues : un entier positif, ramené à INVITE_CAP_MAX ; sinon 500. */
+export function parseInviteCap(v: string | null | undefined): number {
+  const t = String(v ?? '').trim();
+  if (!/^\d{1,9}$/.test(t)) return INVITE_CAP;
+  const n = Number(t);
+  return n > 0 ? Math.min(n, INVITE_CAP_MAX) : INVITE_CAP;
+}
+
+/** 'webinar_invite_not_before' → l'instant (ms) avant lequel on n'invite pas, ou null (absent, illisible, sans fuseau).
+ *  `setting` met la valeur en minuscules : on la remet en majuscules avant de la lire. */
+export function parseNotBefore(v: string | null | undefined): number | null {
+  const t = String(v ?? '').trim().toUpperCase();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(t)) return null;
+  const ms = Date.parse(t);
+  return Number.isFinite(ms) ? ms : null;
+}
 
 /** Le texte de l'invitation (anglais, la voix de Mathieu). */
 export function inviteText(s: WebinarSession, name: string | null, now = Date.now()): string {
@@ -331,6 +363,10 @@ export async function runWebinarInvites(db: Db, until: number): Promise<{ invite
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const now = Date.now();
   if (!token || (await setting(db, 'webinar_invites', 'off')) !== 'on') return { invited: 0, failed: 0 };
+  // la 2e vague attend son heure : rien n'est envoyé ni fermé avant (28/10/2026)
+  const notBefore = parseNotBefore(await setting(db, 'webinar_invite_not_before', ''));
+  if (notBefore !== null && now < notBefore) return { invited: 0, failed: 0 };
+  const cap = parseInviteCap(await setting(db, 'webinar_invite_cap', ''));
   const { data: ss } = await db.from('webinar_sessions').select('id,starts_at,zoom_url').eq('active', true).is('invite_done_at', null)
     .gt('starts_at', iso(now + INVITE_UNTIL)).lte('starts_at', iso(now + INVITE_FROM)).order('starts_at', { ascending: true }).limit(1);
   const s = ss?.[0] as WebinarSession | undefined;
@@ -349,7 +385,8 @@ export async function runWebinarInvites(db: Db, until: number): Promise<{ invite
       await close('coupe-circuit', `⚠️ Invitations au webinar arrêtées : ${Math.round((100 * st.blocked) / st.sent)} % des invités ont bloqué le bot`);
       break;
     }
-    const room = INVITE_CAP - st.total;
+    // le plafond compte les invitations reçues (sans erreur), pas les essais (28/10/2026)
+    const room = cap - st.sent;
     const { data: batch, error } = room > 0 ? await db.rpc('webinar_invite_batch', { p_session: s.id, p_limit: Math.min(INVITE_BATCH, room) }) : { data: [], error: null };
     if (error) throw new Error(error.message);
     const people = (batch ?? []) as Array<{ tg_id: number; tg_name: string | null }>;
