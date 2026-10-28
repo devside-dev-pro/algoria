@@ -37,3 +37,12 @@ export const tradingTimeMs = (day: string, hhmm: string) => {
   const first = naive - offsetMin(naive) * 60_000;
   return naive - offsetMin(first) * 60_000;
 };
+
+/** L'heure d'un trade, à Paris : « 02:12 » s'il est de la journée de trading en cours, « 22/10 02:12 » sinon (29/10/2026 :
+ *  sans la date, des trades d'il y a une semaine se lisaient comme ceux de la nuit). */
+export const tradeTimeLabel = (iso: string, now: Date | number = Date.now()) => {
+  const d = new Date(iso);
+  const hm = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: TRADING_TZ });
+  if (tradingDayOf(d) === tradingDayOf(now)) return hm;
+  return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', timeZone: TRADING_TZ })} ${hm}`;
+};

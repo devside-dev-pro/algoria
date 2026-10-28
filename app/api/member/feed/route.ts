@@ -6,6 +6,7 @@ import { OFFBOARDED } from '@/lib/member/winback';
 import { TRACK_SINCE, TRACK_SINCE_MS } from '@/lib/member/trackSince';
 import { seesHistory } from '@/lib/member/historyMaintenance';
 import { tradingDayOf, tradingDayStartMs } from '@/lib/display/tradingDay';
+import { inCopyWindow } from '@/lib/member/copyWindow';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -74,7 +75,9 @@ export async function GET(req: NextRequest) {
   // trades OUVERTS après le début de sa copie : le Monero ouvert le 22/09 et fermé le 18/10 s'affichait en gain du jour
   // chez des membres arrivés après, qui ne l'avaient pas sur leur compte. Admins et prospects voient tout l'historique.
   const copyStart = (startQ.data?.[0] as { done_at?: string } | undefined)?.done_at ? Date.parse(String((startQ.data?.[0] as { done_at: string }).done_at)) : NaN;
-  const mine = (t: { opened_at?: string | null }) => !Number.isFinite(copyStart) || isAdmin(s.username) || !['live', 'paused'].includes(feedStatus) || !t.opened_at || Date.parse(String(t.opened_at)) >= copyStart;
+  // 29/10/2026 : une ligne close-only (sans heure d'ouverture) est jugée sur son heure de clôture (lib/member/copyWindow.ts),
+  // comme app/api/member/account/route.ts — elle passait toujours, et des gains du 22/10 s'affichaient chez une membre du 28/10.
+  const mine = (t: { opened_at?: string | null; closed_at?: string | null }) => !Number.isFinite(copyStart) || isAdmin(s.username) || !['live', 'paused'].includes(feedStatus) || inCopyWindow(t, copyStart);
   // 🛠 HISTORIQUE EN MAINTENANCE pour les prospects (22/10/2026, lib/member/historyMaintenance.ts) : aucun trade
   const maintenance = !seesHistory(feedStatus, isAdmin(s.username));
   const trades = maintenance ? [] : clean.filter((t) => Number((t as { strategy?: number }).strategy ?? 2) === LIVE_STRATEGY && (unlocked || Date.parse(String(t.closed_at)) >= prospectFrom) && mine(t));
