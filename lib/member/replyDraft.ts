@@ -133,9 +133,10 @@ function brokerLinks(): string {
 
 /** Règle « résultats passés ». Ouverte : on peut citer le bloc REAL PAST RESULTS et le lien (texte du 30/09/2026,
  *  inchangé). Retenue (incident, ou historique en maintenance pour un prospect) : aucun chiffre, aucun lien.
- *  La perte d'octobre (about 85%) ne se dit que si on la demande, et jamais sous le mot « maintenance ». */
+ *  La perte d'octobre ne se dit que si on la demande, en une phrase (LOSSES_LINE), sans chiffre (28/10/2026 : plus de
+ *  « about 85% »), et jamais sous le mot « maintenance ». */
 const PAST_RESULTS_OPEN = `PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://getalgoria.com/track-record and the reminder that past results do not guarantee future results. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars.`;
-const PAST_RESULTS_HELD = `PAST RESULTS: do NOT quote any performance figure, win rate or dollar result, and do NOT send the track record page. The RESULTS block above wins over the KNOWLEDGE and the older lessons. The only results link you may send is the Myfxbook link written there, copied exactly: it replaces every result figure. The only percentage you may write unprompted is the −5% daily safeguard. About 85% is only for the night of 21-22 October, and only if they asked what happened then or why there is a new account: say it plainly, never call that loss "maintenance", never minimise it. No other percentage.`;
+const PAST_RESULTS_HELD = `PAST RESULTS: do NOT quote any performance figure, win rate or dollar result, and do NOT send the track record page. The RESULTS block above wins over the KNOWLEDGE and the older lessons. The only results link you may send is the Myfxbook link written there, copied exactly: it replaces every result figure. The only percentage you may write is the −5% daily safeguard. About the night of 21-22 October, if they ask what happened or why there is a new account: only the single sentence "${LOSSES_LINE}" then the Myfxbook URL and "${PAST_RESULTS_LINE}"; never a figure about that loss, never call it "maintenance", never minimise it. No other percentage.`;
 const pastResultsRule = (hold: boolean) => (hold ? PAST_RESULTS_HELD : PAST_RESULTS_OPEN);
 
 /** Les leçons apprises des corrections de Mathieu : elles priment sur tout le reste. */
@@ -467,7 +468,7 @@ const RETRY_HINT: Record<string, string> = {
   'lien du track record': 'it included a track record page link. Remove it. No result figure. The only results link is the Myfxbook URL from the FACTS, copied exactly.',
   'lien de résultats non autorisé': 'it used a Myfxbook URL that is not the one in the FACTS. Copy that URL exactly, or send no results link.',
   'lien myfxbook manquant': 'they asked for results or proof and the reply has no Myfxbook link. Add the exact Myfxbook URL from the FACTS. No result figure.',
-  'chiffre de résultat': 'it quoted 85% but they did not ask about October or the previous account. Remove that figure. The Myfxbook link replaces result figures.',
+  'chiffre de résultat': 'it quoted a figure about the October loss. Remove it: about the loss, only the single sentence from the FACTS, then the Myfxbook URL. No figure.',
   // L'indice ne redit pas le chiffre : sinon la 2e tentative le recopie.
   // 28/10/2026 : les règles dures (hardRules). L'indice dit quoi enlever, sans recopier la phrase fautive.
   'délai promis': `it gave a deadline (today, tomorrow, a few days, a weekday…). No deadline at all. To say you will follow up: "${FOLLOW_UP_LINE}"`,
@@ -519,7 +520,6 @@ export function resultLinkIssue(text: string): string | null {
 }
 
 const WANTS_PROOF = /\b(results?|performance|profits?|track ?record|win ?rate|myfxbook|proof|prove)\b/i;
-const ASKS_LOSS = /\b(october|oct\b|previous account|old account|why .{0,40}new account)\b/i;
 
 /** La page track record, écrite ou en lien, ne doit pas arriver au modèle quand les résultats sont retenus.
  *  Le Myfxbook n'est pas concerné : c'est le lien qu'on veut qu'il recopie. */
@@ -711,8 +711,8 @@ export function assessModelOutput(raw: string, opts: {
   if (opts.holdResults) {
     const linkIssue = resultLinkIssue(out);
     if (linkIssue) return { draft: null, issue: linkIssue };
-    const asksLoss = INCIDENT_TALK.test(opts.userText) || ASKS_LOSS.test(opts.userText);
-    if (/\b85\s?%/.test(out) && !asksLoss) return { draft: null, issue: 'chiffre de résultat' };
+    // 28/10/2026 (Mathieu) : le chiffre de la perte d'octobre ne part plus, même si on demande ce qui s'est passé
+    if (/\b85\s?%/.test(out)) return { draft: null, issue: 'chiffre de résultat' };
     if (WANTS_PROOF.test(opts.userText) && !out.includes(MYFXBOOK_URL)) return { draft: null, issue: 'lien myfxbook manquant' };
     if (mentionsPositionCap(out)) return { draft: null, issue: 'plafond de positions' };
   }

@@ -6,7 +6,7 @@
 // fautive ET laisser passer les bonnes réponses (la phrase de suivi, la réponse à une capture, la règle des 30 jours,
 // le mot de passe dans l'app…), sinon on fabrique des cartes sans proposition.
 import { readFileSync } from 'node:fs';
-import { FOLLOW_UP_LINE, INCIDENT, INCIDENT_NOTE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, LOSSES_LINE, MYFXBOOK_URL, PAST_RESULTS_LINE, RESULTS_REPLY_NOTE, incidentReplyNote } from '../../lib/member/incident';
+import { FOLLOW_UP_LINE, HISTORY_LOSS_NOTE, HISTORY_RESULTS_NOTE, INCIDENT, INCIDENT_NOTE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, LOSSES_LINE, MYFXBOOK_URL, PAST_RESULTS_LINE, RESULTS_REPLY_NOTE, incidentReplyNote } from '../../lib/member/incident';
 import { TRADER_PASSWORD_LINE, assessModelOutput, buildDraftSystem, fixOldDomain, hardRuleIssue, humanize, withPastDisclaimer } from '../../lib/member/replyDraft';
 
 let failed = 0;
@@ -120,6 +120,7 @@ check('ancien domaine réécrit', fixOldDomain('Here: https://app.algoria.tech/m
   check('aucune note ne promet « solutions in the next few days », « personally today », « contacting every affected member »', notes.every((n) => !/solutions? in the next few days|personally today|contacting every affected member/i.test(n)));
   check('les notes d\'incident donnent la phrase de suivi', [INCIDENT_NOTE, incidentReplyNote(true), INCIDENT_OTHER_NOTE].every((n) => n.includes(FOLLOW_UP_LINE) || /come back to you personally as soon as/.test(n)));
   check('INCIDENT.start reste la nuit du 21-22/10', INCIDENT.start.startsWith('2026-10-2'));
+  check('plus aucun « 85 % » dans les consignes d\'incident (28/10, Mathieu)', [...notes, HISTORY_LOSS_NOTE, HISTORY_RESULTS_NOTE].every((n) => !/\b85\s?%/.test(n)) && [HISTORY_LOSS_NOTE, HISTORY_RESULTS_NOTE, INCIDENT_NOTE].every((n) => n.includes(LOSSES_LINE)));
   const src = readFileSync('lib/member/replyDraft.ts', 'utf8') + readFileSync('lib/member/supportAuto.ts', 'utf8');
   check('aucun paramètre temperature dans les appels Anthropic (#555)', !/\btemperature\s*:/.test(src));
   const academy = readFileSync('lib/member/academy.ts', 'utf8') + readFileSync('app/member/ai/page.tsx', 'utf8');

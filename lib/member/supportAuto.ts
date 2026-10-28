@@ -544,7 +544,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   if (directAsk && !introduced) note = DIRECT_NOTE;
   if (resultsAsk) {
     // Après le 05/11, une question sur octobre ne doit pas être recouverte par « nouvelle version » seule :
-    // on dit la perte (~85 %), puis le Myfxbook. Pendant l'incident, aboutIncident a déjà pris ce cas.
+    // on dit la perte (la phrase unique, sans chiffre depuis le 28/10), puis le Myfxbook. Pendant l'incident, aboutIncident a déjà pris ce cas.
     const resultsNote = resultsPolicyNow === 'maintenance' && INCIDENT_TALK.test(joined) ? HISTORY_LOSS_NOTE : RESULTS_REPLY_NOTE;
     note = note ? `${note}\n${resultsNote}` : resultsNote;
   }
