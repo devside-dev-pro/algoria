@@ -6,6 +6,7 @@ import { translateToItalian, entitiesToHtml } from '@/lib/member/translate';
 import { notifyOwner, adminTgIds } from '@/lib/member/notifyOwner';
 import { draftReply, draftTraceDetail, AUTOREPLY_ON } from '@/lib/member/replyDraft';
 import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback, handleBusinessCorrection } from '@/lib/member/businessInbox';
+import { JOIN_SWITCH_CB, canToggleJoins, joinSwitch, joinSwitchMessage, noteJoinSwitch, parseJoinSwitch } from '@/lib/member/joinSwitch';
 import { handleReplayAdmin, handleReplayUpload, isReplayRequest, replayLang, requestReplay, runReplaySoon } from '@/lib/member/replay';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
 import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
@@ -410,6 +411,11 @@ export async function POST(req: Request) {
   // membre par le bot, exactement comme une réponse tapée dans l'admin (tracée en nudge). Quelqu'un
   // d'autre qui appuie n'obtient rien : la liste des admins est celle de notifyOwner.
   const cq = update?.callback_query;
+  // 🚪 l'interrupteur auto-accept du canal, par ses boutons (lib/member/joinSwitch.ts) : admins + JOIN_SWITCH_TG_IDS seulement
+  if (cq && db && typeof cq.data === 'string' && cq.data.startsWith(JOIN_SWITCH_CB)) {
+    await handleJoinSwitchCallback(db, cq).catch((e) => console.error('[telegram] join switch callback failed:', (e as { message?: string })?.message ?? e));
+    return NextResponse.json({ ok: true });
+  }
   if (cq && db) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const tg = async (method: string, payload: Record<string, unknown>) => token ? fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000), body: JSON.stringify(payload) }).catch(() => null) : null;
@@ -477,6 +483,10 @@ export async function POST(req: Request) {
   }
 
   const msg = update?.message;
+  // 🚪 « autoaccept » / « autoaccept on|off » en privé (lib/member/joinSwitch.ts) : admins + JOIN_SWITCH_TG_IDS (Maria, échanges
+  // de pubs) ; pour tout autre compte, rien : le message suit son chemin habituel.
+  if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.from?.id && parseJoinSwitch(msg.text)
+    && (await handleJoinSwitchText(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 📣 Mathieu corrige un post du canal en répondant au message du matin (lib/channel/cm.ts). AVANT la correction du
   // bot de support : un « # règle » en réponse au plan du canal va dans la mémoire du CM, pas dans celle du support.
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message
@@ -804,4 +814,37 @@ export async function GET() {
       bot_token: !!process.env.TELEGRAM_BOT_TOKEN, // requis pour les photos de profil
     },
   });
+}
+
+// ── 🚪 l'interrupteur auto-accept depuis le bot (29/10/2026, lib/member/joinSwitch.ts) ──
+async function tgCall(method: string, payload: Record<string, unknown>): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000), body: JSON.stringify(payload) }).catch(() => null);
+}
+const whoOf = (u: { id?: number; username?: string; first_name?: string } | undefined) => (u?.username ? `@${u.username}` : u?.first_name || String(u?.id ?? '?'));
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function handleJoinSwitchText(db: any, msg: any): Promise<boolean> {
+  const action = parseJoinSwitch(msg.text);
+  if (!action) return false;
+  const who = await canToggleJoins(Number(msg.from.id));
+  if (!who.ok) return false; // pas autorisé : le message suit son chemin habituel, rien n'est révélé
+  const by = `${whoOf(msg.from)} (bot)`;
+  const s = await joinSwitch(db, action, by);
+  if (action !== 'get' && !who.admin) await noteJoinSwitch(whoOf(msg.from), s, action);
+  await tgCall('sendMessage', { chat_id: msg.chat.id, ...joinSwitchMessage(s, action === 'get' ? undefined : action) });
+  return true;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function handleJoinSwitchCallback(db: any, cq: any): Promise<void> {
+  const action = String(cq.data).slice(JOIN_SWITCH_CB.length);
+  if (action !== 'on' && action !== 'off' && action !== 'get') return;
+  const who = await canToggleJoins(Number(cq.from?.id));
+  if (!who.ok || cq.message?.chat?.type !== 'private') { await tgCall('answerCallbackQuery', { callback_query_id: cq.id, text: 'Not allowed.' }); return; }
+  const s = await joinSwitch(db, action, `${whoOf(cq.from)} (bot)`);
+  if (action !== 'get' && !who.admin) await noteJoinSwitch(whoOf(cq.from), s, action);
+  await tgCall('answerCallbackQuery', { callback_query_id: cq.id, text: action === 'get' ? 'Updated' : action === 'on' ? 'Auto-accept ON' : 'Auto-accept OFF' });
+  await tgCall('editMessageText', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, ...joinSwitchMessage(s, action === 'get' ? undefined : action) });
 }
