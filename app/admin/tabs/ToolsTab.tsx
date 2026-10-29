@@ -16,10 +16,11 @@ export function ToolsTab() {
   const { bcAudience, bcReport, bcTag, bcText, busy, carding, composerSend, cpBtn, cpChat, cpReport, cpText, cpUrl, downloadCard, downloadRecap, feedWins, input, live, post, proof, pushAud, pushBody, pushResult, pushTitle, pushUrl, rows, sendBroadcast, sendChannelPost, setBcAudience, setBcTag, setBcText, setBusy, setCpBtn, setCpChat, setCpReport, setCpText, setCpUrl, setInput, setPushAud, setPushBody, setPushTitle, setPushUrl, setSthAudit, state, sthAudit, tgChats, wl } = useAdmin();
   return (
           <>
-            {/* 🚨 l'incident du 21-22/10/2026 : en tête tant qu'il est en cours */}
-            <IncidentPanel />
-            {/* 🚪 acceptation automatique des demandes d'adhésion au canal (échanges de pubs, 26/10/2026) */}
+            {/* 🚪 acceptation automatique des demandes d'adhésion au canal (échanges de pubs, 26/10/2026) — tout en haut
+                depuis le 29/10/2026 (demande de Mathieu) : c'est l'interrupteur qu'il touche le plus souvent */}
             <JoinSwitchPanel />
+            {/* 🚨 l'incident du 21-22/10/2026 : juste en dessous */}
+            <IncidentPanel />
             {/* 🧠 le cerveau d'Algoria AI — en tête des outils : c'est lui que Mathieu nourrit le plus souvent */}
             <AgentBrain />
             <AgentBrain docKey="memory" />
