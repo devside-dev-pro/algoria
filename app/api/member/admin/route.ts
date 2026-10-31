@@ -122,6 +122,16 @@ export async function GET(req: NextRequest) {
   if (!isAdmin(sess.username)) return NextResponse.json({ error: 'forbidden', username: sess.username ?? null }, { status: 403 });
   const s = sess;
   const db = sdb();
+  // 🩹 HEARTBEAT DU RUNNER À PART (01/11/2026, admin bloqué sur « loading… » quand la base saturait). La lecture de la
+  // dernière bougie est servie seule, appelée par l'admin APRÈS le chargement principal : si elle est lente ou échoue,
+  // seul le bandeau « RUNNER SILENT » manque, l'admin s'affiche quand même. Filtrée sur le symbole (seul l'or tourne) :
+  // elle passe par l'index existant candles_time_idx (symbol, time desc) au lieu de trier ~1 M de lignes.
+  if (new URL(req.url).searchParams.get('runner') === '1') {
+    const { data, error } = await db.from('candles').select('time').eq('symbol', 'XAUUSD').order('time', { ascending: false }).limit(1);
+    if (error) return NextResponse.json({ runnerLastSeen: null, error: error.message }, { status: 503 });
+    const t = (data as Array<{ time: number | string }> | null)?.[0]?.time;
+    return NextResponse.json({ runnerLastSeen: t != null ? Number(t) : null });
+  }
   // CINQ REQUÊTES QUI S'ENCHAÎNAIENT POUR RIEN (17/09/2026). Elles vivaient après ce bloc, exécutées une
   // par une alors qu'aucune ne dépend d'une autre : cinq aller-retours Supabase en série à chaque
   // chargement, répétés toutes les 30 s. Elles rejoignent le tir groupé — même lignes, même résultat, un
@@ -150,7 +160,9 @@ export async function GET(req: NextRequest) {
     // 'auto'/'human' — le seul test que fait l'écran. Forme inchangée côté client.
     rawq.from('admin_nudge_last').select('tg_id,created_at,done_by').limit(5000),
     // HEARTBEAT runner : la dernière bougie écrite (BTC 24/7 → toujours attendue) — bandeau rouge si > 20 min.
-    db.from('candles').select('time').order('time', { ascending: false }).limit(1),
+    // 🩹 01/11/2026 : la lecture « dernière bougie » (candles order by time desc) partait en statement timeout et
+    // bloquait tout le chargement ; elle vit maintenant à part : GET /api/member/admin?runner=1 (voir plus haut).
+    Promise.resolve({ data: null as Array<{ time: number }> | null }),
     // NOMS LÉGAUX (kyc.broker_name, déclarés au wizard) : LE pont entre les 3 identités d'une personne
     // (nom Telegram ≠ @pseudo ≠ nom sur le compte broker) — affiché partout + cherchable dans l'admin.
     db.from('member_actions').select('tg_id,detail,created_at').eq('kind', 'kyc').order('created_at', { ascending: false }).limit(500),

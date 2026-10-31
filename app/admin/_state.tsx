@@ -42,7 +42,7 @@ export function useAdminState() {
   const [rows, setRows] = useState<Row[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
   const [aff, setAff] = useState<Affiliate | null>(null);
-  const [state, setState] = useState<'loading' | 'ok' | 'forbidden' | 'anon'>('loading');
+  const [state, setState] = useState<'loading' | 'ok' | 'forbidden' | 'anon' | 'error'>('loading');
   // pseudo Telegram de la session refusée : LE renseignement qui manquait pour sortir de la boucle
   const [deniedAs, setDeniedAs] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -182,9 +182,32 @@ export function useAdminState() {
   // relit toute la base ET remonte la page. Le bouton ↻ de la barre haute recharge seulement les données, sur place.
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [reloading, setReloading] = useState(false);
+  // 🩹 01/11/2026 (admin bloqué sur « loading… » quand la base saturait) : un seul chargement à la fois, abandon à
+  // 25 s, écran « Admin indisponible — réessayer » en cas d'échec (au lieu d'un loading infini), et rechargement
+  // automatique espacé après chaque échec (30 s → 60 s → 120 s → … 5 min max). 401 / 403 inchangés.
+  const inFlight = useRef(false);
+  const fails = useRef(0);
+  const nextAt = useRef(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadRunner = () => {
+    void fetch('/api/member/admin?runner=1', { signal: AbortSignal.timeout(15_000) })
+      .then(async (r) => { if (r.ok) setRunnerLastSeen(((await r.json()) as { runnerLastSeen?: number | null }).runnerLastSeen ?? null); })
+      .catch(() => null);
+  };
   const load = () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setReloading(true);
-    void fetch('/api/member/admin').then(async (r) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 25_000);
+    const fail = (why: string) => {
+      fails.current += 1;
+      nextAt.current = Date.now() + Math.min(30_000 * 2 ** fails.current, 300_000);
+      setLoadError(why);
+      // déjà chargé une fois : on garde les données à l'écran (bandeau d'erreur) ; sinon écran d'erreur
+      setState((st) => (st === 'ok' ? st : 'error'));
+    };
+    void fetch('/api/member/admin', { signal: ctl.signal }).then(async (r) => {
       // 401 = aucune session · 403 = session mais pas admin. Les DEUX ouvrent la porte de connexion admin
       // (au lieu d'un cul-de-sac) — mais l'accès reste réservé à ADMIN_TG_USERNAMES : un autre compte
       // se reconnecte, se refait renvoyer en 403, et ne voit jamais le CRM. Sécurité intacte, porte ajoutée.
@@ -194,6 +217,7 @@ export function useAdminState() {
         setDeniedAs(d.username ?? null);
         return setState('forbidden');
       }
+      if (!r.ok) return fail(`HTTP ${r.status}`);
       const d = (await r.json()) as { pendingTotal?: number; whitelist: WL[]; members: Row[]; actions: Action[]; affiliate?: Affiliate; deposits?: Deposit[]; pushTgIds?: number[]; nudges?: { tg_id: number; created_at: string; done_by?: string }[]; spokeTgIds?: number[]; rejectedTgIds?: number[]; botBlocked?: number[] };
       setWl(d.whitelist);
       setRows(d.members);
@@ -207,7 +231,6 @@ export function useAdminState() {
       setSpokeTgIds(d.spokeTgIds ?? []);
       setRejectedTgIds(d.rejectedTgIds ?? []);
       setBotBlocked(d.botBlocked ?? []);
-      setRunnerLastSeen((d as { runnerLastSeen?: number | null }).runnerLastSeen ?? null);
       setLegalNames((d as { legalNames?: Record<string, string> }).legalNames ?? {});
       setExtraAccounts(((d as unknown as { extraAccounts?: typeof extraAccounts }).extraAccounts) ?? []);
       setBotActivity(((d as unknown as { botActivity?: typeof botActivity }).botActivity) ?? []);
@@ -216,7 +239,10 @@ export function useAdminState() {
       setTgChats(((d as unknown as { tgChats?: typeof tgChats }).tgChats) ?? []);
       setState('ok');
       setLoadedAt(Date.now());
-    }).finally(() => setReloading(false));
+      fails.current = 0; nextAt.current = 0; setLoadError(null);
+      loadRunner();
+    }).catch((e) => fail((e as { name?: string })?.name === 'AbortError' ? 'timeout (25 s)' : String((e as Error)?.message ?? e)))
+      .finally(() => { clearTimeout(timer); inFlight.current = false; setReloading(false); });
   };
   // ═══ NE PAS RECHARGER UN ÉCRAN QUE PERSONNE NE REGARDE (17/09/2026) ════════════════════════════════
   // Retour de Mathieu : « quand je refresh ou j'ouvre l'admin ça met de plus en plus de temps ». Un
@@ -230,9 +256,9 @@ export function useAdminState() {
   // ce qui donne aussi ce qu'on veut vraiment : des données fraîches à l'instant où on regarde.
   useEffect(() => {
     load();
-    const tick = () => { if (!document.hidden) load(); };
+    const tick = () => { if (!document.hidden && Date.now() >= nextAt.current) load(); };
     const iv = setInterval(tick, 30_000);
-    const onVisible = () => { if (!document.hidden) load(); };
+    const onVisible = () => { if (!document.hidden && Date.now() >= nextAt.current) load(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1162,7 +1188,15 @@ export function useAdminState() {
   };
 
   // ÉCRAN DE GARDE : rendu par page.tsx (un hook ne peut pas court-circuiter le rendu).
-  const gate = state === 'loading' ? <Center>loading…</Center> : state === 'anon' || state === 'forbidden' ? <AdminGate forbidden={state === 'forbidden'} deniedAs={deniedAs} /> : null;
+  const gate = state === 'loading' ? <Center>loading…</Center> : state === 'error' ? (
+    <Center>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, textAlign: 'center' }}>
+        <div>Admin indisponible — réessayer</div>
+        {loadError && <div style={{ fontSize: 11, opacity: 0.7 }}>{loadError}</div>}
+        <button onClick={() => { nextAt.current = 0; load(); }} disabled={reloading} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--cyan)', cursor: 'pointer' }}>{reloading ? '…' : '↻ Réessayer'}</button>
+      </div>
+    </Center>
+  ) : state === 'anon' || state === 'forbidden' ? <AdminGate forbidden={state === 'forbidden'} deniedAs={deniedAs} /> : null;
 
   const live = rows.filter((r) => r.status === 'live').length;
   const pendingRev = rows.filter((r) => r.status === 'pending_copier').length;
