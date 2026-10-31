@@ -18,6 +18,34 @@ export const STYLES: Style[] = ALL_STYLES.filter((s) => /^(validated|liked)/i.te
 export const styleWarning = (s: Style | undefined): string | null => (s && /compliance/i.test(s.status) ? `⚠ ${s.name} : conformité à vérifier (parodie de promesse de richesse — uniquement moquée, jamais réelle).` : null);
 
 export const THEMES = method.themes as Array<{ name: string; example: string }>;
+
+// 📖 STORY (31/10/2026, Mathieu : « le thème fait doublon avec le style »). Le STYLE = le rendu visuel ; la STORY = l'histoire.
+// Les styles-concepts ont leur propre histoire (documentary = Trader in the Wild, pixel8bit = Level Up…) : elle est proposée
+// par défaut quand on choisit ce style, et n'apparaît pas comme histoire séparée. Les histoires « universelles » marchent
+// avec n'importe quel style. La clé JSON reste « theme » (brief_input_format).
+export type Story = { name: string; example: string };
+const themeOf = (n: string) => THEMES.find((t) => t.name === n);
+/** Le style-concept → son histoire (noms de method.themes). */
+export const CONCEPT_STORY: Record<string, string> = {
+  documentary: 'Trader in the Wild', pixel8bit: 'Level Up', claymation: 'Clay Desk', vhs80s: 'Not An Infomercial', tiltshift: 'Tiny Town',
+};
+/** Les histoires qui marchent avec tous les styles (les idées 3D Pixar « en cours » séparées en entrées). */
+export const STORIES: Story[] = [
+  ...['Switch off the noise', 'The Lighthouse'].map((n) => themeOf(n)).filter((t): t is Story => !!t),
+  { name: 'Mountain climb', example: 'Mountain climb with an AI guide-bot.' },
+  { name: 'Magic academy', example: 'Magical academy first day.' },
+  { name: 'Rooftop community', example: 'Noisy billboard city → rooftop community.' },
+];
+/** L'histoire propre au style (s'il est un style-concept), sinon null. */
+export const conceptStory = (styleId: string): Story | null => {
+  const n = CONCEPT_STORY[styleId];
+  return (n && themeOf(n)) || null;
+};
+/** Les histoires proposées pour un style : la sienne d'abord (par défaut), puis les universelles. */
+export const storiesFor = (styleId: string): Story[] => {
+  const c = conceptStory(styleId);
+  return c ? [c, ...STORIES] : STORIES;
+};
 export const HOOK_ANGLES = ['question', 'relatable panic', 'contrarian', 'reveal'] as const;
 export type HookAngle = (typeof HOOK_ANGLES)[number];
 export const FORMATS = ['9:16', '1:1', '4:5', '16:9'] as const;
@@ -63,7 +91,7 @@ export function buildBrief(i: BriefInput): BriefResult {
   const style = STYLES.find((s) => s.id === i.style);
   if (!style) errors.push(`style non autorisé : ${i.style || '(vide)'}`);
   const theme = String(i.theme ?? '').trim();
-  if (!theme) errors.push('thème manquant');
+  if (!theme) errors.push('histoire manquante');
   if (!HOOK_ANGLES.includes(i.hook_angle)) errors.push('angle du hook invalide');
   const dur = Math.round(Number(i.duration_s));
   if (!Number.isFinite(dur) || dur < DURATION_MIN || dur > DURATION_MAX) errors.push(`durée entre ${DURATION_MIN} et ${DURATION_MAX} s`);
@@ -72,7 +100,7 @@ export function buildBrief(i: BriefInput): BriefResult {
   if (!VOICES.includes(i.voice) && !/^other\b/i.test(i.voice)) errors.push('voix invalide');
   const must = (i.must_show ?? []).filter((m) => MUST_SHOW.includes(m));
   const notes = String(i.notes ?? '').trim();
-  for (const [label, v] of [['thème', theme], ['notes', notes], ['voix', i.voice]] as const) {
+  for (const [label, v] of [['histoire', theme], ['notes', notes], ['voix', i.voice]] as const) {
     const hit = bannedIn(v);
     if (hit.length) errors.push(`${label} : mot interdit — ${hit.join(', ')}`);
   }
@@ -80,7 +108,7 @@ export function buildBrief(i: BriefInput): BriefResult {
 
   // 1) EXACTEMENT brief_input_format (mêmes clés, même ordre)
   const json = { style: style.id, theme, hook_angle: i.hook_angle, duration_s: dur, formats, voice: i.voice, must_show: must, notes };
-  const knownTheme = THEMES.find((t) => t.name === theme);
+  const knownTheme = storiesFor(style.id).find((t) => t.name === theme) ?? STORIES.find((t) => t.name === theme);
   // 2) les blocs ajoutés automatiquement (non modifiables)
   const pal = Object.entries(PALETTE).map(([k, v]) => `${k} ${Array.isArray(v) ? v.join(' / ') : v}`).join(' · ');
   const text = [
@@ -88,7 +116,7 @@ export function buildBrief(i: BriefInput): BriefResult {
     '',
     `--- AUTO (algoria ads method ${METHOD_VERSION}, do not edit) ---`,
     `STYLE: ${style.name} [${style.status}]`,
-    knownTheme ? `THEME IDEA: ${knownTheme.example}` : 'THEME IDEA: free theme (see notes)',
+    knownTheme ? `STORY: ${knownTheme.name} — ${knownTheme.example}` : 'STORY: free story (see theme / notes)',
     '',
     `NARRATIVE (${dur} s, ${formats.join(' + ')}; ${method.narrative_structure.shot_length}):`,
     ...BEATS.map((b) => `- ${b.beat} (${b.time}): ${b.rule}`),

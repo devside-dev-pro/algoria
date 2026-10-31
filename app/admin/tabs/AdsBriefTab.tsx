@@ -7,7 +7,7 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { toast } from '@/components/admin/Dialog';
 import { dimP, goldBtn, inp, secH } from '../_shared';
 import {
-  DURATION_MAX, DURATION_MIN, FORMATS, HOOK_ANGLES, METHOD_VERSION, MUST_SHOW, STYLES, THEMES, VOICES,
+  DURATION_MAX, DURATION_MIN, FORMATS, HOOK_ANGLES, METHOD_VERSION, MUST_SHOW, STYLES, VOICES, conceptStory, storiesFor,
   bannedIn, buildBrief, styleWarning, type HookAngle,
 } from '@/lib/admin/adsBrief';
 
@@ -21,7 +21,7 @@ const FREE = '__free__';
 
 export function AdsBriefTab() {
   const [style, setStyle] = useState(STYLES[0]?.id ?? '');
-  const [themePick, setThemePick] = useState(THEMES[0]?.name ?? FREE);
+  const [themePick, setThemePick] = useState(() => (conceptStory(STYLES[0]?.id ?? '') ?? storiesFor('')[0])?.name ?? FREE);
   const [freeTheme, setFreeTheme] = useState('');
   const [hook, setHook] = useState<HookAngle>('relatable panic');
   const [dur, setDur] = useState(30);
@@ -31,6 +31,14 @@ export function AdsBriefTab() {
   const [notes, setNotes] = useState('');
 
   const theme = themePick === FREE ? freeTheme : themePick;
+  const stories = storiesFor(style);
+  // changer de style : son histoire propre devient l'histoire par défaut ; sinon on garde une histoire universelle ou libre
+  const pickStyle = (id: string) => {
+    setStyle(id);
+    const c = conceptStory(id);
+    if (c) setThemePick(c.name);
+    else if (themePick !== FREE && !storiesFor(id).some((t) => t.name === themePick)) setThemePick(storiesFor(id)[0]?.name ?? FREE);
+  };
   const res = useMemo(() => buildBrief({ style, theme, hook_angle: hook, duration_s: dur, formats, voice, must_show: must, notes }), [style, theme, hook, dur, formats, voice, must, notes]);
   const warn = styleWarning(STYLES.find((s) => s.id === style));
   const toggle = (list: string[], set: (v: string[]) => void, v: string) => set(list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
@@ -47,17 +55,17 @@ export function AdsBriefTab() {
         <p style={dimP}>Pick the ingredients; the brief comes out in Designer&rsquo;s exact format. Story beats, style keywords, negative prompt, palette, CTA and risk line are added automatically (method {METHOD_VERSION}).</p>
 
         <div style={lab}>STYLE</div>
-        <div style={row}>{STYLES.map((s) => <button key={s.id} onClick={() => setStyle(s.id)} style={chip(style === s.id)} title={s.status}>{s.name}</button>)}</div>
+        <div style={row}>{STYLES.map((s) => <button key={s.id} onClick={() => pickStyle(s.id)} style={chip(style === s.id)} title={s.status}>{s.name}</button>)}</div>
         {warn && <p style={{ ...dimP, color: 'var(--gold)' }}>{warn}</p>}
 
-        <div style={lab}>THEME</div>
+        <div style={lab}>STORY</div>
         <div style={row}>
-          {THEMES.map((t) => <button key={t.name} onClick={() => setThemePick(t.name)} style={chip(themePick === t.name)} title={t.example}>{t.name}</button>)}
-          <button onClick={() => setThemePick(FREE)} style={chip(themePick === FREE, 'var(--gold)')}>✏️ Free theme</button>
+          {stories.map((t) => <button key={t.name} onClick={() => setThemePick(t.name)} style={chip(themePick === t.name)} title={t.example}>{t.name}{conceptStory(style)?.name === t.name ? ' · this style' : ''}</button>)}
+          <button onClick={() => setThemePick(FREE)} style={chip(themePick === FREE, 'var(--gold)')}>✏️ Free story</button>
         </div>
         {themePick === FREE
-          ? <input value={freeTheme} onChange={(e) => setFreeTheme(e.target.value)} placeholder="Your theme, in English" style={inp} />
-          : <p style={dimP}>{THEMES.find((t) => t.name === themePick)?.example}</p>}
+          ? <input value={freeTheme} onChange={(e) => setFreeTheme(e.target.value)} placeholder="Your story, in English" style={inp} />
+          : <p style={dimP}>{stories.find((t) => t.name === themePick)?.example}</p>}
 
         <div style={lab}>HOOK ANGLE</div>
         <div style={row}>{HOOK_ANGLES.map((h) => <button key={h} onClick={() => setHook(h)} style={chip(hook === h)}>{h}</button>)}</div>

@@ -3,7 +3,7 @@
 //
 // Le Brief Designer (lib/admin/adsBrief.ts) : styles autorisés, format exact du brief, blocs automatiques, mots interdits.
 import method from '../../lib/admin/adsMethod.json';
-import { CTA, RISK_LINE, STYLES, bannedIn, buildBrief, styleWarning, type BriefInput } from '../../lib/admin/adsBrief';
+import { CTA, RISK_LINE, STORIES, STYLES, bannedIn, buildBrief, conceptStory, storiesFor, styleWarning, type BriefInput } from '../../lib/admin/adsBrief';
 
 let failed = 0;
 function check(name: string, ok: boolean, detail?: string): void {
@@ -32,8 +32,22 @@ if (r.ok) {
   check('blocs auto : trame (5 temps)', ['Hook', 'Problem', 'Turn / guide', 'Value / community', 'CTA end card'].every((b) => r.text.includes(`- ${b} (`)));
   check('blocs auto : mots-clés, interdits, prompt négatif, palette', ['STYLE KEYWORDS: Pixar-style 3D animation', 'AVOID:', 'NEGATIVE PROMPT: text, letters', 'PALETTE: bg #08101f'].every((x) => r.text.includes(x)));
   check('CTA et ligne de risque toujours présents', r.text.includes(CTA) && r.text.includes(RISK_LINE) && RISK_LINE.startsWith('Education & community only.'));
-  check('l’idée du thème connu est reprise', r.text.includes('lighthouse beam traces a path'));
+  check('l’histoire choisie est reprise (STORY)', r.text.includes('STORY: The Lighthouse — ') && r.text.includes('lighthouse beam traces a path'));
+  check('clé JSON « theme » = l’histoire', r.json.theme === 'The Lighthouse');
 }
+
+// 2b. Story ≠ Style
+const uni = STORIES.map((t) => t.name);
+check('histoires universelles', JSON.stringify(uni) === JSON.stringify(['Switch off the noise', 'The Lighthouse', 'Mountain climb', 'Magic academy', 'Rooftop community']), uni.join());
+check('aucune histoire-concept parmi les universelles', !['Trader in the Wild', 'Level Up', 'Clay Desk', 'Not An Infomercial', 'Tiny Town', 'In progress (3D Pixar)'].some((n) => uni.includes(n)));
+check('style-concept → son histoire en premier (défaut)', storiesFor('documentary')[0]?.name === 'Trader in the Wild' && storiesFor('tiltshift')[0]?.name === 'Tiny Town' && storiesFor('documentary').length === uni.length + 1);
+check('pixar3d : pas d’histoire propre, universelles seulement', conceptStory('pixar3d') === null && storiesFor('pixar3d').length === uni.length);
+const rc = buildBrief({ ...base, style: 'claymation', theme: 'Clay Desk' });
+check('brief style-concept avec son histoire', rc.ok && rc.text.includes('STORY: Clay Desk — '));
+const rs = buildBrief({ ...base, style: 'vhs80s', theme: 'Mountain climb' });
+check('style-concept + autre histoire autorisé', rs.ok && rs.text.includes('STORY: Mountain climb — '));
+const rf = buildBrief({ ...base, theme: 'A grandma learns to dance with a robot' });
+check('histoire libre acceptée', rf.ok && rf.text.includes('STORY: free story'));
 
 // 3. les mots interdits (champs libres)
 const bad = ['an algorithm for MetaTrader 5', 'copy our signals', 'earn $500 per week', '+12% a month', 'passive income', 'guaranteed results', 'open a broker account', 'act now, last chance', 'show the win card'];
