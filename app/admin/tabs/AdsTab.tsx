@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type R
 import { ask, toast } from '@/components/admin/Dialog';
 import { dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 import { AgentBrain } from './AgentBrain';
+import { AdsBriefTab } from './AdsBriefTab';
 import {
   ANGLES, HOOK_STATUSES, HOOK_STATUS_LABEL, LOVE_REASONS, NEEDS, NEED_LABEL, POLES, POLE_LABEL, READINESS, REJECT_REASONS, RESOURCES, RESOURCE_KEYS, STATUSES, STATUS_LABEL,
   isUntriaged, needsAllowed, readinessOf, scriptText, studioBrief,
@@ -52,7 +53,22 @@ function StatusSelect({ value, onChange }: { value: Status; onChange: (s: Status
   );
 }
 
+// 31/10/2026 : deux parties. 📝 SCRIPTS = le studio ci-dessous, inchangé ; 🎬 BRIEF DESIGNER = le brief vidéo pour
+// Designer Algoria (AdsBriefTab.tsx, lib/admin/adsBrief.ts).
 export function AdsTab() {
+  const [part, setPart] = useState<'scripts' | 'brief'>('scripts');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button onClick={() => setPart('scripts')} style={chip(part === 'scripts')}>📝 Scripts</button>
+        <button onClick={() => setPart('brief')} style={chip(part === 'brief')}>🎬 Brief Designer</button>
+      </div>
+      {part === 'scripts' ? <ScriptsStudio /> : <AdsBriefTab />}
+    </div>
+  );
+}
+
+function ScriptsStudio() {
   const [scripts, setScripts] = useState<AdScript[] | null>(null);
   const [hooks, setHooks] = useState<AdHook[]>([]);
   const [err, setErr] = useState<string | null>(null);
