@@ -124,9 +124,10 @@ export async function GET(req: NextRequest) {
   const db = sdb();
   // 🩹 HEARTBEAT DU RUNNER À PART (01/11/2026, admin bloqué sur « loading… » quand la base saturait). La lecture de la
   // dernière bougie est servie seule, appelée par l'admin APRÈS le chargement principal : si elle est lente ou échoue,
-  // seul le bandeau « RUNNER SILENT » manque, l'admin s'affiche quand même.
+  // seul le bandeau « RUNNER SILENT » manque, l'admin s'affiche quand même. Filtrée sur le symbole (seul l'or tourne) :
+  // elle passe par l'index existant candles_time_idx (symbol, time desc) au lieu de trier ~1 M de lignes.
   if (new URL(req.url).searchParams.get('runner') === '1') {
-    const { data, error } = await db.from('candles').select('time').order('time', { ascending: false }).limit(1);
+    const { data, error } = await db.from('candles').select('time').eq('symbol', 'XAUUSD').order('time', { ascending: false }).limit(1);
     if (error) return NextResponse.json({ runnerLastSeen: null, error: error.message }, { status: 503 });
     const t = (data as Array<{ time: number | string }> | null)?.[0]?.time;
     return NextResponse.json({ runnerLastSeen: t != null ? Number(t) : null });
