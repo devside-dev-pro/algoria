@@ -1,0 +1,271 @@
+{
+  "version": "2026-10-31",
+  "owner": "Designer Algoria",
+  "styles": [
+    {
+      "id": "pixar3d",
+      "name": "3D Pixar",
+      "status": "validated (Mathieu's favourite)",
+      "keywords": [
+        "Pixar-style 3D animation",
+        "soft global illumination",
+        "expressive stylized character",
+        "night blue palette with cyan and gold light",
+        "cinematic depth of field",
+        "volumetric light"
+      ],
+      "avoid": [
+        "the word Pixar on clothing/signs (it gets printed)",
+        "readable text in the scene",
+        "red/green arrows or candlesticks",
+        "realistic faces of real people"
+      ]
+    },
+    {
+      "id": "documentary",
+      "name": "Nature documentary (Trader in the Wild)",
+      "status": "validated",
+      "keywords": [
+        "BBC-style wildlife documentary",
+        "telephoto lens",
+        "natural light",
+        "handheld observational camera",
+        "British documentary narrator"
+      ],
+      "avoid": [
+        "humans mocked",
+        "money visible"
+      ]
+    },
+    {
+      "id": "pixel8bit",
+      "name": "8-bit pixel art game (Level Up)",
+      "status": "validated",
+      "keywords": [
+        "made in code (Python/Pillow), not AI video",
+        "chiptune",
+        "pixel end screen"
+      ],
+      "avoid": [
+        "score = money",
+        "+$ points"
+      ]
+    },
+    {
+      "id": "claymation",
+      "name": "Claymation / stop-motion (Clay Desk)",
+      "status": "liked",
+      "keywords": [
+        "claymation stop-motion",
+        "plasticine texture",
+        "fingerprints on clay",
+        "miniature handmade set",
+        "12fps stop-motion feel"
+      ],
+      "avoid": [
+        "green-skinned characters (gain colour)",
+        "sticky notes with readable text"
+      ]
+    },
+    {
+      "id": "vhs80s",
+      "name": "80s VHS infomercial parody (Not An Infomercial)",
+      "status": "liked, compliance to check",
+      "keywords": [
+        "1980s VHS infomercial",
+        "CRT scanlines",
+        "chroma bleed",
+        "PLAY/PAUSE overlay",
+        "chrome machine",
+        "announcer voice"
+      ],
+      "avoid": [
+        "any real promise of riches (only mocked)",
+        "pixel font too close to 8-bit"
+      ]
+    },
+    {
+      "id": "tiltshift",
+      "name": "Tilt-shift miniature (Tiny Town)",
+      "status": "liked",
+      "keywords": [
+        "tilt-shift miniature photography",
+        "aerial top-down",
+        "tiny figurines",
+        "model train set",
+        "shallow focus band"
+      ],
+      "avoid": [
+        "two similar aerial shots back to back"
+      ]
+    },
+    {
+      "id": "meme_static",
+      "name": "Meme static",
+      "status": "to validate",
+      "keywords": [
+        "relatable 3AM scenario",
+        "bold caption"
+      ],
+      "avoid": [
+        "profit screenshots"
+      ]
+    },
+    {
+      "id": "carousel",
+      "name": "Myth Busters carousel",
+      "status": "to validate",
+      "keywords": [
+        "6 slides, myth/fact",
+        "brand palette"
+      ],
+      "avoid": [
+        "risk line missing on any slide"
+      ]
+    },
+    {
+      "id": "kinetic_text",
+      "name": "Flat kinetic text",
+      "status": "REJECTED by Mathieu",
+      "keywords": [],
+      "avoid": [
+        "do not use"
+      ]
+    }
+  ],
+  "themes": [
+    {
+      "name": "Switch off the noise",
+      "example": "Overwhelmed trader at night, screens switch off, a cyan-to-gold light path leads to a community."
+    },
+    {
+      "name": "The Lighthouse",
+      "example": "Lone sailor on a stormy sea of chart-like waves, a lighthouse beam traces a path to a warm harbour full of people."
+    },
+    {
+      "name": "Trader in the Wild",
+      "example": "Documentary narrator observes the 'lone trader' species, which thrives once it joins its pack."
+    },
+    {
+      "name": "Level Up",
+      "example": "8-bit game: solo player keeps losing lives to noise, unlocks the guide and the guild."
+    },
+    {
+      "name": "Clay Desk",
+      "example": "Clay man buried under 50 sticky-note tips finds the one plan worth keeping, then a table of friends."
+    },
+    {
+      "name": "Not An Infomercial",
+      "example": "Get-rich machine breaks on camera, the ad turns honest: no magic, guidance + free community."
+    },
+    {
+      "name": "Tiny Town",
+      "example": "Miniature town in panic seen from above; a calm train on a clear path brings everyone to the same station."
+    },
+    {
+      "name": "In progress (3D Pixar)",
+      "example": "Mountain climb with an AI guide-bot; magical academy first day; noisy billboard city → rooftop community."
+    }
+  ],
+  "narrative_structure": {
+    "total": "20-50 s (9:16). Short cuts 15 s later for A/B.",
+    "beats": [
+      {
+        "beat": "Hook",
+        "time": "0-2 s",
+        "rule": "pattern interrupt visual + curiosity/tension line; first word at <0.5 s"
+      },
+      {
+        "beat": "Problem",
+        "time": "2-12 s",
+        "rule": "noise, guessing, being alone; new visual beat every 2-3 s; open loop ('but one thing…')"
+      },
+      {
+        "beat": "Turn / guide",
+        "time": "12-22 s",
+        "rule": "guidance appears (AI guide, light, path); calm"
+      },
+      {
+        "beat": "Value / community",
+        "time": "22-35 s",
+        "rule": "show the ecosystem: community, app (generic UI, no numbers), academy; pay off the open loop"
+      },
+      {
+        "beat": "CTA end card",
+        "time": "last 6-9 s",
+        "rule": "end card integrated in the video's style, VO CTA lands exactly when logo appears, risk line ≥4 s"
+      }
+    ],
+    "shot_length": "2-4 s per shot, 0.4-0.6 s crossfades, no hard cuts",
+    "proof": "No 'proof' beat with results/testimonials; proof = transparency and real community, never numbers."
+  },
+  "positioning": {
+    "say": "algoria AI = an ecosystem that accompanies you: AI-powered guidance, a FREE public community group where people share and learn, a FREE app, an academy full of lessons.",
+    "never_say": [
+      "an algorithm for MetaTrader 5",
+      "algorithm that trades gold for you",
+      "signals",
+      "profits / returns / passive income",
+      "MetaTrader, broker, CFD, leverage"
+    ],
+    "cta": "Join the free algoria community. No deposit. No purchase required."
+  },
+  "brand_and_compliance": {
+    "palette": {
+      "bg": "#08101f",
+      "panels": [
+        "#0e1b33",
+        "#0c1730"
+      ],
+      "cyan": "#2be3f5",
+      "blue": "#2e8bf0",
+      "gold": "#f5c24a",
+      "gold_gradient": "#ffd166 → #f5a623",
+      "text": [
+        "#dce9ff",
+        "#93a8cc",
+        "#6d82a8"
+      ]
+    },
+    "fonts": [
+      "Space Grotesk",
+      "JetBrains Mono"
+    ],
+    "logo": "real PNG only (algoria-mark.png + 'ALGORIA AI' in Space Grotesk on dark); never AI-generated logo text",
+    "language": "English only (on-screen text and VO)",
+    "risk_line": "Education & community only. Not financial advice. Trading involves significant risk and you can lose the capital you invest. Past performance does not guarantee future results. (small, ~25 px, end card, ≥4 s; on every carousel slide)",
+    "never": [
+      "promise of gains, amounts, %, P&L curves, profit screenshots",
+      "green gains / red losses visuals",
+      "urgency",
+      "fake clients or testimonials",
+      "member names/IDs, MT5/MetaApi/broker IDs, admin, tokens",
+      "Mathieu's photo without OK",
+      "og.png, wincard.png, July app screenshots (BTC)",
+      "'easy money', 'guaranteed'"
+    ],
+    "process": "Nothing is published or sent without Mathieu's explicit OK; UAE/SCA licensing may need legal review."
+  },
+  "brief_input_format": {
+    "style": "id from styles",
+    "theme": "one of themes or free text",
+    "hook_angle": "question | relatable panic | contrarian | reveal",
+    "duration_s": 30,
+    "formats": [
+      "9:16"
+    ],
+    "voice": "Alex (default) | David | other",
+    "must_show": [
+      "community",
+      "app",
+      "academy",
+      "AI guide"
+    ],
+    "notes": "free text"
+  },
+  "negative": "text, letters, logos, watermark, extra fingers, face morphing, red/green arrows, money, numbers",
+  "voices": [
+    "Alex",
+    "David"
+  ]
+}
