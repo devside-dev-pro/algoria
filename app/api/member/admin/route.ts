@@ -178,7 +178,7 @@ export async function GET(req: NextRequest) {
     // chez PU Prime n'a plus nulle part son numéro RaiseFX, alors que c'est lui qui porte la commission.
     // Mesuré : 4 dépôts sur ~59 sont dans ce cas. Sans cette requête, l'export sortait pour eux un numéro
     // appartenant à un AUTRE broker — pire qu'une case vide, puisqu'on part le chercher pour rien.
-    db.from('member_actions').select('tg_id,detail').eq('kind', 'connect').eq('status', 'done').limit(2000),
+    db.from('member_actions').select('tg_id,detail,created_at').eq('kind', 'connect').eq('status', 'done').order('created_at', { ascending: true }).limit(2000),
     // ENVOIS REFUSÉS PAR TELEGRAM — sert à retirer de la file de relances les gens que le bot ne peut
     // plus joindre. On remonte l'erreur ET la date : un blocage n'est PAS éternel (on peut débloquer un
     // bot), donc c'est la chronologie qui tranche, pas la simple existence d'un échec passé.
@@ -333,7 +333,12 @@ export async function GET(req: NextRequest) {
     .filter(([tg, at]) => (lastReachable.get(tg) ?? 0) < at)
     .map(([tg]) => tg);
   const { count: pendingTotal } = await db.from('member_actions').select('id', { count: 'exact', head: true }).eq('status', 'pending');
-  return NextResponse.json({ pendingTotal: pendingTotal ?? (actions.data ?? []).length, whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, botBlocked, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
+  // connexions validées horodatées (tg, broker, compte) : la feuille « dépôts à vérifier » s'en sert pour
+  // retrouver le compte au moment de CHAQUE dépôt, et fusionner les ressaisies d'un même compte.
+  const brokerConnects = ((connectedQ.data ?? []) as Array<{ tg_id: number; created_at: string; detail: { broker?: string; login?: string } | null }>)
+    .filter((c) => c.detail?.broker && c.detail?.login)
+    .map((c) => ({ tg_id: c.tg_id, created_at: c.created_at, detail: { broker: String(c.detail?.broker), login: String(c.detail?.login) } }));
+  return NextResponse.json({ pendingTotal: pendingTotal ?? (actions.data ?? []).length, whitelist: wl.data ?? [], members: members.data ?? [], actions: actions.data ?? [], affiliate, deposits: depositsQ.data ?? [], brokerConnects, pushTgIds, nudges: nudgesQ.data ?? [], brokerLogins, botBlocked, runnerLastSeen: heartQ.data?.[0]?.time != null ? Number(heartQ.data[0].time) : null, legalNames, extraAccounts: extraAccounts ?? [], botActivity: botActivity ?? [], tgInboxOn, joinSources, tgChats,
     // segmentation de la file du jour : qui a déjà écrit (→ vraie relance) et qui s'est fait refuser (→ rattrapage)
     spokeTgIds: [...new Set((spokeQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
     rejectedTgIds: [...new Set((rejectedQ.data ?? []).map((r: { tg_id: number | null }) => Number(r.tg_id)).filter(Boolean))],
