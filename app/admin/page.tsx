@@ -5,6 +5,7 @@
 // mensuel exportable en CSV), AFFILIATE (l'argent des parrains), TOOLS (whitelist, push).
 // Garde : l'API /api/member/admin renvoie 403 à quiconque n'est pas dans ADMIN_TG_USERNAMES — cette page
 // n'est qu'une façade. Session : le même login Telegram que l'espace membre.
+import { isGoldClosed } from '@/lib/market/goldHours';
 import { DialogHost } from '@/components/admin/Dialog';
 import { useAdminState, AdminCtx } from './_state';
 import { warnBox } from './_shared';
@@ -73,13 +74,18 @@ export default function AdminCRM() {
 
         <div style={{ flex: 1, width: '100%', maxWidth: 1240, margin: '0 auto', padding: '18px 22px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-          {/* WATCHDOG — visible sur TOUS les onglets : si le runner n'écrit plus de bougie depuis > 20 min
-              (BTC 24/7 → il devrait toujours en écrire), quelque chose est mort côté Railway. */}
-          {runnerLastSeen != null && Date.now() - runnerLastSeen > 20 * 60_000 && (
+          {/* WATCHDOG — visible sur TOUS les onglets : si le runner n'écrit plus de bougie depuis > 20 min, quelque chose
+              est mort côté Railway. Le BTC (24/7) ne sert plus de pouls (WATCH_BTCUSD=0) : pendant la fermeture de l'or
+              (ven 17:00 → dim 18:00 NY, + 20 min de marge) aucune bougie n'est attendue → note neutre, pas d'alerte. */}
+          {runnerLastSeen != null && Date.now() - runnerLastSeen > 20 * 60_000 && (isGoldClosed(new Date()) ? (
+            <div style={{ ...warnBox, color: 'var(--dim)' }}>
+              Or fermé (week-end) — pas de bougie attendue · dernière il y a {Math.floor((Date.now() - runnerLastSeen) / 60_000)} min.
+            </div>
+          ) : (
             <div style={{ ...warnBox, borderColor: 'rgba(255,90,60,.6)', background: 'rgba(255,90,60,.1)', color: '#ff8a5c', fontWeight: 800 }}>
               🚨 RUNNER SILENT — no candle written for {Math.floor((Date.now() - runnerLastSeen) / 60_000)} min. Check Railway (the cron also pushes this alert to your phone).
             </div>
-          )}
+          ))}
           {/* ===== DASHBOARD — les chiffres qui comptent, toujours en tête ===== */}
           {tab === 'dashboard' && <DashboardTab />}
 
