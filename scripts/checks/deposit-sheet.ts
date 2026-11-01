@@ -26,7 +26,7 @@ const deposits = [
   dep(5, '2026-10-17T22:16:00Z', 'vtmarkets', 200), // 02:16 le 18 à Dubaï
   { id: 'x', tg_id: 6, created_at: '2026-10-05T10:00:00Z', detail: { nature: 'direct', commission_usd: 200, deposited_at: '2026-10-05T10:00:00Z' } },
   dep(7, '2026-10-20T10:00:00Z', 'xlence', 200),
-  dep(7, '2026-10-21T10:00:00Z', 'xlence', 400), // pas de compte connu + montant différent → 2 lignes
+  dep(7, '2026-10-21T10:00:00Z', 'xlence', 400), // 2e saisie même broker → fusionnée
   dep(8, '2026-11-02T10:00:00Z', 'raisefx', 999), // novembre
 ];
 const connects = [
@@ -42,12 +42,12 @@ const by = (tg: number) => rows.filter((r) => r.name === `Membre ${tg}`);
 check('ressaisie même compte → 1 ligne', by(1).length === 1, JSON.stringify(by(1)));
 check('ressaisie notée', by(1)[0]?.note === 'Ressaisi le 17/10 (même compte, fusionné)', by(1)[0]?.note);
 check('montant = 1er dépôt (pas additionné)', by(1)[0]?.deposit === '500$');
-check('nouveau compte même broker → 2 lignes', by(2).length === 2 && by(2)[1].account === '1254730' && by(2)[1].note.startsWith('Nouveau compte'), JSON.stringify(by(2)));
+check('reconnecté sur un autre compte, même broker → 1 ligne, 1er compte', by(2).length === 1 && by(2)[0].account === '1253410' && by(2)[0].deposit === '300$' && by(2)[0].note.startsWith('Reconnecté le 13/10, compte 1254730'), JSON.stringify(by(2)));
 check('ressaisie d\'un compte de septembre → absente d\'octobre', by(3).length === 0);
 check('reporté d\'août → présent, noté', by(4).length === 2 && by(4).every((r) => r.note === 'Reporté de août'), JSON.stringify(by(4)));
 check('date en heure de Dubaï', by(5)[0]?.date === '18/10/2026', by(5)[0]?.date);
 check('accès direct exclu', by(6).length === 0);
-check('sans compte, montants différents → 2 lignes', by(7).length === 2 && by(7).every((r) => r.account === ''));
+check('sans compte connu → 1 ligne par broker, compte vide', by(7).length === 1 && by(7)[0].account === '' && by(7)[0].deposit === '200$');
 check('autre mois exclu', by(8).length === 0);
 check('trié par date', rows.every((r, i) => i === 0 || rows[i - 1].sortKey <= r.sortKey));
 check('commission et CPA vides', rows.every((r) => r.commission === '' && r.cpa === false));
@@ -55,7 +55,7 @@ check('broker lisible', by(4).some((r) => r.broker === 'PU Prime') && by(1)[0]?.
 check('en-tête du Sheet compta', JSON.stringify(SHEET_HEADER) === JSON.stringify(['Name', 'ID Account', 'Broker', 'Date', 'Dépôt', 'Pays', 'Commission', 'Note', 'CPA']));
 check('CSV : BOM + en-tête', sheetCsv(rows).startsWith('\ufeff"Name","ID Account"'));
 check('TSV : 9 colonnes par ligne', sheetTsv(rows).split('\n').every((l) => l.split('\t').length === 9));
-check('nombre total de lignes', rows.length === 8, String(rows.length));
+check('nombre total de lignes', rows.length === 6, String(rows.length));
 
 if (failed) { console.error(`\n${failed} échec(s)`); process.exit(1); }
 console.log('\ntout est ok');

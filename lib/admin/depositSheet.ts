@@ -6,12 +6,13 @@
 // telles quelles, ces lignes faisaient croire à la comptable à des dépôts en double.
 //
 // Règle :
-//  - clé = (membre, broker, numéro de compte au moment du dépôt) ; le compte est celui de la dernière
-//    connexion validée chez ce broker AVANT le dépôt (+1 h de marge : la saisie suit la validation).
-//  - même clé → UNE ligne, date et montant du 1er dépôt ; les saisies suivantes sont notées « Ressaisi le JJ/MM ».
+//  - clé = (membre, broker) : UN dépôt valable par broker (décision Mathieu, 01/11/2026 — un membre qui se
+//    déconnecte/reconnecte reçoit un nouveau numéro de compte, ce n'est pas un nouveau dépôt).
+//  - même clé → UNE ligne : date, montant et numéro de compte du 1er dépôt (le compte = dernière connexion
+//    validée chez ce broker avant le dépôt, +1 h de marge). Les saisies suivantes sont notées : « Ressaisi le
+//    JJ/MM » (même compte) ou « Reconnecté, compte X » (autre numéro).
 //  - la ligne appartient au mois comptable de ce 1er dépôt (booked_ym sinon sa date) : une ressaisie en
 //    octobre d'un compte déjà déposé en septembre ne réapparaît pas en octobre.
-//  - nouveau compte chez le même broker (re-dépôt sur un autre numéro) = sa propre ligne, notée.
 //  - accès direct (nature='direct') : pas un dépôt broker → hors feuille.
 // Commission et CPA restent VIDES : ils se constatent chez le broker le 1er du mois, la valeur en base n'est
 // qu'une estimation. Dates en heure de Dubaï.
@@ -58,9 +59,7 @@ export function buildDepositSheet(input: {
     .sort((a, b) => depAt(a).localeCompare(depAt(b)));
   for (const d of broker) {
     const b = String(d.detail?.broker ?? '').toLowerCase();
-    const acc = accountAt(d.tg_id, b, depAt(d));
-    // sans numéro de compte, on ne fusionne que sur un montant identique (prudence : 2 montants = 2 dépôts)
-    const key = acc ? `${d.tg_id}|${b}|${acc}` : `${d.tg_id}|${b}|?${Number(d.detail?.amount_usd ?? 0)}`;
+    const key = `${d.tg_id}|${b}`;
     const g = groups.get(key);
     if (g) g.push(d); else groups.set(key, [d]);
   }
@@ -71,12 +70,15 @@ export function buildDepositSheet(input: {
     const notes: string[] = [];
     const real = depAt(first).slice(0, 7);
     if (real !== input.ym) notes.push(`Reporté de ${MONTHS[Number(real.slice(5, 7)) - 1]}`);
-    if (first.detail?.redeposit) notes.push('Nouveau compte chez le même broker — pas de nouvelle commission');
-    for (const x of g.slice(1)) notes.push(`Ressaisi le ${dubaiDate(depAt(x), true)} (même compte, fusionné)`);
-    const acc = key.split('|')[2];
+    const b = key.split('|')[1];
+    const acc = accountAt(first.tg_id, b, depAt(first));
+    for (const x of g.slice(1)) {
+      const a2 = accountAt(x.tg_id, b, depAt(x));
+      notes.push(a2 && a2 !== acc ? `Reconnecté le ${dubaiDate(depAt(x), true)}, compte ${a2} (fusionné)` : `Ressaisi le ${dubaiDate(depAt(x), true)} (même compte, fusionné)`);
+    }
     rows.push({
       name: input.nameOf(first.tg_id),
-      account: acc.startsWith('?') ? '' : acc,
+      account: acc,
       broker: brokerLabel(String(first.detail?.broker ?? '')),
       date: dubaiDate(depAt(first)),
       deposit: `${Number(first.detail?.amount_usd ?? 0)}$`,
