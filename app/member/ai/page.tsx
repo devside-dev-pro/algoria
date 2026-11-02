@@ -137,6 +137,89 @@ const GREETINGS = [
   'Your money never leaves your own broker account.',
 ];
 
+// ── LE CHAT (02/11/2026) : l'assistant qui RÉPOND, pour les membres live (10 messages/jour) et les admins.
+// Les autres voient la zone d'écriture grisée et gardent les questions prêtes ci-dessous. La réponse arrive
+// ENTIÈRE et déjà contrôlée par le serveur (app/api/member/assistant) ; la « machine à écrire » n'est qu'un effet.
+interface ChatState { loggedIn: boolean; canChat: boolean; reason?: string; unlimited?: boolean; left?: number | null; limit?: number; resetsInMin?: number; messages?: Array<{ role: 'user' | 'assistant'; content: string }> }
+const lockedText = (s: ChatState | null) => !s ? 'Loading…'
+  : !s.loggedIn ? 'Log in to chat with Algoria AI.'
+  : s.reason === 'not_live' ? 'Chat opens once your account is live. Meanwhile, pick a question below.'
+  : s.reason === 'closed' ? 'The chat is coming soon. Meanwhile, pick a question below.'
+  : '';
+const hm = (min: number) => `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`;
+
+function Chat({ onBusy }: { onBusy: (b: boolean) => void }) {
+  const [st, setSt] = useState<ChatState | null>(null);
+  const [msgs, setMsgs] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [draft, setDraft] = useState('');
+  const [pending, setPending] = useState(false);
+  const [typing, setTyping] = useState<{ i: number; n: number } | null>(null);
+  const [err, setErr] = useState('');
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    void fetch('/api/member/assistant', { cache: 'no-store' }).then((r) => r.json()).then((d: ChatState) => { setSt(d); setMsgs(d.messages ?? []); }).catch(() => setSt({ loggedIn: false, canChat: false }));
+  }, []);
+  useEffect(() => {
+    if (!typing) return;
+    const full = msgs[typing.i]?.content ?? '';
+    if (typing.n >= full.length) { setTyping(null); return; }
+    const id = setTimeout(() => setTyping({ i: typing.i, n: typing.n + 3 }), 16);
+    return () => clearTimeout(id);
+  }, [typing, msgs]);
+  useEffect(() => { onBusy(pending || !!typing); }, [pending, typing, onBusy]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [msgs.length, pending]);
+  const out = st?.canChat && !st.unlimited && st.left === 0;
+  const can = !!st?.canChat && !out && !pending;
+  const send = async () => {
+    const q = draft.trim(); if (!q || !can) return;
+    setErr(''); setDraft(''); setPending(true);
+    setMsgs((m) => [...m, { role: 'user', content: q }]);
+    try {
+      const r = await fetch('/api/member/assistant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: q }) });
+      const d = await r.json() as { answer?: string; left?: number | null; resetsInMin?: number; error?: string; reason?: string };
+      if (d.left !== undefined) setSt((s) => (s ? { ...s, left: d.left, resetsInMin: d.resetsInMin ?? s.resetsInMin } : s));
+      if (!r.ok || !d.answer) {
+        setErr(d.reason === 'limit' ? 'No messages left today.' : d.reason === 'global_cap' ? 'Algoria AI is very busy today, try again tomorrow.' : 'Algoria AI is unavailable right now, try again in a moment.');
+        return;
+      }
+      setMsgs((m) => { const next = [...m, { role: 'assistant' as const, content: d.answer! }]; setTyping({ i: next.length - 1, n: 0 }); return next; });
+    } catch { setErr('Network error, try again.'); } finally { setPending(false); }
+  };
+  const locked = lockedText(st);
+  return (
+    <section className="panel" style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, letterSpacing: 1.4 }}>
+        <span style={{ color: 'var(--gold)' }}>CHAT WITH ALGORIA AI</span>
+        {st?.canChat && <span style={{ color: 'var(--dim)' }}>{st.unlimited ? 'ADMIN · UNLIMITED' : `${st.left ?? 0}/${st.limit ?? 10} TODAY${st.left === 0 && st.resetsInMin ? ` · RESETS IN ${hm(st.resetsInMin)}` : ''}`}</span>}
+      </div>
+      {msgs.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 380, overflowY: 'auto' }}>
+          {msgs.map((m, i) => (
+            <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%', padding: '9px 12px', fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap',
+              borderRadius: m.role === 'user' ? '14px 14px 4px 14px' : '4px 14px 14px 14px',
+              background: m.role === 'user' ? 'linear-gradient(135deg,#2be3f5,#2e8bf0)' : 'var(--surface)', color: m.role === 'user' ? '#0b0e14' : 'var(--muted)',
+              border: m.role === 'user' ? 'none' : '1px solid var(--border)' }}>
+              {typing?.i === i ? m.content.slice(0, typing.n) : m.content}
+            </div>
+          ))}
+          {pending && <div style={{ fontSize: 12.5, color: 'var(--dim)' }}>Algoria AI is thinking…</div>}
+          <div ref={endRef} />
+        </div>
+      )}
+      <form onSubmit={(e) => { e.preventDefault(); void send(); }} style={{ display: 'flex', gap: 8 }}>
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={1000} disabled={!can}
+          placeholder={locked || (out ? 'No messages left today' : 'Ask Algoria AI anything…')} aria-label="Message Algoria AI"
+          style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: 12, fontSize: 13.5, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', opacity: can ? 1 : .5, cursor: can ? 'text' : 'not-allowed' }} />
+        <button type="submit" disabled={!can || !draft.trim()} style={{ padding: '0 14px', borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 13, background: 'linear-gradient(135deg,#2be3f5,#2e8bf0)', color: '#0b0e14', opacity: can && draft.trim() ? 1 : .4, cursor: can ? 'pointer' : 'not-allowed' }}>Send</button>
+      </form>
+      {err && <div style={{ fontSize: 12.5, color: 'var(--down)' }}>{err}</div>}
+      <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.45 }}>
+        Algoria AI explains, it does not give financial advice and can make mistakes. Trading involves a risk of loss. <a href="/risk" style={{ color: 'var(--cyan)' }}>Read the risk notice →</a>
+      </div>
+    </section>
+  );
+}
+
 export default function AlgoriaAI() {
   const router = useRouter();
   const [days, setDays] = useState<TrackDay[] | null>(null);
@@ -144,6 +227,7 @@ export default function AlgoriaAI() {
   const [greet, setGreet] = useState(0);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [typed, setTyped] = useState(0);
+  const [chatBusy, setChatBusy] = useState(false);
   const answerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     void fetch('/api/public/track').then((r) => (r.ok ? r.json() : null)).then((d: { days?: TrackDay[]; maintenance?: boolean } | null) => { setCurveOff(!!d?.maintenance); setDays(d?.days ?? []); }).catch(() => setDays([]));
@@ -171,7 +255,7 @@ export default function AlgoriaAI() {
         <div className="mono" style={{ fontSize: 9.5, letterSpacing: 1.6, color: 'var(--up)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="liveGlow" style={{ width: 7, height: 7, borderRadius: 4, background: 'var(--up)', display: 'inline-block' }} /> ONLINE · WATCHING GOLD
         </div>
-        <Orb energy={answering ? 1 : 0} onTap={() => { setAsk(null); setGreet((g) => (g + 1) % GREETINGS.length); }} />
+        <Orb energy={answering || chatBusy ? 1 : 0} onTap={() => { setAsk(null); setGreet((g) => (g + 1) % GREETINGS.length); }} />
         <div style={{ fontWeight: 800, letterSpacing: 2, fontSize: 15 }}>ALGORIA <span style={{ color: 'var(--cyan)' }}>AI</span></div>
         <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', minHeight: 20, maxWidth: 300 }}>{nb(GREETINGS[greet])}</div>
       </section>
@@ -186,6 +270,8 @@ export default function AlgoriaAI() {
           See every trade, in % or at your lot →
         </button>
       </section>}
+
+      <Chat onBusy={setChatBusy} />
 
       <section className="panel" style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="mono" style={{ fontSize: 9.5, letterSpacing: 1.4, color: 'var(--gold)' }}>ASK ALGORIA AI</div>
