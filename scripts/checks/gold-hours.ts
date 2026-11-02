@@ -2,7 +2,7 @@
 //   npx tsx scripts/checks/gold-hours.ts
 //
 // lib/market/goldHours.ts : fenêtre de fermeture de l'or (ven 17:00 → dim 18:00 NY) + marge de 20 min, heure d'été/hiver US.
-import { isGoldClosed, nyClock } from '../../lib/market/goldHours';
+import { goldFeedExpected, isGoldClosed, nyClock } from '../../lib/market/goldHours';
 
 let failed = 0;
 function check(name: string, ok: boolean, detail?: string): void {
@@ -39,6 +39,20 @@ at('2026-03-08T22:21:00Z', false, 'dim 08/03 18:21 NY (EDT), marge passée');
 // Semaine
 at('2026-11-04T15:00:00Z', false, 'mercredi');
 at('2026-11-02T05:00:00Z', false, 'lundi 00:00 NY');
+
+// LE FLUX DE PRIX ATTENDU (feedWatchdog, 03/11/2026) : pause quotidienne 17:00 → 18:00 NY + 20 min de grâce
+const feed = (iso: string, want: boolean, label: string) => check(`flux ${want ? 'attendu' : 'pas attendu'} : ${label}`, goldFeedExpected(new Date(iso)) === want);
+feed('2026-11-02T22:30:00Z', false, 'lun 02/11 22:30Z = 17:30 EST, pause d’hiver (le crash du 02/11)');
+feed('2026-11-02T21:30:00Z', true, 'lun 02/11 21:30Z = 16:30 EST, ouvert en hiver');
+feed('2026-10-28T21:30:00Z', false, 'mer 28/10 21:30Z = 17:30 EDT, pause d’été');
+feed('2026-10-28T22:10:00Z', false, 'mer 28/10 22:10Z = 18:10 EDT, grâce après réouverture');
+feed('2026-10-28T22:21:00Z', true, 'mer 28/10 22:21Z = 18:21 EDT, grâce passée');
+feed('2026-11-02T23:10:00Z', false, 'lun 02/11 23:10Z = 18:10 EST, grâce après réouverture');
+feed('2026-11-02T23:21:00Z', true, 'lun 02/11 23:21Z = 18:21 EST, grâce passée');
+feed('2026-11-06T22:30:00Z', false, 'ven 06/11 17:30 EST, week-end');
+feed('2026-11-08T23:10:00Z', false, 'dim 08/11 18:10 EST, grâce de la réouverture du dimanche');
+feed('2026-11-08T23:21:00Z', true, 'dim 08/11 18:21 EST, ouvert');
+feed('2026-11-04T15:00:00Z', true, 'mercredi midi');
 
 if (failed) { console.error(`\n${failed} échec(s)`); process.exit(1); }
 console.log('\ntout est ok');
