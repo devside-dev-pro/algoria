@@ -42,6 +42,7 @@ const COPY_MODE = process.env.ALGORIA_COPY_OBSERVE === '1';
 import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { REF_LABEL, REF_LOT } from '../lib/display/scale';
 import { tradingDayOf, tradingHour } from '../lib/display/tradingDay';
+import { goldFeedExpected } from '../lib/market/goldHours';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, runnerSwitch, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
@@ -1005,26 +1006,28 @@ async function main() {
   {
     const RESUB_MIN = 10, EXIT_MIN = 20, RELAPSE_MIN = 30;
     let lastResub = 0;
-    const marketShouldBeOpen = (inst: InstrumentSpec, now: Date): boolean => {
-      if (inst.ctx.h24) return true;
-      const d = now.getUTCDay(), h = now.getUTCHours();
-      if (d === 6) return false; // samedi
-      if (d === 5 && h >= 21) return false; // vendredi soir
-      if (d === 0 && h < 22) return false; // dimanche avant la réouverture
-      return h !== 21; // pause quotidienne
-    };
+    // EN HEURE DE NEW YORK (03/11/2026) : pause 17:00 → 18:00 NY chaque jour, week-end ven 17:00 → dim 18:00 NY, et 20 min
+    // de grâce après chaque réouverture (lib/market/goldHours.ts). L'ancienne règle en UTC fixe (21h) ne valait qu'en
+    // heure d'été : le 02/11, la pause d'hiver (22h → 23h UTC) a fait sortir le runner en boucle jusqu'au CRASHED.
+    const marketShouldBeOpen = (inst: InstrumentSpec, now: Date): boolean => inst.ctx.h24 ? true : goldFeedExpected(now);
+    // Le silence se compte depuis le DERNIER des trois : la dernière cotation, le démarrage du process, le moment où le
+    // marché est redevenu « attendu ». Une cotation d'avant le démarrage (celle de la veille de la pause) ne relance
+    // plus le process en boucle toutes les 3 min.
+    let expectedSince = startedAt;
+    let wasExpected = true;
     const feedWatchdog = async () => {
       try {
         const now = new Date();
         const expected = engines.filter((e) => marketShouldBeOpen(e.inst, now));
-        if (!expected.length) return;
+        if (!expected.length) { wasExpected = false; return; }
+        if (!wasExpected) { wasExpected = true; expectedSince = Date.now(); }
         let freshest = 0;
         for (const e of expected) {
           const p = terminal.price(e.inst.broker);
           const t = p?.time ? new Date(p.time).getTime() : 0;
           if (Number.isFinite(t)) freshest = Math.max(freshest, t);
         }
-        if (!freshest) freshest = startedAt; // jamais coté depuis le boot : on compte depuis le démarrage
+        freshest = Math.max(freshest, startedAt, expectedSince); // jamais coté depuis le boot ou la réouverture : on compte depuis là
         const staleMin = (Date.now() - freshest) / 60_000;
         if (staleMin < RESUB_MIN) return;
         const syms = expected.map((e) => e.inst.display).join('+');
