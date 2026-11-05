@@ -47,7 +47,7 @@ export async function ensureDeployed(
           `Compte ${ctx.accountId}`,
           `État : ${state}`,
           `Contexte : ${ctx.reason}`,
-          'Vérifier D'ABORD le solde / billing MetaApi (cause du 05/11 : balance à zéro → undeploy auto).',
+          "Vérifier D'ABORD le solde / billing MetaApi (cause du 05/11 : balance à zéro → undeploy auto).",
           action === 'alert-and-deploy' ? 'Deploy MetaApi demandé automatiquement (garde 30 min).' : 'Deploy en cooldown — action manuelle possible sur le dashboard MetaApi.',
         ],
         tag: 'metaapi-undeployed',
