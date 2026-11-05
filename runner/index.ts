@@ -43,6 +43,8 @@ import { lastEdgeHealthCheck } from '../lib/supabase/sync';
 import { REF_LABEL, REF_LOT } from '../lib/display/scale';
 import { tradingDayOf, tradingHour } from '../lib/display/tradingDay';
 import { goldFeedExpected } from '../lib/market/goldHours';
+import { ensureDeployed } from './metaapi/ensureDeployed';
+import { freshDeployGuard, isDeployedState } from './metaapi/deployGuard';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, runnerSwitch, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
@@ -1019,6 +1021,7 @@ async function main() {
   {
     const RESUB_MIN = 10, EXIT_MIN = 20, RELAPSE_MIN = 30;
     let lastResub = 0;
+    let undeployGuard = freshDeployGuard(); // 05/11 : deploy/alert cooldown partagé avec connectMaster
     // EN HEURE DE NEW YORK (03/11/2026) : pause 17:00 → 18:00 NY chaque jour, week-end ven 17:00 → dim 18:00 NY, et 20 min
     // de grâce après chaque réouverture (lib/market/goldHours.ts). L'ancienne règle en UTC fixe (21h) ne valait qu'en
     // heure d'été : le 02/11, la pause d'hiver (22h → 23h UTC) a fait sortir le runner en boucle jusqu'au CRASHED.
@@ -1047,6 +1050,17 @@ async function main() {
         const relapse = lastResub > 0 && Date.now() - lastResub < RELAPSE_MIN * 60_000; // rechute après un réabonnement récent
         if (staleMin >= EXIT_MIN || relapse) {
           const why = relapse ? `feed died again ${((Date.now() - lastResub) / 60_000).toFixed(0)} min after re-subscribing` : `no quote for ${staleMin.toFixed(0)} min despite re-subscribing`;
+          // 05/11/2026 : si le compte est UNDEPLOYED, chemin DÉDIÉ — alerte + deploy gardé, PAS de process.exit
+          // (la boucle CRASHED du 05/11 venait de FEED DEAD → exit → Railway → timeout waitConnected → exit).
+          try { await account.reload(); } catch { /* */ }
+          if (!isDeployedState(account.state)) {
+            const r = await ensureDeployed(account, undeployGuard, { accountId: String(process.env.METAAPI_ACCOUNT_ID ?? ''), reason: `feed watchdog · ${why}` });
+            undeployGuard = r.guard;
+            console.error(`[algoria] FEED UNDEPLOYED — ${syms} : ${why} · état ${r.state} · deploy=${r.deployed} · process reste vivant`);
+            await logNote(`🔌 feed undeployed — ${syms}: ${why} · MetaApi ${r.state} · deploy ${r.deployed ? 'requested' : 'cooldown'} · staying up (no crash loop)`, 'veto').catch(() => {});
+            lastResub = 0; // permettre un nouvel essai de souscription au prochain tour
+            return;
+          }
           // REDEPLOY METAAPI AUTOMATIQUE (07/09/2026, décision Mathieu « oui pour les 3 »). Le 07/09, huit heures
           // aveugles sur S2 : une réplique MetaApi morte, l'autre incapable de finir sa synchronisation, et deux
           // redémarrages Railway plus un redéploiement du code n'y ont rien fait. Ce qui a marché : le bouton
@@ -1058,7 +1072,6 @@ async function main() {
           let redeployed = false;
           if (Date.now() - startedAt >= 60 * 60_000) {
             try {
-              await account.reload();
               if (account.state === 'DEPLOYED') { await account.redeploy(); redeployed = true; }
               else console.warn(`[algoria] feed watchdog : compte MetaApi en état ${account.state}, pas de redeploy`);
             } catch (e) { console.error('[algoria] redeploy MetaApi échoué:', (e as { message?: string })?.message ?? e); }

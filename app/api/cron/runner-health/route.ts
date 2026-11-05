@@ -2,16 +2,16 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { pushToAdmins } from '@/lib/push/send';
 import { adminLink } from '@/lib/member/notifyOwner';
-import { isGoldClosed } from '@/lib/market/goldHours';
+import { goldFeedExpected } from '@/lib/market/goldHours';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // WATCHDOG RUNNER — appelé par le cron Vercel (vercel.json). Le runner écrit une bougie M5 en continu
-// (le BTC 24/7 servait de pouls le week-end ; il est coupé — WATCH_BTCUSD=0 — donc seul l'or écrit : pendant sa
-// fermeture, ven 17:00 → dim 18:00 NY + STALE_MIN de marge, aucune bougie n'est attendue → pas d'alerte). Si la dernière bougie date de > 20 min,
-// le runner est mort/gelé → push aux admins. Throttle 60 min via un marqueur en base (pas de spam).
-const STALE_MIN = 20;
+// (le BTC 24/7 servait de pouls le week-end ; il est coupé — WATCH_BTCUSD=0 — donc seul l'or écrit).
+// 05/11/2026 : seuil raccourci à 15 min QUAND le flux or est attendu (goldFeedExpected = semaine + hors pause
+// 17–18h NY + 20 min de grâce). Pendant la fermeture, aucune alerte. Throttle 60 min via un marqueur en base.
+const STALE_MIN = 15;
 const THROTTLE_MIN = 60;
 
 export async function GET(req: NextRequest) {
@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
   const lastMs = last?.[0]?.time != null ? Number(last[0].time) : 0;
   const staleMin = lastMs ? Math.floor((Date.now() - lastMs) / 60_000) : Infinity;
   if (staleMin <= STALE_MIN) return NextResponse.json({ ok: true, staleMin });
-  if (isGoldClosed(new Date(), STALE_MIN)) return NextResponse.json({ ok: true, staleMin, goldClosed: true });
+  // marché fermé / pause / grâce → pas d'alerte (même logique NY que le feedWatchdog, PR #574)
+  if (!goldFeedExpected(new Date())) return NextResponse.json({ ok: true, staleMin, goldClosed: true });
 
   // en panne → alerte (throttlée : un marqueur 'watchdog-alert' en base, max 1/h)
   const { data: lastAlert } = await db.from('events').select('ts').eq('msg', 'watchdog-alert').order('ts', { ascending: false }).limit(1);
