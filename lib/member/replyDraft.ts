@@ -136,13 +136,46 @@ function brokerLinks(): string {
  *  La perte d'octobre ne se dit que si on la demande, en une phrase (LOSSES_LINE), sans chiffre (28/10/2026 : plus de
  *  « about 85% »), et jamais sous le mot « maintenance ». */
 const PAST_RESULTS_OPEN = `PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://getalgoria.com/track-record and the reminder that past results do not guarantee future results. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars.`;
-const PAST_RESULTS_HELD = `PAST RESULTS: do NOT quote any performance figure, win rate or dollar result, and do NOT send the track record page. The RESULTS block above wins over the KNOWLEDGE and the older lessons. The only results link you may send is the Myfxbook link written there, copied exactly: it replaces every result figure. The only percentage you may write is the −5% daily safeguard. About the night of 21-22 October, if they ask what happened or why there is a new account: only the single sentence "${LOSSES_LINE}" then the Myfxbook URL and "${PAST_RESULTS_LINE}"; never a figure about that loss, never call it "maintenance", never minimise it. No other percentage.`;
+const PAST_RESULTS_HELD = `PAST RESULTS: do NOT quote any performance figure, win rate or dollar result, and do NOT send the track record page. The RESULTS block (under MORE FACTS, at the end) wins over the KNOWLEDGE and the older lessons. The only results link you may send is the Myfxbook link written there, copied exactly: it replaces every result figure. The only percentage you may write is the −5% daily safeguard. About the night of 21-22 October, if they ask what happened or why there is a new account: only the single sentence "${LOSSES_LINE}" then the Myfxbook URL and "${PAST_RESULTS_LINE}"; never a figure about that loss, never call it "maintenance", never minimise it. No other percentage.`;
 const pastResultsRule = (hold: boolean) => (hold ? PAST_RESULTS_HELD : PAST_RESULTS_OPEN);
 
 /** Les leçons apprises des corrections de Mathieu : elles priment sur tout le reste. */
 const memoryBlock = (memory: string | null) => memory
   ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS (in French — they win over the knowledge and the facts; if two lessons disagree, the later one wins):\n${memory}`
   : '';
+
+// ── LE PROMPT EN BLOCS, POUR LE CACHE (05/11/2026) ─────────────────────────────────────────────────────────
+// Octobre sur Sonnet 5.5 : 22,67 $ d'ÉCRITURES en cache pour 0,99 $ de LECTURES. Le bloc REAL PAST RESULTS
+// (recalculé toutes les 30 min, il change à chaque trade clôturé), le webinaire et les leçons étaient au MILIEU du
+// prompt : chaque changement réécrivait tout le prompt en cache, payé 1,25 fois le prix normal, pour presque
+// aucune relecture. Maintenant le prompt part en trois blocs, du plus stable au plus mouvant :
+//   1. le socle (consignes, faits du code, knowledge) : en cache 1 h ;
+//   2. les leçons des corrections (memory) : en cache 1 h, réécrites seulement après une correction ;
+//   3. les faits qui bougent (track record, webinaire, note d'incident) : hors cache, à la fin.
+// Le cache d'1 h coûte 2 fois le prix normal à l'écriture et 0,1 fois à la lecture, et chaque lecture le prolonge :
+// avec un message toutes les 20 à 30 minutes, le socle n'est réécrit que quelques fois par jour.
+export const MORE_FACTS_HEADER = 'MORE FACTS (refreshed during the day; same status as the FACTS above, and they win over the KNOWLEDGE when they disagree):';
+
+export interface PromptBlock { text: string; cache: boolean }
+
+function promptBlocks(stable: string, memory: string | null, live: Array<string | null | undefined>): PromptBlock[] {
+  const lessons = memoryBlock(memory).trim();
+  const moving = live.filter((x): x is string => Boolean(x && x.trim())).join('\n\n');
+  return [
+    { text: stable, cache: true },
+    ...(lessons ? [{ text: lessons, cache: true }] : []),
+    ...(moving ? [{ text: `${MORE_FACTS_HEADER}\n${moving}`, cache: false }] : []),
+  ];
+}
+
+/** Les blocs au format de l'API : un point de cache (1 h) sur chaque bloc stable, rien sur le dernier qui bouge. */
+export function systemParam(blocks: PromptBlock[]) {
+  return blocks.map((b) => ({
+    type: 'text' as const,
+    text: b.text,
+    ...(b.cache ? { cache_control: { type: 'ephemeral' as const, ttl: '1h' as const } } : {}),
+  }));
+}
 
 function businessSystem(knowledge: string | null, memory: string | null, track: string | null, webinar: string | null, holdResults: boolean): string {
   return `You write Telegram replies for Mathieu, founder of Algoria (an AI copy-trading service on gold, XAU/USD only). A prospect or client wrote to Mathieu's own support account. Your reply goes out FROM HIS ACCOUNT, as him: when you are sure it is sent automatically; when you are not, it is shown to Mathieu first and he decides.
@@ -580,19 +613,22 @@ export interface DraftSystemInput {
 }
 
 /** Le prompt réellement envoyé, et la politique qui l'a choisi. Le script de contrôle appelle ÇA, pas une copie. */
-export function buildDraftSystem(o: DraftSystemInput): { system: string; policy: ResultsPolicy; knowledge: string | null; knownPct: string[] } {
+export function buildDraftSystem(o: DraftSystemInput): { system: string; blocks: PromptBlock[]; policy: ResultsPolicy; knowledge: string | null; knownPct: string[] } {
   const policy = resultsPolicy({ now: o.now, status: o.status, historyMaintenance: o.historyMaintenance });
   const hold = policy !== 'open';
   const track = policy === 'incident' ? INCIDENT_NOTE : policy === 'maintenance' ? HISTORY_RESULTS_NOTE : o.trackNow;
-  const raw = o.biz
-    ? businessSystem(o.knowledge, o.memory, track, o.webinar, hold)
-    : system(o.locale ?? 'en', o.knowledge, o.memory, track, o.webinar, hold);
+  // Le socle SANS les leçons, le track record ni le webinaire : ils viennent après, en blocs séparés (cache).
+  const stable = o.biz
+    ? businessSystem(o.knowledge, null, null, null, hold)
+    : system(o.locale ?? 'en', o.knowledge, null, null, null, hold);
+  const rawBlocks = promptBlocks(stable, o.memory, [track, o.webinar]);
+  const raw = rawBlocks.map((b) => b.text).join('\n\n');
   // Les % du knowledge (un +40 % qu'il a écrit un jour) ne sont pas citables quand les résultats sont retenus.
   // Calculés AVANT hideTrackLinks : ce remplacement peut casser la sous-chaîne du knowledge.
   const pctSource = hold && o.knowledge ? raw.split(o.knowledge).join('') : raw;
   const knownPct = [...new Set((pctSource.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map(normPct))];
-  const shown = hold ? hidePositionCap(hideTrackLinks(raw)) : raw;
-  return { system: shown, policy, knowledge: o.knowledge, knownPct };
+  const blocks = hold ? rawBlocks.map((b) => ({ ...b, text: hidePositionCap(hideTrackLinks(b.text)) })) : rawBlocks;
+  return { system: blocks.map((b) => b.text).join('\n\n'), blocks, policy, knowledge: o.knowledge, knownPct };
 }
 
 // ── L'ASSISTANT DE L'APP (02/11/2026, lib/member/assistant.ts) ─────────────────────────────────────────────
@@ -609,14 +645,15 @@ export interface AssistantSystemInput {
   now?: number;
   historyMaintenance?: boolean;
 }
-export function buildAssistantSystem(o: AssistantSystemInput): { system: string; policy: ResultsPolicy; knowledge: string | null; knownPct: string[] } {
+export function buildAssistantSystem(o: AssistantSystemInput): { system: string; blocks: PromptBlock[]; policy: ResultsPolicy; knowledge: string | null; knownPct: string[] } {
   const policy = resultsPolicy({ now: o.now, status: o.status, historyMaintenance: o.historyMaintenance });
   const hold = policy !== 'open';
   const track = policy === 'incident' ? INCIDENT_NOTE : policy === 'maintenance' ? HISTORY_RESULTS_NOTE : o.trackNow;
-  const factsBlock = (o.knowledge
+  // Track record et webinaire hors du socle : en dernier bloc, hors cache (voir promptBlocks).
+  const factsBlock = o.knowledge
     ? `${liveFacts()}\n\nMATHIEU'S KNOWLEDGE (written in French by Mathieu — the source of truth):\n${o.knowledge}`
-    : facts()) + (track ? `\n\n${track}` : '') + (o.webinar ? `\n\n${o.webinar}` : '');
-  const raw = `You are Algoria AI, the assistant inside the Algoria app (an AI copy-trading service on gold, XAU/USD only, run by Mathieu's team). A logged-in member is chatting with you in the app. Warm, clear, patient with beginners, no hype. Reply in the language of the member's message (English by default${(o.locale ?? 'en') === 'it' ? ', Italian if they write Italian' : ''}).
+    : facts();
+  const stable = `You are Algoria AI, the assistant inside the Algoria app (an AI copy-trading service on gold, XAU/USD only, run by Mathieu's team). A logged-in member is chatting with you in the app. Warm, clear, patient with beginners, no hype. Reply in the language of the member's message (English by default${(o.locale ?? 'en') === 'it' ? ', Italian if they write Italian' : ''}).
 
 FACTS — use only these, never invent anything else:
 ${factsBlock}
@@ -634,12 +671,15 @@ RULES
 - ${pastResultsRule(hold)}
 - Algoria is an ecosystem (the AI, the copier, the app, the community, the academy, Mathieu's support), never describe it as "an algorithm for MT5" or a bot to install.
 - Money on a real account is always at risk: never say or imply a deposit is safe or risk-free. Whenever you mention depositing, also say that funds must stay ${WITHDRAW_LOCK_DAYS} days.
-- THE OCTOBER INCIDENT: never mention it, the loss or "what happened" unless the member asks about it. If they ask, follow the incident context above (acknowledge it plainly, no figure, no promise).
+- THE OCTOBER INCIDENT: never mention it, the loss or "what happened" unless the member asks about it. If they ask, follow the incident context in MORE FACTS (acknowledge it plainly, no figure, no promise).
 - For anything about their own file, money, a withdrawal, a payout, a complaint or credentials that do not work: say Mathieu handles it personally on Telegram (@mathieu_algoria), without a deadline.`;
+  // Jamais la `memory` dans l'assistant (décision du 02/11) : null.
+  const rawBlocks = promptBlocks(stable, null, [track, o.webinar]);
+  const raw = rawBlocks.map((b) => b.text).join('\n\n');
   const pctSource = hold && o.knowledge ? raw.split(o.knowledge).join('') : raw;
   const knownPct = [...new Set((pctSource.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map(normPct))];
-  const shown = hold ? hidePositionCap(hideTrackLinks(raw)) : raw;
-  return { system: shown, policy, knowledge: o.knowledge, knownPct };
+  const blocks = hold ? rawBlocks.map((b) => ({ ...b, text: hidePositionCap(hideTrackLinks(b.text)) })) : rawBlocks;
+  return { system: blocks.map((b) => b.text).join('\n\n'), blocks, policy, knowledge: o.knowledge, knownPct };
 }
 
 // ── LES RÈGLES DURES EN CODE (28/10/2026) ──────────────────────────────────────────────────────────────
@@ -861,12 +901,12 @@ async function attempt(i: DraftInput, retry: string | null): Promise<{ draft: Dr
       biz, locale: i.locale, knowledge: kMeta.text, memory: mMeta.text, trackNow, webinar, status: i.member?.status ?? null,
     });
     // LE SUPPORT DE MATHIEU (16/10/2026) : ses réponses partent seules quand le modèle est sûr, donc le meilleur modèle
-    // (ALGORIA_SUPPORT_MODEL). Le prompt système (faits, knowledge, mémoire) est le même d'un message à l'autre : mis en
-    // cache, il ne se paie plein tarif qu'une fois toutes les quelques minutes.
+    // (ALGORIA_SUPPORT_MODEL). Le prompt part en blocs (05/11/2026, voir promptBlocks) : le socle et les leçons en
+    // cache 1 h, les chiffres qui bougent après, hors cache.
     const res = await client.messages.create({
       model: requested,
       max_tokens: biz ? 700 : 350,
-      system: [{ type: 'text', text: built.system, cache_control: { type: 'ephemeral' } }],
+      system: systemParam(built.blocks),
       messages: [{ role: 'user', content: biz && i.images?.length
         ? [...i.images.slice(0, 3).map((im) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: im.media_type, data: im.data } })), { type: 'text' as const, text: user }]
         : user }],

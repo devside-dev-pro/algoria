@@ -16,7 +16,7 @@
 // « machine à écrire » est fait côté client, sur le texte validé. Le modèle n'a AUCUN outil.
 import Anthropic from '@anthropic-ai/sdk';
 import { createHash } from 'node:crypto';
-import { buildAssistantSystem, fixOldDomain, humanize, replyTextIssue, withPastDisclaimer } from './replyDraft';
+import { buildAssistantSystem, fixOldDomain, humanize, replyTextIssue, systemParam, withPastDisclaimer } from './replyDraft';
 import { INCIDENT_TALK } from './incident';
 import { getAgentDocMeta } from './agentDocs';
 import { trackFacts } from './trackFacts';
@@ -100,7 +100,7 @@ export async function askAssistant(i: { question: string; history: AssistantTurn
       const res = await client.messages.create({
         model,
         max_tokens: 900,
-        system: [{ type: 'text', text: built.system, cache_control: { type: 'ephemeral' } }],
+        system: systemParam(built.blocks), // socle en cache 1 h, track record et webinaire après (05/11/2026)
         messages: [...history, { role: 'user', content: `${i.question}${hint}` }],
       });
       const u = res.usage as { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };

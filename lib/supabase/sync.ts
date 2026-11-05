@@ -261,13 +261,18 @@ export async function setSetting(key: string, value: string): Promise<boolean> {
  *  Né de l'incident de la nuit du 21 au 22/10 : ce jour-là, relancer les inscrits « reviens brancher ton compte »
  *  pendant que les membres découvraient leurs pertes était le pire message possible, et la seule façon de l'arrêter
  *  était de couper le runner sur Railway. Ligne absente → 'on' (comportement d'avant). Lecture impossible → null :
- *  l'appelant ne relance pas et réessaie au passage suivant (une relance ratée ne coûte rien, une de trop si). */
-export async function runnerSwitch(key: 'nudges' | 'sth_autorepair' | 'vip_autojoin' | 'public_autojoin' = 'nudges'): Promise<'on' | 'off' | null> {
+ *  l'appelant ne relance pas et réessaie au passage suivant (une relance ratée ne coûte rien, une de trop si).
+ *  'narration' (05/11/2026) : les phrases du desk écrites par Claude pour le cockpit (une toutes les 5 min par marché,
+ *  24 h/24, ~21 $ en octobre). Ligne absente → 'off' (`fallback`) : seule la valeur 'on' les rallume. */
+export async function runnerSwitch(
+  key: 'nudges' | 'sth_autorepair' | 'vip_autojoin' | 'public_autojoin' | 'narration' = 'nudges',
+  fallback: 'on' | 'off' = 'on',
+): Promise<'on' | 'off' | null> {
   try {
     const raw = db as unknown as { from: (t: string) => any };
     const { data, error } = await raw.from('support_settings').select('value').eq('key', key).limit(1);
     if (error) return null;
-    return (data?.[0]?.value ?? 'on') === 'off' ? 'off' : 'on';
+    return (data?.[0]?.value ?? fallback) === 'off' ? 'off' : 'on';
   } catch {
     return null;
   }

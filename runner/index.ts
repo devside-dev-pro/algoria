@@ -88,6 +88,19 @@ function marketRead(ctx: import('../lib/engine/types').MarketContext): string {
     : `${vol} session that kept reversing — the trend flipped right after entries`;
 }
 
+// COMMENTAIRES DU DESK (05/11/2026) : les phrases que Claude écrit pour le cockpit à chaque bougie de 5 min (et au
+// récap horaire) coûtaient ~21 $ en octobre, 24 h/24, pour un écran qu'on ne regarde plus en dehors des lives. Coupées
+// par défaut : support_settings 'narration' = 'on' les rallume, sans redéploiement. Le desk garde ses champs structurés
+// (deskMeta) : le cockpit reste vivant, sans la phrase. Lu au plus toutes les 5 min ; une lecture ratée = éteint.
+let narrationSwitch: { on: boolean; at: number } | null = null;
+async function deskNarrationOn(): Promise<boolean> {
+  if (!narrationReady()) return false;
+  if (!narrationSwitch || Date.now() - narrationSwitch.at > 5 * 60_000) {
+    narrationSwitch = { on: (await runnerSwitch('narration', 'off')) === 'on', at: Date.now() };
+  }
+  return narrationSwitch.on;
+}
+
 async function main() {
   console.log('[algoria] runner démarre…');
   const { account, stream, terminal } = await connectMaster();
@@ -95,7 +108,7 @@ async function main() {
   const instruments = activeInstruments();
   if (!instruments.length) throw new Error('[algoria] aucun instrument actif dans le registre (lib/engine/instruments.ts)');
   console.log(`[algoria] instruments actifs : ${instruments.map((i) => `${i.display}(${i.broker})`).join(', ')} · TF ${TF}`);
-  console.log(`[algoria] narration ${narrationReady() ? 'ON (Claude)' : 'OFF — ajoute ANTHROPIC_API_KEY dans .env'}`);
+  console.log(`[algoria] narration ${!narrationReady() ? 'OFF — ajoute ANTHROPIC_API_KEY dans .env' : (await deskNarrationOn()) ? 'ON (Claude)' : 'OFF — interrupteur support_settings.narration (mettre \'on\' pour rallumer)'}`);
   console.log(`[algoria] risque portefeuille · max ${PORTFOLIO.maxOpenPositions} positions (total) · ${PORTFOLIO.maxPositionsPerInstrument} par instrument`);
 
   // ===== État PARTAGÉ à tous les instruments =====
@@ -528,7 +541,7 @@ async function main() {
         const deskConf = bkSignal ? bkSignal.confluence : confluence;
         const meta = deskMeta(kind, context, { signal: executed, confluence: deskConf, threshold, gated });
         let clause: string | null = null;
-        if (narrationReady()) {
+        if (await deskNarrationOn()) {
           clause = await narrate(
             kind === 'trade'
               ? { kind, ctx: context, signal: executed, confluence: deskConf, threshold }
@@ -1630,7 +1643,7 @@ async function main() {
         const stats = await fetchDayTradeStats();
         if (!stats || stats.trades === 0) return; // rien à raconter
         const meta = { kind: 'recap', trades: stats.trades, wins: stats.wins, winRate: stats.wins / stats.trades, net: Math.round(stats.net) };
-        const clause = narrationReady() ? await narrateRecap(stats) : null;
+        const clause = (await deskNarrationOn()) ? await narrateRecap(stats) : null;
         await logNarration(clause ?? '', Date.now(), meta);
         console.log(`[algoria] recap ${h}h : ${stats.trades} trades · ${stats.wins} wins · ${Math.round(stats.net)}$`);
         // Canal VIP : « pulse » preuve-de-vie toutes les 4 h + bilan du soir (23h Paris). En % / win rate, jamais
