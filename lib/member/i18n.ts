@@ -22,16 +22,18 @@ export const asLocale = (v: unknown): Locale => (v === 'it' ? 'it' : 'en');
 
 /** DM envoyé au moment de la demande d'adhésion — la SEULE fenêtre où Telegram autorise le bot à
  *  écrire à un inconnu, donc le message le plus rentable du funnel. */
-/** Les boutons sous le message de bienvenue (anglais seulement, voir JOIN_DM). */
+/** Bouton sous le message de bienvenue (anglais seulement, voir JOIN_DM).
+ *  Depuis le 5/11/2026, Mathieu a demandé de retirer le CTA Académie/vidéo du DM d'adhésion
+ *  (l'académie n'a plus de vidéo d'intro) ; le bouton compte est conservé. */
 export const JOIN_DM_BUTTONS = [
   [{ text: '📲 CREATE MY FREE ACCOUNT', url: 'https://app.getalgoria.com/member' }],
-  [{ text: '🎓 THE ACADEMY, IN 5 MIN', url: 'https://app.getalgoria.com/academy' }],
 ];
 
 export const JOIN_DM: Record<Locale, string> = {
   // DE VRAIS BOUTONS (15/10/2026, décision Mathieu : « un vrai bouton c'est mieux qu'un lien ») : les liens en texte
-  // sont devenus les deux boutons de JOIN_DM_BUTTONS. Ceux qui créent leur compte dans les 10 minutes après ce
+  // sont devenus JOIN_DM_BUTTONS. Ceux qui créent leur compte dans les 10 minutes après ce
   // message font la moitié des passages en copie (1 036 personnes → 26 activations sur 52, depuis le 01/09).
+  // 5/11/2026 : CTA Académie/vidéo retiré du DM EN (plus de vidéo d'intro) ; bouton compte conservé.
   // Version italienne inchangée (décision Mathieu : on ne touche pas au bot italien).
   en: [
     '🎉 <b>Thanks for requesting access to Algoria !</b>',
@@ -41,7 +43,6 @@ export const JOIN_DM: Record<Locale, string> = {
     'While you wait, get a head start 👇',
     '',
     '📲 <b>Create your free account</b>: get your access ready',
-    '🎓 <b>The Academy</b>: what Algoria is and how it works, in 5 minutes',
     '',
     '💬 <b>A question ?</b> Message Mathieu directly: @mathieu_algoria',
     '',
