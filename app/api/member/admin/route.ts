@@ -18,6 +18,7 @@ import { TG_ALLOWED_UPDATES } from '@/lib/member/tgWebhook';
 import { publishToChannels } from '@/lib/channel/publish';
 import { extraMirrors } from '@/lib/channel/mirrors';
 import { sendLiveWelcome } from '@/lib/member/liveWelcome';
+import { scheduleDepositSheetSync, dubaiYm } from '@/lib/admin/depositSheetSync';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -542,6 +543,8 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       } as never,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // Sheet « Dépôts Algoria » — fire-and-forget (échec ≠ rollback admin)
+    scheduleDepositSheetSync(db, depositedAt.slice(0, 7));
     // re-dépôt : la commission de parrainage est née sur le PREMIER dépôt, elle ne se réaligne pas
     if (redeposit) return NextResponse.json({ ok: true, redeposit: true });
     // le montant validé fait foi : si ce membre a un parrain, sa commission s'aligne dessus.
@@ -589,6 +592,8 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
       const { data: owner } = await db.from('member_actions').select('tg_id').eq('id', u.id).limit(1);
       if (owner?.[0]?.tg_id) await syncPendingReferralCommission(db, Number(owner[0].tg_id), Number(det.amount_usd));
     }
+    const ymSync = String(det.booked_ym ?? String(det.deposited_at ?? '').slice(0, 7));
+    scheduleDepositSheetSync(db, /^\d{4}-\d{2}$/.test(ymSync) ? ymSync : dubaiYm());
     return NextResponse.json({ ok: true });
   }
   if (body.deleteDeposit) {

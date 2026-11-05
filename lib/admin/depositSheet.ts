@@ -84,7 +84,13 @@ export function buildDepositSheet(input: {
       deposit: `${Number(first.detail?.amount_usd ?? 0)}$`,
       country: input.countryOf(first.tg_id),
       commission: '',
-      note: notes.join(' · '),
+      note: (() => {
+        const base = notes.join(' · ');
+        if (String(first.detail?.commission_status ?? '') === 'canceled') {
+          return base ? `ANNULÉ · ${base}` : 'ANNULÉ';
+        }
+        return base;
+      })(),
       cpa: false,
       sortKey: depAt(first),
     });
@@ -104,4 +110,9 @@ export function sheetCsv(rows: SheetRow[]): string {
 export function sheetTsv(rows: SheetRow[]): string {
   const clean = (v: string) => v.replace(/[\t\r\n]+/g, ' ');
   return [SHEET_HEADER, ...rows.map(cells)].map((l) => l.map(clean).join('\t')).join('\n');
+}
+
+/** Ligne annulée : on la GARDE sur la feuille (Mathieu 05/11) — pas de suppression, marqueur dans Note. */
+export function isDepositCanceled(d: SheetDeposit): boolean {
+  return String(d.detail?.commission_status ?? '') === 'canceled';
 }
