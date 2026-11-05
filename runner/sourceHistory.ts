@@ -88,11 +88,22 @@ export function startSourceHistorySync(): void {
   if (!accountId) { console.log('[algoria] historique source : OFF (SOURCE_ACCOUNT_ID absent)'); return; }
   if (!process.env.METAAPI_TOKEN) { console.log('[algoria] historique source : OFF (METAAPI_TOKEN absent)'); return; }
   let running = false;
+  let missingAccount = false; // 05/11 : SOURCE_ACCOUNT_ID (ex. 638dc8ac) introuvable → un seul warn, plus de spam
   const tick = () => {
-    if (running) return; // une synchro lente ne se superpose jamais à la suivante
+    if (running || missingAccount) return; // une synchro lente ne se superpose jamais à la suivante
     running = true;
     void syncOnce(accountId)
-      .catch((e) => console.error('[algoria] historique source : échec, nouvel essai dans 6 h —', (e as { message?: string })?.message ?? e))
+      .catch((e) => {
+        const msg = String((e as { message?: string })?.message ?? e);
+        if (/not found/i.test(msg) || /404/.test(msg)) {
+          if (!missingAccount) {
+            missingAccount = true;
+            console.warn(`[algoria] historique source : compte ${accountId} introuvable sur MetaApi — synchro coupée pour ce process (trading inchangé)`);
+          }
+          return;
+        }
+        console.error('[algoria] historique source : échec, nouvel essai dans 6 h —', msg);
+      })
       .finally(() => { running = false; });
   };
   setTimeout(tick, 60_000); // après le démarrage du runner, jamais pendant
