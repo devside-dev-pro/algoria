@@ -80,15 +80,15 @@ async function fetchAvatar(db: any, userId: number): Promise<string | null> {
 async function sendJoinDm(userId: number, locale: Locale): Promise<'sent' | 'failed' | 'skipped'> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return 'skipped';
-  // l'override d'env ne s'applique qu'à l'anglais : sinon poser TELEGRAM_JOIN_DM ré-anglaiserait
-  // silencieusement les Italiens (le genre de régression qu'on ne voit qu'en lisant les logs du bot).
-  const text = locale === 'en' ? (process.env.TELEGRAM_JOIN_DM?.trim() || JOIN_DM[locale]) : JOIN_DM[locale];
+  // 5/11/2026 (Mathieu) : un seul message anglais + bouton pour tous les canaux (y compris IT).
+  // TELEGRAM_JOIN_DM surcharge le texte pour tout le monde — plus de variante italienne séparée.
+  const text = process.env.TELEGRAM_JOIN_DM?.trim() || JOIN_DM[locale];
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(5000),
-      body: JSON.stringify({ chat_id: userId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...(locale === 'en' ? { reply_markup: { inline_keyboard: JOIN_DM_BUTTONS } } : {}) }),
+      body: JSON.stringify({ chat_id: userId, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: JOIN_DM_BUTTONS } }),
     });
     const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
     if (!d.ok) console.error('[telegram] join DM refused:', d.description ?? 'unknown');
