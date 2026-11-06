@@ -9,6 +9,8 @@
 // touché (calculé côté serveur, jamais fourni par le navigateur), et ce que chacun déclare (solde avant / après,
 // capture, commentaire). Une déclaration n'est PAS une demande de remboursement et le texte le dit.
 import { HISTORY_MAINTENANCE } from './historyMaintenance';
+import { MYFXBOOK_URL } from './myfxbook';
+export { MYFXBOOK_URL };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -42,11 +44,7 @@ export const INCIDENT_TOPIC = /\b(blown|wiped|liquidat\w*|margin call|stop ?out|
 export const INCIDENT_TALK = /\b(incident|blown|wiped|liquidat\w*|margin call|stop ?out|stopped out|account (?:was |got |is |has been )?(?:closed|gone|empty|blown|wiped)|what happened|last night|yesterday night|crash\w*|bug|glitch|malfunction\w*|compensat\w*|refund\w*|money back|lost (?:my|all|everything|it|money)|losses?)\b/i;
 /** … sauf ce qui reste à Mathieu même là : un retrait, une arnaque, un avocat, une plainte. */
 export const INCIDENT_ESCALATE = /\b(withdraw\w*|scam\w*|fraud\w*|stolen|hack\w*|police|lawyer|solicitor|court|sue|legal action|chargeback|regulator|fsca|fca|ritir\w*|truffa)\b/i;
-/** MYFXBOOK DU NOUVEAU MASTER (27/10/2026). Compte réel RaiseFX, MT5, vérifié par un tiers. Mathieu vient de le
- *  créer : ce lien REMPLACE la promesse « track record vérifiable à venir » (guide §13). Une seule constante :
- *  le support et le bot de l'app la recopient, les garde-fous ne laissent passer qu'elle. Aucun chiffre de
- *  résultat — le lien est la preuve. Pas le CM, pas la page /track-record, pas HISTORY_MAINTENANCE. */
-export const MYFXBOOK_URL = 'https://www.myfxbook.com/members/AlgoriaAI/algoria-ai/12279938';
+/** MYFXBOOK_URL : source unique lib/member/myfxbook.ts (import + re-export ci-dessus). */
 /** Liste fermée des liens de résultats. Tout autre Myfxbook, et la page track record de l'app, sont refusés. */
 export const ALLOWED_RESULT_LINKS = [MYFXBOOK_URL] as const;
 
