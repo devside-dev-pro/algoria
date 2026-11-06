@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { sdb } from '@/lib/member/server';
 import { historyGate, MAINTENANCE_BODY } from '@/lib/member/historyGate';
 import { MASTER_TRACK_FROM } from '@/lib/track/source';
+import { TRACK_SINCE } from '@/lib/member/trackSince';
 import { loadMaster } from '../master';
 
 export const runtime = 'nodejs';
@@ -20,15 +21,19 @@ export async function GET(req: NextRequest) {
   const gate = await historyGate(req); // 🛠 historique en maintenance (lib/member/historyMaintenance.ts)
   if (gate === 'hidden') return NextResponse.json(MAINTENANCE_BODY, { headers: { 'Cache-Control': 'private, no-store' } });
   const month = req.nextUrl.searchParams.get('month') ?? '';
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < MASTER_TRACK_FROM.slice(0, 7)) {
-    return NextResponse.json({ error: `trade-by-trade detail starts in ${MASTER_TRACK_FROM.slice(0, 7)}` }, { status: 400 });
+  const sinceDay = TRACK_SINCE.slice(0, 10);
+  const detailFrom = (sinceDay > MASTER_TRACK_FROM ? sinceDay : MASTER_TRACK_FROM).slice(0, 7);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < detailFrom) {
+    return NextResponse.json({ error: `trade-by-trade detail starts in ${detailFrom}` }, { status: 400 });
   }
   const [y, m] = month.split('-').map(Number);
   const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  // même mois : ne pas remonter avant le départ visible (nuit 21-22 oct hors écran)
+  const fromDay = month === sinceDay.slice(0, 7) ? sinceDay : `${month}-01`;
   const db = sdb() as unknown as Parameters<typeof loadMaster>[0];
   let master: Awaited<ReturnType<typeof loadMaster>>;
-  try { master = await loadMaster(db, `${month}-01`, next); } catch (e) { return NextResponse.json({ error: String((e as Error).message) }, { status: 500 }); }
-  const days = master.days.map((d) => ({
+  try { master = await loadMaster(db, fromDay, next); } catch (e) { return NextResponse.json({ error: String((e as Error).message) }, { status: 500 }); }
+  const days = master.days.filter((d) => d.d >= sinceDay).map((d) => ({
     d: d.d,
     fee: r2(d.fee),
     trades: d.trades.map((t) => ({

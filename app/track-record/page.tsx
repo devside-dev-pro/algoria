@@ -1,5 +1,5 @@
 // getalgoria.com/track-record — page PUBLIQUE partageable aux prospects. Depuis le 24/09/2026 elle montre le
-// VRAI historique du compte qu'Algoria copie (depuis le lancement, juillet 2026), plus la simulation d'avant.
+// VRAI historique du compte qu'Algoria copie (départ visible : lib/member/trackSince.ts), plus la simulation d'avant.
 // L'ancienne URL /backtest a circulé : next.config.mjs la redirige ici (308, permanente), aucun lien ne casse.
 // Sur app.getalgoria.com, le middleware réécrit /track-record vers l'écran in-app — même lien, bonne page.
 // Le rendu vit dans components/TrackRecord.tsx, partagé avec l'écran in-app : une seule version des chiffres.
@@ -9,16 +9,16 @@ import { TrackRecord } from '@/components/TrackRecord';
 export const metadata: Metadata = {
   metadataBase: new URL('https://getalgoria.com'),
   title: 'Algoria — Track Record (real account)',
-  description: 'Every trade of the real MetaTrader 5 account Algoria copies, since launch in July 2026 — in % or in $ at the lot size you choose. Red months and drawdowns included.',
+  description: 'Every trade of the real MetaTrader 5 account Algoria copies — in % or in $ at the lot size you choose. Red months and drawdowns included.',
   openGraph: {
     title: 'Algoria — Track Record',
-    description: 'The real account Algoria copies, since July 2026 — every trade, red months included. See it in % or in $ at your lot size.',
+    description: 'The real account Algoria copies — every trade, red months included. See it in % or in $ at your lot size.',
     type: 'website',
     url: 'https://getalgoria.com/track-record',
     siteName: 'Algoria AI',
     images: [{ url: '/brand/og.png', width: 1200, height: 630, alt: 'Algoria AI — track record' }],
   },
-  twitter: { card: 'summary_large_image', title: 'Algoria — Track Record', description: 'The real account Algoria copies, since July 2026 — red months included.', images: ['/brand/og.png'] },
+  twitter: { card: 'summary_large_image', title: 'Algoria — Track Record', description: 'The real account Algoria copies — red months included.', images: ['/brand/og.png'] },
 };
 
 export default function TrackRecordPage() {

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { historyGate, MAINTENANCE_BODY } from '@/lib/member/historyGate';
 import { sdb } from '@/lib/member/server';
 import { MASTER_TRACK_FROM, SOURCE_TRACK_START } from '@/lib/track/source';
+import { TRACK_SINCE } from '@/lib/member/trackSince';
 import { loadMaster } from './master';
 
 export const runtime = 'nodejs';
@@ -42,6 +43,9 @@ export async function GET(req: NextRequest) {
   // 🛠 historique en maintenance (lib/member/historyMaintenance.ts) : rien pour les prospects et la page publique
   const gate = await historyGate(req);
   if (gate === 'hidden') return NextResponse.json(MAINTENANCE_BODY, { headers: { 'Cache-Control': 'private, no-store' } });
+  // borne d'affichage (lib/member/trackSince.ts) : au 06/11 Mathieu rouvre depuis le 25/10 — la nuit du 21-22 reste hors écran
+  const sinceDay = TRACK_SINCE.slice(0, 10);
+  const masterFrom = sinceDay > MASTER_TRACK_FROM ? sinceDay : MASTER_TRACK_FROM;
   const db = sdb() as unknown as { from: (t: string) => any; rpc: (f: string, a: object) => any };
   const rows: Array<{ time: string; type: string; entry_type: string | null; volume: number | null; profit: number | null; commission: number | null; swap: number | null }> = [];
   // PostgREST plafonne à 1 000 lignes par requête : on pagine
@@ -59,7 +63,7 @@ export async function GET(req: NextRequest) {
 
   // ── LE MASTER, à partir de MASTER_TRACK_FROM (voir master.ts) ─────────────────────────────────────────
   let master: Awaited<ReturnType<typeof loadMaster>>;
-  try { master = await loadMaster(db, MASTER_TRACK_FROM); } catch (e) { return NextResponse.json({ error: String((e as Error).message) }, { status: 500 }); }
+  try { master = await loadMaster(db, masterFrom); } catch (e) { return NextResponse.json({ error: String((e as Error).message) }, { status: 500 }); }
 
   const byDay = new Map<string, Day>();
   let sinceNet = 0;
@@ -73,7 +77,7 @@ export async function GET(req: NextRequest) {
   // s'arrêtent à MASTER_TRACK_FROM.
   for (const d of rows) {
     const day = d.time.slice(0, 10);
-    const shown = day < MASTER_TRACK_FROM;
+    const shown = day < MASTER_TRACK_FROM && day >= sinceDay;
     const cur = byDay.get(day) ?? { d: day, u: 0, net: 0, cash: 0, n: 0, w: 0 };
     if (d.type === 'DEAL_TYPE_BALANCE') {
       // dépôt ou retrait : ce n'est PAS de la performance — il bouge le solde, jamais le rendement
@@ -103,7 +107,16 @@ export async function GET(req: NextRequest) {
     cumU += u; peakU = Math.max(peakU, cumU); ddU = Math.min(ddU, cumU - peakU);
   };
   for (const d of rows) {
-    if (d.time.slice(0, 10) >= MASTER_TRACK_FROM) break;
+    const day = d.time.slice(0, 10);
+    if (day >= MASTER_TRACK_FROM) break;
+    if (day < sinceDay) {
+      // avant le départ visible : on avance le solde (dépôts / P&L) sans compter le drawdown affiché
+      if (d.type === 'DEAL_TYPE_BALANCE') { bal += Number(d.profit ?? 0); continue; }
+      const exit0 = d.entry_type ? EXIT.has(d.entry_type) : false;
+      const net0 = exit0 ? Number(d.profit ?? 0) + Number(d.commission ?? 0) + Number(d.swap ?? 0) : Number(d.commission ?? 0) + Number(d.swap ?? 0);
+      bal += net0;
+      continue;
+    }
     if (d.type === 'DEAL_TYPE_BALANCE') { bal += Number(d.profit ?? 0); continue; }
     const exit = d.entry_type ? EXIT.has(d.entry_type) : false;
     const net = exit ? Number(d.profit ?? 0) + Number(d.commission ?? 0) + Number(d.swap ?? 0) : Number(d.commission ?? 0) + Number(d.swap ?? 0);
@@ -130,7 +143,7 @@ export async function GET(req: NextRequest) {
   const days = [...byDay.values()].sort((a, b) => a.d.localeCompare(b.d))
     .map((v) => ({ d: v.d, u: r2(v.u), net: r2(v.net), cash: r2(v.cash), n: v.n, w: v.w, ...(v.base != null ? { base: r2(v.base) } : {}) }));
   const res = NextResponse.json({
-    since: SOURCE_TRACK_START,
+    since: sinceDay,
     masterFrom: MASTER_TRACK_FROM,
     updatedAt: lastBal?.ts ?? account.updated_at,
     currency: account.currency ?? 'USD',
