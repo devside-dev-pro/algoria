@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useMe, UnlockSheet, LoadFailed } from '../ui';
 import { ShareWinSheet, type ShareableWin } from '@/components/member/ShareWinSheet';
 import { HistoryMaintenance } from '@/components/HistoryMaintenance';
+import { MYFXBOOK_URL } from '@/lib/member/myfxbook';
 
 interface FeedTrade { ticket: string; symbol: string; direction: string; entry: number; exit: number; pnl: number; r: number | null; reason: string; closed_at: string; lot?: number }
 
@@ -197,7 +198,7 @@ export default function MemberHistory() {
         {trades.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--dim)' }}>No closed trades over this period yet.</p>}
       </section>
 
-      {/* « tu veux voir plus loin ? » → le track record RÉEL du compte copié (depuis juillet 2026), en natif.
+      {/* « tu veux voir plus loin ? » → le track record RÉEL du compte copié (borne trackSince), en natif.
           Visible par tous : mêmes données que la page publique /track-record, excellent pour la conversion. */}
       <button
         onClick={() => router.push('/member/track-record')}
@@ -208,11 +209,26 @@ export default function MemberHistory() {
         <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
           <span style={{ fontSize: 13.5, fontWeight: 800 }}>See Algoria&rsquo;s full track record</span>
           <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45 }}>
-            The <b style={{ color: 'var(--cyan)' }}>real account</b> Algoria copies, since July 2026 — in % or $ at your lot <span style={{ color: 'var(--dim)' }}>· red months shown</span>
+            The <b style={{ color: 'var(--cyan)' }}>real account</b> Algoria copies — in % or $ at your lot <span style={{ color: 'var(--dim)' }}>· red months shown</span>
           </span>
         </span>
         <span style={{ color: 'var(--cyan)', fontSize: 18 }}>›</span>
       </button>
+
+      <a
+        href={MYFXBOOK_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="panel"
+        style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: 'var(--text)', borderColor: 'rgba(43,227,245,.28)' }}
+      >
+        <span style={{ fontSize: 20 }} aria-hidden>🔗</span>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>Open the official track record on Myfxbook</span>
+          <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45 }}>Verified by a third party · the live copied account</span>
+        </span>
+        <span style={{ color: 'var(--cyan)', fontSize: 18 }} aria-hidden>↗</span>
+      </a>
 
       {/* Le CLOSING prospect vit désormais EN HAUT (bannière « manque à gagner »). Ici, juste un repli
           si la période n'est pas positive (pas de bannière en haut) — sinon on ne duplique pas le CTA. Membre : la note. */}

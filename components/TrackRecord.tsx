@@ -14,6 +14,7 @@
 // départ est écrite en clair, avec la raison ; aucune taille de compte n'est suggérée (décision Mathieu :
 // chacun gère son money management) — le % dit seulement que le SIEN dépendra du lot qu'il choisit.
 import { HistoryMaintenance } from './HistoryMaintenance';
+import { MYFXBOOK_URL } from '@/lib/member/myfxbook';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MASTER_TRACK_FROM } from '@/lib/track/source';
 import { TRADING_TZ } from '@/lib/display/tradingDay';
@@ -265,6 +266,22 @@ export function TrackRecord() {
         </div>
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Shown since {SINCE_LABEL(data.since)} · {view.monthRows.length} months · last update {updated}</span>
       </section>
+
+      {/* Myfxbook officiel (06/11/2026, Mathieu) — preuve tierce pour les connaisseurs. Même URL que le support. */}
+      <a
+        href={MYFXBOOK_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="panel"
+        style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: 'var(--text)', borderColor: 'rgba(43,227,245,.28)' }}
+      >
+        <span style={{ fontSize: 20 }} aria-hidden>🔗</span>
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>Open the official track record on Myfxbook</span>
+          <span style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45 }}>Verified by a third party · the live copied account</span>
+        </span>
+        <span style={{ color: 'var(--cyan)', fontSize: 18 }} aria-hidden>↗</span>
+      </a>
 
       <section className="panel" style={{ padding: 16, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
         <Kpi label="Trades" value={view.trades.toLocaleString('en-US')} />
