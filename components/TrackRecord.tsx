@@ -15,15 +15,16 @@
 // chacun gère son money management) — le % dit seulement que le SIEN dépendra du lot qu'il choisit.
 import { HistoryMaintenance } from './HistoryMaintenance';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MASTER_TRACK_FROM, SOURCE_TRACK_START_LABEL } from '@/lib/track/source';
+import { MASTER_TRACK_FROM } from '@/lib/track/source';
 import { TRADING_TZ } from '@/lib/display/tradingDay';
 
 type Day = { d: string; u: number; net: number; cash: number; n: number; w: number; base?: number };
-type Track = { since: string; updatedAt: string; currency: string; startBalance: number; balance: number; maxDdPct?: number; maxDdU?: number; days: Day[] };
+type Track = { since: string; masterFrom?: string; updatedAt: string; currency: string; startBalance: number; balance: number; maxDdPct?: number; maxDdU?: number; days: Day[] };
 
 const LOTS = [0.01, 0.02, 0.05, 0.1, 0.5, 1];
 const UP = '#26e0a6', DOWN = '#ff6f8e';
 const MONTH = (ym: string) => new Date(`${ym}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+const SINCE_LABEL = (iso: string) => new Date(iso.slice(0, 10) + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
 const fmtUsd = (n: number, sign = true) => {
   const a = Math.abs(n);
@@ -76,7 +77,6 @@ function Curve({ points, unit }: { points: number[]; unit: 'pct' | 'usd' }) {
 // même calcul que le mois au-dessus. Le bot et nos messages promettaient « chaque trade » : la page le montre.
 type MTrade = { c: string; o: string | null; dir: 'buy' | 'sell' | null; entry: number | null; exit: number | null; u: number; reason: string | null };
 type MDay = { d: string; fee: number; trades: MTrade[] };
-const DETAIL_FROM = MASTER_TRACK_FROM.slice(0, 7);
 // jours et heures de Paris (14/10/2026, lib/display/tradingDay.ts) : la même journée que l'app, le VIP et le canal
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: TRADING_TZ });
 const price = (n: number | null) => (n == null ? '–' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
@@ -245,6 +245,8 @@ export function TrackRecord() {
   if (maintenance) return <HistoryMaintenance />;
   if (failed) return <p style={{ fontSize: 12.5, color: 'var(--dim)' }}>The track record could not be loaded right now — try again in a minute.</p>;
   if (!data || !view) return <p style={{ fontSize: 12.5, color: 'var(--dim)' }}>loading…</p>;
+  // détail trade-par-trade : mois ≥ max(masterFrom, trackSince)
+  const detailFrom = [(data.masterFrom ?? MASTER_TRACK_FROM).slice(0, 7), data.since.slice(0, 7)].sort().pop() as string;
   const maxAbs = Math.max(...view.monthRows.map((m) => Math.abs(view.val(m)))) || 1;
 
   return (
@@ -261,7 +263,7 @@ export function TrackRecord() {
           <span className="mono" style={{ fontSize: 34, fontWeight: 800, color: view.total >= 0 ? 'var(--up)' : 'var(--down)', letterSpacing: -0.5, fontVariantNumeric: 'tabular-nums' }}>{fmt(view.total)}</span>
           <span className="mono" style={{ fontSize: 12, color: 'var(--muted)' }}>{mode === 'pct' ? 'account return' : `at ${lot.toFixed(2)} lot`}</span>
         </div>
-        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Since Algoria&rsquo;s launch, {SOURCE_TRACK_START_LABEL} · {view.monthRows.length} months · last update {updated}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Shown since {SINCE_LABEL(data.since)} · {view.monthRows.length} months · last update {updated}</span>
       </section>
 
       <section className="panel" style={{ padding: 16, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
@@ -284,7 +286,7 @@ export function TrackRecord() {
         <span className="mono" style={{ fontSize: 9.5, letterSpacing: 1.4, color: 'var(--dim)', fontWeight: 700 }}>MONTH BY MONTH</span>
         {view.monthRows.map((m) => {
           const v = view.val(m), pos = v >= 0;
-          const detail = m.ym >= DETAIL_FROM, open = detail && openMonth === m.ym;
+          const detail = m.ym >= detailFrom, open = detail && openMonth === m.ym;
           return (
             <div key={m.ym} style={{ display: 'flex', flexDirection: 'column' }}>
             <div onClick={detail ? () => setOpenMonth(open ? null : m.ym) : undefined} role={detail ? 'button' : undefined}
@@ -300,14 +302,14 @@ export function TrackRecord() {
             </div>
           );
         })}
-        <span style={{ fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Tap a month from {MONTH(DETAIL_FROM)} to see every trade: time, buy or sell, entry, exit and result.</span>
+        <span style={{ fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>Tap a month from {MONTH(detailFrom)} to see every trade: time, buy or sell, entry, exit and result.</span>
       </section>
 
       <p style={{ margin: '0 2px', fontSize: 11, color: 'var(--dim)', lineHeight: 1.55 }}>
         {mode === 'pct'
           ? <>The <b style={{ color: 'var(--muted)' }}>%</b> is the real account&rsquo;s return, day by day. Your own % depends on the lot you copy at compared to your balance.</>
           : <>The <b style={{ color: 'var(--muted)' }}>$</b> figures show what the same trades made at <b style={{ color: 'var(--muted)' }}>{lot.toFixed(2)} lot</b> — each trade scaled from its real size.</>}
-        {' '}Shown since Algoria&rsquo;s launch in {SOURCE_TRACK_START_LABEL}: the account traded before that date, and those months are not part of Algoria&rsquo;s record. Red months and drawdowns are shown as they happened. Past performance is <b style={{ color: 'var(--muted)' }}>not a promise</b> of future results.
+        {' '}Shown since {SINCE_LABEL(data.since)}: earlier days are not part of this published record. Red months and drawdowns are shown as they happened. Past performance is <b style={{ color: 'var(--muted)' }}>not a promise</b> of future results.
       </p>
     </div>
   );
