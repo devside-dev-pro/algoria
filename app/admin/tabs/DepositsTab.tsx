@@ -9,7 +9,7 @@ import { useAdmin } from '../_state';
 import { Kpi, dangerBtn, dimP, goldBtn, inp, miniBtn, okBtn, secH } from '../_shared';
 
 export function DepositsTab() {
-  const { addDeposit, busy, copyBrokerLink, countrySelect, deleteDeposit, depAmount, depBroker, depCom, depComAuto, depDate, depDateOf, depNote, depTg, depNature, setDepNature, depTotals, deposits, editDepositAmount, editDepositCom, exportCsv, input, legalOf, liveNoDeposit, monthDeps, monthLabel, nameOf, nextYm, planAmount, planCopied, planExcluded, planRanking, planTg, post, rows, setDeposits, setDepAmount, setDepBroker, setDepCom, setDepDate, setDepNote, setDepTg, setPlanAmount, setPlanTg, shiftMonth, ym } = useAdmin();
+  const { exportSheetCsv, copySheet, addDeposit, busy, copyBrokerLink, countrySelect, deleteDeposit, depAmount, depBroker, depCom, depComAuto, depDate, depDateOf, depNote, depTg, depNature, setDepNature, depTotals, deposits, editDepositAmount, editDepositCom, exportCsv, input, legalOf, liveNoDeposit, monthDeps, monthLabel, nameOf, nextYm, planAmount, planCopied, planExcluded, planRanking, planTg, post, rows, setDeposits, setDepAmount, setDepBroker, setDepCom, setDepDate, setDepNote, setDepTg, setPlanAmount, setPlanTg, shiftMonth, ym } = useAdmin();
   // POINTAGE DES COMMISSIONS (01/10/2026, demande Mathieu : « quand je clique sur received ça charge longtemps »).
   // L'ancien bouton passait par post() : tous les boutons de l'admin grisés, puis rechargement COMPLET de
   // l'admin (membres, actions, relances…) après chaque clic — insupportable sur 50 lignes à pointer.
@@ -162,7 +162,10 @@ export function DepositsTab() {
                 <h2 style={{ ...secH, minWidth: 150, textAlign: 'center' }}>{monthLabel}</h2>
                 <button onClick={() => shiftMonth(1)} style={miniBtn}>›</button>
                 <span style={{ flex: 1 }} />
-                <button disabled={monthDeps.length === 0} onClick={exportCsv} style={{ ...goldBtn, opacity: monthDeps.length === 0 ? 0.5 : 1 }}>⬇ EXPORT CSV</button>
+                {/* compta : une ligne par compte broker, ressaisies fusionnées — format du Sheet « Dépôts Algoria » */}
+                <button disabled={monthDeps.length === 0} onClick={copySheet} style={{ ...goldBtn, opacity: monthDeps.length === 0 ? 0.5 : 1 }}>📋 COPIER POUR LE SHEET COMPTA</button>
+                <button disabled={monthDeps.length === 0} onClick={exportSheetCsv} style={{ ...goldBtn, opacity: monthDeps.length === 0 ? 0.5 : 1 }}>⬇ CSV COMPTA</button>
+                <button disabled={monthDeps.length === 0} onClick={exportCsv} title="registre brut : une ligne par saisie, ressaisies comprises" style={{ ...goldBtn, background: 'transparent', color: 'var(--dim)', opacity: monthDeps.length === 0 ? 0.5 : 1 }}>⬇ registre brut</button>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
                 <Kpi label="DEPOSITS" value={String(monthDeps.length)} accent="var(--cyan)" />
