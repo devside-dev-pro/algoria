@@ -10,7 +10,8 @@
 // fixe (mis en cache par l'API quand il est assez long). Lots de 5 ads par appel (~1 min) : ça tient dans le
 // maxDuration de Vercel quel que soit le forfait, et l'écran affiche la progression.
 import Anthropic from '@anthropic-ai/sdk';
-import { NEEDS, POLES, RESOURCES, needsAllowed, scriptText, type AdHook, type AdScript, type Need, type Pole, type Resource } from './ads';
+import { ANGLES, NEEDS, POLES, RESOURCES, needsAllowed, scriptText, type AdHook, type AdScript, type Need, type Pole, type Resource } from './ads';
+import { AD_SCRIPT_CTA, type AngleSlot } from './adsCompliance';
 
 export const GEN_MODEL = 'claude-opus-5-5';
 /** $ par million de tokens, Claude Opus 5.5 (tarifs Anthropic au 25/09/2026). */
@@ -49,10 +50,11 @@ FORMAT OF ONE AD (match the library)
 - title: short, in French or English, says what the ad is.
 - hook: the first 3 seconds. Spoken line in double quotes; optional on-screen text after " · Texte : ". Stage directions in parentheses, in French.
 - prep: what to prepare before filming (people, devices, screens, place), in French, 1 to 3 short lines.
-- body: the full script after the hook. Numbered shots: "1. (direction en français) \"Spoken line in English.\"". Then a line "Fin" followed by the call to action in quotes (ending with 🙏🏼) and the on-screen risk line when relevant. Add a short "Montage :" note only if it helps.
+- body: the full script after the hook. Numbered shots: "1. (direction en français) \"Spoken line in English.\"". Then a line "Fin" followed by exactly "Click the link 🙏🏼" as the call to action (free public Algoria Telegram community — ecosystem, never a trading/deposit CTA), then the on-screen risk line. Add a short "Montage :" note only if it helps.
+- angle: the creative angle assigned in the request (must match exactly).
 - needs: only from the allowed list given in the request. solo = Mathieu alone; videographer; actors = people with English lines; street = passers-by interviews; event.
 - duration: like "20 à 30 s".
-- alt_hooks: exactly 3 alternative hooks (spoken English lines, no quotes), to shoot right after with the same outfit.
+- alt_hooks: exactly 3 alternative hooks (spoken English lines, no quotes), to shoot right after with the same outfit, same angle.
 - meta_flag: empty string unless there is a real Meta risk (in French).
 
 HOW TO BE USEFUL
@@ -71,9 +73,10 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['pole', 'title', 'hook', 'prep', 'body', 'needs', 'duration', 'alt_hooks', 'meta_flag'],
+        required: ['pole', 'angle', 'title', 'hook', 'prep', 'body', 'needs', 'duration', 'alt_hooks', 'meta_flag'],
         properties: {
           pole: { type: 'string', enum: [...POLES] },
+          angle: { type: 'string', enum: [...ANGLES] },
           title: { type: 'string' },
           hook: { type: 'string' },
           prep: { type: 'string' },
@@ -88,8 +91,8 @@ const SCHEMA = {
   },
 } as const;
 
-export type GeneratedAd = { pole: Pole; title: string; hook: string; prep: string; body: string; needs: Need[]; duration: string; alt_hooks: string[]; meta_flag: string };
-export type GenRequest = { count: number; resources: Resource[]; extra: string; poles: Pole[]; direction: string };
+export type GeneratedAd = { pole: Pole; angle: string; title: string; hook: string; prep: string; body: string; needs: Need[]; duration: string; alt_hooks: string[]; meta_flag: string };
+export type GenRequest = { count: number; resources: Resource[]; extra: string; poles: Pole[]; direction: string; slots?: AngleSlot[] };
 export type Library = { memory: string | null; scripts: AdScript[]; hooks: AdHook[] };
 
 const POLE_HINT: Record<Pole, string> = {
@@ -122,6 +125,16 @@ function userPrompt(req: GenRequest, lib: Library): string {
   if (req.extra.trim()) parts.push(`He also says: ${req.extra.trim()}`);
   parts.push(`Allowed needs: ${allowed.join(', ')}.`);
   parts.push(req.poles.length ? `Formats wanted: ${req.poles.map((p) => `${p} (${POLE_HINT[p]})`).join(', ')}.` : `Formats: pick what fits his resources best, mixing formats (${POLES.map((p) => `${p} = ${POLE_HINT[p]}`).join('; ')}).`);
+  if (req.slots?.length) {
+    parts.push('<assigned_slots>');
+    parts.push('Each ad below MUST use exactly the given angle and pole (no swaps, no duplicates):');
+    req.slots.slice(0, req.count).forEach((s, i) => parts.push(`${i + 1}. angle=${s.angle} · pole=${s.pole} (${POLE_HINT[s.pole]})`));
+    parts.push('</assigned_slots>');
+  }
+  parts.push(
+    `Call to action (Fin line): exactly "${AD_SCRIPT_CTA}". The ad sells the free public Algoria Telegram channel (community / ecosystem). Never a deposit, broker signup, or trading CTA. Never describe Algoria as "an algorithm for MetaTrader 5".`,
+    'Do not use banned compliance words: algorithm, MetaTrader/MT5, broker, CFD, leverage, signals, profit(s)/return(s)/passive income, guaranteed/easy money/get rich, dollar amounts or percentages, urgency phrases, testimonials, P&L/win card.',
+  );
   if (req.direction.trim()) parts.push(`His direction for this batch: ${req.direction.trim()}`);
   parts.push('</request>');
   return parts.join('\n');
@@ -131,7 +144,7 @@ function client() {
   return new Anthropic(); // ANTHROPIC_API_KEY (déjà utilisée par le bot Telegram)
 }
 
-/** Un appel = un lot (ADS_PER_CALL ads au plus). Renvoie les ads, filtrées pour respecter les besoins autorisés. */
+/** Un appel = un lot (ADS_PER_CALL ads au plus). Renvoie les ads, filtrées pour respecter les besoins autorisés. Pas de `temperature`. */
 export async function generateAds(req: GenRequest, lib: Library): Promise<{ ads: GeneratedAd[]; usage: Usage }> {
   const stream = client().messages.stream({
     model: GEN_MODEL,
@@ -147,11 +160,20 @@ export async function generateAds(req: GenRequest, lib: Library): Promise<{ ads:
   let parsed: { ads?: GeneratedAd[] };
   try { parsed = JSON.parse(text); } catch { throw new Error('Claude returned an unreadable answer. Try again.'); }
   const allowed = new Set(needsAllowed(req.resources));
-  const ads = (parsed.ads ?? []).slice(0, req.count).map((a) => ({
-    ...a,
-    needs: [...new Set(a.needs.filter((n) => allowed.has(n)))].length ? [...new Set(a.needs.filter((n) => allowed.has(n)))] : (['solo'] as Need[]),
-    alt_hooks: (a.alt_hooks ?? []).filter((h) => h.trim()).slice(0, 3),
-  })).filter((a) => a.title?.trim() && a.hook?.trim() && (POLES as readonly string[]).includes(a.pole));
+  const slots = req.slots?.slice(0, req.count) ?? [];
+  const angleSet = new Set<string>(ANGLES as readonly string[]);
+  const ads = (parsed.ads ?? []).slice(0, req.count).map((a, i) => {
+    const slot = slots[i];
+    const angle = (slot?.angle && angleSet.has(slot.angle) ? slot.angle : (angleSet.has(a.angle) ? a.angle : (ANGLES[i % ANGLES.length] as string)));
+    const pole = (slot?.pole && (POLES as readonly string[]).includes(slot.pole) ? slot.pole : a.pole) as Pole;
+    return {
+      ...a,
+      pole,
+      angle,
+      needs: [...new Set((a.needs ?? []).filter((n) => allowed.has(n)))].length ? [...new Set((a.needs ?? []).filter((n) => allowed.has(n)))] : (['solo'] as Need[]),
+      alt_hooks: (a.alt_hooks ?? []).filter((h) => h.trim()).slice(0, 3),
+    };
+  }).filter((a) => a.title?.trim() && a.hook?.trim() && (POLES as readonly string[]).includes(a.pole));
   return { ads, usage: msg.usage };
 }
 

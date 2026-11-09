@@ -890,8 +890,15 @@ function GenerateSheet({ onClose, onDone }: { onClose: () => void; onDone: (s: A
     try { localStorage.setItem(GEN_KEY, JSON.stringify({ resources, extra })); } catch { /* navigation privée */ }
     const per = usage?.perCall ?? 5;
     const calls = Math.ceil(count / per);
+    const remaining = usage != null ? Math.max(0, usage.limit - usage.today) : calls;
+    if (calls > remaining) {
+      toast(`⚠ Not enough daily runs: need ${calls}, ${remaining} left (max ${remaining * per} ads). Daily limit stays at ${usage?.limit ?? '—'}.`, 'error');
+      return;
+    }
     const all: { s: AdScript[]; h: AdHook[] } = { s: [], h: [] };
     let cost = 0;
+    let rejected = 0;
+    let regenerated = 0;
     setProgress({ done: 0, total: count });
     for (let i = 0; i < calls; i++) {
       const n = Math.min(per, count - i * per);
@@ -900,6 +907,8 @@ function GenerateSheet({ onClose, onDone }: { onClose: () => void; onDone: (s: A
         const d = await r.json().catch(() => ({}));
         if (!r.ok || d.error) throw new Error(d.error ?? `HTTP ${r.status}`);
         all.s.push(...d.scripts); all.h.push(...d.hooks); cost += Number(d.costUsd ?? 0);
+        const c = d.compliance as { kept?: number; rejected?: number; regenerated?: number } | undefined;
+        if (c) { rejected += Number(c.rejected ?? 0); regenerated += Number(c.regenerated ?? 0); }
         if (d.usage) setUsage(d.usage);
         setSpent(cost);
         setProgress({ done: all.s.length, total: count });
@@ -909,11 +918,20 @@ function GenerateSheet({ onClose, onDone }: { onClose: () => void; onDone: (s: A
       }
     }
     setProgress(null);
-    if (all.s.length) { toast(`✨ ${all.s.length} new ads · $${cost.toFixed(2)}`); onDone(all.s, all.h); }
+    if (all.s.length) {
+      const extra = (rejected || regenerated) ? ` · ${regenerated} regenerated · ${rejected} rejected (compliance)` : '';
+      toast(`✨ ${all.s.length} new ads · $${cost.toFixed(2)}${extra}`);
+      onDone(all.s, all.h);
+    }
   };
 
   const busy = progress != null;
+  const per = usage?.perCall ?? 5;
+  const remainingCalls = usage != null ? Math.max(0, usage.limit - usage.today) : null;
+  const callsNeeded = Math.ceil(count / per);
   const limitHit = usage != null && usage.today >= usage.limit;
+  const quotaShort = remainingCalls != null && callsNeeded > remainingCalls;
+  const maxAdsNow = remainingCalls != null ? remainingCalls * per : null;
   return (
     <div onClick={busy ? undefined : onClose} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(3,7,14,.66)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 680, maxHeight: '92vh', overflowY: 'auto', background: 'var(--panel, #0b1220)', border: '1px solid var(--border)', borderBottom: 'none', borderRadius: '16px 16px 0 0', padding: '16px 18px calc(20px + env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -941,7 +959,7 @@ function GenerateSheet({ onClose, onDone }: { onClose: () => void; onDone: (s: A
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ ...secH, fontSize: 10 }}>HOW MANY ?</span>
           <div style={{ display: 'flex', gap: 6 }}>
-            {[5, 10, 20].map((n) => <button key={n} disabled={busy} onClick={() => setCount(n)} style={chip(count === n)}>{n} ads</button>)}
+            {[5, 10, 20, 50].map((n) => <button key={n} disabled={busy} onClick={() => setCount(n)} style={chip(count === n)}>{n} ads</button>)}
           </div>
         </div>
 
@@ -949,20 +967,22 @@ function GenerateSheet({ onClose, onDone }: { onClose: () => void; onDone: (s: A
           placeholder="Direction (optional): e.g. “for the Pau shoot”, “more proof, less money talk”, “answers to sceptical comments”…" style={area} />
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button disabled={busy || limitHit || resources.length === 0} onClick={() => void run()} style={{ ...goldBtn, padding: '11px 18px', fontSize: 13 }}>
+          <button disabled={busy || limitHit || quotaShort || resources.length === 0} onClick={() => void run()} style={{ ...goldBtn, padding: '11px 18px', fontSize: 13 }}>
             {busy ? `Writing… ${progress.done}/${progress.total}` : `✨ WRITE ${count} ADS`}
           </button>
           <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>
-            ≈ ${(count * 0.03).toFixed(2)} · ~{Math.ceil(count / 5)} min{spent ? ` · spent $${spent.toFixed(2)}` : ''}
+            ≈ ${(count * 0.03).toFixed(2)} · ~{Math.ceil(count / 5)} min · {callsNeeded} run{callsNeeded > 1 ? 's' : ''}{spent ? ` · spent $${spent.toFixed(2)}` : ''}
           </span>
         </div>
         {busy && <p style={{ ...dimP, fontSize: 11 }}>Claude is writing, 5 ads at a time (about a minute each). Keep this open.</p>}
         {usage && (
-          <p style={{ ...dimP, fontSize: 10.5, color: limitHit ? '#ff8a5c' : 'var(--dim)' }}>
-            Today: {usage.today}/{usage.limit} runs · This month: ${usage.monthUsd.toFixed(2)} on your API key{limitHit ? ' · daily limit reached' : ''}
+          <p style={{ ...dimP, fontSize: 10.5, color: limitHit || quotaShort ? '#ff8a5c' : 'var(--dim)' }}>
+            Today: {usage.today}/{usage.limit} runs · This month: ${usage.monthUsd.toFixed(2)} on your API key
+            {limitHit ? ' · daily limit reached' : ''}
+            {quotaShort && !limitHit ? ` · not enough quota for ${count} ads (need ${callsNeeded} runs, ${remainingCalls} left → max ${maxAdsNow} ads now)` : ''}
           </p>
         )}
-        <p style={{ ...dimP, fontSize: 10.5 }}>New ads land in the Library as 🆕 to triage. ⭐ / 👎 them with a reason: that is how the next batches get better.</p>
+        <p style={{ ...dimP, fontSize: 10.5 }}>New ads land in the Library as 🆕 to triage. ⭐ / 👎 them with a reason: that is how the next batches get better. CTA: « Click the link 🙏🏼 » (free public Telegram).</p>
       </div>
     </div>
   );

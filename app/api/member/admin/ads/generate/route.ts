@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, isAdmin } from '@/lib/member/server';
 import { HOOK_COLS, POLES, RESOURCE_KEYS, SCRIPT_COLS, type AdHook, type AdScript, type Pole, type Resource } from '@/lib/admin/ads';
-import { ADS_PER_CALL, DAILY_CALLS, GEN_MODEL, costOf, generateAds, proposeMemory, type Library, type Usage } from '@/lib/admin/adsGenerator';
+import { ADS_PER_CALL, DAILY_CALLS, GEN_MODEL, costOf, generateAds, proposeMemory, type GeneratedAd, type Library, type Usage } from '@/lib/admin/adsGenerator';
+import { angleNote, checkScriptCompliance, ensureFixedCta, planAngleSlots, type AngleSlot } from '@/lib/admin/adsCompliance';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,6 +52,62 @@ async function logCall(kind: 'generate' | 'memory', params: unknown, by: string,
   return (data?.[0] ?? null) as { id: string; cost_usd: number | null } | null;
 }
 
+function sumUsage(a: Usage | null, b: Usage | null): Usage | null {
+  if (!a && !b) return null;
+  return {
+    input_tokens: (a?.input_tokens ?? 0) + (b?.input_tokens ?? 0),
+    output_tokens: (a?.output_tokens ?? 0) + (b?.output_tokens ?? 0),
+    cache_read_input_tokens: (a?.cache_read_input_tokens ?? 0) + (b?.cache_read_input_tokens ?? 0),
+    cache_creation_input_tokens: (a?.cache_creation_input_tokens ?? 0) + (b?.cache_creation_input_tokens ?? 0),
+  };
+}
+
+function normalizeAd(a: GeneratedAd): GeneratedAd {
+  return { ...a, body: ensureFixedCta(a.body ?? '') };
+}
+
+/** Garde les ads conformes ; les autres partent en retry (une fois) puis rejet. */
+async function generateCompliant(
+  base: { count: number; resources: Resource[]; extra: string; poles: Pole[]; direction: string },
+  slots: AngleSlot[],
+  lib: Library,
+): Promise<{ ads: GeneratedAd[]; usage: Usage | null; kept: number; rejected: number; regenerated: number }> {
+  const first = await generateAds({ ...base, count: slots.length, slots }, lib);
+  let usage: Usage | null = first.usage;
+  const good: GeneratedAd[] = [];
+  const badSlots: AngleSlot[] = [];
+  first.ads.forEach((raw, i) => {
+    const a = normalizeAd(raw);
+    const slot = slots[i] ?? { angle: a.angle, pole: a.pole };
+    const check = checkScriptCompliance(a);
+    if (check.ok) good.push({ ...a, angle: slot.angle, pole: slot.pole });
+    else badSlots.push(slot);
+  });
+  // Ads manquantes (réponse trop courte) → retry aussi.
+  for (let i = first.ads.length; i < slots.length; i++) badSlots.push(slots[i]);
+
+  let regenerated = 0;
+  let rejected = 0;
+  if (badSlots.length) {
+    try {
+      const retry = await generateAds({ ...base, count: badSlots.length, slots: badSlots, direction: `${base.direction}\nRETRY: previous draft failed compliance (banned words or missing risk line). Fix that.`.slice(0, 1000) }, lib);
+      usage = sumUsage(usage, retry.usage);
+      regenerated = retry.ads.length;
+      retry.ads.forEach((raw, i) => {
+        const a = normalizeAd(raw);
+        const slot = badSlots[i] ?? { angle: a.angle, pole: a.pole };
+        const check = checkScriptCompliance(a);
+        if (check.ok) good.push({ ...a, angle: slot.angle, pole: slot.pole });
+        else rejected++;
+      });
+      if (retry.ads.length < badSlots.length) rejected += badSlots.length - retry.ads.length;
+    } catch {
+      rejected += badSlots.length;
+    }
+  }
+  return { ads: good, usage, kept: good.length, rejected, regenerated };
+}
+
 export async function GET(req: NextRequest) {
   if (!gate(req)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   try { return NextResponse.json(await usageNow()); } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }); }
@@ -86,22 +143,38 @@ export async function POST(req: NextRequest) {
     let usage: Usage | null = null;
     try {
       const lib = await library();
-      const r = await generateAds(params, lib);
+      const slots = planAngleSlots(count, poles, lib.scripts, lib.hooks);
+      const r = await generateCompliant(params, slots, lib);
       usage = r.usage;
-      const batch = await logCall('generate', params, by, usage, r.ads.length);
-      if (!r.ads.length) return NextResponse.json({ error: 'No usable ad came back. Try again.' }, { status: 502 });
+      const batch = await logCall('generate', { ...params, slots }, by, usage, r.ads.length);
+      if (!r.ads.length) {
+        return NextResponse.json({
+          error: 'No compliant ad came back (banned words or missing risk line). Try again with another direction.',
+          compliance: { kept: 0, rejected: r.rejected, regenerated: r.regenerated },
+        }, { status: 502 });
+      }
       const rows = r.ads.map((a) => ({
         pole: a.pole, title: a.title.slice(0, 200), hook: a.hook, body: a.body, prep: a.prep || null, needs: a.needs,
-        duration: a.duration.slice(0, 80) || null, status: 'idea', source: 'Claude · generator', meta_flag: a.meta_flag.trim() || null,
+        duration: a.duration.slice(0, 80) || null, status: 'idea',
+        source: `Claude · generator · ${a.angle}`,
+        notes: angleNote(a.angle),
+        meta_flag: a.meta_flag.trim() || null,
         batch_id: batch?.id ?? null, created_by: by,
       }));
       const ins = await tb('ad_scripts').insert(rows).select(SCRIPT_COLS);
       if (ins.error) throw new Error(ins.error.message);
       const scripts = (ins.data ?? []) as AdScript[];
-      const hookRows = scripts.flatMap((sc, i) => r.ads[i].alt_hooks.map((t) => ({ text: t.slice(0, 500), script_id: sc.id, created_by: by })));
+      // Angle stocké sur chaque alt hook (colonne existante) + notes/source du script. Pas de doublon du hook principal.
+      const hookRows = scripts.flatMap((sc, i) => {
+        const angle = r.ads[i]?.angle ?? null;
+        return (r.ads[i]?.alt_hooks ?? []).map((t) => ({ text: t.slice(0, 500), angle, script_id: sc.id, created_by: by }));
+      });
       const hi = hookRows.length ? await tb('ad_hooks').insert(hookRows).select(HOOK_COLS) : { data: [], error: null };
       if (hi.error) throw new Error(hi.error.message);
-      return NextResponse.json({ ok: true, scripts, hooks: hi.data ?? [], costUsd: batch?.cost_usd ?? null, usage: await usageNow() });
+      return NextResponse.json({
+        ok: true, scripts, hooks: hi.data ?? [], costUsd: batch?.cost_usd ?? null, usage: await usageNow(),
+        compliance: { kept: r.kept, rejected: r.rejected, regenerated: r.regenerated },
+      });
     } catch (e) {
       if (!usage) await logCall('generate', params, by, null, 0, (e as Error).message).catch(() => {});
       return NextResponse.json({ error: (e as Error).message }, { status: 502 });
