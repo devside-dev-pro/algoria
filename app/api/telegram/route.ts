@@ -15,6 +15,7 @@ import { logFunnelEvent } from '@/lib/member/funnel';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
 import { extraMirrors } from '@/lib/channel/mirrors';
+import { recordMemberEvent } from '@/lib/channel/members';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
 export const maxDuration = 60; // 25 s jusqu'au 15/10/2026 : la réécriture d'un post du canal (lib/channel/cm.ts) appelle le modèle après la réponse
@@ -377,6 +378,9 @@ export async function POST(req: Request) {
   // On passe la ligne en 'accepted' (spotlight doré "GOT IN") ; si la demande date d'avant le webhook
   // (backlog), on l'insère directement en 'accepted' — les drops du backlog s'affichent donc aussi.
   const cm = update?.chat_member;
+  // 📊 MESURE DU CANAL (10/11/2026, lib/channel/members.ts) : entrées et départs des canaux publics, depuis ce même
+  // update chat_member (déjà reçu : rien de changé dans allowed_updates). Sans effet tant que la migration 0043 manque.
+  if (db && cm) await recordMemberEvent(db, cm).catch((e) => console.error('[telegram] member event:', (e as { message?: string })?.message ?? e));
   const becameMember = cm?.new_chat_member?.status === 'member' && ['left', 'kicked'].includes(cm?.old_chat_member?.status);
   if (db && becameMember && cm.new_chat_member.user) {
     const u = cm.new_chat_member.user;

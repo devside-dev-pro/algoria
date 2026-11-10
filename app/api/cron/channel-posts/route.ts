@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { sdb, verifySession, SESSION_COOKIE, isAdmin } from '@/lib/member/server';
 import { HOWTO, CTAS, planDay, planTarget, renderPlan, runDue, sendPlan } from '@/lib/channel/cm';
 import { tradingDayOf } from '@/lib/display/tradingDay';
+import { snapshotMembersIfDue } from '@/lib/channel/members';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,14 +22,16 @@ export async function GET(req: NextRequest) {
     const { data } = await db.from('channel_posts').select('*').eq('day', day).order('scheduled_at', { ascending: true });
     return NextResponse.json({ day, plan: renderPlan(day, data ?? []), howto: HOWTO, ctas: CTAS });
   }
-  if ((process.env.CHANNEL_CM ?? '').trim().toLowerCase() === 'off') return NextResponse.json({ ok: true, status: 'off' });
+  // 📊 la photo quotidienne des membres du canal (une fois par jour après 23:30 Paris), même si le CM est coupé
+  const members = await snapshotMembersIfDue(db).catch(() => 0);
+  if ((process.env.CHANNEL_CM ?? '').trim().toLowerCase() === 'off') return NextResponse.json({ ok: true, status: 'off', members });
   try {
     // le plan du lendemain à partir de 23h15 (Paris), sinon celui du jour s'il manque encore (premier jour, panne)
     const day = planTarget();
     const planned = await planDay(db, day);
     const dm = planned ? await sendPlan(db, day) : 0;
     const run = await runDue(db);
-    return NextResponse.json({ ok: true, day, planned, dm, ...run });
+    return NextResponse.json({ ok: true, day, planned, dm, members, ...run });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
