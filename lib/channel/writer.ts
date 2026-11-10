@@ -19,6 +19,7 @@ import { atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingTimeMs } from '@/lib/display/tradingDay';
 import { liveTrades } from './recap';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
+import { safeSlice, stripAppLines, wellFormed } from './text';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -96,7 +97,7 @@ export async function dayContext(db: Db, day: string): Promise<DayContext> {
   const ls = sum((d) => d === last);
   const wk = wd >= 2 && wd <= 5 ? sum((d) => d >= monday && d < day) : wd === 6 || wd === 0 ? sum((d) => d >= addDays(monday, 0) && d <= addDays(monday, 4)) : { trades: 0, net10: 0 };
   const questions = (qs as Array<{ detail: { from?: string; text?: string } | null }>)
-    .map((r) => (r.detail?.from === 'client' ? String(r.detail?.text ?? '') : '')).filter((t) => t.length > 8 && !t.startsWith('[')).slice(0, 40).map((t) => t.slice(0, 160).replace(/\s+/g, ' '));
+    .map((r) => (r.detail?.from === 'client' ? String(r.detail?.text ?? '') : '')).filter((t) => t.length > 8 && !t.startsWith('[')).slice(0, 40).map((t) => safeSlice(t, 160).replace(/\s+/g, ' '));
   // LE PLAN PART À 18h (23/10/2026) : la séance de la veille n'est pas finie quand on écrit le bonjour du lendemain. Un
   // chiffre partiel ne se cite pas (la soirée peut tout changer) : résultat de la veille et de la semaine seulement
   // si la séance est close (l'or ferme à 23h, Paris).
@@ -105,7 +106,7 @@ export async function dayContext(db: Db, day: string): Promise<DayContext> {
     day, dateLabel: longDate(day), weekend: wd === 0 || wd === 6, news,
     lastSession: closed && ls.trades && ls.net10 > 0 ? { day: last, ...ls } : null,
     week: closed && wk.trades && wk.net10 > 0 ? wk : null,
-    recent: [...(recentRows as Array<{ text: string | null }>), ...(recaps as Array<{ text: string | null }>)].map((r) => String(r.text ?? '').slice(0, 300)).filter(Boolean),
+    recent: [...(recentRows as Array<{ text: string | null }>), ...(recaps as Array<{ text: string | null }>)].map((r) => safeSlice(String(r.text ?? ''), 300)).filter(Boolean),
     questions,
   };
 }
@@ -145,7 +146,7 @@ HARD RULES (a post that breaks one is thrown away):
 - Never repeat an opening, a structure or a joke from the RECENT POSTS. Every post must feel written today, for today.
 
 OUTPUT: only a JSON object {"text": "..."} with the post (use \\n for line breaks). No comment before or after.
-${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu, the source of truth for facts):\n${knowledge.slice(0, AGENT_DOC_MAX)}` : ''}${memory ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS ON CHANNEL POSTS (in French; they win over everything except the hard rules; the later one wins):\n${memory.slice(0, 6000)}` : ''}`;
+${knowledge ? `\nMATHIEU'S KNOWLEDGE (written in French by Mathieu, the source of truth for facts):\n${safeSlice(knowledge, AGENT_DOC_MAX)}` : ''}${memory ? `\n\nLESSONS FROM MATHIEU'S CORRECTIONS ON CHANNEL POSTS (in French; they win over everything except the hard rules; the later one wins):\n${safeSlice(memory, 6000)}` : ''}`;
 }
 
 function contextBlock(c: DayContext): string {
@@ -243,7 +244,7 @@ export const guard = (raw: string, o: GuardOpts): string | null => { const r = c
 async function ask(system: string, user: string): Promise<string | null> {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   try {
-    const res = await new Anthropic().messages.create({ model: CM_MODEL(), max_tokens: 1200, system, messages: [{ role: 'user', content: user }] }, { timeout: 30_000, maxRetries: 0 });
+    const res = await new Anthropic().messages.create({ model: CM_MODEL(), max_tokens: 1200, system: wellFormed(system), messages: [{ role: 'user', content: wellFormed(user) }] }, { timeout: 30_000, maxRetries: 0 });
     const out = res.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('').trim();
     const j = out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1);
     const text = (JSON.parse(j) as { text?: unknown }).text;
@@ -342,7 +343,8 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
     const raw = await ask(sys, prompt);
     if (!raw) return null;
     // au 2e essai, un texte encore en pavé est aéré par le code plutôt que perdu (airify)
-    const r = check(b.kind === 'recap' ? raw.replace(/\n*👉\s*app\.algoria\.tech\s*$/i, '') : raw, { ...opts, fixLayout: attempt === 1 });
+    // le récap : la ligne « 👉 app… » est remise par le code (recap.ts, withAppLine), on retire celle du modèle
+    const r = check(b.kind === 'recap' ? stripAppLines(raw) : raw, { ...opts, fixLayout: attempt === 1 });
     if (r.ok) return times ? withTimes(r.text, times) : r.text;
     console.error(`[cm writer] ${b.kind} refusé (${r.why})`);
     prompt = `${user}\n\nYOUR PREVIOUS DRAFT WAS REJECTED BECAUSE ${r.why.toUpperCase()}. Write it again and fix that.\nPrevious draft:\n${raw}`;
@@ -351,3 +353,4 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
 }
 
 export { RISK as CM_RISK };
+export { stripAppLines };
