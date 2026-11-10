@@ -14,6 +14,7 @@ import { atRef } from '@/lib/display/scale';
 import { adminTgIds, notifyOwner } from '@/lib/member/notifyOwner';
 import { publishToChannels, sourceChannel } from '@/lib/channel/publish';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
+import { stripAppLines } from './text';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -187,6 +188,12 @@ export async function handleRecapCallback(db: Db, cq: { id: string; data?: strin
   return true;
 }
 
+/** Le corps du récap + UNE ligne « 👉 app.getalgoria.com » + la phrase de risque s'il y a des chiffres. Toute ligne
+ *  « 👉 app.… » déjà dans le corps est retirée d'abord (le lien en double du 28/10 au 09/11, voir lib/channel/text.ts). */
+export function withAppLine(body: string, risk: string | null): string {
+  return [stripAppLines(body), APP, ...(risk ? [risk] : [])].join('\n\n');
+}
+
 /** Le récap réécrit par le rédacteur du canal, ou tel quel si la réécriture échoue. */
 async function rewriteRecap(db: Db, r: Recap): Promise<Recap> {
   const { dayContext, writePost, CM_RISK } = await import('./writer');
@@ -196,5 +203,5 @@ async function rewriteRecap(db: Db, r: Recap): Promise<Recap> {
   const withFigures = ['win', 'record', 'week'].includes(r.kind);
   // le récap part en texte brut (échappé à la publication) : on retire le gras et on défait l'échappement du garde-fou
   const body = out.replace(/<\/?(?:b|i)>/g, '').replace(/&amp;/g, '&').replace('{{AMOUNTS}}', r.amounts ?? '').trim(); // « ✅ +$X at 0.01 lot · +$Y at 0.10 lot »
-  return { ...r, text: [body, APP, ...(withFigures ? [CM_RISK] : [])].join('\n\n') };
+  return { ...r, text: withAppLine(body, withFigures ? CM_RISK : null) };
 }
