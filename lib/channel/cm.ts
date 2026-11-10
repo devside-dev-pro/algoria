@@ -40,7 +40,7 @@ import { dayContext, writePost, type Brief, type DayContext } from './writer';
 import { atOneLot, atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs, tradingTimeMs } from '@/lib/display/tradingDay';
 import { APP_URL, SUPPORT_TG_URL } from '@/lib/member/i18n';
-import { LIVE_DM_LINE, saHour, seatLink, ukDay, ukHour, upcomingSessions, WEBINAR_PAGE, type WebinarSession } from '@/lib/member/webinar';
+import { LIVE_DM_LINE, seatLink, ukDay, upcomingSessions, WEBINAR_PAGE, webinarTimesBlock, webinarTimesInline, type WebinarSession } from '@/lib/member/webinar';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -171,11 +171,49 @@ const VIDEO_AT = '19:30';
 // tout de suite). Toujours deux boutons par jour au plus, et la rotation des CTA reprend le lendemain là où elle était.
 // Le bonjour de la veille et du jour J peut en dire un mot, sans bouton.
 // 'soon' = J-2 (26/10/2026, Mathieu : « il faut commencer à teaser le webinaire… prévenir tout le monde que y'a un webinaire
-// dans 2 jours ») : le mercredi s'annonce le lundi, le dimanche le vendredi
+// dans 2 jours ») : le mercredi s'annonce le lundi (un seul webinaire par semaine depuis le 10/11/2026)
 export type WbPhase = 'soon' | 'tomorrow' | 'today' | 'last';
 const WB_LAST_CALL_MS = 15 * 60_000;
-export function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal: string } {
-  const at = `${ukHour(s.starts_at)} UK time (${saHour(s.starts_at)} in South Africa)`;
+// 🌍 6 FUSEAUX ET DES ANNONCES QUI VARIENT (10/11/2026, Mathieu, via le CM : le canal sonne répétitif). L'heure est le
+// bloc de webinarTimesBlock (une ligne par fuseau, calculée par Intl) ; le rédacteur écrit le jeton {{TIMES}} et le code
+// le remplace (lib/channel/writer.ts) : il n'écrit jamais une heure lui-même. Le texte de secours change de gabarit selon
+// la session et la phase, pour ne pas reprendre la même formule à chaque annonce.
+const WB_OPEN: Record<'soon' | 'tomorrow' | 'today', Array<(when: string) => string>> = {
+  soon: [
+    (w) => `🎤 <b>${w}, I’m going live.</b>`,
+    (w) => `🎤 <b>Save the date: ${w}, live with me on Zoom.</b>`,
+    (w) => `🎤 <b>In 2 days, ${w}, I’m doing a live.</b>`,
+  ],
+  tomorrow: [
+    (w) => `🎤 <b>${w}, I’m going live.</b>`,
+    () => '🎤 <b>Tomorrow I’m live on Zoom, and I’d love to see you there.</b>',
+    (w) => `🎤 <b>See you tomorrow ? ${w.replace(/^Tomorrow, /, '')}, live on Zoom.</b>`,
+  ],
+  today: [
+    () => '🎤 <b>Tonight, I’m going live.</b>',
+    () => '🎤 <b>It’s today: I’m live on Zoom tonight.</b>',
+    () => '🎤 <b>Tonight’s the night, I’m going live with you.</b>',
+  ],
+};
+const WB_BODY = [
+  '45 minutes on Zoom, in English: how the AI trades gold, the real app on screen, real past results, and your questions.',
+  'On Zoom, in English, 45 minutes. I show you the real app, how the AI trades gold, real past results, and I answer you live.',
+  'Zoom, 45 minutes, in English. My story, the real app on screen, how the AI trades gold, and all your questions.',
+];
+const WB_GIFT = [
+  '🎁 Something reserved for the 10 people who are there live. Free, save your seat 👇',
+  '🎁 At the end, something for the 10 people who stay live. It’s free, save your seat 👇',
+  '🎁 Stay until the end, something is reserved for 10 people. Free seat below 👇',
+];
+const pick = <T,>(list: T[], key: string): T => {
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return list[h % list.length];
+};
+
+export function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal: string; times?: string } {
+  const times = webinarTimesBlock(s.starts_at);
+  const at = webinarTimesInline(s.starts_at);
   if (phase === 'last') {
     return {
       ...post('webinar-last', ['🔴 <b>We go live in 15 minutes.</b>', '', 'Zoom, 45 minutes, in English, with me.', 'Tap below, press START, and the Zoom link comes straight away 👇'], '🎥 JOIN THE LIVE', seatLink(s.id, 'channel')),
@@ -183,20 +221,21 @@ export function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal:
     };
   }
   const when = phase === 'soon' ? ukDay(s.starts_at) : phase === 'tomorrow' ? `Tomorrow, ${ukDay(s.starts_at)}` : 'Tonight';
+  const key = `${s.id}:${phase}`;
   return {
     ...post(`webinar-${phase}`, [
-      `🎤 <b>${when}, I’m going live.</b>`,
+      pick(WB_OPEN[phase], key)(when),
       '',
-      `${phase === 'soon' ? 'In 2 days, ' : ''}${at}, on Zoom, in English.`,
-      '45 minutes: how the AI trades gold, the real app on screen, real past results, and your questions.',
+      times,
       '',
-      '🎁 At the end, something reserved for the 10 people who are there live.',
+      pick(WB_BODY, `${key}:body`),
       '',
-      'Free. Save your seat 👇',
+      pick(WB_GIFT, `${key}:gift`),
       '',
       LIVE_DM_LINE,
     ], '🎤 SAVE MY SEAT', `${WEBINAR_PAGE}?src=channel`),
-    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'soon' ? `IN 2 DAYS, on ${ukDay(s.starts_at)}` : phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'}, at ${at}: 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now. Keep one line, in substance: or just DM @mathieu_algoria the single word LIVE (write LIVE in <b>bold</b>) and their seat is saved. One button only, the system adds it. No Zoom link in the text, no second button, no figure you were not given, nothing negative, no promise of gains`,
+    times,
+    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'soon' ? `IN 2 DAYS, on ${ukDay(s.starts_at)}` : phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'} (${at}): 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now. The time is shown in 6 time zones by the token {{TIMES}}: put it exactly once, alone in its own block, and never write an hour or a time zone yourself. Vary it: do not reuse the first line or the structure of the reference version or of the RECENT POSTS, first person, relaxed, short sentences. Keep one line, in substance: or just DM @mathieu_algoria the single word LIVE (write LIVE in <b>bold</b>) and their seat is saved. One button only, the system adds it. No Zoom link in the text, no second button, no figure you were not given, nothing negative, no promise of gains`,
   };
 }
 
@@ -268,8 +307,8 @@ export async function planDay(db: Db, day: string): Promise<number> {
       if (wbPick === 'today') wbFirst = at;
       if (wbPick === 'last') { wbLast = true; at = wbStart - WB_LAST_CALL_MS; }
       const w = webinarPost(wb, wbPick);
-      rows.push({ day, slot: s.slot, kind: 'cta', scheduled_at: new Date(at).toISOString(), status: 'draft', ref: w.id, text: w.text, button_text: w.btn, button_url: w.url, report: { webinar: wb.id, goal: w.goal } });
-      briefs.push({ kind: 'cta', goal: w.goal, reference: w.text, button: w.btn });
+      rows.push({ day, slot: s.slot, kind: 'cta', scheduled_at: new Date(at).toISOString(), status: 'draft', ref: w.id, text: w.text, button_text: w.btn, button_url: w.url, report: { webinar: wb.id, goal: w.goal, ...(w.times ? { times: w.times } : {}) } });
+      briefs.push({ kind: 'cta', goal: w.goal, reference: w.text, button: w.btn, ...(w.times ? { times: w.times } : {}) });
     } else if (s.kind === 'cta') {
       const fam = s.fam ?? 'app';
       const i = nextIn(CTAS, ci[fam], (c) => c.fam === fam && shown(c.id));
@@ -292,7 +331,7 @@ export async function planDay(db: Db, day: string): Promise<number> {
   // LA RÉDACTION : tous les posts du jour en parallèle (un appel chacun). Échec ou texte refusé par les garde-fous →
   // le texte de la banque ; pour le bonjour, pas de post (un bonjour en conserve, c'est ce qu'on veut éviter).
   const ctx = await dayContext(db, day).catch(() => null);
-  if (ctx && wb && wbPhase) ctx.webinar = `Mathieu's free live webinar on Zoom is ${wbPhase === 'today' ? 'TONIGHT' : wbPhase === 'tomorrow' ? `TOMORROW, ${ukDay(wb.starts_at)}` : `IN 2 DAYS, on ${ukDay(wb.starts_at)}`}, at ${ukHour(wb.starts_at)} UK time (${saHour(wb.starts_at)} in South Africa), 45 minutes in English. The announcement posts carry one button to save a seat, and one line: or just DM @mathieu_algoria the single word LIVE and the seat is saved. The final reminder (we go live in a few minutes) does not add that line. The morning post may mention the webinar in one warm line (no link, no button, no pointing below); other posts do not mention it. Never a Zoom link in the channel, never a second button, nothing negative, no promise of gains.`;
+  if (ctx && wb && wbPhase) ctx.webinar = `Mathieu's free live webinar on Zoom is ${wbPhase === 'today' ? 'TONIGHT' : wbPhase === 'tomorrow' ? `TOMORROW, ${ukDay(wb.starts_at)}` : `IN 2 DAYS, on ${ukDay(wb.starts_at)}`}, at ${webinarTimesInline(wb.starts_at)}, 45 minutes in English. The announcement posts carry one button to save a seat, and one line: or just DM @mathieu_algoria the single word LIVE and the seat is saved. The final reminder (we go live in a few minutes) does not add that line. The morning post may mention the webinar in one warm line (no link, no button, no pointing below); other posts do not mention it. Never a Zoom link in the channel, never a second button, nothing negative, no promise of gains.`;
   const written = ctx ? await Promise.all(briefs.map((b) => (b ? writePost(ctx, b).catch(() => null) : Promise.resolve(null)))) : briefs.map(() => null);
   for (let k = rows.length - 1; k >= 0; k--) {
     const rep = (rows[k].report as object | undefined) ?? {}; // garde le brief d'un CTA webinaire (briefOf)
@@ -520,8 +559,8 @@ function briefOf(r: Row): Brief | null {
   if (r.kind === 'morning') return { kind: 'morning' };
   if (r.kind === 'howto') { const p = HOWTO.find((x) => x.id === r.ref); return p ? { kind: 'howto', card: p.text } : null; }
   if (r.kind === 'qa') return { kind: 'qa' };
-  const wbGoal = (r.report as { goal?: string } | null)?.goal;
-  if (r.kind === 'cta' && r.ref?.startsWith('webinar-') && wbGoal) return { kind: 'cta', goal: wbGoal, reference: r.text ?? '', button: r.button_text ?? '' };
+  const { goal: wbGoal, times: wbTimes } = (r.report as { goal?: string; times?: string } | null) ?? {};
+  if (r.kind === 'cta' && r.ref?.startsWith('webinar-') && wbGoal) return { kind: 'cta', goal: wbGoal, reference: r.text ?? '', button: r.button_text ?? '', ...(wbTimes ? { times: wbTimes } : {}) };
   if (r.kind === 'cta') { const c = CTAS.find((x) => x.id === r.ref); return c ? { kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn } : null; }
   return null;
 }
