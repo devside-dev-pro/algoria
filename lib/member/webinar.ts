@@ -75,11 +75,71 @@ export async function notifyNoUpcomingWebinar(chatId: number): Promise<void> {
   await send(chatId, NO_UPCOMING_WEBINAR);
 }
 
+/** L'heure 'HH:MM' (24 h) d'un instant dans un fuseau IANA : l'heure d'été vient d'Intl, jamais d'un décalage codé en dur. */
+export const hourIn = (at: string, timeZone: string) => new Date(at).toLocaleTimeString('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+/** Le jour de la semaine d'un instant dans un fuseau IANA (« Thursday », ou « Thu » en court). */
+export const weekdayIn = (at: string, timeZone: string, style: 'long' | 'short' = 'long') => new Date(at).toLocaleDateString('en-GB', { timeZone, weekday: style });
+/** La date locale 'YYYY-MM-DD' d'un instant dans un fuseau IANA. */
+const dateIn = (at: string, timeZone: string) => new Date(at).toLocaleDateString('en-CA', { timeZone });
+
 /** « Wednesday 28 October » et « 19:00 », à l'heure du Royaume-Uni (le public : UK, Afrique du Sud…). */
 export const ukDay = (at: string) => new Date(at).toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long' });
-export const ukHour = (at: string) => new Date(at).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+export const ukHour = (at: string) => hourIn(at, 'Europe/London');
 /** L'heure en Afrique du Sud, le 2e public (« 21:00 in South Africa »). */
-export const saHour = (at: string) => new Date(at).toLocaleTimeString('en-GB', { timeZone: 'Africa/Johannesburg', hour: '2-digit', minute: '2-digit' });
+export const saHour = (at: string) => hourIn(at, 'Africa/Johannesburg');
+
+// 🌍 LES 6 FUSEAUX DU WEBINAIRE (10/11/2026, Mathieu, via le CM : « UK/IE, Italie/Europe centrale, Afrique du Sud/Israël,
+// Dubaï, Sydney et NZ, avec le jour »). Toujours calculés par Intl avec les fuseaux IANA : l'heure d'été (Londres, Rome,
+// Israël, Sydney, Auckland) suit d'elle-même. L'Afrique du Sud (UTC+2 toute l'année) et Israël (UTC+3 l'été) ne sont pas
+// toujours à la même heure : une seule ligne quand c'est la même, deux lignes sinon. Sydney et la Nouvelle-Zélande
+// donnent toujours leur jour (la session du soir en Europe tombe le lendemain matin là-bas) ; les autres seulement si
+// leur date locale n'est pas celle du Royaume-Uni.
+export type WebinarZone = { flag: string; label: string; tz: string; day?: boolean };
+export const WEBINAR_ZONES: WebinarZone[][] = [
+  [
+    { flag: '🇬🇧', label: 'UK & Ireland', tz: 'Europe/London' },
+    { flag: '🇮🇹', label: 'Italy & Central Europe', tz: 'Europe/Rome' },
+    { flag: '🇿🇦', label: 'South Africa', tz: 'Africa/Johannesburg' },
+    { flag: '🇮🇱', label: 'Israel', tz: 'Asia/Jerusalem' },
+  ],
+  [
+    { flag: '🇦🇪', label: 'Dubai', tz: 'Asia/Dubai' },
+    { flag: '🇦🇺', label: 'Sydney', tz: 'Australia/Sydney', day: true },
+    { flag: '🇳🇿', label: 'New Zealand', tz: 'Pacific/Auckland', day: true },
+  ],
+];
+export type WebinarTime = { flag: string; label: string; time: string; day: string | null };
+
+/** Les heures du webinaire, groupe par groupe (Europe/Afrique/Moyen-Orient, puis Golfe/Pacifique). */
+export function webinarTimes(at: string): WebinarTime[][] {
+  const ukD = dateIn(at, 'Europe/London');
+  const one = (z: WebinarZone): WebinarTime => ({
+    flag: z.flag, label: z.label, time: hourIn(at, z.tz),
+    day: z.day || dateIn(at, z.tz) !== ukD ? weekdayIn(at, z.tz, 'short') : null,
+  });
+  return WEBINAR_ZONES.map((group) => {
+    const out: WebinarTime[] = [];
+    for (const z of group) {
+      const t = one(z);
+      const prev = out[out.length - 1];
+      // Afrique du Sud et Israël à la même heure, le même jour : une seule ligne
+      if (z.tz === 'Asia/Jerusalem' && prev && prev.label === 'South Africa' && prev.time === t.time && prev.day === t.day) {
+        out[out.length - 1] = { ...prev, flag: `${prev.flag}${t.flag}`, label: 'South Africa & Israel' };
+      } else out.push(t);
+    }
+    return out;
+  });
+}
+
+const timeText = (t: WebinarTime) => `${t.day ? `${t.day} ` : ''}${t.time}`;
+/** Le bloc du canal : une ligne par fuseau, deux blocs séparés par une ligne vide (jamais plus de 5 lignes par bloc,
+ *  la règle d'air du rédacteur). Ex. « 🇬🇧 UK & Ireland: 19:00 » … « 🇦🇺 Sydney: Thu 06:00 ». */
+export const webinarTimesBlock = (at: string): string =>
+  webinarTimes(at).map((g) => g.map((t) => `${t.flag} ${t.label}: ${timeText(t)}`).join('\n')).join('\n\n');
+/** La même chose sur une ligne, pour les consignes du rédacteur. */
+export const webinarTimesInline = (at: string): string =>
+  webinarTimes(at).flat().map((t) => `${timeText(t)} ${t.label}`).join(', ');
+
 const ukDate = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 /** « tonight », « tomorrow », « on Wednesday » : le jour de la session vu d'aujourd'hui (Royaume-Uni). */
 export function relDay(at: string, now = Date.now()): string {
@@ -89,11 +149,19 @@ export function relDay(at: string, now = Date.now()): string {
   return `on ${new Date(at).toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long' })}`;
 }
 
+/** La session tombe-t-elle sur un jour de WEEKLY (jour de la semaine au Royaume-Uni) ? Les dimanches déjà créés en base
+ *  avant le 10/11/2026 (ensureSessions crée 8 jours à l'avance) sont désactivés par retireOffSchedule au premier passage
+ *  de la cron ; d'ici là, upcomingSessions les écarte déjà (canal, page, support). */
+export const isWeeklySlot = (at: string): boolean => {
+  const wd = new Date(`${new Date(at).toLocaleDateString('en-CA', { timeZone: 'Europe/London' })}T12:00:00Z`).getUTCDay();
+  return WEEKLY.some((w) => w.weekday === wd);
+};
+
 /** Les prochaines sessions ouvertes à l'inscription, la plus proche d'abord. */
 export async function upcomingSessions(db: Db, limit = 2): Promise<WebinarSession[]> {
   const { data } = await db.from('webinar_sessions').select('id,starts_at,zoom_url').eq('active', true)
-    .gt('starts_at', iso(Date.now() - LATE_JOIN_MS)).order('starts_at', { ascending: true }).limit(limit);
-  return (data ?? []) as WebinarSession[];
+    .gt('starts_at', iso(Date.now() - LATE_JOIN_MS)).order('starts_at', { ascending: true }).limit(limit + 2);
+  return ((data ?? []) as WebinarSession[]).filter((s) => isWeeklySlot(s.starts_at)).slice(0, limit);
 }
 
 type Button = { text: string; url: string };
@@ -323,8 +391,10 @@ async function reminderReport(db: Db, s: WebinarSession, st: { col: string; tag:
 // n'est jamais recréée. Mathieu pilote en écrivant au bot (handleWebinarAdmin) : « webinar » pour l'état, « webinar
 // off / on », « webinar invites on / off », « webinar skip », « webinar zoom <lien> ».
 
-/** Les webinaires de chaque semaine, heure du Royaume-Uni (0 = dimanche, 3 = mercredi). */
-const WEEKLY: Array<{ weekday: number; at: string }> = [{ weekday: 3, at: '19:00' }, { weekday: 0, at: '19:00' }];
+/** Les webinaires de chaque semaine, heure du Royaume-Uni (0 = dimanche, 3 = mercredi).
+ *  UN SEUL PAR SEMAINE, LE MERCREDI (10/11/2026, Mathieu : le dimanche est supprimé, pas assez de demande). L'heure du
+ *  mercredi ne change pas. */
+export const WEEKLY: Array<{ weekday: number; at: string }> = [{ weekday: 3, at: '19:00' }];
 const AHEAD_DAYS = 8;
 /** Le premier webinaire (Mathieu : mercredi 28/10) : aucune session automatique avant. */
 const FIRST_DAY = '2026-10-28';
@@ -348,8 +418,22 @@ function ukTimeMs(day: string, hhmm: string): number {
   return naive - londonOffsetMin(naive - londonOffsetMin(naive) * 60_000) * 60_000;
 }
 
+/** Désactive (active = false) les sessions À VENIR qui ne tombent plus sur un jour de WEEKLY : les dimanches créés avant
+ *  le 10/11/2026. Plus d'invitation, plus de rappel, plus d'inscription pour elles ; Mathieu est prévenu (avec le nombre
+ *  d'inscrits, pour qu'il puisse les prévenir lui-même s'il y en a). */
+export async function retireOffSchedule(db: Db, now = Date.now()): Promise<string[]> {
+  const { data } = await db.from('webinar_sessions').select('id,starts_at').eq('active', true).gt('starts_at', iso(now));
+  const off = ((data ?? []) as Array<{ id: string; starts_at: string }>).filter((s) => !isWeeklySlot(s.starts_at)).map((s) => s.id);
+  if (!off.length) return [];
+  await db.from('webinar_sessions').update({ active: false }).in('id', off);
+  const { count } = await db.from('webinar_registrations').select('tg_id', { count: 'exact', head: true }).in('session_id', off);
+  await notifyOwner({ title: `🎤 Webinaire du dimanche retiré (${off.join(', ')})`, lines: ['Un seul webinaire par semaine désormais, le mercredi.', `${count ?? 0} inscrit${(count ?? 0) > 1 ? 's' : ''} sur ${off.length > 1 ? 'ces sessions' : 'cette session'} (aucun message envoyé).`], tag: 'webinar' }).catch(() => undefined);
+  return off;
+}
+
 /** Crée les sessions des 8 prochains jours qui manquent (rien si Mathieu a coupé les webinaires). Appelé par la cron. */
 export async function ensureSessions(db: Db): Promise<number> {
+  await retireOffSchedule(db).catch(() => []); // le dimanche supprimé (10/11/2026), même si les webinaires sont coupés
   if ((await setting(db, 'webinars', 'on')) === 'off') return 0;
   const now = Date.now();
   const want: Array<{ id: string; starts_at: string }> = [];
@@ -568,7 +652,7 @@ export async function handleWebinarAdmin(db: Db, msg: any): Promise<boolean> {
   let note = '';
   if (/^(off|on)$/i.test(arg)) {
     await setSetting(db, 'webinars', arg.toLowerCase(), by);
-    note = arg.toLowerCase() === 'on' ? '✅ Webinaires automatiques rallumés : les sessions se recréent chaque mercredi et dimanche.' : '⏸ Webinaires automatiques coupés : plus aucune nouvelle session. Celles déjà prévues restent (« webinar skip » pour annuler la prochaine).';
+    note = arg.toLowerCase() === 'on' ? '✅ Webinaires automatiques rallumés : les sessions se recréent chaque mercredi.' : '⏸ Webinaires automatiques coupés : plus aucune nouvelle session. Celles déjà prévues restent (« webinar skip » pour annuler la prochaine).';
   } else if (/^invit\w*\s+(on|off)$/i.test(arg)) {
     const v = /on$/i.test(arg) ? 'on' : 'off';
     await setSetting(db, 'webinar_invites', v, by);

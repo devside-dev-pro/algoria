@@ -315,7 +315,8 @@ export type Brief =
   | { kind: 'qa' }
   | { kind: 'story' }
   | { kind: 'lesson'; card: string }
-  | { kind: 'cta'; goal: string; reference: string; button: string }
+  // times : le bloc des heures du webinaire (6 fuseaux, lib/member/webinar.ts), écrit par le code à la place de {{TIMES}}
+  | { kind: 'cta'; goal: string; reference: string; button: string; times?: string }
   | { kind: 'trade'; facts: TradeFacts }
   | { kind: 'recap'; recapKind: 'win' | 'record' | 'week' | 'quiet' | 'red'; trades: number; wins: number; liveMembers: number[]; weekLabel?: string }
   // anciens noms (plans d'avant le 10/11/2026, encore corrigeables par une réponse au message du plan)
@@ -348,10 +349,12 @@ FACT CARD:
 ${stripRisk((b as Extract<Brief, { kind: 'lesson' }>).card)}`,
   cta: (b) => {
     const x = b as Extract<Brief, { kind: 'cta' }>;
-    return `Write a short post that invites people to act. 2 or 3 short blocks (4 lines of text at most). Goal: ${x.goal}
-The button "${x.button}" is added under the post by the system. You may refer to it once, naturally, in your own words, but never "tap below" and never end with 👇. It must read like Mathieu, not like an ad.
+    // la version de référence porte le jeton à la place des heures : le modèle le recopie au lieu de réécrire les heures
+    const reference = x.times ? x.reference.split(x.times).join('{{TIMES}}') : x.reference;
+    return `Write a short post that invites people to act. 2 or 3 short blocks (4 lines of text at most${x.times ? ', not counting the {{TIMES}} block' : ''}). Goal: ${x.goal}
+The button "${x.button}" is added under the post by the system. You may refer to it once, naturally, in your own words, but never "tap below" and never end with 👇. It must read like Mathieu, not like an ad.${x.times ? '\nPut the token {{TIMES}} exactly once, alone in its own block (an empty line before and after): the system replaces it with the time in 6 time zones. Never write an hour, a weekday for another country or a time zone yourself.' : ''}
 Facts you may use are in this reference version (do not copy its wording, its opening or its emojis):
-${stripRisk(x.reference)}`;
+${stripRisk(reference)}`;
   },
   // LE TRADE COMMENTÉ (écrit à l'heure de la publication, sur un vrai trade clos)
   trade: (b) => {
@@ -380,6 +383,10 @@ Do not write the app link nor the risk sentence: the system adds them.`;
   morning: () => BRIEFS.backstage({ kind: 'backstage', photo: true }),
   howto: (b) => BRIEFS.lesson({ kind: 'lesson', card: (b as Extract<Brief, { kind: 'howto' }>).card }),
 };
+
+/** Remplace le jeton {{TIMES}} (une seule fois, garanti par `required`) par le bloc des 6 fuseaux, comme un bloc à part. */
+export const withTimes = (text: string, times: string): string =>
+  text.replace(/[ \t]*\{\{TIMES\}\}[ \t]*/, `\n${times}\n`).replace(/\n{3,}/g, '\n\n').trim();
 
 /** Les options du garde-fou pour un brief, avec le guide de ton du jour. */
 function optsFor(c: DayContext, b: Brief, tokens: Record<string, string>, extraOpenings: string[] = []): GuardOpts {
@@ -414,10 +421,15 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
   if (c.lastSession) tokens.YESTERDAY = amountsLine(c.lastSession.net10);
   if (c.week) tokens.WEEK = amountsLine(c.week.net10);
   if (extra?.result) tokens.RESULT = extra.result;
-  const user = `${contextBlock(c)}\n\nTASK:\n${BRIEFS[b.kind](b)}${extra?.previous ? `\n\nTHE CURRENT VERSION OF THIS POST:\n${extra.previous}` : ''}${extra?.instruction ? `\n\nMATHIEU ASKS (in French) FOR THIS CHANGE, apply it while keeping the rules:\n${extra.instruction}` : ''}`;
+  // 🌍 les heures du webinaire (6 fuseaux) : jeton {{TIMES}} obligatoire, remplacé par le code APRÈS les garde-fous
+  // (comme {{AMOUNTS}} dans le récap) ; le bloc vient d'Intl, il ne compte donc pas dans la longueur écrite par le modèle
+  const times = b.kind === 'cta' && b.times ? b.times : null;
+  const previous = extra?.previous && times ? extra.previous.split(times).join('{{TIMES}}') : extra?.previous;
+  const user = `${contextBlock(c)}\n\nTASK:\n${BRIEFS[b.kind](b)}${previous ? `\n\nTHE CURRENT VERSION OF THIS POST:\n${previous}` : ''}${extra?.instruction ? `\n\nMATHIEU ASKS (in French) FOR THIS CHANGE, apply it while keeping the rules:\n${extra.instruction}` : ''}`;
   // une correction de Mathieu réécrit SON post : sa propre ouverture ne compte pas comme une répétition
   const own = extra?.previous ? firstLine(extra.previous) : '';
   const opts = optsFor(c, b, tokens, extra?.openings ?? []);
+  if (times) { opts.tokens = { ...opts.tokens, TIMES: '{{TIMES}}' }; opts.required = [...(opts.required ?? []), 'TIMES']; }
   if (own && opts.tone?.openings) opts.tone.openings = opts.tone.openings.filter((o) => o !== own);
   const sys = await systemPrompt();
   // deux essais : un texte refusé par les garde-fous repart au modèle avec la raison du refus
@@ -428,7 +440,7 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
     // au 2e essai, un texte encore en pavé est aéré par le code plutôt que perdu (airify)
     // le récap : la ligne « 👉 app… » est remise par le code (recap.ts, withAppLine), on retire celle du modèle
     const r = check(b.kind === 'recap' ? stripAppLines(raw) : raw, { ...opts, fixLayout: attempt === 1 });
-    if (r.ok) return r.text;
+    if (r.ok) return times ? withTimes(r.text, times) : r.text;
     console.error(`[cm writer] ${b.kind} refusé (${r.why})`);
     prompt = `${user}\n\nYOUR PREVIOUS DRAFT WAS REJECTED BECAUSE ${r.why.toUpperCase()}. Write it again and fix that.\nPrevious draft:\n${raw}`;
   }
