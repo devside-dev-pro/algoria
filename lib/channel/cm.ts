@@ -37,6 +37,7 @@ import { adminTgIds } from '@/lib/member/notifyOwner';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { appendAgentMemory } from '@/lib/member/agentDocs';
 import { dayContext, writePost, type Brief, type DayContext } from './writer';
+import { safeSlice, wellFormed } from './text';
 import { atOneLot, atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs, tradingTimeMs } from '@/lib/display/tradingDay';
 import { APP_URL, SUPPORT_TG_URL } from '@/lib/member/i18n';
@@ -324,14 +325,14 @@ async function videoIdea(db: Db): Promise<string | null> {
   const { data } = await db.from('member_actions').select('detail').eq('kind', 'biz_msg').gte('created_at', new Date(Date.now() - 7 * 86_400_000).toISOString())
     .order('created_at', { ascending: false }).limit(300);
   const msgs = ((data ?? []) as Array<{ detail: { from?: string; text?: string } | null }>)
-    .map((r) => (r.detail?.from === 'client' ? String(r.detail?.text ?? '') : '')).filter((t) => t.length > 8 && !t.startsWith('[')).map((t) => t.slice(0, 300));
+    .map((r) => (r.detail?.from === 'client' ? String(r.detail?.text ?? '') : '')).filter((t) => t.length > 8 && !t.startsWith('[')).map((t) => safeSlice(t, 300));
   if (msgs.length < 5) return null;
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const res = await new Anthropic().messages.create({
     model: process.env.ALGORIA_CM_MODEL ?? 'claude-haiku-4-5-20251001',
     max_tokens: 100,
     system: 'You read messages that prospects sent to the founder of Algoria, an AI that trades gold and is copied on members\' own broker accounts. Find the ONE concrete question that comes up most often and that a 30-second video answer would settle. Reply with that question only, in English, under 15 words. No names, no account numbers, no amounts. If nothing stands out, reply NONE.',
-    messages: [{ role: 'user', content: msgs.join('\n---\n').slice(0, 30000) }],
+    messages: [{ role: 'user', content: wellFormed(safeSlice(msgs.join('\n---\n'), 30000)) }],
   });
   const out = res.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('').trim().replace(/^["«]|["»]$/g, '');
   return !out || /^none\b/i.test(out) || out.length > 160 ? null : out;
