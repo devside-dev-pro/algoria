@@ -34,6 +34,7 @@ import { detectCountry } from './countries';
 import { HISTORY_LOSS_NOTE, INCIDENT, INCIDENT_ESCALATE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, incidentReplyNote, resultsPolicy, wasAffected } from './incident';
 import { isLiveKeyword, liveSeatReply, upcomingSessions } from './webinar';
 import type { Conn } from './businessInbox';
+import { FAQ_KIND, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, classifyFaq, faqCardButton, faqKeyboard, faqRecentlySent, faqSentTo, faqVoiceDecision, isFaqTopic, parseAssetCallback, pickFaqVoice, tagFaqVoice, type FaqDecision, type FaqTopic } from './faqVoice';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -589,6 +590,11 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   }
   if (country || base.hot_at) await db.from('member_actions').update({ detail: base }).eq('id', last.id);
   const extra = { country, voiced, introduced, hot, images: images.length };
+  // 🎙 LE THÈME FAQ (10/11/2026, lib/member/faqVoice.ts) : noté sur son message dès qu'il est reconnu avec une confiance
+  // haute, vocal envoyé ou non (la mesure compare « vocal » et « texte seul » sur le même thème, migration 0042)
+  const faqClass = classifyFaq(joined);
+  const faqTopic = faqClass.topic && faqClass.confidence >= FAQ_MIN_CONFIDENCE ? faqClass.topic : null;
+  if (faqTopic) base = { ...base, faq_topic: faqTopic, faq_conf: faqClass.confidence };
 
   if (!draft) {
     // Reply vide après l'accueil, sur un bonjour ou une question que l'intro couvrira : on n'envoie rien et on ne
@@ -622,6 +628,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   }
 
   const { data: recentAuto } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', 'auto').gte('created_at', iso(Date.now() - 3_600_000)).limit(MAX_AUTO_PER_HOUR + 1);
+  // le plafond horaire compte aussi les vocaux FAQ partis seuls (requête à part : celle d'au-dessus ne change pas)
+  const { data: recentFaq } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>via', FAQ_KIND).gte('created_at', iso(Date.now() - 3_600_000)).limit(MAX_AUTO_PER_HOUR + 1);
   // 🚨 INCIDENT DU 21-22/10 (lib/member/incident.ts). Depuis le 24/10, la nuit a sa réponse d'attente, rédigée avec les
   // mots de Mathieu ; elle arrive chez lui en PROPOSITION (Mathieu : « au moins qu'il m'envoie les propositions de
   // réponses »), un tap pour l'envoyer. Un retrait, une arnaque, un avocat : à lui, sans proposition imposée.
@@ -643,12 +651,39 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     // entre l'accueil et son intro : jamais de lien broker ni de montant de dépôt (20/10/2026, Riyaz)
     : welcomed && !stepDone && !introduced && !directAsk && BEFORE_INTRO.test(draft.text) ? 'lien broker ou dépôt avant son intro (il n’a pas encore dit d’où il vient)'
     : media.length ? `il a aussi envoyé ${media.join(', ')}`
-    : (recentAuto ?? []).length >= MAX_AUTO_PER_HOUR ? 'beaucoup de réponses automatiques dans l’heure'
+    : (recentAuto ?? []).length + (recentFaq ?? []).length >= MAX_AUTO_PER_HOUR ? 'beaucoup de réponses automatiques dans l’heure'
     : !conn.canReply ? 'droit « Reply to messages » coupé dans Telegram Business'
     : null;
-  if (why) {
-    await reviewCard(db, conn, last.id, base, member, draft.text, why);
-    return { status: 'done', result: { outcome: 'review', reason: why, ...extra } };
+  // 🎙 LE VOCAL FAQ : seulement si le thème est sûr ET que la réponse serait de toute façon partie seule (aucun garde-fou
+  // ci-dessus n'est relâché : une carte reste une carte, avec un bouton « 🎙 Envoyer le vocal » pour Mathieu)
+  let faq: FaqDecision = { mode: 'none', topic: faqTopic, reason: faqClass.reason ?? '' };
+  const faqAsset = faqTopic ? await pickFaqVoice(db, faqTopic).catch(() => null) : null;
+  if (faqTopic) {
+    const sentFaq = faqAsset ? await faqSentTo(db, job.tg_id).catch(() => []) : [];
+    faq = faqVoiceDecision(faqClass, {
+      modelSure: draft.auto, reviewReason: why, webinarLead, beforeIntro: welcomed && !stepDone && !introduced, introJustSent: voiced || introduced,
+      brokerLinkAsk: directAsk, hasMedia: images.length > 0 || media.length > 0, assetExists: !!faqAsset, recentlySent: faqRecentlySent(sentFaq, faqTopic),
+    });
+  }
+  const faqExtra = faqTopic ? { faq_topic: faqTopic, faq_mode: faq.mode, faq_reason: faq.reason } : {};
+  if (why || faq.mode === 'card') {
+    await reviewCard(db, conn, last.id, base, member, draft.text, why ?? `🎙 vocal FAQ à valider (${faq.reason})`);
+    if (faq.mode === 'card' && faqAsset && faq.topic) {
+      await tg('sendMessage', { chat_id: conn.userChatId, text: `🎙 Ton vocal FAQ « ${FAQ_LABELS[faq.topic]} » colle à sa question. Un tap l’envoie dans sa conversation, avec la ligne :\n« ${FAQ_LINES[faq.topic]} »`, disable_web_page_preview: true, reply_markup: faqCardButton(faqAsset.id, last.id, faq.topic) }).catch(() => null);
+    }
+    return { status: 'done', result: { outcome: 'review', reason: why ?? faq.reason, ...extra, ...faqExtra } };
+  }
+  if (faq.mode === 'auto' && faqAsset && faq.topic) {
+    // il a réécrit pendant la rédaction : la réponse suivante reprend tout (comme pour le texte)
+    const { data: newerF } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', last.created_at).limit(1);
+    if (newerF?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...extra, ...faqExtra } };
+    const sent = await sendFaqVoice(db, { id: last.id, tg_id: job.tg_id, member_no: member?.member_no ?? null, detail: { ...base, conn: job.conn } }, faq.topic, faqAsset, 'algoria-ai', draft.text);
+    if (sent === null) {
+      await markRead(conn, job.conn, job.tg_id, last);
+      return { status: 'done', result: { outcome: 'auto', via: FAQ_KIND, topic: faq.topic, asset_id: faqAsset.id, ...extra, ...faqExtra } };
+    }
+    // vocal refusé par Telegram : la réponse écrite habituelle part à la place
+    base = { ...base, faq_error: sent };
   }
   // part seule, depuis le compte de Mathieu, après un « en train d'écrire… » réaliste
   await tg('sendChatAction', { business_connection_id: job.conn, chat_id: job.tg_id, action: 'typing' });
@@ -666,7 +701,41 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     return { status: 'done', result: { outcome: 'review', reason: err, ...extra } };
   }
   await markRead(conn, job.conn, job.tg_id, last);
-  return { status: 'done', result: { outcome: 'auto', chars: draft.text.length, ...extra } };
+  return { status: 'done', result: { outcome: 'auto', chars: draft.text.length, ...extra, ...faqExtra } };
+}
+
+/** 🎙 Envoie le vocal FAQ puis sa ligne fixe, DEPUIS le compte de Mathieu, et l'enregistre : une ligne via='faq_voice'
+ *  (topic, asset_id) pour la mesure et l'anti-spam, une ligne via='faq_voice_line' pour le texte. null = parti. */
+async function sendFaqVoice(
+  db: Db,
+  row: { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> },
+  topic: FaqTopic,
+  asset: { id: number; file_id: string; uses: number | null },
+  by: string,
+  draftText: string | null,
+): Promise<string | null> {
+  const { tg } = await import('./businessInbox');
+  const d = row.detail ?? {};
+  const biz = { business_connection_id: String(d.conn ?? ''), chat_id: row.tg_id };
+  await tg('sendChatAction', { ...biz, action: 'record_voice' });
+  await sleep(3000);
+  const v = await tg('sendVoice', { ...biz, voice: asset.file_id });
+  if (!v.ok) return v.description ?? 'vocal refusé';
+  const now = iso(Date.now());
+  await db.from('member_actions').insert({ tg_id: row.tg_id, member_no: row.member_no, kind: BIZ_KIND, status: 'done', done_by: by, detail: { from: 'owner', via: FAQ_KIND, text: `[faq voice note: ${topic}]`, topic, asset_id: asset.id, voice: asset.id, conn: biz.business_connection_id } });
+  await db.from('support_assets').update({ last_used_at: now, uses: Number(asset.uses ?? 0) + 1 }).eq('id', asset.id);
+  await sleep(2000);
+  await tg('sendChatAction', { ...biz, action: 'typing' });
+  await sleep(1500);
+  const line = FAQ_LINES[topic];
+  const r = await tg('sendMessage', { ...biz, text: line, disable_web_page_preview: true });
+  if (r.ok) await db.from('member_actions').insert({ tg_id: row.tg_id, member_no: row.member_no, kind: BIZ_KIND, status: 'done', done_by: by, detail: { from: 'owner', via: 'faq_voice_line', text: line, topic, asset_id: asset.id, conn: biz.business_connection_id } });
+  await db.from('member_actions').update({ detail: {
+    ...d, answered_at: now, owner_reply: r.ok ? line : `[faq voice note: ${topic}]`, draft_intent: FAQ_KIND,
+    faq_topic: topic, faq_arm: 'voice', faq_asset: asset.id, ...(draftText ? { draft: draftText } : {}),
+    ...(by !== 'algoria-ai' ? { draft_sent_at: now, draft_sent_by: by } : {}), ...(r.ok ? {} : { faq_line_error: r.description ?? 'refusé' }),
+  } }).eq('id', row.id);
+  return null;
 }
 
 /** Pas de réponse 2 h après l'accueil et pas de compte : le lien de l'app part quand même (une fois). */
@@ -872,13 +941,15 @@ type AssetRow = { id: number; kind?: string | null; situation?: string | null; l
 
 /** Les boutons sous une bulle (public, langue) ou sous un vocal (ses pays, plusieurs possibles). ✓ = choix actuel. */
 export function assetKeyboard(a: AssetRow) {
+  if (a.kind === FAQ_KIND) return faqKeyboard(a);
   if (a.active === false) return { inline_keyboard: [[{ text: '↩️ Remettre dans la bibliothèque', callback_data: `sa:${a.id}:on` }]] };
   if (a.kind === 'country_voice') {
     const on = new Set(a.countries ?? []);
     const btns = VOICE_COUNTRIES.map(([cc, label]) => ({ text: `${on.has(cc) ? '✓ ' : ''}${flagOf(cc)} ${label}`, callback_data: `sa:${a.id}:c:${cc}` }));
     const rows: Array<Array<{ text: string; callback_data: string }>> = [];
     for (let k = 0; k < btns.length; k += 3) rows.push(btns.slice(k, k + 3));
-    rows.push([{ text: '🗑 Retirer', callback_data: `sa:${a.id}:x` }]);
+    // 🎙 un vocal peut aussi être une réponse FAQ (10/11/2026) : ce bouton bascule vers les thèmes
+    rows.push([{ text: '❓ C’est un vocal FAQ', callback_data: `sa:${a.id}:faq` }, { text: '🗑 Retirer', callback_data: `sa:${a.id}:x` }]);
     return { inline_keyboard: rows };
   }
   const sit = a.situation ?? 'all', lg = a.lang ?? 'en';
@@ -897,6 +968,8 @@ async function libraryLine(db: Db): Promise<string> {
   const all = (data ?? []) as Array<{ kind: string; situation: string | null; lang: string | null; countries: string[] | null }>;
   const videos = all.filter((a) => a.kind === 'welcome_video');
   const voices = all.filter((a) => a.kind === 'country_voice');
+  const faqs = all.filter((a) => a.kind === FAQ_KIND && isFaqTopic(a.situation));
+  const faqCovered = new Set(faqs.map((a) => a.situation));
   const by = (Object.keys(SITUATIONS) as Situation[]).map((k) => {
     const n = videos.filter((a) => (a.situation ?? 'all') === k);
     return n.length ? `${SITUATIONS[k]} : ${n.length}${n.some((a) => a.lang === 'it') ? ` (dont ${n.filter((a) => a.lang === 'it').length} 🇮🇹)` : ''}` : null;
@@ -905,6 +978,7 @@ async function libraryLine(db: Db): Promise<string> {
   return [
     videos.length ? `🎥 ${videos.length} bulle${videos.length > 1 ? 's' : ''} d’accueil · ${by.join(' · ')}` : '🎥 Aucune bulle d’accueil.',
     voices.length ? `🎙 ${voices.length} ${voices.length > 1 ? 'vocaux' : 'vocal'} pays · ${covered.length ? covered.map(flagOf).join(' ') : 'aucun pays choisi'}` : '🎙 Aucun vocal pays.',
+    `❓ Vocaux FAQ : ${faqCovered.size}/${FAQ_TOPICS.length} thèmes${faqCovered.size < FAQ_TOPICS.length ? ` · manquent : ${FAQ_TOPICS.filter((t) => !faqCovered.has(t)).map((t) => FAQ_LABELS[t]).join(', ')}` : ''}`,
   ].join('\n');
 }
 
@@ -920,15 +994,23 @@ export async function handleSupportVideo(db: Db, msg: any): Promise<boolean> {
   const { error } = await db.from('support_assets').insert({ kind, file_id: v.file_id, file_unique_id: v.file_unique_id, chat_id: Number(msg.chat.id), message_id: Number(msg.message_id) });
   const dup = error && /duplicate|unique/i.test(error.message);
   // renvoyé après un « retire » : il revient dans la rotation
-  if (dup) await db.from('support_assets').update({ active: true }).eq('file_unique_id', v.file_unique_id);
+  if (dup) {
+    // un vocal FAQ renvoyé reprend son thème : l'autre vocal actif du même thème est désactivé d'abord (un seul par thème)
+    const { data: prev } = await db.from('support_assets').select('id,kind,situation').eq('file_unique_id', v.file_unique_id).limit(1);
+    const p = prev?.[0] as { id: number; kind: string; situation: string | null } | undefined;
+    if (p?.kind === FAQ_KIND && isFaqTopic(p.situation)) await db.from('support_assets').update({ active: false }).eq('kind', FAQ_KIND).eq('situation', p.situation).eq('active', true).neq('id', p.id);
+    await db.from('support_assets').update({ active: true }).eq('file_unique_id', v.file_unique_id);
+  }
   if (error && !dup) {
     await tg('sendMessage', { chat_id: msg.chat.id, reply_to_message_id: msg.message_id, text: `⨯ Pas enregistré (${error.message.slice(0, 80)}), renvoie-le.` });
     return true;
   }
   const { data: row } = await db.from('support_assets').select('id,kind,situation,lang,countries,active').eq('file_unique_id', v.file_unique_id).limit(1);
   const a = row?.[0] as AssetRow | undefined;
-  const head = voice
-    ? `🎙 ${dup ? 'Déjà dans ta bibliothèque (remis dans la rotation si tu l’avais retiré).' : 'Vocal pays enregistré.'}\nPour quel(s) pays ? Touche en dessous (plusieurs possibles). Un autre pays : réponds à ce message avec son nom ou son drapeau.\nIl part quand la personne dit qu’elle vient de ce pays, juste avant la réponse écrite.`
+  const head = voice && a?.kind === FAQ_KIND
+    ? `🎙 Déjà dans ta bibliothèque, en vocal FAQ${isFaqTopic(a.situation) ? ` « ${FAQ_LABELS[a.situation]} »` : ''} (remis dans la rotation si tu l’avais retiré). Change le thème en dessous si besoin.`
+    : voice
+    ? `🎙 ${dup ? 'Déjà dans ta bibliothèque (remis dans la rotation si tu l’avais retiré).' : 'Vocal enregistré.'}\nVocal PAYS : touche le(s) pays en dessous (plusieurs possibles ; un autre pays : réponds à ce message avec son nom ou son drapeau). Il part quand la personne dit qu’elle vient de ce pays.\nVocal FAQ : touche « ❓ C’est un vocal FAQ », puis le thème. Il part quand un prospect pose cette question (et remplace l’ancien vocal du thème).\nTant que tu n’as rien touché, il ne part chez personne.`
     : `🎥 ${dup ? 'Déjà dans tes bulles (remise dans la rotation si tu l’avais retirée).' : 'Bulle d’accueil enregistrée.'}\nPour qui ? Touche en dessous (sinon : tout le monde, en anglais).`;
   await tg('sendMessage', {
     chat_id: msg.chat.id, reply_to_message_id: msg.message_id,
@@ -970,21 +1052,27 @@ export async function handleSupportLibrary(db: Db, msg: any): Promise<boolean> {
   const text = typeof msg?.text === 'string' ? msg.text.trim() : '';
   const lib = /^\/?(bulles?|biblioth[eè]que|vocaux)$/i.test(text);
   const stats = /^\/?(pays|stats? pays)$/i.test(text);
-  if (msg?.chat?.type !== 'private' || msg.reply_to_message || !(lib || stats)) return false;
+  const faqCmd = /^\/?(faq|vocaux faq|faq stats?)$/i.test(text);
+  if (msg?.chat?.type !== 'private' || msg.reply_to_message || !(lib || stats || faqCmd)) return false;
   if (!(await adminTgIds()).includes(Number(msg.from?.id))) return false;
   const { tg } = await import('./businessInbox');
   if (stats) {
     await tg('sendMessage', { chat_id: msg.chat.id, parse_mode: 'HTML', text: await countryStatsText(db) });
     return true;
   }
+  if (faqCmd) {
+    await tg('sendMessage', { chat_id: msg.chat.id, parse_mode: 'HTML', disable_web_page_preview: true, text: await faqStatsText(db) });
+    return true;
+  }
   const { data } = await db.from('support_assets').select('id,kind,file_id,situation,lang,countries,active,uses').eq('active', true).order('id', { ascending: true }).limit(40);
   const all = (data ?? []) as Array<AssetRow & { file_id: string; uses: number | null }>;
   await tg('sendMessage', {
     chat_id: msg.chat.id,
-    text: `${await libraryLine(db)}\n\n🎥 À l’accueil : une bulle de sa situation et de sa langue, sinon une « tout le monde », en rotation.\n🎙 Quand il dit son pays : le vocal de ce pays, sinon celui des « autres pays ».\nSous chacun : à qui il va, 🗑 pour le retirer. Pour en ajouter : envoie-le-moi.`,
+    text: `${await libraryLine(db)}\n\n🎥 À l’accueil : une bulle de sa situation et de sa langue, sinon une « tout le monde », en rotation.\n🎙 Quand il dit son pays : le vocal de ce pays, sinon celui des « autres pays ».\n❓ Quand un prospect pose une question FAQ (thème sûr) : le vocal de ce thème + une ligne fixe. « faq » : la couverture et la mesure.\nSous chacun : à qui il va, 🗑 pour le retirer. Pour en ajouter : envoie-le-moi.`,
   });
   for (const a of all) {
-    if (a.kind === 'country_voice') await tg('sendVoice', { chat_id: msg.chat.id, voice: a.file_id, caption: `🎙 ${countriesLine(a.countries)} · envoyé ${a.uses ?? 0} fois`, reply_markup: assetKeyboard(a) });
+    if (a.kind === FAQ_KIND) await tg('sendVoice', { chat_id: msg.chat.id, voice: a.file_id, caption: `❓ ${isFaqTopic(a.situation) ? FAQ_LABELS[a.situation] : 'thème pas encore choisi'} · envoyé ${a.uses ?? 0} fois`, reply_markup: assetKeyboard(a) });
+    else if (a.kind === 'country_voice') await tg('sendVoice', { chat_id: msg.chat.id, voice: a.file_id, caption: `🎙 ${countriesLine(a.countries)} · envoyé ${a.uses ?? 0} fois`, reply_markup: assetKeyboard(a) });
     else await tg('sendVideoNote', { chat_id: msg.chat.id, video_note: a.file_id, reply_markup: assetKeyboard(a) });
   }
   return true;
@@ -1014,28 +1102,91 @@ async function countryStatsText(db: Db): Promise<string> {
   ].join('\n');
 }
 
+/** « faq » au bot : les thèmes couverts, et la mesure vocal vs texte seul (support_faq_voice_stats, migration 0042). */
+async function faqStatsText(db: Db): Promise<string> {
+  const { data: assets } = await db.from('support_assets').select('situation,uses').eq('kind', FAQ_KIND).eq('active', true).limit(100);
+  const by = new Map(((assets ?? []) as Array<{ situation: string | null; uses: number | null }>).map((a) => [a.situation, Number(a.uses ?? 0)]));
+  const cover = FAQ_TOPICS.map((t) => `${by.has(t) ? '✅' : '▫️'} ${esc(FAQ_LABELS[t])}${by.has(t) ? ` · ${by.get(t)}×` : ''}`).join('\n');
+  const { data, error } = await db.rpc('support_faq_voice_stats');
+  const rows = (data ?? []) as Array<{ topic: string; arm: string; people: number; mature: number; connect_7d: number; deposit_7d: number }>;
+  const pct = (a: number, b: number) => (b ? `${Math.round((1000 * a) / b) / 10}%` : '–');
+  const table = error ? `⨯ Mesure indisponible (${esc(String(error.message).slice(0, 80))}) : la migration 0042 est-elle appliquée ?`
+    : !rows.length ? 'Pas encore de mesure.'
+    : ['<pre>', `${'Thème'.padEnd(16)}${'Bras'.padEnd(6)}${'n'.padStart(4)}${'7j+'.padStart(5)}${'Con7'.padStart(7)}${'Dep7'.padStart(7)}`,
+      ...rows.map((r) => `${r.topic.replace(/^faq_/, '').slice(0, 15).padEnd(16)}${r.arm.padEnd(6)}${String(r.people).padStart(4)}${String(r.mature).padStart(5)}${pct(Number(r.connect_7d), Number(r.mature)).padStart(7)}${pct(Number(r.deposit_7d), Number(r.mature)).padStart(7)}`), '</pre>'].join('\n');
+  return `❓ <b>Vocaux FAQ</b>\n${cover}\n\n📈 <b>Connexion et dépôt à 7 jours</b>, vocal vs texte seul, même thème :\n${table}\n<i>Taux sur les expositions de plus de 7 jours (7j+), prospects pas encore connectés. Petits nombres = à lire avec prudence ; les gens qui reçoivent un vocal ne sont pas tirés au hasard.</i>\n\nPour ajouter ou remplacer un vocal : envoie-le-moi, touche « ❓ C’est un vocal FAQ », puis le thème.`;
+}
+
 /** Les boutons sous une bulle ou un vocal (sa:<id>:s:<situation> · sa:<id>:l:<langue> · sa:<id>:c:<pays> · sa:<id>:x · sa:<id>:on). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleSupportAssetCallback(db: Db, cq: any): Promise<boolean> {
-  const m = /^sa:(\d+):(s:(new|app|all)|l:(en|it)|c:([A-Z]{2})|x|on)$/.exec(String(cq?.data ?? ''));
-  if (!m) return false;
+  const c = parseAssetCallback(cq?.data);
+  if (!c) return false;
   const { tg } = await import('./businessInbox');
-  const answer = (text: string) => tg('answerCallbackQuery', { callback_query_id: cq.id, text });
+  const answer = (text: string) => tg('answerCallbackQuery', { callback_query_id: cq.id, text: text.slice(0, 190) });
   if (!(await adminTgIds()).includes(Number(cq.from?.id))) { await answer('Réservé aux admins.'); return true; }
-  const id = Number(m[1]);
+  const id = c.id;
+  if (c.op === 'send') return sendFaqFromCard(db, cq, id, c.rowId, answer);
   const { data: cur } = await db.from('support_assets').select('id,kind,situation,lang,countries,active').eq('id', id).limit(1);
   const before = cur?.[0] as AssetRow | undefined;
   if (!before) { await answer('Introuvable.'); return true; }
   let toggledOn = false;
-  const patch = m[3] ? { situation: m[3] } : m[4] ? { lang: m[4] } : m[5]
-    ? (() => { const set = new Set(before.countries ?? []); toggledOn = !set.has(m[5]); if (toggledOn) set.add(m[5]); else set.delete(m[5]); return { countries: [...set] }; })()
-    : { active: m[2] === 'on' };
-  const { data } = await db.from('support_assets').update(patch).eq('id', id).select('id,kind,situation,lang,countries,active');
-  const a = (data?.[0] ?? { ...before, ...patch }) as AssetRow;
+  let toast = '';
+  let a: AssetRow;
+  if (c.op === 'topic') {
+    // 🎙 REMPLACEMENT : l'ancien vocal actif de ce thème est désactivé (pas supprimé), puis celui-ci prend le thème
+    const r = await tagFaqVoice(db, id, c.value);
+    if (r.error) { await answer(`⨯ Pas enregistré (${r.error.slice(0, 80)})`); return true; }
+    a = { ...before, kind: FAQ_KIND, situation: c.value, lang: 'en', active: true };
+    toast = `✓ ${FAQ_LABELS[c.value]}${r.replaced ? ' · l’ancien vocal de ce thème est désactivé' : ''}`;
+    await tg('sendMessage', { chat_id: cq.message?.chat?.id, reply_to_message_id: cq.message?.message_id, text: `❓ Vocal FAQ « ${FAQ_LABELS[c.value]} » actif.${r.replaced ? ` L’ancien vocal de ce thème est désactivé (toujours dans la base : « bulles » puis ↩️ pour le remettre).` : ''}\nIl part quand un prospect pose cette question (thème sûr), suivi de :\n« ${FAQ_LINES[c.value]} »`, disable_web_page_preview: true });
+  } else if (c.op === 'faq') {
+    // vocal pays → vocal FAQ, thème à choisir (tant qu'il n'est pas choisi, il ne part chez personne)
+    await db.from('support_assets').update({ kind: FAQ_KIND, situation: 'all', countries: [] }).eq('id', id);
+    a = { ...before, kind: FAQ_KIND, situation: 'all', countries: [] };
+    toast = '❓ Vocal FAQ : choisis le thème en dessous';
+  } else if (c.op === 'country_voice') {
+    await db.from('support_assets').update({ kind: 'country_voice', situation: 'all' }).eq('id', id);
+    a = { ...before, kind: 'country_voice', situation: 'all' };
+    toast = '🌍 Vocal pays : choisis le(s) pays en dessous';
+  } else {
+    // remis dans la bibliothèque, un vocal FAQ reprend son thème : l'autre vocal actif du thème est désactivé
+    if (c.op === 'active' && c.value && before.kind === FAQ_KIND && isFaqTopic(before.situation)) {
+      await db.from('support_assets').update({ active: false }).eq('kind', FAQ_KIND).eq('situation', before.situation).eq('active', true).neq('id', id);
+    }
+    const patch = c.op === 'situation' ? { situation: c.value } : c.op === 'lang' ? { lang: c.value } : c.op === 'country'
+      ? (() => { const set = new Set(before.countries ?? []); toggledOn = !set.has(c.value); if (toggledOn) set.add(c.value); else set.delete(c.value); return { countries: [...set] }; })()
+      : { active: c.value };
+    const { data } = await db.from('support_assets').update(patch).eq('id', id).select('id,kind,situation,lang,countries,active');
+    a = (data?.[0] ?? { ...before, ...patch }) as AssetRow;
+    toast = c.op === 'situation' ? `✓ ${SITUATIONS[c.value]}` : c.op === 'lang' ? `✓ ${LANGS[c.value]}`
+      : c.op === 'country' ? `${toggledOn ? '✓' : '✗'} ${flagOf(c.value)} ${countryName(c.value, 'fr')}`
+      : a.active ? '↩️ Remis dans la bibliothèque' : '🗑 Retiré';
+  }
   await tg('editMessageReplyMarkup', { chat_id: cq.message?.chat?.id, message_id: cq.message?.message_id, reply_markup: assetKeyboard(a) });
-  await answer(m[3] ? `✓ ${SITUATIONS[m[3] as Situation]}` : m[4] ? `✓ ${LANGS[m[4] as Lang]}`
-    : m[5] ? `${toggledOn ? '✓' : '✗'} ${flagOf(m[5])} ${countryName(m[5], 'fr')}`
-    : a.active ? '↩️ Remis dans la bibliothèque' : '🗑 Retiré');
+  await answer(toast);
+  return true;
+}
+
+/** 🎙 « Envoyer le vocal » sous une carte « À toi » : Mathieu valide d'un tap, le vocal FAQ et sa ligne partent dans la
+ *  conversation depuis son compte. La carte est alors répondue (✅ Envoyer dira « Déjà répondu »). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sendFaqFromCard(db: Db, cq: any, assetId: number, rowId: string, answer: (t: string) => Promise<unknown>): Promise<boolean> {
+  const { tg } = await import('./businessInbox');
+  const { data: rows } = await db.from('member_actions').select('id,tg_id,member_no,detail').eq('kind', BIZ_KIND).eq('id', rowId).limit(1);
+  const row = rows?.[0] as { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> } | undefined;
+  if (!row) { await answer('Message introuvable.'); return true; }
+  if (row.detail?.answered_at || row.detail?.draft_sent_at) { await answer('Déjà répondu.'); return true; }
+  const { data: as } = await db.from('support_assets').select('id,file_id,uses,kind,situation,active').eq('id', assetId).limit(1);
+  const asset = as?.[0] as { id: number; file_id: string; uses: number | null; kind: string; situation: string | null; active: boolean } | undefined;
+  if (!asset || asset.kind !== FAQ_KIND || !asset.active || !isFaqTopic(asset.situation)) { await answer('Ce vocal n’est plus actif.'); return true; }
+  const topic = asset.situation;
+  if (faqRecentlySent(await faqSentTo(db, row.tg_id), topic)) { await answer('Déjà envoyé à cette personne récemment.'); return true; }
+  const by = cq.from?.username ? `@${cq.from.username}` : String(cq.from?.id ?? 'admin');
+  const err = await sendFaqVoice(db, row, topic, asset, by, row.detail?.draft ? String(row.detail.draft) : null);
+  if (err) { await answer(`⨯ Telegram refuse : ${err}`); return true; }
+  await tg('editMessageText', { chat_id: cq.message?.chat?.id, message_id: cq.message?.message_id, text: `✓ Vocal FAQ « ${FAQ_LABELS[topic]} » et sa ligne envoyés.` });
+  await answer('🎙 Envoyé');
   return true;
 }
 
