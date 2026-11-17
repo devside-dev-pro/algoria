@@ -137,6 +137,13 @@ export function parseSheetFlags(settings: Record<string, string | null | undefin
   return out;
 }
 
+/** Pourcentages déjà écrits dans une fiche validée. Ce sont des faits (ex. bonus +100 %, règle −5 %),
+ *  pas une invention du modèle. On les passe à replyTextIssue.knownPct au moment d’envoyer le texte
+ *  de la fiche. N’autorise pas un % ajouté en plus du texte validé. */
+export function sheetKnownPct(body: string): string[] {
+  return body.match(/\d+(?:[.,]\d+)?\s?%/g) ?? [];
+}
+
 // ── CE QUI RESTE EN RELECTURE, même dans la fenêtre ────────────────────────────────────────────────────
 const CREDENTIALS = /\b(?:password|passcode|pwd|pass|token|seed(?: phrase)?|otp|investor|trader)\s*(?:is|:|=|-)\s*\S+/i;
 const ALREADY_DEPOSITED = /\b(?:i(?:'ve| have| just)?|we(?:'ve| have)?)\s+(?:already\s+)?(?:deposited|funded|paid|sent(?:\s+the)?\s+money|made\s+(?:a\s+|the\s+)?deposit)\b/i;

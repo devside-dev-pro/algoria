@@ -37,7 +37,7 @@ import { HISTORY_LOSS_NOTE, INCIDENT, INCIDENT_ESCALATE, INCIDENT_OTHER_NOTE, IN
 import { isLiveKeyword, liveSeatReply, upcomingSessions } from './webinar';
 import type { Conn } from './businessInbox';
 import { FAQ_KIND, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, faqCardButton, faqKeyboard, faqRecentlySent, faqSentTo, faqSituationLabel, faqVoiceDecision, isFaqSituation, isFaqTopic, parseAssetCallback, pickFaqVoice, tagFaqVoice, type FaqDecision, type FaqTopic } from './faqVoice';
-import { FAQ_WAIT_KIND, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA, decideSupportWindow, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, supportAutoWindowBounds, waitSentInWindow, type SheetMap, type WindowConfig } from './supportWindow';
+import { FAQ_WAIT_KIND, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA, decideSupportWindow, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, sheetKnownPct, supportAutoWindowBounds, waitSentInWindow, type SheetMap, type WindowConfig } from './supportWindow';
 import { hardRuleIssue, replyTextIssue } from './replyDraft';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -713,8 +713,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
 }
 
 /** Les mêmes garde-fous que le support, sans en relâcher aucun. null = le texte peut partir. */
-function windowTextIssue(text: string, userText: string, holdResults = false): string | null {
-  return replyTextIssue(text, { biz: true, sys: '', userText, holdResults, knowledge: null, knownPct: [] })
+function windowTextIssue(text: string, userText: string, holdResults = false, knownPct: string[] = []): string | null {
+  return replyTextIssue(text, { biz: true, sys: '', userText, holdResults, knowledge: null, knownPct })
     ?? hardRuleIssue(text);
 }
 
@@ -798,7 +798,7 @@ async function handleAutoWindow(db: Db, c: WindowJobCtx): Promise<JobResult | nu
   }
   if (decision.action === 'auto_text' && decision.body && topic) {
     const holdResults = topic === 'faq_results_myfxbook';
-    const issue = windowTextIssue(decision.body, c.joined, holdResults);
+    const issue = windowTextIssue(decision.body, c.joined, holdResults, sheetKnownPct(decision.body));
     if (issue) {
       await reviewCard(db, c.conn, c.last.id, { ...c.base, ...mark }, c.member, c.draft.text, `fenêtre 5h–9h Dubaï : fiche refusée par un garde-fou (${issue})`);
       if (!waitAlreadySent && !c.manual) {
