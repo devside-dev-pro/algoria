@@ -319,6 +319,27 @@ const RAW_MAX = 1500;
 
 /** Ce qu'on range dans member_actions.detail pour reconstruire une réponse à partir de son texte ou de sa date.
  *  Le brut est la sortie du modèle, tronquée, sans secret : jamais les images, jamais la requête. */
+export interface DraftUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read: number;
+  cache_creation: number;
+  thinking_tokens?: number;
+}
+
+/** Compteurs de l'appel, sans texte ni identifiant. thinking_tokens (détail du SDK) dit ce qui est allé au raisonnement. */
+export function modelUsage(u: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null; output_tokens_details?: { thinking_tokens?: number } | null } | null | undefined): DraftUsage {
+  const usage: DraftUsage = {
+    input_tokens: u?.input_tokens ?? 0,
+    output_tokens: u?.output_tokens ?? 0,
+    cache_read: u?.cache_read_input_tokens ?? 0,
+    cache_creation: u?.cache_creation_input_tokens ?? 0,
+  };
+  const thinking = u?.output_tokens_details?.thinking_tokens;
+  if (thinking != null) usage.thinking_tokens = thinking;
+  return usage;
+}
+
 export interface DraftTrace {
   model: string | null;
   stop: string | null;
@@ -329,6 +350,7 @@ export interface DraftTrace {
   memoryAt: string | null;
   knowledgeHash: string | null;
   memoryHash: string | null;
+  usage: DraftUsage | null;
 }
 
 export interface DraftResult { draft: Draft | null; trace: DraftTrace }
@@ -344,6 +366,7 @@ export function draftTraceDetail(t: DraftTrace): Record<string, unknown> {
   if (t.memoryAt) d.docs_memory_at = t.memoryAt;
   if (t.knowledgeHash) d.docs_knowledge_hash = t.knowledgeHash;
   if (t.memoryHash) d.docs_memory_hash = t.memoryHash;
+  if (t.usage) d.draft_usage = t.usage;
   return d;
 }
 
@@ -864,7 +887,7 @@ export async function draftReply(i: DraftInput): Promise<DraftResult> {
 }
 
 function emptyPartial(): Omit<DraftTrace, 'issue' | 'retried'> {
-  return { model: null, stop: null, raw: null, knowledgeAt: null, memoryAt: null, knowledgeHash: null, memoryHash: null };
+  return { model: null, stop: null, raw: null, knowledgeAt: null, memoryAt: null, knowledgeHash: null, memoryHash: null, usage: null };
 }
 
 async function attempt(i: DraftInput, retry: string | null): Promise<{ draft: Draft | null; issue: string | null; partial: Omit<DraftTrace, 'issue' | 'retried'> }> {
@@ -903,9 +926,13 @@ async function attempt(i: DraftInput, retry: string | null): Promise<{ draft: Dr
     // LE SUPPORT DE MATHIEU (16/10/2026) : ses réponses partent seules quand le modèle est sûr, donc le meilleur modèle
     // (ALGORIA_SUPPORT_MODEL). Le prompt part en blocs (05/11/2026, voir promptBlocks) : le socle et les leçons en
     // cache 1 h, les chiffres qui bougent après, hors cache.
+    // 12/11/2026 : Sonnet 5.5 pense par défaut (effort API = high) et ces tokens comptent dans max_tokens.
+    // 700 coupait le JSON des cartes Business. 4096 + output_config.effort medium (doc Anthropic + typage SDK 0.106).
+    // Mode bot (Haiku 4.5, 350) inchangé : ce n'est pas Sonnet 5.5. Pas de temperature.
     const res = await client.messages.create({
       model: requested,
-      max_tokens: biz ? 700 : 350,
+      max_tokens: biz ? 4096 : 350,
+      ...(biz ? { output_config: { effort: 'medium' as const } } : {}),
       system: systemParam(built.blocks),
       messages: [{ role: 'user', content: biz && i.images?.length
         ? [...i.images.slice(0, 3).map((im) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: im.media_type, data: im.data } })), { type: 'text' as const, text: user }]
@@ -913,6 +940,8 @@ async function attempt(i: DraftInput, retry: string | null): Promise<{ draft: Dr
     });
     partial.model = res.model || requested;
     partial.stop = res.stop_reason ?? null;
+    partial.usage = modelUsage(res.usage);
+    console.info('[replyDraft]', { model: partial.model, stop: partial.stop, usage: partial.usage, retry: !!retry });
     const raw = res.content.map((c) => (c.type === 'text' ? c.text : '')).join('').trim();
     partial.raw = clipModelRaw(raw);
     const judged = assessModelOutput(raw, {

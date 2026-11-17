@@ -2,7 +2,7 @@ import { NextResponse, after, type NextRequest } from 'next/server';
 import { verifySession, SESSION_COOKIE, sdb, encryptSecret, isAdmin, isVip } from '@/lib/member/server';
 import { MIN_PAYOUT_USD, TRC20_RE, commissionForActivation, commissionTermsFor, nextMilestone } from '@/lib/member/affiliate';
 import { minDepositFor, MIN_ENTRY_DEPOSIT } from '@/lib/member/minimums';
-import { inMaintenance } from '@/lib/member/maintenance';
+import { inMaintenance, LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { lotsStateOf } from '@/lib/member/activation';
 import { DIRECT_ACCESS_PRICE_USD } from '@/lib/member/directAccess';
 import { OFFBOARDED } from '@/lib/member/winback';
@@ -39,7 +39,7 @@ async function queueAction(tgId: number, kind: string, detail: Record<string, un
   const who = `#${memberNo ?? '?'} ${detail.username ? `@${detail.username}` : ''}`.trim();
   const d = detail as Record<string, unknown>;
   const alerts: Record<string, { title: string; lines: string[] }> = {
-    connect: { title: '🆕 Dossier à valider', lines: [who, `${d.broker_name ?? d.broker ?? 'broker ?'} · ${d.platform ?? ''} ${d.login ?? ''}`.trim(), `dépôt déclaré ${d.declared_deposit ?? '?'} $ · S${d.strategy ?? '?'}`, d.waiting_broker ? '⏳ compte préexistant : le broker doit rattacher' : d.lots_claimed_at ? '✓ lot d’activation déclaré' : 'lot d’activation pas encore déclaré', d.add_strategy ? '(compte supplémentaire)' : ''] },
+    connect: { title: '🆕 Dossier à valider', lines: [who, `${d.broker_name ?? d.broker ?? 'broker ?'} · ${d.platform ?? ''} ${d.login ?? ''}`.trim(), `dépôt déclaré ${d.declared_deposit ?? '?'} $ · S${d.strategy ?? '?'}`, d.waiting_broker ? '⏳ compte préexistant : le broker doit rattacher' : d.lot_help_requested_at ? 'aide demandée pour le trade d’activation' : d.lots_claimed_at ? '✓ lot d’activation déclaré' : 'lot d’activation pas encore déclaré', d.add_strategy ? '(compte supplémentaire)' : ''] },
     disconnect: { title: '🔌 Membre déconnecté — copieur à retirer', lines: [who] },
     pause: { title: '⏸ Pause demandée — STH n’a pas répondu', lines: [who] },
     resume: { title: '▶️ Reprise demandée — STH n’a pas répondu', lines: [who] },
@@ -101,7 +101,7 @@ export async function GET(req: NextRequest) {
   if (ctx === 'banned') return NextResponse.json({ error: 'access revoked', banned: true }, { status: 403 });
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const db = sdb();
-  const [refs, commsQ, payoutsQ, rejQ, accountsQ, kycQ, connQ] = await Promise.all([
+  const [refs, commsQ, payoutsQ, rejQ, accountsQ, kycQ, connQ, linkClickQ] = await Promise.all([
     db.from('members').select('status').eq('referred_by', ctx.session.tgId),
     db.from('referral_commissions').select('id,kind,amount,status,reason,detail,created_at').eq('referrer_tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
     db.from('referral_payouts').select('id,amount,address,status,tx_hash,reason,created_at').eq('tg_id', ctx.session.tgId).order('created_at', { ascending: false }),
@@ -115,6 +115,9 @@ export async function GET(req: NextRequest) {
     db.from('member_actions').select('detail').eq('tg_id', ctx.session.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
     // CARTE CONNECT EN COURS — porte l'état du lot d'activation, affiché sur l'écran d'attente.
     db.from('member_actions').select('detail,created_at').eq('tg_id', ctx.session.tgId).eq('kind', 'connect').eq('status', 'pending').order('created_at', { ascending: false }).limit(1),
+    // 17/11/2026 : un clic sur le lien partenaire dans l'app (ou depuis la popup bonus) déduit l'origine
+    // « new » — on ne redemande plus « d'où vient ce compte ? ». Lecture seule, aucun secret.
+    db.from('funnel_events').select('id').eq('tg_id', ctx.session.tgId).in('event', ['ob_broker_link', 'ob_bonus_click']).limit(1),
   ]);
   const rejDetail = rejQ.data?.[0]?.detail as { reject_reason?: string; reject_code?: string } | undefined;
   const memberLocale = (String((ctx.member as { locale?: string }).locale ?? 'en') === 'it' ? 'it' : 'en') as 'en' | 'it';
@@ -177,8 +180,9 @@ export async function GET(req: NextRequest) {
   // submittedAt / waitingBroker : l'écran d'attente dit depuis quand le dossier attend et pourquoi (audit
   // 03/09 : un texte fixe « quelques heures » restait affiché au bout de huit jours).
   const pendingCard = connQ.data?.[0] as { detail?: Record<string, unknown> | null; created_at?: string } | undefined;
-  const activation = { claimed: lots.claimedAt != null, claimedAt: lots.claimedAt, validated: lots.ok || lots.override != null, submittedAt: pendingCard?.created_at ?? null, waitingBroker: !!pendingCard?.detail?.waiting_broker };
-  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit, activation, prefill });
+  const activation = { claimed: lots.claimedAt != null, claimedAt: lots.claimedAt, helpRequestedAt: lots.helpRequestedAt, validated: lots.ok || lots.override != null, submittedAt: pendingCard?.created_at ?? null, waitingBroker: !!pendingCard?.detail?.waiting_broker };
+  const clickedBrokerLink = Boolean(linkClickQ.data?.length);
+  return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit, activation, prefill, clickedBrokerLink });
 }
 
 /** Progression de l'onboarding + réglages. body: { action: 'broker'|'mt5'|'strategy'|'pause'|'resume', ... } */
@@ -253,21 +257,14 @@ export async function POST(req: NextRequest) {
     // MINIMUM D'ENTRÉE VÉRIFIÉ ICI, À L'ÉTAPE 2 (03/09) — pas à l'étape 3, après la saisie du mot de passe,
     // où le refus obligeait à tout re-saisir (audit §2.5).
     if (deposit < MIN_ENTRY_DEPOSIT) { void logAttempt(s.tgId, 'mt5', false, 'below_min'); return NextResponse.json({ error: `the minimum deposit is $${MIN_ENTRY_DEPOSIT} — top up first, then come back` }, { status: 400 }); }
-    // LES DEUX ENGAGEMENTS (14/08) — 43% des demandes de connexion étaient refusées, dont ~74% pour la
-    // même raison : un compte ouvert AVANT Algoria, donc jamais rattaché au broker et introuvable dans le
-    // dashboard partenaire (souvent refusé sous l'étiquette « invalid account »). Le front pose la
-    // question et détourne le cas ; ce contrôle-ci est le verrou, et surtout il ARCHIVE la déclaration —
-    // à l'examen, on sait ce que le membre a affirmé, ce qui rend la conversation possible en cas de refus.
-    const ackLink = body.ackLink === true;
-    const ackFunded = body.ackFunded === true;
-    // Origine déclarée par le membre. ARCHIVÉE, JAMAIS BLOQUANTE : elle ne conditionne aucun refus, elle
-    // ne fait que changer le libellé de ce qu'on archive et étiqueter la carte à l'étape suivante. Toute
-    // valeur autre que 'existing' retombe sur le comportement d'avant, y compris l'absence de champ.
+    // 17/11/2026 — PLUS DE CASES OBLIGATOIRES ackLink / ackFunded. Elles ne prouvaient rien (100 % des
+    // gens les cochaient, et les refus « pas via le lien » / « pas de dépôt » continuaient). On garde
+    // une TRACE SIMPLE de l'origine déclarée (new | existing) et, le cas échéant, du clic sur le lien
+    // partenaire dans l'app. Ce n'est JAMAIS bloquant : ça étiquette seulement la carte CONNECT.
+    // Origine déclarée par le membre. ARCHIVÉE, JAMAIS BLOQUANTE. Toute valeur autre que 'existing'
+    // retombe sur « new », y compris l'absence de champ.
     const preExistingAccount = body.origin === 'existing';
-    if (!ackLink || !ackFunded) {
-      void logAttempt(s.tgId, 'mt5', false, 'missing_ack');
-      return NextResponse.json({ error: 'please confirm both boxes: the account was created through the Algoria link, and it is funded' }, { status: 400 });
-    }
+    const clickedPartnerLink = body.clickedPartnerLink === true;
     // Un serveur de démonstration se nomme toujours ainsi — 7% des refus, refusables ici sans attente.
     if (/demo/i.test(server)) {
       void logAttempt(s.tgId, 'mt5', false, 'demo_server');
@@ -288,11 +285,35 @@ export async function POST(req: NextRequest) {
     patch.mt5_login = login;
     patch.mt5_server = server;
     patch.mt5_password_enc = encryptSecret(password); // AES-256-GCM — jamais en clair, jamais renvoyé
-    patch.onboarding_step = 2;
+    // 17/11/2026 : l'écran de confirmation (ex-étape 3, sans choix de stratégie) est fusionné ici.
+    // L'envoi MT5 crée la carte connect et passe le membre en pending_copier — plus d'écran intermédiaire.
+    patch.onboarding_step = 3;
+    patch.strategy = LIVE_STRATEGY;
+    patch.status = 'pending_copier';
     // STASH VÉRIFICATION (nom du titulaire + dépôt déclaré) : porté par la file d'actions (statut done →
     // jamais dans la queue), relu à la fin du wizard pour enrichir la carte CONNECT côté admin.
     const { data: mn } = await db.from('members').select('member_no').eq('tg_id', s.tgId).limit(1);
+    const kycDetail: Record<string, unknown> = {
+      broker_name: fullName,
+      declared_deposit: deposit,
+      platform,
+      is_mt4: platform === 'mt4',
+      origin: preExistingAccount ? 'existing' : 'new',
+      ...(clickedPartnerLink ? { clicked_partner_link: true } : {}),
+      ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}),
+      // Demande d'aide pour passer le trade : horodatée ici, recopiée sur la carte CONNECT. Aucun ordre
+      // n'est passé. lots_ok reste humain. Ignoré en accès direct (pas de lot d'activation).
+      ...(body.lotHelp === true && broker !== 'other' ? { lot_help_requested_at: new Date().toISOString() } : {}),
+      ...(broker === 'other' ? {
+        broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null,
+        manual_connect: true,
+        direct_access: true,
+        ack_paid: body.ackPaid === true,
+        direct_price_usd: DIRECT_ACCESS_PRICE_USD,
+      } : {}),
+    };
     const { data: kycIns } = await db.from('member_actions').insert({
+
       tg_id: s.tgId, member_no: mn?.[0]?.member_no ?? null, kind: 'kyc', status: 'done', done_by: 'member',
       // broker_label : nom saisi à la main quand le broker n'est PAS partenaire (résidents US, qui paient
       // l'accès directement). Porté jusqu'à la carte admin — sans lui, le support voit « other » et doit
@@ -300,36 +321,42 @@ export async function POST(req: NextRequest) {
       // verify : 'ok' = STH a réellement joint le compte MetaTrader avec ces identifiants ; 'unknown' =
       // contrôle impossible (STH muet). Affiché sur la carte admin — un compte vérifié ne se refuse plus
       // pour « invalid account », le doute porte alors sur le rattachement ou le dépôt.
-      // origin : 'new' (compte né de notre lien) | 'existing' (compte préexistant, rattachement demandé
-      // au support du broker par le titulaire). ARCHIVÉ, JAMAIS BLOQUANT — il ne sert qu'à étiqueter la
-      // carte CONNECT « en attente du broker » à l'étape suivante, pour que l'admin sache d'avance
-      // pourquoi ce dossier va mettre des jours. Une valeur absente ou inattendue ne change rien.
-      // La case cochée ne dit PAS la même chose selon l'origine : « créé via le lien Algoria » pour un
-      // compte neuf, « j'ai demandé le rattachement à mon broker » pour un compte préexistant. On archive
-      // donc ce que la personne a RÉELLEMENT déclaré — écrire ack_link:true pour quelqu'un qui n'a jamais
-      // affirmé ça rendrait la déclaration inutilisable le jour où une connexion est contestée, et c'est
-      // précisément à ce moment-là qu'on la relit.
+      // origin : 'new' (compte né de notre lien, ou déduit d'un clic sur le lien partenaire dans l'app)
+      // | 'existing' (compte préexistant, rattachement demandé au support du broker par le titulaire).
+      // ARCHIVÉ, JAMAIS BLOQUANT — étiquette la carte CONNECT « en attente du broker ». Une valeur
+      // absente ou inattendue ne change rien. Plus de ack_link / ack_funded (17/11/2026) : ces cases
+      // ne prouvaient rien. On archive l'origine, et clicked_partner_link s'il a cliqué le lien dans l'app.
       // ── LOT D'ACTIVATION DÉCLARÉ ICI, ET C'EST TOUT L'INTÉRÊT (01/09/2026) ──────────────────────────
       // La consigne vivait sur l'écran d'attente, donc APRÈS que le membre a tout rempli et refermé son
       // terminal. Lui demander d'y retourner deux heures plus tard coûte la moitié des gens. À CETTE
-      // étape il est littéralement DANS MetaTrader — il vient d'y lire son login et son serveur — et son
-      // compte est financé (il coche ack_funded juste au-dessus). Deux clics ne lui coûtent rien ici.
+      // étape il est littéralement DANS MetaTrader — il vient d'y lire son login et son serveur.
       //
-      // La clé atterrit dans le détail du kyc, qui est étalé tel quel sur la carte CONNECT à l'étape
-      // suivante (voir action 'strategy'). Rien d'autre à câbler : la carte arrive dans la file du support
-      // déjà marquée « déclaré », et le verrou de lib/member/activation.ts la lit sans changement.
+      // La clé atterrit dans le détail du kyc, recopié tel quel sur la carte CONNECT créée juste après.
+      // Rien d'autre à câbler : la carte arrive dans la file du support déjà marquée « déclaré », et le
+      // verrou de lib/member/activation.ts la lit sans changement.
       //
       // ⚠️ Ça reste une DÉCLARATION, jamais une preuve : `lots_ok` n'est écrit que par un humain qui a
       // pointé le dashboard partenaire. Le membre ne peut pas se déverrouiller lui-même.
-      // CE QUE LA CASE VEUT DIRE DÉPEND DU DOSSIER (17/09/2026). Une seule case à l'écran, trois sens :
-      //   • compte préexistant   → il a demandé le RATTACHEMENT (ack_attach), pas ouvert via le lien ;
-      //   • broker hors partenaires → ACCÈS DIRECT : il a payé son accès et garde son broker. Aucun lien
-      //     n'existe pour lui, donc ack_link reste FAUX et on archive `direct_access` à la place. Avant,
-      //     il devait cocher « ouvert via le lien Algoria » pour franchir le formulaire, et le dossier
-      //     gardait un ack_link:true faux (constaté sur #1469) — une déclaration inexploitable à l'examen ;
-      //   • le cas courant       → il a bien ouvert via le lien.
-      detail: { broker_name: fullName, declared_deposit: deposit, platform, is_mt4: platform === 'mt4', origin: preExistingAccount ? 'existing' : 'new', ack_link: preExistingAccount || broker === 'other' ? false : ackLink, ack_attach: preExistingAccount ? ackLink : undefined, ack_funded: ackFunded, ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}), ...(broker === 'other' ? { broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null, manual_connect: true, direct_access: true, ack_direct: ackLink, ack_paid: body.ackPaid === true, direct_price_usd: DIRECT_ACCESS_PRICE_USD } : {}) } as never,
+      // ACCÈS DIRECT (broker hors partenaires) : on archive `direct_access` + `ack_paid`. Aucun lien
+      // partenaire n'existe pour ce dossier (leçon #1469 : ne plus écrire ack_link:true à tort).
+      detail: kycDetail as never,
     }).select('id');
+    // CARTE CONNECT + FILE ADMIN (17/11/2026) — était créée par l'action 'strategy' sur l'écran de
+    // confirmation, qui n'avait plus aucun choix. On la crée ici, dès l'envoi MT5. L'action 'strategy'
+    // reste pour un changement depuis le profil, et pour un membre déjà arrivé à l'ancienne étape 3.
+    {
+      const { data: mrow } = await db.from('members').select('tg_username').eq('tg_id', s.tgId).limit(1);
+      await queueAction(s.tgId, 'connect', {
+        login,
+        server,
+        strategy: LIVE_STRATEGY,
+        lot: '0.01',
+        broker: broker || null,
+        username: mrow?.[0]?.tg_username ?? null,
+        ...kycDetail,
+        ...(preExistingAccount ? { waiting_broker: { since: new Date().toISOString(), by: 'member (pre-existing account)', note: 'member asked the broker to attach this account to the Algoria affiliate ID' } } : {}),
+      });
+    }
     // PRÉ-TEST STH EN ARRIÈRE-PLAN (01/10/2026, mode observation — voir lib/member/sthPrecheck.ts) : APRÈS
     // la réponse, jamais dans le chemin de l'envoi (leçon du 15/08). Pas pour « autre broker » : ce
     // dossier-là se branche à la main. Le résultat s'affiche sur la carte admin ; le membre n'en voit rien.
@@ -343,8 +370,10 @@ export async function POST(req: NextRequest) {
     // pas un taux, il compte des échecs.
     void logAttempt(s.tgId, 'mt5', true);
   } else if (body.action === 'strategy') {
-    // CHOIX DE STRATÉGIE (remplace le sélecteur de lot — le lot copieur est FIXE 0.01, le levier de risque
-    // du membre est la stratégie). Fin du wizard OU changement depuis le profil (→ file : move de master STH).
+    // CHOIX DE STRATÉGIE. Depuis le 17/11/2026, la fin du wizard (carte connect + pending_copier) passe
+    // par l'action 'mt5'. Ce chemin reste pour : (1) un changement depuis le profil, (2) un membre déjà
+    // arrivé à l'ancienne étape 3 (identifiants envoyés, confirmation pas encore validée).
+    // Le lot copieur est FIXE 0.01 ; le levier de risque du membre est la stratégie.
     const choice = Number(body.choice ?? 0);
     if (![1, 2, 3].includes(choice)) return NextResponse.json({ error: 'invalid strategy' }, { status: 400 });
     // VERROU SERVEUR SUR LA MAINTENANCE (11/09/2026). Le sélecteur grise déjà les stratégies retirées,
@@ -356,9 +385,10 @@ export async function POST(req: NextRequest) {
     if (inMaintenance(choice)) return NextResponse.json({ error: 'this strategy is not available right now — pick another one' }, { status: 400 });
     patch.strategy = choice;
     if (cur.status === 'onboarding') {
-      const [{ data: mrow }, { data: kyc }] = await Promise.all([
+      const [{ data: mrow }, { data: kyc }, { data: already }] = await Promise.all([
         db.from('members').select('mt5_login,mt5_server,broker,tg_username').eq('tg_id', s.tgId).limit(1),
         db.from('member_actions').select('detail').eq('tg_id', s.tgId).eq('kind', 'kyc').order('created_at', { ascending: false }).limit(1),
+        db.from('member_actions').select('id').eq('tg_id', s.tgId).eq('kind', 'connect').eq('status', 'pending').limit(1),
       ]);
       // MINIMUM PAR STRATÉGIE ($200/$500/$1000) : recoupé avec le dépôt déclaré au wizard — un membre à
       // $200 ne peut pas prendre TURBO ; le front grise déjà, ceci est le verrou serveur.
@@ -376,16 +406,18 @@ export async function POST(req: NextRequest) {
       // normalement le jour où le broker répond.
       const kycDetail = (kyc?.[0]?.detail as Record<string, unknown> | undefined) ?? {};
       const preExisting = kycDetail.origin === 'existing';
-      await queueAction(s.tgId, 'connect', {
-        login: mrow?.[0]?.mt5_login ?? null,
-        server: mrow?.[0]?.mt5_server ?? null,
-        strategy: choice,
-        lot: '0.01', // lot copieur FIXE pour tous — plus de tier
-        broker: mrow?.[0]?.broker ?? null,
-        username: mrow?.[0]?.tg_username ?? null,
-        ...kycDetail,
-        ...(preExisting ? { waiting_broker: { since: new Date().toISOString(), by: 'member (pre-existing account)', note: 'member asked the broker to attach this account to the Algoria affiliate ID' } } : {}),
-      });
+      if (!already?.length) {
+        await queueAction(s.tgId, 'connect', {
+          login: mrow?.[0]?.mt5_login ?? null,
+          server: mrow?.[0]?.mt5_server ?? null,
+          strategy: choice,
+          lot: '0.01', // lot copieur FIXE pour tous — plus de tier
+          broker: mrow?.[0]?.broker ?? null,
+          username: mrow?.[0]?.tg_username ?? null,
+          ...kycDetail,
+          ...(preExisting ? { waiting_broker: { since: new Date().toISOString(), by: 'member (pre-existing account)', note: 'member asked the broker to attach this account to the Algoria affiliate ID' } } : {}),
+        });
+      }
     } else if (['live', 'paused'].includes(cur.status)) {
       // AUTO via STH (demande Mathieu 29/07 : il validait 100 % des cartes — la file ne sert plus qu'aux
       // connexions, où le dépôt se vérifie). join-master déclaratif = un appel déplace le receiver vers le
@@ -528,6 +560,32 @@ export async function POST(req: NextRequest) {
       void notifyOwner({ title: '✅ Lot d’activation déclaré — à pointer', lines: [`#${detail.member_no ?? ''} ${detail.username ? `@${detail.username}` : ''}`.trim(), `${detail.broker_name ?? detail.broker ?? ''} · ${detail.login ?? ''}`.trim()], path: '/', tag: 'owner-activation' });
     }
     return NextResponse.json({ ok: true, claimed: true });
+  } else if (body.action === 'activation_help') {
+    // LE MEMBRE DEMANDE DE L'AIDE POUR PASSER LE TRADE D'ACTIVATION.
+    //
+    // ⚠️ AUCUN ORDRE N'EST PASSÉ. Cette action n'écrit QUE `lot_help_requested_at` sur la carte
+    // connect en cours — jamais lots_ok, jamais lots_claimed_at, aucun appel STH / MetaApi / broker.
+    // Idempotente : re-cliquer ne réécrit pas la date et ne renvoie pas une seconde alerte.
+    const { data: card } = await db.from('member_actions')
+      .select('id,detail,member_no').eq('tg_id', s.tgId).eq('kind', 'connect').eq('status', 'pending')
+      .order('created_at', { ascending: false }).limit(1);
+    if (!card?.length) return NextResponse.json({ error: 'no connection request is pending on your account' }, { status: 404 });
+    const detail = (card[0].detail as Record<string, unknown>) ?? {};
+    const already = typeof detail.lot_help_requested_at === 'string' && detail.lot_help_requested_at.trim();
+    if (!already) {
+      const at = new Date().toISOString();
+      await db.from('member_actions')
+        .update({ detail: { ...detail, lot_help_requested_at: at } as never })
+        .eq('id', card[0].id);
+      void notifyOwner({
+        title: 'Aide demandée — trade d’activation',
+        lines: [`#${card[0].member_no ?? detail.member_no ?? ''} ${detail.username ? `@${detail.username}` : ''}`.trim(), `${detail.broker_name ?? detail.broker ?? ''} · ${detail.login ?? ''}`.trim(), 'Le membre ne sait pas passer le trade seul — aucun ordre n’a été placé.'],
+        path: '/',
+        tag: 'owner-activation-help',
+      });
+      return NextResponse.json({ ok: true, helpRequestedAt: at });
+    }
+    return NextResponse.json({ ok: true, helpRequestedAt: already });
   } else if (body.action === 'trc20') {
     // adresse de retrait USDT TRC20 — une seule par membre, format vérifié, changement horodaté (audit)
     const address = String(body.address ?? '').trim();

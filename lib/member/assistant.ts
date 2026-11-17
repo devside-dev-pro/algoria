@@ -16,7 +16,7 @@
 // « machine à écrire » est fait côté client, sur le texte validé. Le modèle n'a AUCUN outil.
 import Anthropic from '@anthropic-ai/sdk';
 import { createHash } from 'node:crypto';
-import { buildAssistantSystem, fixOldDomain, humanize, replyTextIssue, systemParam, withPastDisclaimer } from './replyDraft';
+import { buildAssistantSystem, fixOldDomain, humanize, modelUsage, replyTextIssue, systemParam, withPastDisclaimer } from './replyDraft';
 import { INCIDENT_TALK } from './incident';
 import { getAgentDocMeta } from './agentDocs';
 import { trackFacts } from './trackFacts';
@@ -97,17 +97,21 @@ export async function askAssistant(i: { question: string; history: AssistantTurn
     const hint = lastIssue ? `\n\n(Your previous draft was rejected by a safety check: ${lastIssue}. Write a new answer that avoids it.)` : '';
     try {
       // PAS de `temperature` : claude-sonnet-5-5 la refuse (400), voir le hotfix du 27/10 dans replyDraft.ts.
+      // 12/11/2026 : même plafond et même effort que le support Business (Sonnet 5.5, thinking par défaut).
+      // Pas de temperature. output_config.effort est typé par @anthropic-ai/sdk 0.106.
       const res = await client.messages.create({
         model,
-        max_tokens: 900,
+        max_tokens: 4096,
+        output_config: { effort: 'medium' },
         system: systemParam(built.blocks), // socle en cache 1 h, track record et webinaire après (05/11/2026)
         messages: [...history, { role: 'user', content: `${i.question}${hint}` }],
       });
-      const u = res.usage as { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
-      usage.input += u.input_tokens ?? 0;
-      usage.output += u.output_tokens ?? 0;
-      usage.cacheRead += u.cache_read_input_tokens ?? 0;
-      usage.cacheWrite += u.cache_creation_input_tokens ?? 0;
+      const counted = modelUsage(res.usage);
+      usage.input += counted.input_tokens;
+      usage.output += counted.output_tokens;
+      usage.cacheRead += counted.cache_read;
+      usage.cacheWrite += counted.cache_creation;
+      console.info('[assistant]', { model: res.model || model, stop: res.stop_reason ?? null, usage: counted, retried: n > 0 });
       const raw = res.content.map((c) => (c.type === 'text' ? c.text : '')).join('').trim();
       const judged = assessAssistantText(raw, { sys: built.system, userText: i.question, holdResults: built.policy !== 'open', knowledge: built.knowledge, knownPct: built.knownPct, sentBefore, stopReason: res.stop_reason });
       if (judged.text) return { ...base, text: judged.text, ok: true, issue: null, retried: n > 0 };

@@ -34,7 +34,7 @@ export default function MemberHome() {
   const [social, setSocial] = useState<Social | null>(null);
   const router = useRouter();
   const [tick, setTick] = useState(0); // rotation du bandeau preuve sociale
-  const [historyOff, setHistoryOff] = useState(false); // 🛠 historique en maintenance (lib/member/historyMaintenance.ts)
+  const [historyOff, setHistoryOff] = useState(false); // teaser prospect (lib/member/historyMaintenance.ts)
   useEffect(() => {
     void fetch('/api/member/feed').then(async (r) => {
       if (!r.ok) return;

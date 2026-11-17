@@ -5,13 +5,17 @@
 // (live, en pause) et l'admin le gardent : on leur a dit toute la vérité dans le VIP, le leur cacher maintenant
 // ressemblerait à une dissimulation. Rien n'est supprimé ni filtré côté base : le drapeau ne fait que masquer.
 //
-// 06/11/2026 — Mathieu : « il vas falloir réactiver l'historique… maintenant qu'on a le myfxbook officiel »,
-// puis « Réactive l'historique depuis le 25 octobre stp ». On repasse à false : History, /track-record et
-// les posts canal qui pointaient vers l'app reviennent. Le livre visible part du 25 octobre 2026
-// (lib/member/trackSince.ts) — la nuit du 21-22 n'est PAS affichée. Ce n'est PAS le livre complet non filtré.
-// Le lien Myfxbook tiers (lib/member/incident.ts) reste la preuve vérifiée.
+// 06/11/2026 — réactivation aux prospects depuis le 25 octobre (PR #578). Le départ visible du livre, pour ceux
+// qui le voient, reste le 25 octobre 2026 (lib/member/trackSince.ts) : la nuit du 21-22 n'est PAS affichée.
+// Ce n'est PAS le livre complet non filtré.
+//
+// 17/11/2026 — Mathieu (via Charlie) : historique en accès VIP seulement. Les routes publiques et le
+// feed ne servent aucun trade aux prospects. Plus tard le même jour : plus d'écran « maintenance » ;
+// les prospects voient un aperçu flouté (données factices masquées), la carte Myfxbook et un « How it
+// works » (components/HistoryMaintenance.tsx). Les membres live ou en pause, et l'admin, gardent
+// l'historique réel depuis le 25 octobre.
 // Client-safe : lu par les écrans (History, Home, Track record) et par les routes qui servent les chiffres.
-export const HISTORY_MAINTENANCE = false;
+export const HISTORY_MAINTENANCE = true;
 
 export const seesHistory = (status: string | null | undefined, admin = false): boolean =>
   !HISTORY_MAINTENANCE || admin || status === 'live' || status === 'paused';

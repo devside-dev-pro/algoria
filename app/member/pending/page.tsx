@@ -14,13 +14,14 @@ const CHECKS = [
   'Account linked to the Algoria copier',
 ];
 
-type Activation = { claimed: boolean; claimedAt: string | null; validated: boolean; submittedAt?: string | null; waitingBroker?: boolean };
+type Activation = { claimed: boolean; claimedAt: string | null; helpRequestedAt?: string | null; validated: boolean; submittedAt?: string | null; waitingBroker?: boolean };
 
 export default function Pending() {
   const router = useRouter();
   const [name, setName] = useState<string | null>(null);
   const [act, setAct] = useState<Activation | null>(null);
   const [busy, setBusy] = useState(false);
+  const [helpBusy, setHelpBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // DÉCLARER ≠ ÊTRE VALIDÉ. Le bouton bascule en « déclaré » immédiatement (le membre doit voir que son
   // clic a servi), mais le texte ne lui promet JAMAIS que c'est acquis — c'est le support qui pointe le
@@ -37,6 +38,27 @@ export default function Pending() {
       })
       .catch((e) => setErr((e as Error).message))
       .finally(() => setBusy(false));
+  };
+  // Demande d'aide : horodatée sur la carte, alerte l'équipe. Aucun ordre n'est passé.
+  const requestHelp = () => {
+    if (act?.helpRequestedAt) return;
+    setHelpBusy(true);
+    setErr(null);
+    void fetch('/api/member/me', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'activation_help' }) })
+      .then(async (r) => {
+        const d = (await r.json().catch(() => ({}))) as { error?: string; helpRequestedAt?: string };
+        if (!r.ok) throw new Error(d.error ?? 'could not save that');
+        setAct((a) => ({
+          claimed: a?.claimed ?? false,
+          claimedAt: a?.claimedAt ?? null,
+          validated: a?.validated ?? false,
+          submittedAt: a?.submittedAt,
+          waitingBroker: a?.waitingBroker,
+          helpRequestedAt: d.helpRequestedAt ?? new Date().toISOString(),
+        }));
+      })
+      .catch((e) => setErr((e as Error).message))
+      .finally(() => setHelpBusy(false));
   };
   useEffect(() => {
     let alive = true;
@@ -104,6 +126,26 @@ export default function Pending() {
             <button disabled={busy || act?.claimed} onClick={claim} style={{ border: 'none', borderRadius: 10, padding: '11px 14px', fontSize: 13.5, fontWeight: 700, cursor: act?.claimed ? 'default' : 'pointer', color: act?.claimed ? 'var(--muted)' : '#04121e', background: act?.claimed ? 'rgba(130,152,190,.15)' : 'linear-gradient(90deg,#2be3f5,#2e8bf0)' }}>
               {busy ? 'saving…' : act?.claimed ? '✓ marked as done — being checked' : 'I\u2019ve placed both trades'}
             </button>
+            {!act?.claimed && (
+              <button
+                type="button"
+                disabled={helpBusy || !!act?.helpRequestedAt}
+                onClick={requestHelp}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 10, padding: '11px 14px', fontSize: 13.5, fontWeight: 700, cursor: act?.helpRequestedAt ? 'default' : 'pointer', color: act?.helpRequestedAt ? 'var(--muted)' : 'var(--text)', background: 'transparent' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                {helpBusy ? 'saving…' : 'Let Algoria do it for me'}
+              </button>
+            )}
+            {act?.helpRequestedAt && !act?.claimed && (
+              <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.55, color: 'var(--text)' }}>
+                Our team will contact you shortly to help you place it.
+              </p>
+            )}
             {act?.claimed && (
               <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.55, color: 'var(--dim)' }}>
                 Thanks — the team confirms the volume with the broker before switching your copy on. Nothing else to do.
