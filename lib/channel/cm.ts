@@ -53,6 +53,7 @@ import { firstLine, normLine, rationedIn, similarity, SIMILAR } from './tone';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { appendAgentMemory } from '@/lib/member/agentDocs';
 import { amountsLine, check, dayContext, writePoll, writePost, type Brief, type DayContext, type TradeFacts } from './writer';
+import { fillApprovedVip, vipTemplateOf } from './vipFill';
 import { safeSlice, wellFormed } from './text';
 import { atOneLot, atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs, tradingTimeMs } from '@/lib/display/tradingDay';
@@ -453,7 +454,11 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
     // plus de bannière (10/11/2026) : une image seulement quand c'est une vraie photo
     const img = r.photo_url || rep0.photo_key ? ' · 📸 photo' : r.kind === 'backstage' ? ' · texte seul (pas de photo fraîche)' : '';
     parts.push('', `<b>${NUM[i] ?? i + 1}  ${parisHHMM(r.scheduled_at)} · ${head}</b>${tag}${img} · ${STATUS[r.status] ?? r.status}`);
-    if (r.kind === 'tp' || r.kind === 'trade') {
+    if (vipTemplateOf(r.text, r.report)) {
+      const rep = r.report as { reason?: string; recap_template?: string; recap?: string } | null;
+      const weekly = !!(rep?.recap_template || rep?.recap);
+      parts.push(`<i>${weekly ? "Récap CM : les 3 meilleurs trades copiés de la semaine (lundi–vendredi), montants à 0.10 lot, sans total. Le post saute s'il n'y en a pas 3." : "Texte CM validé : montant et lot du dernier trade copié gagnant du jour (déjà montré exclu, au moins +$15 à 0.10 lot), remplis à l'heure. Rien s'il n'y en a pas."}${rep?.reason ? ` · ${esc(rep.reason)}` : ''}</i>`);
+    } else if (r.kind === 'tp' || r.kind === 'trade') {
       const rep = r.report as { reason?: string } | null;
       parts.push(r.text ? `<blockquote>${esc(safeSlice(plain(r.text), 300))}</blockquote>` : `<i>Le meilleur gain copié depuis le début de la séance (au moins +$15 à 0.10 lot), pas encore montré, commenté à la première personne à son heure (chiffres réels). Rien s'il n'y en a pas.${rep?.reason ? ` · ${esc(rep.reason)}` : ''}</i>`);
     } else if (r.kind === 'poll') {
@@ -628,7 +633,14 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
     const rep = asObj(r.report);
     let text = r.text ?? '', photo = r.photo_url ?? '', ref = r.ref;
     let btnText = r.button_text ?? '', btnUrl = r.button_url ?? '';
-    if (r.kind === 'tp' || r.kind === 'trade') {
+    const vipTpl = vipTemplateOf(r.text, r.report);
+    if (vipTpl) {
+      // Texte CM validé par Mathieu : on remplit +$[X] / [lot] / [N] / [NET], on ne réécrit pas le post.
+      const filled = await fillApprovedVip(db, r, vipTpl).catch((e) => ({ ok: false as const, reason: String((e as Error).message).slice(0, 120) }));
+      if (!filled.ok) { await db.from('channel_posts').update({ status: 'skipped', report: { ...rep, reason: filled.reason } }).eq('id', r.id); skipped++; continue; }
+      text = filled.text; ref = filled.ref;
+      photo = '';
+    } else if (r.kind === 'tp' || r.kind === 'trade') {
       const w = await pickWin(db, r).catch((e) => ({ reason: String((e as Error).message).slice(0, 120) }));
       if ('reason' in w) { await db.from('channel_posts').update({ status: 'skipped', report: { ...rep, reason: w.reason } }).eq('id', r.id); skipped++; continue; }
       // LE TRADE COMMENTÉ (10/11/2026) : écrit maintenant, à la première personne, sur ce trade-là ; chiffres du code
