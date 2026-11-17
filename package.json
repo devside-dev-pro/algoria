@@ -12,7 +12,7 @@
     "backfill-index": "tsx scripts/backfill-index.ts",
     "demo": "tsx scripts/demo.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test lib/member/faqVoice.test.ts lib/member/supportWindow.test.ts lib/channel/writer.punct.test.ts"
+    "test": "tsx --test lib/member/faqVoice.test.ts lib/member/supportWindow.test.ts lib/channel/writer.punct.test.ts lib/channel/vipFill.test.ts"
   },
   "engines": {
     "node": ">=20"
