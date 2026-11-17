@@ -20,7 +20,7 @@ export default function MemberHistory() {
   const [paywall, setPaywall] = useState(false);
   const [shareTarget, setShareTarget] = useState<ShareableWin | null>(null);
   const [trackSince, setTrackSince] = useState<string | null>(null);
-  const [maintenance, setMaintenance] = useState(false); // 🛠 lib/member/historyMaintenance.ts // départ du track record visible (lib/member/trackSince.ts)
+  const [maintenance, setMaintenance] = useState(false); // teaser prospect (lib/member/historyMaintenance.ts) // départ du track record visible (lib/member/trackSince.ts)
   // PÉRIODE (28/09/2026) : « depuis Algoria 2.0 » par défaut. Sur 7 jours seuls, une mauvaise séance rendait
   // tout l'historique rouge alors que le membre est vert depuis le départ. Le prospect garde le flux court.
   type Range = 'all' | '30d' | '7d';
