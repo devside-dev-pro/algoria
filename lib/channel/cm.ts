@@ -1,5 +1,18 @@
 // 📣 LE CM AUTOMATIQUE DU CANAL PUBLIC (15/10/2026, décision Mathieu : « Go pour le CM et les CTA »).
 //
+// 🔁 REFONTE DU 10/11/2026 (Mathieu : le canal sonne répétitif et robotique, il veut que ça sonne comme s'il postait
+// lui-même). Ce qui suit dans ce commentaire décrit la version du 15/10 ; ce qui a changé :
+//   · plus de séquence fixe : un plan de 4 à 5 posts par jour, heures tirées au hasard dans des fenêtres larges, formats
+//     pondérés jamais deux fois de suite (lib/channel/plan.ts), pour laisser la place aux 3 à 4 bulles vidéo de Mathieu ;
+//   · plus d'en-tête « 🔵💙 HOW IT WORKS », plus de 👇 obligatoire, 1 ou 2 CTA par jour (les seuls boutons, 2 au plus) ;
+//   · la carte de gain fixe (« ✅ +$X at 0.10 lot … Closed by Algoria AI ») devient un trade commenté à la 1re personne ;
+//   · le guide de ton est contrôlé par le code (lib/channel/tone.ts) : un texte refusé est réécrit une fois, puis le
+//     post saute (plus de texte de banque en secours, sauf les annonces du webinaire) ;
+//   · la phrase de risque : une ligne en italique, seulement sur un post qui montre un chiffre de résultat ;
+//   · plus de bannière automatique : une image seulement quand c'est une vraie photo (les coulisses du matin) ;
+//   · la photo vient du dossier Drive de Mathieu (lib/channel/photos.ts), marquée utilisée à la publication.
+// Les webinaires gardent leur logique (webinarPost, plus bas) : un CTA prévu devient l'annonce.
+//
 // Le constat (analyse du canal du 02/10) : des textes de motivation et des bonjour / bonne nuit jamais lus, rien le
 // soir, et rien sur ce que l'audience demande (26 votes sur 34 : « automation explanations »). Les trois quarts de ce
 // qui marche, c'est Mathieu : ses bulles vidéo, ses CTA envoyés depuis l'admin, ses transferts des gains du VIP.
@@ -32,11 +45,14 @@
 // ni minimum, ni montant conseillé, ni « fund your account ». On dit « create your trading account » et « connect
 // your trading account to Algoria ». Les fiches ci-dessous n'en parlent plus, et le rédacteur refuse ces mots.
 import { liveTrades, type Trade } from './recap';
-import { publishToChannels, sourceChannel } from './publish';
-import { adminTgIds } from '@/lib/member/notifyOwner';
+import { publishPollToChannels, publishToChannels, sourceChannel } from './publish';
+import { adminTgIds, notifyOwner } from '@/lib/member/notifyOwner';
+import { buildDayPlan, type PlanFormat } from './plan';
+import { driveWanted, listDrivePhotos, LOW_STOCK, pickFresh, readDriveEnv, sendDrivePhoto, type PhotoCandidate, type PhotoUse } from './photos';
+import { firstLine, normLine, rationedIn, similarity, SIMILAR } from './tone';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { appendAgentMemory } from '@/lib/member/agentDocs';
-import { dayContext, writePost, type Brief, type DayContext } from './writer';
+import { amountsLine, check, dayContext, writePoll, writePost, type Brief, type DayContext, type TradeFacts } from './writer';
 import { safeSlice, wellFormed } from './text';
 import { atOneLot, atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs, tradingTimeMs } from '@/lib/display/tradingDay';
@@ -106,25 +122,9 @@ export const CTAS: Array<CmPost & { fam: 'app' | 'mathieu' }> = [
 const NEEDS_HISTORY = new Set(['track', 'theapp', 'results', 'trackcta']);
 const shown = (id: string) => !HISTORY_MAINTENANCE || !NEEDS_HISTORY.has(id);
 
-type Slot = { slot: string; at: string; kind: 'morning' | 'howto' | 'cta' | 'tp' | 'qa'; fam?: 'app' | 'mathieu' };
-// heures de Paris. Le soir compte : l'audience (Afrique du Sud, Royaume-Uni) a fini sa journée.
-// DEUX BOUTONS PAR JOUR, PAS PLUS (22/10/2026, Mathieu : « que des posts avec des boutons, ça fait très robotisé…
-// à la limite un ou deux boutons par jour pour les CTA »). Seuls les deux CTA du jour ont un bouton ; le bonjour,
-// les How it works et les cartes de gain partent sans. Le CTA de 12h30 en semaine est retiré (il y en avait trois).
-const WEEKDAY: Slot[] = [
-  { slot: 'morning', at: '09:00', kind: 'morning' },
-  { slot: 'howto', at: '11:00', kind: 'howto' },
-  { slot: 'tp1', at: '14:00', kind: 'tp' },
-  { slot: 'cta2', at: '17:30', kind: 'cta', fam: 'mathieu' },
-  { slot: 'tp2', at: '19:00', kind: 'tp' },
-  { slot: 'cta3', at: '20:30', kind: 'cta', fam: 'app' },
-];
-const WEEKEND: Slot[] = [
-  { slot: 'morning', at: '10:00', kind: 'morning' },
-  { slot: 'howto', at: '11:30', kind: 'howto' },
-  { slot: 'cta1', at: '13:00', kind: 'cta', fam: 'app' },
-  { slot: 'cta2', at: '20:30', kind: 'cta', fam: 'mathieu' },
-];
+// LA SÉQUENCE FIXE WEEKDAY / WEEKEND (15/10 → 09/11/2026) est remplacée par le plan de lib/channel/plan.ts.
+// DEUX BOUTONS PAR JOUR, PAS PLUS (22/10/2026, Mathieu : « à la limite un ou deux boutons par jour pour les CTA ») :
+// seuls les CTA ont un bouton, et le plan en prévoit 1 ou 2.
 /** Heure (Paris) à laquelle le plan du LENDEMAIN part aux admins. Mathieu valide le soir, la journée tourne seule. Avant
  *  cette heure, c'est le plan du jour qui manque éventuellement (panne, premier jour) qui est préparé, tout de suite.
  *  23h15 jusqu'au 23/10/2026 (après la fermeture de l'or) ; 18h depuis, à la demande de Mathieu qui vit à Dubaï
@@ -143,16 +143,11 @@ export const planTarget = (now = Date.now()) => {
   const today = tradingDayOf(now);
   return now >= tradingTimeMs(today, PLAN_AT) ? new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : today;
 };
-const TP_FROM: Record<string, string | null> = { tp1: null, tp2: '14:00' }; // une carte couvre depuis le créneau précédent
 const TP_MIN_AT_ONE_LOT = 150; // le seuil des cartes de gain du VIP (runner/metaapi/trades.ts, VIP_WIN_MIN_USD)
 const STALE_MS = 90 * 60_000; // un post validé mais raté de plus de 1 h 30 (panne) ne part plus : il serait hors sujet
 const GRACE_MS = 60 * 60_000; // un brouillon validé jusqu'à 1 h après son heure part tout de suite ; au-delà il expire
-/** Décalage de -10 à +10 minutes, fixe pour un jour et un créneau donnés. */
-const jitter = (day: string, slot: string) => {
-  let h = 0;
-  for (const ch of `${day}:${slot}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return ((h % 21) - 10) * 60_000;
-};
+// L'ANCIEN « JITTER » (hash(jour:créneau) % 21 − 10 min) est retiré : il glissait de −2 min par jour sur cta2 et cta3.
+// Les heures sont tirées au hasard au moment du plan (lib/channel/plan.ts) puis figées dans scheduled_at.
 const CTA_GOAL: Record<string, string> = {
   results: 'make them open the app and look at every real trade at their own size',
   steps: 'show that starting is 3 simple steps and send them to the guided setup',
@@ -257,101 +252,151 @@ function nextIn<T>(list: T[], from: number, ok: (x: T) => boolean): number {
   return -1;
 }
 
+/** Les formats publiables (les anciens noms restent lisibles pour les plans d'avant le 10/11/2026). */
+const POST_KINDS = ['backstage', 'gold', 'qa', 'story', 'trade', 'poll', 'lesson', 'cta', 'morning', 'howto', 'tp'];
+/** Une fiche « How it works » sans son en-tête : les faits seulement (la pédagogie reformulée). */
+const cardFacts = (t: string) => t.split('\n').filter((l) => !l.includes(HOW)).join('\n').trim();
+/** Écart minimal entre le dernier appel du webinaire et un autre post du CM. */
+const WB_GAP_MS = 60 * 60_000;
+
 /** Crée les posts du jour (une seule fois : (day, slot) est unique). Renvoie le nombre de lignes créées. */
 export async function planDay(db: Db, day: string): Promise<number> {
   const { data: existing } = await db.from('channel_posts').select('id').eq('day', day).limit(1);
   if (existing?.length) return 0;
   const weekend = isWeekend(day);
-  const slots = weekend ? WEEKEND : WEEKDAY;
-  // ROTATION : chaque liste repart après son dernier post PUBLIÉ (ou validé). Un How it works refusé revient donc le
-  // lendemain ; un CTA refusé repassera au tour suivant de sa famille.
-  const { data: hist } = await db.from('channel_posts').select('ref,kind').in('kind', ['howto', 'cta']).in('status', ['published', 'publishing', 'approved'])
+  // ROTATION : les fiches et les CTA repartent après leur dernier post PUBLIÉ (ou validé), anciens noms compris.
+  const { data: hist } = await db.from('channel_posts').select('ref,kind').in('kind', ['howto', 'lesson', 'cta']).in('status', ['published', 'publishing', 'approved'])
     .order('scheduled_at', { ascending: false }).limit(100);
   const last = (pred: (r: { ref: string | null; kind: string }) => number) => { for (const r of (hist ?? []) as Array<{ ref: string | null; kind: string }>) { const i = pred(r); if (i >= 0) return i; } return -1; };
-  let hi = last((r) => (r.kind === 'howto' ? HOWTO.findIndex((p) => p.id === r.ref) : -1));
+  let hi = last((r) => (r.kind === 'howto' || r.kind === 'lesson' ? HOWTO.findIndex((p) => p.id === r.ref) : -1));
   const ci: Record<string, number> = {
     app: last((r) => (r.kind === 'cta' ? CTAS.findIndex((c) => c.id === r.ref && c.fam === 'app') : -1)),
     mathieu: last((r) => (r.kind === 'cta' ? CTAS.findIndex((c) => c.id === r.ref && c.fam === 'mathieu') : -1)),
   };
+  const lastFam = ((hist ?? []) as Array<{ ref: string | null; kind: string }>).filter((r) => r.kind === 'cta').map((r) => CTAS.find((c) => c.id === r.ref)?.fam).find(Boolean) ?? 'app';
+  // le format du dernier post de la veille : jamais deux fois de suite, même d'un jour à l'autre
+  const { data: prevRows } = await db.from('channel_posts').select('kind').eq('day', addDaysCm(day, -1)).in('kind', POST_KINDS).order('scheduled_at', { ascending: false }).limit(1);
+  const prevKind = (prevRows?.[0] as { kind?: string } | undefined)?.kind ?? null;
   const now = Date.now();
   const winCards = await winCardsOn(db).catch(() => true);
-  // 🎤 le webinaire dans 2 jours, du lendemain ou du jour (voir webinarPost)
+  // 🎤 le webinaire dans 2 jours, du lendemain ou du jour (voir webinarPost) — logique inchangée, rien n'est planifié ici
   const wb = (await upcomingSessions(db, 1).catch(() => []))[0] as WebinarSession | undefined;
   const wbStart = wb ? Date.parse(wb.starts_at) : 0;
   const wbDay = wb && wbStart > now ? tradingDayOf(wbStart) : null;
   const wbPhase: WbPhase | null = wbDay === day ? 'today' : wbDay && wbDay === addDaysCm(day, 1) ? 'tomorrow' : wbDay && wbDay === addDaysCm(day, 2) ? 'soon' : null;
-  let wbFirst = 0, wbLast = false; // le jour J : l'heure de « ce soir », et le dernier appel déjà prévu
+
+  const planned = buildDayPlan({ day, weekend, timeMs: (hhmm) => tradingTimeMs(day, hhmm), rand: Math.random, prevKind, trades: winCards && !weekend, ...(wbPhase === 'today' ? { ctas: 2 as const } : {}) });
+  // CTA : deux le même jour = un « Mathieu » et un « app », comme avant ; un seul = l'autre famille que la dernière fois
+  const ctaSlots = planned.filter((p) => p.kind === 'cta');
+  const fams: Array<'app' | 'mathieu'> = ctaSlots.length > 1 ? ['mathieu', 'app'] : [lastFam === 'app' ? 'mathieu' : 'app'];
+  if (ctaSlots.length === 1 && (wbPhase === 'soon' || wbPhase === 'tomorrow')) fams[0] = 'app'; // l'annonce prend le CTA « app »
+
   const rows: Array<Record<string, unknown>> = [];
-  const briefs: Array<Brief | null> = [];
-  for (const s of slots) {
-    let at = tradingTimeMs(day, s.at) + jitter(day, s.slot);
+  const briefs: Array<Brief | 'poll' | null> = [];
+  let wbFirst = 0, wbLast = false, ctaN = 0;
+  for (const s of planned) {
+    let at = s.at;
     if (at <= now) continue; // créneau déjà passé (plan préparé en retard)
-    const base = { day, slot: s.slot, kind: s.kind, scheduled_at: new Date(at).toISOString(), status: 'draft' };
-    // 🎤 ce CTA devient-il une annonce du webinaire ? Deux jours avant et la veille : le CTA « app ». Le jour J : « ce soir » au premier
-    // créneau qui tombe plus d'1 h avant le début, puis le dernier appel 15 min avant (au moins 1 h après « ce soir »).
-    const wbPick: WbPhase | null = s.kind !== 'cta' || !wb ? null
-      : wbPhase === 'tomorrow' || wbPhase === 'soon' ? (s.fam === 'app' ? wbPhase : null)
-      : wbPhase !== 'today' ? null
-      : !wbFirst && at < wbStart - 60 * 60_000 ? 'today'
-      : !wbLast && wbStart - WB_LAST_CALL_MS > Math.max(now, wbFirst + 60 * 60_000) ? 'last' : null;
-    if (s.kind === 'morning') {
-      rows.push({ ...base, ref: 'morning', text: null });
-      briefs.push({ kind: 'morning' });
-      continue;
-    }
-    if (s.kind === 'howto') {
-      hi = nextIn(HOWTO, hi, (p) => shown(p.id));
-      const p = HOWTO[hi];
-      rows.push({ ...base, ref: p.id, text: p.text });
-      briefs.push({ kind: 'howto', card: p.text });
-    } else if (wbPick && wb) {
-      if (wbPick === 'today') wbFirst = at;
-      if (wbPick === 'last') { wbLast = true; at = wbStart - WB_LAST_CALL_MS; }
-      const w = webinarPost(wb, wbPick);
-      rows.push({ day, slot: s.slot, kind: 'cta', scheduled_at: new Date(at).toISOString(), status: 'draft', ref: w.id, text: w.text, button_text: w.btn, button_url: w.url, report: { webinar: wb.id, goal: w.goal, ...(w.times ? { times: w.times } : {}) } });
-      briefs.push({ kind: 'cta', goal: w.goal, reference: w.text, button: w.btn, ...(w.times ? { times: w.times } : {}) });
-    } else if (s.kind === 'cta') {
-      const fam = s.fam ?? 'app';
+    const base = { day, slot: s.slot, kind: s.kind as PlanFormat, scheduled_at: new Date(at).toISOString(), status: 'draft' };
+    if (s.kind === 'cta') {
+      const fam = fams[Math.min(ctaN++, fams.length - 1)];
+      // 🎤 ce CTA devient-il une annonce du webinaire ? (même règle qu'avant le 10/11 : J-2 et J-1 le CTA « app » ; le jour J
+      // « ce soir » au premier CTA plus d'1 h avant le début, puis le dernier appel 15 min avant)
+      const wbPick: WbPhase | null = !wb ? null
+        : wbPhase === 'tomorrow' || wbPhase === 'soon' ? (fam === 'app' ? wbPhase : null)
+        : wbPhase !== 'today' ? null
+        : !wbFirst && at < wbStart - 60 * 60_000 ? 'today'
+        : !wbLast && wbStart - WB_LAST_CALL_MS > Math.max(now, wbFirst + 60 * 60_000) ? 'last' : null;
+      if (wbPick && wb) {
+        if (wbPick === 'today') wbFirst = at;
+        if (wbPick === 'last') { wbLast = true; at = wbStart - WB_LAST_CALL_MS; }
+        const w = webinarPost(wb, wbPick);
+        rows.push({ ...base, kind: 'cta', scheduled_at: new Date(at).toISOString(), ref: w.id, text: w.text, button_text: w.btn, button_url: w.url, report: { webinar: wb.id, goal: w.goal, ...(w.times ? { times: w.times } : {}) } });
+        briefs.push({ kind: 'cta', goal: w.goal, reference: w.text, button: w.btn, ...(w.times ? { times: w.times } : {}) });
+        continue;
+      }
       const i = nextIn(CTAS, ci[fam], (c) => c.fam === fam && shown(c.id));
       if (i < 0) continue;
       ci[fam] = i;
       const c = CTAS[i];
-      rows.push({ ...base, ref: c.id, text: c.text, button_text: c.btn, button_url: c.url });
+      rows.push({ ...base, ref: c.id, text: null, button_text: c.btn, button_url: c.url });
       briefs.push({ kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn });
-    } else if (!winCards && s.slot === 'tp1') { // master à l'arrêt : un 2e How it works à la place de la carte de 14 h
+    } else if (s.kind === 'lesson') {
       hi = nextIn(HOWTO, hi, (p) => shown(p.id));
       const p = HOWTO[hi];
-      rows.push({ ...base, slot: 'howto2', kind: 'howto', ref: p.id, text: p.text });
-      briefs.push({ kind: 'howto', card: p.text });
-    } else if (!winCards) { // … et la question de la semaine à la place de celle de 19 h
-      rows.push({ ...base, slot: 'qa', kind: 'qa', ref: 'qa', text: null });
-      briefs.push({ kind: 'qa' });
-    } else { rows.push(base); briefs.push(null); } // carte de gain : choisie à l'heure dite
+      rows.push({ ...base, ref: p.id, text: null });
+      briefs.push({ kind: 'lesson', card: cardFacts(p.text) });
+    } else if (s.kind === 'trade') {
+      rows.push({ ...base, ref: null, text: null }); briefs.push(null); // le trade est choisi et commenté à son heure
+    } else if (s.kind === 'poll') {
+      rows.push({ ...base, ref: 'poll', text: null }); briefs.push('poll');
+    } else if (s.kind === 'backstage') {
+      rows.push({ ...base, ref: 'backstage', text: null }); briefs.push({ kind: 'backstage', photo: true }); // photo : voir plus bas
+    } else {
+      rows.push({ ...base, ref: s.kind, text: null }); briefs.push({ kind: s.kind } as Brief);
+    }
+  }
+  // le dernier appel du webinaire est à heure fixe : un autre post du CM trop près de lui saute (place à la bulle)
+  const lastCall = rows.find((r) => r.ref === 'webinar-last');
+  if (lastCall) {
+    const t = Date.parse(String(lastCall.scheduled_at));
+    for (let k = rows.length - 1; k >= 0; k--) if (rows[k] !== lastCall && rows[k].kind !== 'cta' && Math.abs(Date.parse(String(rows[k].scheduled_at)) - t) < WB_GAP_MS) { rows.splice(k, 1); briefs.splice(k, 1); }
   }
   if (!rows.length) return 0;
-  // LA RÉDACTION : tous les posts du jour en parallèle (un appel chacun). Échec ou texte refusé par les garde-fous →
-  // le texte de la banque ; pour le bonjour, pas de post (un bonjour en conserve, c'est ce qu'on veut éviter).
+
+  // LA PHOTO DES COULISSES : choisie maintenant, marquée utilisée seulement à la publication (runDue)
+  let photoAlert: string | null = null;
+  const bk = rows.findIndex((r) => r.kind === 'backstage');
+  if (bk >= 0) {
+    const ph = await choosePhoto(db, day).catch(() => null);
+    photoAlert = ph?.alert ?? null;
+    if (ph?.key) { rows[bk].photo_url = ph.fileId ?? null; rows[bk].report = { photo_key: ph.key, ...(ph.driveId ? { drive_file_id: ph.driveId } : {}) }; }
+    else briefs[bk] = { kind: 'backstage', photo: false };
+  }
+
+  // LA RÉDACTION : tous les posts du jour en parallèle (un appel chacun, comme avant : la cron a 60 s). Échec ou texte
+  // refusé deux fois par les garde-fous → le post SAUTE (10/11/2026 : la banque sonnait robot), sauf les annonces du
+  // webinaire, qui gardent leur texte.
   const ctx = await dayContext(db, day).catch(() => null);
   if (ctx && wb && wbPhase) ctx.webinar = `Mathieu's free live webinar on Zoom is ${wbPhase === 'today' ? 'TONIGHT' : wbPhase === 'tomorrow' ? `TOMORROW, ${ukDay(wb.starts_at)}` : `IN 2 DAYS, on ${ukDay(wb.starts_at)}`}, at ${webinarTimesInline(wb.starts_at)}, 45 minutes in English. The announcement posts carry one button to save a seat, and one line: or just DM @mathieu_algoria the single word LIVE and the seat is saved. The final reminder (we go live in a few minutes) does not add that line. The morning post may mention the webinar in one warm line (no link, no button, no pointing below); other posts do not mention it. Never a Zoom link in the channel, never a second button, nothing negative, no promise of gains.`;
-  const written = ctx ? await Promise.all(briefs.map((b) => (b ? writePost(ctx, b).catch(() => null) : Promise.resolve(null)))) : briefs.map(() => null);
+  const write = (b: Brief | 'poll' | null, openings: string[] = []) => (!ctx || !b ? Promise.resolve(null)
+    : b === 'poll' ? writePoll(ctx, openings).then((p) => (p ? JSON.stringify(p) : null)).catch(() => null)
+    : writePost(ctx, b, { openings }).catch(() => null));
+  const written: Array<string | null> = await Promise.all(briefs.map((b) => write(b)));
+  // dans la journée aussi : deux posts écrits en parallèle ne s'ouvrent pas pareil (le second est réécrit une fois,
+  // en connaissant les ouvertures des autres), et 🙏 / 🙌 ne passent qu'une fois
+  const opening = (k: number) => (briefs[k] === 'poll' ? String((JSON.parse(String(written[k])) as { question?: string }).question ?? '') : firstLine(String(written[k] ?? '')));
+  for (let k = 1; k < rows.length; k++) {
+    if (!written[k] || !briefs[k]) continue;
+    const mine = opening(k);
+    const clash = rows.slice(0, k).some((_, j) => written[j] && (normLine(opening(j)) === normLine(mine) || similarity(opening(j), mine) >= SIMILAR));
+    if (clash) written[k] = await write(briefs[k], rows.slice(0, k).map((_, j) => (written[j] ? opening(j) : '')).filter(Boolean));
+  }
+  const rationed = new Set<string>();
+  for (let k = 0; k < rows.length; k++) {
+    if (!written[k] || briefs[k] === 'poll') continue;
+    let t = String(written[k]);
+    for (const key of rationedIn(t)) {
+      if (rationed.has(key)) t = t.replace(key === 'pray' ? /\s?🙏[\u{1F3FB}-\u{1F3FF}]?/gu : /\s?🙌[\u{1F3FB}-\u{1F3FF}]?/gu, '');
+      rationed.add(key);
+    }
+    written[k] = t;
+  }
   for (let k = rows.length - 1; k >= 0; k--) {
-    const rep = (rows[k].report as object | undefined) ?? {}; // garde le brief d'un CTA webinaire (briefOf)
-    if (written[k]) { rows[k].text = written[k]; rows[k].report = { ...rep, writer: 'ai' }; }
-    else if (rows[k].kind === 'morning' || rows[k].kind === 'qa') rows.splice(k, 1); // pas de version en conserve
-    else if (rows[k].kind !== 'tp') rows[k].report = { ...rep, writer: 'bank' };
+    const rep = (rows[k].report as object | undefined) ?? {}; // garde le brief d'un CTA webinaire (briefOf) et la photo
+    if (rows[k].kind === 'trade') continue;
+    if (written[k] && briefs[k] === 'poll') { const p = JSON.parse(String(written[k])) as { question: string; options: string[] }; rows[k].text = p.question; rows[k].report = { ...rep, poll: p, writer: 'ai' }; }
+    else if (written[k]) { rows[k].text = written[k]; rows[k].report = { ...rep, writer: 'ai' }; }
+    else if (String(rows[k].ref ?? '').startsWith('webinar-')) rows[k].report = { ...rep, writer: 'bank' };
+    else { rows.splice(k, 1); briefs.splice(k, 1); } // pas de version en conserve
   }
-  if (!rows.length) return 0;
-  // LE BONJOUR AVEC UNE PHOTO DE MATHIEU (15/10/2026), prise dans la banque qu'il remplit en envoyant ses photos au bot.
-  // Banque vide : le bonjour part avec une bannière, comme les autres posts.
-  const morning = rows.find((r) => r.kind === 'morning');
-  if (morning) {
-    const ph = await pickPhoto(db).catch(() => null);
-    if (ph) { morning.photo_url = ph.file_id; morning.report = { ...(morning.report as object ?? {}), photo_id: ph.id }; }
-  }
+  if (!rows.some((r) => r.kind !== 'trade')) return 0;
   // une seule requête : si un autre passage a créé le plan entre-temps, l'unicité fait tout échouer, et un seul
   // message part aux admins
   const { error } = await db.from('channel_posts').insert(rows);
   if (error) return 0;
+  // 📸 stock de photos bas ou nul : une alerte par plan (donc une par jour), par le canal d'alerte admin habituel
+  if (photoAlert) await notifyOwner({ title: '📸 Photos du CM', lines: [photoAlert], tag: 'cm-photos' }).catch(() => null);
   const idea = await videoIdea(db).catch(() => null);
   if (idea) await db.from('channel_posts').insert({ day, slot: 'video', kind: 'video', text: idea, scheduled_at: new Date(tradingTimeMs(day, VIDEO_AT)).toISOString(), status: 'info' });
   return rows.length;
@@ -379,7 +424,6 @@ async function videoIdea(db: Db): Promise<string | null> {
 
 // ── LE MESSAGE AUX ADMINS ─────────────────────────────────────────────────────────────────────────────
 
-const POST_KINDS = ['morning', 'howto', 'cta', 'tp', 'qa'];
 const STATUS: Record<string, string> = { draft: '⏳ à valider', approved: '✅ validé', publishing: '📤 en cours', published: '📣 publié', skipped: '❌ pas publié', expired: '⌛ expiré' };
 const NUM = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'];
 const parisHHMM = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
@@ -389,6 +433,12 @@ async function rowsOf(db: Db, day: string): Promise<Row[]> {
   return (data ?? []) as Row[];
 }
 
+const HEADS: Record<string, string> = {
+  backstage: 'COULISSES', gold: "AVIS SUR L'OR", qa: 'QUESTION DE MEMBRE', story: 'HISTOIRE PERSO', trade: 'TRADE COMMENTÉ',
+  poll: 'SONDAGE', lesson: 'PÉDAGOGIE', morning: 'BONJOUR', howto: 'HOW IT WORKS', tp: 'CARTE DE GAIN',
+};
+const headOf = (r: { kind: string; ref: string | null }) => (r.kind === 'cta' ? (r.ref?.startsWith('webinar-') ? 'CTA 🎤 WEBINAIRE' : 'CTA 🔘') : HEADS[r.kind] ?? r.kind.toUpperCase());
+
 /** Le message du matin, régénéré depuis la base à chaque clic : il dit toujours l'état réel. */
 export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: Array<Array<Record<string, string>>> } {
   const posts = rows.filter((r) => POST_KINDS.includes(r.kind));
@@ -396,16 +446,21 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
   const tomorrow = day > tradingDayOf(Date.now());
   const parts: string[] = [`📣 <b>Canal public · ${tomorrow ? 'demain, ' : ''}${esc(dayLabel(day))}</b>`, tomorrow ? '<i>Valide ce soir : les posts partiront demain à leur heure, même si tu dors. Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>' : '<i>Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>'];
   posts.forEach((r, i) => {
-    const head = r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'qa' ? 'QUESTION DE LA SEMAINE' : r.kind === 'cta' ? (r.ref?.startsWith('webinar-') ? 'CTA 🎤 WEBINAIRE' : 'CTA') : 'CARTE DE GAIN';
+    const head = headOf(r);
     const by = (r.report as { writer?: string } | null)?.writer;
     const tag = by === 'ai' ? ' · ✍️ IA' : by === 'fixed' ? ' · ✏️ corrigé' : by === 'bank' ? ' · 📄 banque' : '';
-    const img = r.kind === 'tp' ? '' : r.photo_url ? ' · 📸 photo' : ' · 🖼 bannière';
+    const rep0 = (r.report as { photo_key?: string } | null) ?? {};
+    // plus de bannière (10/11/2026) : une image seulement quand c'est une vraie photo
+    const img = r.photo_url || rep0.photo_key ? ' · 📸 photo' : r.kind === 'backstage' ? ' · texte seul (pas de photo fraîche)' : '';
     parts.push('', `<b>${NUM[i] ?? i + 1}  ${parisHHMM(r.scheduled_at)} · ${head}</b>${tag}${img} · ${STATUS[r.status] ?? r.status}`);
-    if (r.kind === 'tp') {
+    if (r.kind === 'tp' || r.kind === 'trade') {
       const rep = r.report as { reason?: string } | null;
-      parts.push(r.text ? `<blockquote>${esc(plain(r.text).slice(0, 300))}</blockquote>` : `<i>Le meilleur gain copié ${TP_FROM[r.slot] ? `depuis ${TP_FROM[r.slot]}` : 'depuis minuit'} (au moins +$15 à 0.10 lot), avec sa carte, comme dans le VIP. Rien s'il n'y en a pas.${rep?.reason ? ` · ${esc(rep.reason)}` : ''}</i>`);
+      parts.push(r.text ? `<blockquote>${esc(safeSlice(plain(r.text), 300))}</blockquote>` : `<i>Le meilleur gain copié depuis le début de la séance (au moins +$15 à 0.10 lot), pas encore montré, commenté à la première personne à son heure (chiffres réels). Rien s'il n'y en a pas.${rep?.reason ? ` · ${esc(rep.reason)}` : ''}</i>`);
+    } else if (r.kind === 'poll') {
+      const poll = (r.report as { poll?: { question: string; options: string[] } } | null)?.poll;
+      parts.push(`<blockquote>📊 ${esc(poll?.question ?? r.text ?? '')}${(poll?.options ?? []).map((o) => `\n▫️ ${esc(o)}`).join('')}</blockquote>`);
     } else {
-      parts.push(`<blockquote>${esc(plain(r.text ?? '').slice(0, 420))}</blockquote>`);
+      parts.push(`<blockquote>${esc(safeSlice(plain(r.text ?? ''), 420))}</blockquote>`);
       if (r.button_text) parts.push(`🔘 ${esc(r.button_text)}`);
     }
   });
@@ -435,12 +490,21 @@ const tg = async (method: string, payload: Record<string, unknown>) => {
 export async function sendPlan(db: Db, day: string): Promise<number> {
   const rows = await rowsOf(db, day);
   const { text, keyboard } = renderPlan(day, rows);
-  const album = albumOf(rows);
   const msgs: Array<{ chat: number; id: number }> = [];
-  for (const chat_id of await adminTgIds()) {
-    // les images d'abord (photo du bonjour, bannières), numérotées comme dans le plan : ce qui part, on le voit
-    if (album.length === 1) await tg('sendPhoto', { chat_id, photo: album[0].media, caption: album[0].caption });
-    else if (album.length > 1) await tg('sendMediaGroup', { chat_id, media: album.slice(0, 10).map((m) => ({ type: 'photo', media: m.media, caption: m.caption })) });
+  const admins = await adminTgIds();
+  // LA PHOTO DRIVE : téléchargée une fois et envoyée au premier admin ; le file_id Telegram rendu sert ensuite partout
+  // (les autres admins, puis la publication), sans retélécharger
+  const env = readDriveEnv();
+  for (const r of rows) {
+    const rep = (r.report as { drive_file_id?: string } | null) ?? {};
+    if (!rep.drive_file_id || r.photo_url || !env || !admins.length) continue;
+    const fid = await sendDrivePhoto(env, rep.drive_file_id, admins[0], photoCaption(rows, r)).catch((e) => { console.error('[cm] photo Drive:', (e as Error).message); return null; });
+    if (fid) { r.photo_url = fid; await db.from('channel_posts').update({ photo_url: fid }).eq('id', r.id); (r as Row & { _sentTo?: number })._sentTo = admins[0]; }
+  }
+  const album = albumOf(rows);
+  for (const chat_id of admins) {
+    // la vraie photo d'abord, numérotée comme dans le plan : ce qui part, on le voit (plus de bannières)
+    for (const m of album) if (m.sentTo !== chat_id) await tg('sendPhoto', { chat_id, photo: m.media, caption: m.caption });
     const r = await tg('sendMessage', { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard } }) as { ok?: boolean; description?: string; result?: { message_id?: number } } | null;
     if (r?.ok && r.result?.message_id) msgs.push({ chat: chat_id, id: r.result.message_id });
     else console.error('[cm] plan non envoyé:', r?.description ?? 'unknown');
@@ -487,32 +551,58 @@ export async function handleCmCallback(db: Db, cq: { id: string; data?: string; 
 
 // ── LA PUBLICATION ────────────────────────────────────────────────────────────────────────────────────
 
-/** La carte de gain d'un créneau : le meilleur trade copié gagnant depuis le créneau précédent, pas encore posté. */
-async function pickWin(db: Db, r: Row): Promise<{ text: string; photo: string; ticket: string } | { reason: string }> {
+/** Le trade d'un post « trade commenté » : le meilleur trade copié gagnant de la séance, pas encore montré. */
+async function pickWin(db: Db, r: Row): Promise<{ trade: Trade; net10: number; facts: TradeFacts } | { reason: string }> {
   const day = String(r.day).slice(0, 10);
-  const fromAt = TP_FROM[r.slot];
-  const since = fromAt ? tradingTimeMs(day, fromAt) : tradingDayStartMs(day);
-  const trades = await liveTrades(db, new Date(since).toISOString());
-  const { data: used } = await db.from('channel_posts').select('ref').eq('kind', 'tp').in('status', ['published', 'publishing']).gte('day', day);
+  const trades = await liveTrades(db, new Date(tradingDayStartMs(day)).toISOString());
+  const { data: used } = await db.from('channel_posts').select('ref').in('kind', ['tp', 'trade']).in('status', ['published', 'publishing']).gte('day', day);
   const done = new Set(((used ?? []) as Array<{ ref: string | null }>).map((u) => String(u.ref)));
   const best = trades
     .filter((t) => tradingDayOf(t.closed_at) === day && Date.parse(t.closed_at) <= Date.now() && atOneLot(t.pnl, t.lot) >= TP_MIN_AT_ONE_LOT && !done.has(String(t.ticket)))
     .sort((a, b) => atOneLot(b.pnl, b.lot) - atOneLot(a.pnl, a.lot))[0] as Trade | undefined;
-  if (!best) return { reason: 'aucun gain assez net sur le créneau' };
-  const net10 = atRef(best.pnl, best.lot);
-  const dir = best.direction === 'long' ? ' BUY' : best.direction === 'short' ? ' SELL' : '';
-  const how = best.reason === 'tp' ? 'target hit' : best.reason === 'trail' ? 'profit locked by the trailing stop' : 'closed in profit';
-  const prices = px(best.entry) && px(best.exit) ? `${px(best.entry)} → ${px(best.exit)} · ` : '';
-  const text = [
-    `✅ <b>${usd(net10)} at 0.10 lot</b> · gold${dir}`,
-    `<i>${prices}${how}</i>`,
-    '',
-    `🤖 Closed by Algoria AI and copied automatically on members' accounts. At 0.01 lot: ${usd(net10 / 10)}.`,
-    '',
-    RISK,
-  ].join('\n');
-  return { text, photo: `${APP_URL}/api/card/win?ticket=${encodeURIComponent(String(best.ticket))}&strategy=${Number(best.strategy ?? 2)}`, ticket: String(best.ticket) };
+  if (!best) return { reason: 'aucun gain assez net sur la séance' };
+  return {
+    trade: best,
+    net10: atRef(best.pnl, best.lot),
+    facts: {
+      direction: best.direction === 'long' ? 'BUY' : best.direction === 'short' ? 'SELL' : null,
+      entry: px(best.entry), exit: px(best.exit),
+      how: best.reason === 'tp' ? 'it hit its target' : best.reason === 'trail' ? 'the trailing stop locked the profit' : 'it closed in profit',
+      closedAt: parisHHMM(best.closed_at),
+    },
+  };
 }
+
+/** LE SECOURS DU TRADE COMMENTÉ (modèle absent ou texte refusé deux fois) : quelques tournures à la première personne,
+ *  tirées au hasard, avec les vrais chiffres ({{RESULT}}, remplacé par le code). Elles passent par les mêmes garde-fous. */
+export function tradeFallback(f: TradeFacts, rand: () => number = Math.random): string {
+  const dir = f.direction ? `${f.direction} ` : '';
+  const move = f.entry && f.exit ? `, ${f.entry} to ${f.exit}` : '';
+  const open = [
+    `The AI just closed a ${dir}on gold${move}.`,
+    `That one went the right way : a gold ${dir}trade${move}.`,
+    `I was watching this one : gold ${dir}${move ? move.slice(2) : 'trade'}, and ${f.how}.`,
+    `Gold ${dir}from the AI this afternoon, ${f.how}.`,
+    `One more for the AI on gold, a ${dir}trade${move}.`,
+  ];
+  const close = [
+    'Copied automatically on every connected account.',
+    'Nobody had to do anything, the copy handled it.',
+    "Members didn't touch a thing, their accounts copied it.",
+    'Same trade on every account that copies Algoria, at its own size.',
+  ];
+  const pick = <T,>(a: T[]) => a[Math.floor(rand() * a.length)];
+  return [pick(open).replace(/\s+/g, ' ').replace(' ,', ','), '{{RESULT}}', pick(close)].join('\n\n');
+}
+
+/** support_settings 'cm_trade_card' = 'on' : le trade commenté garde l'image de la carte (/api/card/win). Par défaut non :
+ *  une image seulement quand c'est une vraie photo (10/11/2026). */
+async function tradeCardOn(db: Db): Promise<boolean> {
+  const { data } = await db.from('support_settings').select('value').eq('key', 'cm_trade_card').limit(1);
+  return String((data?.[0] as { value?: string } | undefined)?.value ?? 'off').trim().toLowerCase() === 'on';
+}
+
+const asObj = (x: unknown): Record<string, unknown> => (x && typeof x === 'object' && !Array.isArray(x) ? (x as Record<string, unknown>) : {});
 
 /** Le passage de la cron : expire ce qui n'a pas été validé à temps, publie ce qui est validé et dont l'heure est venue. */
 export async function runDue(db: Db): Promise<{ published: number; skipped: number; expired: number }> {
@@ -524,9 +614,10 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
   const { data: due } = await db.from('channel_posts').select('*').eq('status', 'approved').lte('scheduled_at', nowIso).order('scheduled_at', { ascending: true }).limit(5);
   const src = sourceChannel();
   for (const r of (due ?? []) as Row[]) {
-    // un brouillon validé dans le délai de grâce part tout de suite ; au-delà de STALE_MS (cron en panne), plus rien
+    // un brouillon validé dans le délai de grâce part tout de suite ; au-delà de STALE_MS (cron en panne), plus rien.
+    // Un post expiré ne « consomme » pas sa photo : elle n'est marquée qu'à la publication.
     if (now - Date.parse(r.scheduled_at) > STALE_MS) {
-      const { data: x } = await db.from('channel_posts').update({ status: 'expired', report: { reason: 'cron en retard' } }).eq('id', r.id).eq('status', 'approved').select('id');
+      const { data: x } = await db.from('channel_posts').update({ status: 'expired', report: { ...asObj(r.report), reason: 'cron en retard' } }).eq('id', r.id).eq('status', 'approved').select('id');
       expired += (x ?? []).length;
       continue;
     }
@@ -534,21 +625,47 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
     // verrou : un seul passage publie une ligne donnée
     const { data: locked } = await db.from('channel_posts').update({ status: 'publishing' }).eq('id', r.id).eq('status', 'approved').select('id');
     if (!locked?.length) continue;
+    const rep = asObj(r.report);
     let text = r.text ?? '', photo = r.photo_url ?? '', ref = r.ref;
     let btnText = r.button_text ?? '', btnUrl = r.button_url ?? '';
-    if (r.kind === 'tp') {
+    if (r.kind === 'tp' || r.kind === 'trade') {
       const w = await pickWin(db, r).catch((e) => ({ reason: String((e as Error).message).slice(0, 120) }));
-      if ('reason' in w) { await db.from('channel_posts').update({ status: 'skipped', report: { reason: w.reason } }).eq('id', r.id); skipped++; continue; }
-      text = w.text; photo = w.photo; ref = w.ticket; btnText = ''; btnUrl = ''; // la carte parle d'elle-même : pas de bouton
-    } else if (!photo) photo = bannerUrl(r); // How it works, CTA, bonjour sans photo : la bannière
-    let out = await publishToChannels(db, { chatId: src, text, buttonText: btnText, buttonUrl: btnUrl, ...(photo ? { photoUrl: photo } : {}) });
-    // la carte n'a pas pu être rendue ou récupérée par Telegram : le gain part en texte, il ne se perd pas
-    if (!out.ok && photo) { photo = ''; out = await publishToChannels(db, { chatId: src, text, buttonText: btnText, buttonUrl: btnUrl }); }
+      if ('reason' in w) { await db.from('channel_posts').update({ status: 'skipped', report: { ...rep, reason: w.reason } }).eq('id', r.id); skipped++; continue; }
+      // LE TRADE COMMENTÉ (10/11/2026) : écrit maintenant, à la première personne, sur ce trade-là ; chiffres du code
+      const result = amountsLine(w.net10);
+      const ctx = await dayContext(db, String(r.day).slice(0, 10)).catch(() => null);
+      let written = ctx ? await writePost(ctx, { kind: 'trade', facts: w.facts }, { result }).catch(() => null) : null;
+      if (!written) written = guardTrade(tradeFallback(w.facts), result, ctx);
+      if (!written) { await db.from('channel_posts').update({ status: 'skipped', report: { ...rep, reason: 'commentaire refusé par les garde-fous' } }).eq('id', r.id); skipped++; continue; }
+      text = written; ref = w.trade.ticket; btnText = ''; btnUrl = '';
+      photo = (await tradeCardOn(db).catch(() => false)) ? `${APP_URL}/api/card/win?ticket=${encodeURIComponent(String(w.trade.ticket))}&strategy=${Number(w.trade.strategy ?? 2)}` : '';
+    }
+    // plus de bannière automatique (10/11/2026) : une image seulement quand c'est une vraie photo
+    let out;
+    const poll = (rep.poll as { question?: string; options?: string[] } | undefined);
+    if (r.kind === 'poll' && poll?.question && poll.options?.length) out = await publishPollToChannels(db, { chatId: src, question: poll.question, options: poll.options });
+    else {
+      out = await publishToChannels(db, { chatId: src, text, buttonText: btnText, buttonUrl: btnUrl, ...(photo ? { photoUrl: photo } : {}) });
+      // l'image n'a pas pu être récupérée par Telegram : le post part en texte, il ne se perd pas (et la photo reste fraîche)
+      if (!out.ok && photo) { photo = ''; out = await publishToChannels(db, { chatId: src, text, buttonText: btnText, buttonUrl: btnUrl }); }
+    }
+    // la photo est « utilisée » maintenant seulement ; sans photo partie, la clé est retirée
+    const { photo_key: pk, ...restRep } = rep as { photo_key?: string };
+    const keep = out.ok && photo && pk ? { photo_key: pk } : {};
+    if (out.ok && photo && typeof pk === 'string' && pk.startsWith('bank:')) await db.from('cm_photos').update({ last_used_at: new Date().toISOString() }).eq('id', Number(pk.slice(5)));
     // échec : la ligne repasse en « validé » et le passage suivant réessaie (jusqu'à STALE_MS)
-    await db.from('channel_posts').update({ status: out.ok ? 'published' : 'approved', ref, text, photo_url: photo || null, button_text: btnText || null, button_url: btnUrl || null, message_id: out.ok ? out.messageId : null, report: out.ok ? out.report : { error: out.error, report: out.report } }).eq('id', r.id);
+    await db.from('channel_posts').update({ status: out.ok ? 'published' : 'approved', ref, text, photo_url: photo || null, button_text: btnText || null, button_url: btnUrl || null, message_id: out.ok ? out.messageId : null,
+      report: out.ok ? { ...restRep, ...keep, channels: out.report } : { ...rep, error: out.error, channels: out.report } }).eq('id', r.id);
     if (out.ok) published++;
   }
   return { published, skipped, expired };
+}
+
+/** Le secours du trade commenté, contrôlé comme un texte du modèle (ton, chiffres, risque). */
+export function guardTrade(raw: string, result: string, ctx: DayContext | null): string | null {
+  const r = check(raw, { tokens: { RESULT: result }, required: ['RESULT'], noButton: true, allowedUsd: [], autoRisk: true, maxChars: 760,
+    tone: { openings: ctx?.openings ?? [], rationedUsed: ctx?.rationedUsed, hasButton: false } });
+  return r.ok ? r.text : null;
 }
 
 // ── LES CORRECTIONS DE MATHIEU ────────────────────────────────────────────────────────────────────────
@@ -557,13 +674,14 @@ const addDaysCm = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:
 const todayFr = () => new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Paris' });
 
 function briefOf(r: Row): Brief | null {
+  const rep = (r.report as { goal?: string; times?: string; photo_key?: string } | null) ?? {};
   if (r.kind === 'morning') return { kind: 'morning' };
-  if (r.kind === 'howto') { const p = HOWTO.find((x) => x.id === r.ref); return p ? { kind: 'howto', card: p.text } : null; }
-  if (r.kind === 'qa') return { kind: 'qa' };
-  const { goal: wbGoal, times: wbTimes } = (r.report as { goal?: string; times?: string } | null) ?? {};
-  if (r.kind === 'cta' && r.ref?.startsWith('webinar-') && wbGoal) return { kind: 'cta', goal: wbGoal, reference: r.text ?? '', button: r.button_text ?? '', ...(wbTimes ? { times: wbTimes } : {}) };
+  if (r.kind === 'backstage') return { kind: 'backstage', photo: !!(r.photo_url || rep.photo_key) };
+  if (r.kind === 'howto' || r.kind === 'lesson') { const p = HOWTO.find((x) => x.id === r.ref); return p ? { kind: 'lesson', card: cardFacts(p.text) } : null; }
+  if (r.kind === 'qa' || r.kind === 'gold' || r.kind === 'story') return { kind: r.kind };
+  if (r.kind === 'cta' && r.ref?.startsWith('webinar-') && rep.goal) return { kind: 'cta', goal: rep.goal, reference: r.text ?? '', button: r.button_text ?? '', ...(rep.times ? { times: rep.times } : {}) };
   if (r.kind === 'cta') { const c = CTAS.find((x) => x.id === r.ref); return c ? { kind: 'cta', goal: CTA_GOAL[c.id] ?? 'bring them to the app', reference: c.text, button: c.btn } : null; }
-  return null;
+  return null; // trade (écrit à son heure) et sondage (pas de réécriture par réponse, ❌ pour le retirer)
 }
 
 /** RÉPONSE DE MATHIEU AU MESSAGE DU MATIN. « 2 plus court » : le post 2 est réécrit par le rédacteur (puis à revalider)
@@ -609,22 +727,22 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
     const r = posts[a.n - 1];
     if (!r) { notes.push(`${a.n} : pas de post ${a.n} ce jour-là`); continue; }
     // « 1 change la photo », « 3 autre image » : on change l'image, pas le texte (et ce n'est pas une leçon d'écriture)
-    if (IMAGE_ASK.test(a.text) && r.kind !== 'tp') {
+    if (IMAGE_ASK.test(a.text) && r.kind !== 'tp' && r.kind !== 'trade') {
       if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { notes.push(`${a.n} : déjà parti ou expiré`); continue; }
       swaps.push({ n: a.n, r });
       continue;
     }
-    const label = r.kind === 'morning' ? 'bonjour du matin' : r.kind === 'howto' ? 'How it works' : r.kind === 'qa' ? 'question de la semaine' : r.kind === 'cta' ? 'CTA' : 'carte de gain';
+    const label = headOf(r).toLowerCase();
     // la remarque est une leçon pour la suite, que le post puisse encore être réécrit ou non
     await appendAgentMemory(db, `${todayFr()} · ${label} : « ${a.text.slice(0, 300)} »`, by, 'cm_memory');
     const brief = briefOf(r);
-    if (!brief) { notes.push(`${a.n} : la carte de gain est choisie à son heure, je retiens juste la remarque`); continue; }
+    if (!brief) { notes.push(`${a.n} : ${r.kind === 'poll' ? 'le sondage ne se réécrit pas, ❌ pour le retirer' : 'le trade commenté est écrit à son heure'}, je retiens juste la remarque`); continue; }
     if (!['draft', 'approved', 'skipped'].includes(r.status) || Date.parse(r.scheduled_at) + GRACE_MS <= Date.now()) { notes.push(`${a.n} : déjà parti ou expiré, je retiens juste la remarque`); continue; }
     todo.push({ n: a.n, r, brief, instruction: a.text });
   }
   for (const sw of swaps) {
-    const img = await swapImage(db, sw.r);
-    await tg('sendPhoto', { chat_id: chat, photo: img, caption: `${NUM[sw.n - 1] ?? sw.n} nouvelle image, à revalider avec ✅ Tout valider`, reply_to_message_id: msg.message_id });
+    const why = await swapImage(db, sw.r, chat, msg.message_id, `${NUM[sw.n - 1] ?? sw.n} nouvelle photo, à revalider avec ✅ Tout valider`);
+    if (why) notes.push(`${sw.n} : ${why}`);
   }
   if (swaps.length) {
     const view = renderPlan(day, await rowsOf(db, day));
@@ -661,12 +779,12 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
   return true;
 }
 
-// ── LES IMAGES (15/10/2026, Mathieu : « ça manque de couleurs, de bannières, ça fait très texte et robot ») ─────
-// · le bonjour part avec une photo de Mathieu, tirée de sa banque (table cm_photos) : il l'alimente en envoyant ses
-//   photos au bot, en privé. Jamais la même deux jours de suite : la moins récemment utilisée d'abord ;
-// · How it works, CTA et bonjour sans photo partent avec une bannière aux couleurs d'Algoria (/api/card/banner),
-//   rendue à partir du post lui-même ;
-// · les cartes de gain gardent leur carte (/api/card/win).
+// ── LES IMAGES ─────────────────────────────────────────────────────────────────────────────────────────
+// 15/10/2026 (Mathieu : « ça manque de couleurs, de bannières ») : une bannière générée sur chaque post sans photo.
+// 10/11/2026 (refonte) : c'est fini, une bannière sur chaque post faisait partie de l'effet « robot ». Une image
+// seulement quand c'est une VRAIE photo : celle des coulisses du matin (dossier Drive de Mathieu, sinon la banque
+// cm_photos). La route /api/card/banner et bannerParts restent pour les anciens posts déjà publiés ; la carte de gain
+// (/api/card/win) ne revient que si support_settings 'cm_trade_card' = 'on'.
 
 const IMAGE_ASK = /\b(photo|image|visuel|banni[eè]re|picture)\b/i;
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -694,38 +812,69 @@ const hash = (s: string) => { let h = 0; for (const ch of s) h = (h * 31 + ch.ch
 export const bannerUrl = (r: { id: number; text: string | null; report: unknown }) =>
   `${APP_URL}/api/card/banner?post=${r.id}&v=${hash(`${r.text ?? ''}#${Number((r.report as { variant?: number } | null)?.variant ?? 0)}`)}`;
 
-/** Les images du plan, dans l'ordre et avec les numéros du message. */
-function albumOf(rows: Row[]): Array<{ media: string; caption: string }> {
-  const posts = rows.filter((r) => POST_KINDS.includes(r.kind));
-  return posts.map((r, i) => ({ r, i })).filter(({ r }) => r.kind !== 'tp' && ['draft', 'approved', 'skipped'].includes(r.status))
-    .map(({ r, i }) => ({ media: r.photo_url || bannerUrl(r), caption: `${NUM[i] ?? i + 1} ${parisHHMM(r.scheduled_at)} · ${r.kind === 'morning' ? 'BONJOUR' : r.kind === 'howto' ? 'HOW IT WORKS' : r.kind === 'qa' ? 'QUESTION' : 'CTA'}` }));
+/** Les vraies photos du plan (plus de bannières, 10/11/2026), dans l'ordre et avec les numéros du message. */
+function albumOf(rows: Row[]): Array<{ media: string; caption: string; sentTo?: number }> {
+  return rows.filter((r) => POST_KINDS.includes(r.kind) && r.photo_url && r.kind !== 'tp' && r.kind !== 'trade' && ['draft', 'approved', 'skipped'].includes(r.status))
+    .map((r) => ({ media: String(r.photo_url), caption: photoCaption(rows, r), sentTo: (r as Row & { _sentTo?: number })._sentTo }));
+}
+const photoCaption = (rows: Row[], r: Row) => {
+  const i = rows.filter((x) => POST_KINDS.includes(x.kind)).findIndex((x) => x.id === r.id);
+  return `${NUM[i] ?? i + 1} ${parisHHMM(r.scheduled_at)} · ${headOf(r)}`;
+};
+
+type Chosen = { key: string | null; fileId?: string | null; driveId?: string; alert?: string | null };
+
+/** Les passages déjà publiés (la photo est « utilisée » à la PUBLICATION, 10/11/2026) : report.photo_key des posts publiés,
+ *  plus, pour la banque, son last_used_at (posé à la publication depuis le 10/11, au plan avant). */
+async function photoUses(db: Db): Promise<PhotoUse[]> {
+  const since = new Date(Date.now() - 60 * 86_400_000).toISOString();
+  const { data } = await db.from('channel_posts').select('report,scheduled_at').eq('status', 'published').gte('scheduled_at', since).not('report->>photo_key', 'is', null).limit(500);
+  return ((data ?? []) as Array<{ report: { photo_key?: string } | null; scheduled_at: string }>)
+    .filter((r) => r.report?.photo_key).map((r) => ({ key: String(r.report?.photo_key), at: Date.parse(r.scheduled_at) }));
 }
 
-/** La photo du bonjour : la moins récemment utilisée (parmi les 3 plus anciennes, au hasard), puis marquée utilisée. */
-async function pickPhoto(db: Db, exclude?: number): Promise<{ id: number; file_id: string } | null> {
-  const { data } = await db.from('cm_photos').select('id,file_id,last_used_at').eq('active', true).limit(500);
-  const all = ((data ?? []) as Array<{ id: number; file_id: string; last_used_at: string | null }>).filter((p) => p.id !== exclude);
-  if (!all.length) return null;
-  all.sort((a, b) => (a.last_used_at ? Date.parse(a.last_used_at) : 0) - (b.last_used_at ? Date.parse(b.last_used_at) : 0));
-  const pick = all[Math.floor(Math.random() * Math.min(3, all.length))];
-  await db.from('cm_photos').update({ last_used_at: new Date().toISOString() }).eq('id', pick.id);
-  return pick;
-}
-
-/** « 1 change la photo » : une autre photo de la banque pour le bonjour, sinon une autre ambiance de bannière.
- *  Le post redevient un brouillon. Renvoie l'image à montrer. */
-async function swapImage(db: Db, r: Row): Promise<string> {
-  const rep = (r.report as { photo_id?: number; variant?: number } | null) ?? {};
-  if (r.kind === 'morning') {
-    const ph = await pickPhoto(db, rep.photo_id).catch(() => null);
-    if (ph) {
-      await db.from('channel_posts').update({ photo_url: ph.file_id, status: 'draft', report: { ...rep, photo_id: ph.id } }).eq('id', r.id);
-      return ph.file_id;
+/** LA PHOTO DES COULISSES (lib/channel/photos.ts) : le dossier Drive de Mathieu s'il est configuré, sinon la banque
+ *  cm_photos. Rien n'est marqué ici. null (clé) = texte seul, jamais une photo répétée. `alert` = à envoyer aux admins. */
+async function choosePhoto(db: Db, _day: string, excludeKey?: string | null): Promise<Chosen> {
+  const share = String(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? '').trim();
+  let all: Array<PhotoCandidate & { fileId?: string }> = [];
+  if (driveWanted()) {
+    const env = readDriveEnv();
+    if (!env) return { key: null, alert: 'Le dossier Drive des photos est configuré (CM_PHOTOS_DRIVE_FOLDER_ID), mais pas le compte de service (GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY). Le post du matin part en texte seul.' };
+    try { all = await listDrivePhotos(env); } catch (e) {
+      return { key: null, alert: `Le dossier Drive des photos est illisible (${String((e as Error).message).slice(0, 80)}). Partage-le en Lecteur avec ${share || 'le compte de service'}. Le post du matin part en texte seul.` };
     }
+  } else {
+    const { data } = await db.from('cm_photos').select('id,file_id,last_used_at').eq('active', true).limit(500);
+    all = ((data ?? []) as Array<{ id: number; file_id: string }>).map((p) => ({ key: `bank:${p.id}`, fileId: p.file_id }));
   }
-  const next = { ...rep, variant: Number(rep.variant ?? 0) + 1 };
-  await db.from('channel_posts').update({ photo_url: null, status: 'draft', report: next }).eq('id', r.id);
-  return bannerUrl({ id: r.id, text: r.text, report: next });
+  const bankUses = driveWanted() ? [] : (((await db.from('cm_photos').select('id,last_used_at').not('last_used_at', 'is', null).limit(500)).data ?? []) as Array<{ id: number; last_used_at: string }>)
+    .map((p) => ({ key: `bank:${p.id}`, at: Date.parse(p.last_used_at) }));
+  const { pick, freshLeft } = pickFresh(all, [...(await photoUses(db)), ...bankUses], Date.now(), Math.random, excludeKey);
+  const where = driveWanted() ? 'dans le dossier Drive « Photos Mathieu - CM canal »' : 'dans la banque du bot';
+  const alert = !all.length ? `Aucune photo ${where} : le post du matin part en texte seul. Ajoute des photos${driveWanted() && share ? ` (dossier partagé en Lecteur avec ${share})` : ''}.`
+    : !pick ? `Plus aucune photo fraîche ${where} (toutes passées récemment) : le post du matin part en texte seul plutôt que de répéter une photo. Ajoute des photos.`
+    : freshLeft < LOW_STOCK ? `Plus que ${Math.max(0, freshLeft)} photo${freshLeft > 1 ? 's' : ''} fraîche${freshLeft > 1 ? 's' : ''} ${where} (pas passées depuis 30 jours). Pense à en ajouter.` : null;
+  if (!pick) return { key: null, alert };
+  const c = all.find((p) => p.key === pick.key);
+  return { key: pick.key, fileId: c?.fileId ?? null, ...(pick.key.startsWith('drive:') ? { driveId: pick.key.slice(6) } : {}), alert };
+}
+
+/** « 1 change la photo » : une autre photo pour les coulisses (Drive ou banque), montrée tout de suite à l'admin.
+ *  Le post redevient un brouillon. Les autres posts n'ont plus d'image (10/11/2026). */
+async function swapImage(db: Db, r: Row, chat: number, replyTo: number, caption: string): Promise<string> {
+  const rep = (r.report as { photo_key?: string; drive_file_id?: string } | null) ?? {};
+  if (r.kind !== 'backstage' && r.kind !== 'morning') return 'pas d’image sur ce post (une image seulement pour une vraie photo, le matin)';
+  const ph = await choosePhoto(db, String(r.day).slice(0, 10), rep.photo_key).catch(() => null);
+  if (!ph?.key) return 'pas d’autre photo fraîche : le post partira en texte seul si tu retires la photo';
+  let fid = ph.fileId ?? null;
+  const env = readDriveEnv();
+  if (ph.driveId && env) fid = await sendDrivePhoto(env, ph.driveId, chat, caption, replyTo).catch(() => null);
+  else if (fid) await tg('sendPhoto', { chat_id: chat, photo: fid, caption, reply_to_message_id: replyTo });
+  if (!fid) return 'la photo n’a pas pu être chargée, réessaie';
+  const { drive_file_id: _d, ...rest } = rep;
+  await db.from('channel_posts').update({ photo_url: fid, status: 'draft', report: { ...rest, photo_key: ph.key, ...(ph.driveId ? { drive_file_id: ph.driveId } : {}) } }).eq('id', r.id);
+  return '';
 }
 
 /** UNE PHOTO ENVOYÉE AU BOT PAR UN ADMIN, en privé et pas en réponse à un message : elle entre dans la banque du
