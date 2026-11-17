@@ -240,7 +240,7 @@ export async function reviewCard(db: Db, conn: Conn, rowId: string, base: Record
 export type Row = { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> };
 
 /** Envoie `text` au client DEPUIS le compte de Mathieu (Telegram n'étiquette le bot que chez lui). null = parti. */
-export async function sendAsOwner(db: Db, row: Row, text: string, via: 'draft' | 'corrected' | 'auto', by: string): Promise<string | null> {
+export async function sendAsOwner(db: Db, row: Row, text: string, via: 'draft' | 'corrected' | 'auto' | 'window_auto', by: string): Promise<string | null> {
   const d = row.detail ?? {};
   const r = await tg('sendMessage', { business_connection_id: d.conn, chat_id: row.tg_id, text, disable_web_page_preview: true });
   // Refus typiques : conversation inactive depuis plus de 24 h, ou « Reply to Messages » décoché dans Chat Automation.

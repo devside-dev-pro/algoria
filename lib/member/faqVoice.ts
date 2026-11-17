@@ -13,6 +13,11 @@ import { MYFXBOOK_URL } from './myfxbook';
 
 export const FAQ_KIND = 'faq_voice';
 
+/** Vocal d'attente n°19 (fenêtre 05:00–09:00 Asia/Dubai). Même modèle que la #583 : kind = 'faq_voice', situation = 'faq_attente_5h9h'. Pas un thème classifié. */
+export const FAQ_WAIT_KIND = FAQ_KIND;
+export const FAQ_WAIT_TOPIC = 'faq_attente_5h9h';
+export const FAQ_WAIT_LABEL = '⏳ Attente 5h–9h';
+
 /** Les thèmes, dans l'ordre des boutons (les 10 premiers de la spec, puis la suite). */
 export const FAQ_TOPICS = [
   'faq_how_it_works', 'faq_broker', 'faq_deposit', 'faq_cost_free', 'faq_connect',
@@ -38,6 +43,10 @@ export const FAQ_LABELS: Record<FaqTopic, string> = {
   faq_not_copying_yet: '⏳ Pas encore de trades',
   faq_incident: '🚨 Incident (si demandé)',
 };
+export const isFaqWaitTopic = (t: unknown): t is typeof FAQ_WAIT_TOPIC => t === FAQ_WAIT_TOPIC;
+export const isFaqSituation = (t: unknown): t is FaqTopic | typeof FAQ_WAIT_TOPIC => isFaqTopic(t) || isFaqWaitTopic(t);
+export const faqSituationLabel = (t: string | null | undefined): string =>
+  t && isFaqTopic(t) ? FAQ_LABELS[t] : t === FAQ_WAIT_TOPIC ? FAQ_WAIT_LABEL : 'thème pas encore choisi';
 
 /** LA LIGNE FIXE sous le vocal (spec section 4, « Texte »). Liens : app.getalgoria.com (domaine actuel) et le
  *  Myfxbook officiel, seul lien de résultats. Jamais de mot de passe demandé, or uniquement, aucune promesse. */
@@ -241,6 +250,7 @@ export function faqKeyboard(a: { id: number; situation?: string | null; active?:
   const btns: Btn[] = FAQ_TOPICS.map((t) => ({ text: `${a.situation === t ? '✓ ' : ''}${FAQ_LABELS[t]}`, callback_data: `sa:${a.id}:t:${t}` }));
   const rows: Btn[][] = [];
   for (let k = 0; k < btns.length; k += 2) rows.push(btns.slice(k, k + 2));
+  rows.push([{ text: `${a.situation === FAQ_WAIT_TOPIC ? '✓ ' : ''}${FAQ_WAIT_LABEL}`, callback_data: `sa:${a.id}:t:${FAQ_WAIT_TOPIC}` }]);
   rows.push([{ text: '🌍 C’est un vocal pays', callback_data: `sa:${a.id}:cv` }, { text: '🗑 Retirer', callback_data: `sa:${a.id}:x` }]);
   return { inline_keyboard: rows };
 }
@@ -258,7 +268,7 @@ export type AssetCallback =
   | { id: number; op: 'active'; value: boolean }
   | { id: number; op: 'faq' }
   | { id: number; op: 'country_voice' }
-  | { id: number; op: 'topic'; value: FaqTopic }
+  | { id: number; op: 'topic'; value: FaqTopic | typeof FAQ_WAIT_TOPIC }
   | { id: number; op: 'send'; rowId: string };
 
 export function parseAssetCallback(data: unknown): AssetCallback | null {
@@ -268,7 +278,7 @@ export function parseAssetCallback(data: unknown): AssetCallback | null {
   if (m[3]) return { id, op: 'situation', value: m[3] as 'new' | 'app' | 'all' };
   if (m[4]) return { id, op: 'lang', value: m[4] as 'en' | 'it' };
   if (m[5]) return { id, op: 'country', value: m[5].toUpperCase() };
-  if (m[6]) return isFaqTopic(m[6]) ? { id, op: 'topic', value: m[6] } : null;
+  if (m[6]) return isFaqSituation(m[6]) ? { id, op: 'topic', value: m[6] } : null;
   if (m[7]) return { id, op: 'send', rowId: m[7].toLowerCase() };
   if (m[2] === 'faq') return { id, op: 'faq' };
   if (m[2] === 'cv') return { id, op: 'country_voice' };
@@ -280,14 +290,14 @@ type Db = any;
 
 /** Tague un vocal sur un thème. REMPLACEMENT : l'ancien vocal actif de ce thème est désactivé (jamais supprimé), AVANT
  *  d'activer le nouveau (l'index unique partiel de la migration 0042 l'exige). Renvoie le nombre de vocaux désactivés. */
-export async function tagFaqVoice(db: Db, id: number, topic: FaqTopic): Promise<{ replaced: number; error?: string }> {
+export async function tagFaqVoice(db: Db, id: number, topic: FaqTopic | typeof FAQ_WAIT_TOPIC): Promise<{ replaced: number; error?: string }> {
   const { data: old } = await db.from('support_assets').update({ active: false }).eq('kind', FAQ_KIND).eq('situation', topic).eq('active', true).neq('id', id).select('id');
   const { error } = await db.from('support_assets').update({ kind: FAQ_KIND, situation: topic, lang: 'en', active: true }).eq('id', id);
   return { replaced: (old ?? []).length, ...(error ? { error: String(error.message ?? error) } : {}) };
 }
 
 /** Le vocal actif d'un thème (le plus récent s'il en reste plusieurs, avant migration). */
-export async function pickFaqVoice(db: Db, topic: FaqTopic): Promise<{ id: number; file_id: string; uses: number | null } | null> {
+export async function pickFaqVoice(db: Db, topic: FaqTopic | typeof FAQ_WAIT_TOPIC): Promise<{ id: number; file_id: string; uses: number | null } | null> {
   const { data } = await db.from('support_assets').select('id,file_id,uses').eq('kind', FAQ_KIND).eq('situation', topic).eq('active', true).order('id', { ascending: false }).limit(1);
   return (data?.[0] ?? null) as { id: number; file_id: string; uses: number | null } | null;
 }
