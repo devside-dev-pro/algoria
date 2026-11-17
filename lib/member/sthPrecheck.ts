@@ -22,7 +22,7 @@
 // que celui déjà connecté. Un autre compte est testé, après un disconnect pour éviter le « Invalid account »
 // ambigu d'un UserID déjà enregistré.
 import { sdb } from './server';
-import { sthReady, sthConnectCustomer, sthDisconnect } from './sth';
+import { sthReady, sthConnectCustomer, sthDisconnect, isInvalidAccountMessage } from './sth';
 
 export type PrecheckResult = 'ok' | 'invalid' | 'error' | 'known' | 'timeout';
 export interface Precheck { result: PrecheckResult; error?: string; at: string }
@@ -72,7 +72,9 @@ export async function sthPrecheck(o: { tgId: number; kycId: string | null; login
     const at = new Date().toISOString();
     if (!r) check = { result: 'timeout', at };
     else if (r.ok) check = { result: 'ok', at };
-    else check = { result: /invalid account/i.test(r.errorMessage) ? 'invalid' : 'error', error: r.errorMessage.slice(0, 200), at };
+    // 17/11/2026 : reconnaître aussi INVALID_ACCOUNT (tiret bas). L'ambiguïté « déjà connu »
+    // reste gérée plus haut (saut `known` / disconnect avant le test d'un autre login).
+    else check = { result: isInvalidAccountMessage(r.errorMessage) ? 'invalid' : 'error', error: r.errorMessage.slice(0, 200), at };
   }
   // Écrit sur la fiche kyc (recopiée telle quelle dans la carte CONNECT à la fin du tunnel) ET sur une
   // carte CONNECT déjà en attente, si le membre a fini le tunnel avant la réponse de STH.
