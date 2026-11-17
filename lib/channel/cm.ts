@@ -53,6 +53,7 @@ import { firstLine, normLine, rationedIn, similarity, SIMILAR } from './tone';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { appendAgentMemory } from '@/lib/member/agentDocs';
 import { amountsLine, check, dayContext, writePoll, writePost, type Brief, type DayContext, type TradeFacts } from './writer';
+import { renderBubblesPlanSection, sendDueBubbleDms } from './bubbles';
 import { fillApprovedVip, vipTemplateOf } from './vipFill';
 import { safeSlice, wellFormed } from './text';
 import { atOneLot, atRef } from '@/lib/display/scale';
@@ -470,7 +471,9 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
     }
   });
   if (!isWeekend(day)) parts.push('', '<i>23:05 · le récap du jour garde son brouillon à part, comme d\'habitude.</i>');
-  if (idea) parts.push('', `🎥 <b>Idée de bulle vidéo</b> (la question qui revient le plus en support cette semaine) :`, `« ${esc(idea)} »`);
+  const bubbleSec = renderBubblesPlanSection(rows);
+  if (bubbleSec) parts.push('', bubbleSec);
+  else if (idea) parts.push('', `🎥 <b>Idée de bulle vidéo</b> (la question qui revient le plus en support cette semaine) :`, `« ${esc(idea)} »`);
   parts.push('', '<i>Pour corriger un post : réponds à ce message avec son numéro et ce qu\'il faut changer (« 2 plus court », « 1 change la photo »). Pour une règle durable : # + la règle. Un post non validé part quand même si tu valides jusqu\'à 1 h après son heure.</i>');
   const text = parts.join('\n').slice(0, 4090);
   const keyboard: Array<Array<Record<string, string>>> = [];
@@ -614,6 +617,7 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
   let published = 0, skipped = 0, expired = 0;
+  await sendDueBubbleDms(db, now).catch((e) => { console.error('[cm] bubbles dm:', (e as Error).message); });
   const { data: late } = await db.from('channel_posts').update({ status: 'expired' }).eq('status', 'draft').lte('scheduled_at', new Date(now - GRACE_MS).toISOString()).select('id');
   expired += (late ?? []).length;
   const { data: due } = await db.from('channel_posts').select('*').eq('status', 'approved').lte('scheduled_at', nowIso).order('scheduled_at', { ascending: true }).limit(5);

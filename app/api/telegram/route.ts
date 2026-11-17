@@ -14,6 +14,7 @@ import { handleWebinarAdmin, handleWebinarCallback, isLiveKeyword, noteBotBlocke
 import { logFunnelEvent } from '@/lib/member/funnel';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
+import { handleBubbleCallback } from '@/lib/channel/bubbles';
 import { extraMirrors } from '@/lib/channel/mirrors';
 
 // le brouillon de réponse (Haiku, ≤ 8 s) s'ajoute au traitement du message : marge au-dessus des 10 s par défaut
@@ -427,6 +428,7 @@ export async function POST(req: Request) {
     try {
       if (await handleBusinessCallback(db, cq)) return NextResponse.json({ ok: true });
       if (await handleRecapCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 récap du soir (lib/channel/recap.ts)
+      if (await handleBubbleCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles : Faite / Pas cette fois
       if (await handleCmCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 posts du jour du canal (lib/channel/cm.ts)
       if (await handleSupportAssetCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles d'accueil (lib/member/supportAuto.ts)
       if (await handleDigestCallback(db, cq)) return NextResponse.json({ ok: true }); // 🌙 règles du récap du soir (lib/member/supportDigest.ts)
