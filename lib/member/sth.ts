@@ -37,9 +37,19 @@ function sthLogError(context: string, message: string): void {
   console.warn(`[sth] ${context}: ${sthSafeError(message)}`);
 }
 
+/** STH dit parfois « Invalid account », parfois « INVALID_ACCOUNT » (tiret bas). Les deux
+ *  veulent dire la même chose. On les reconnaît tous les deux (17/11/2026) : avant, le
+ *  pré-check ne classait jamais le cas en `invalid` et le rangeait en `error`.
+ *  ⚠️ AMBIGUÏTÉ CONSERVÉE : un UserID déjà enregistré chez STH peut renvoyer le même
+ *  message (cliente #7, 03/08). Ce helper ne tranche pas ce cas — c'est sthPrecheck
+ *  (disconnect / saut `known` sur le même login) et l'admin qui le font. */
+export function isInvalidAccountMessage(message: string): boolean {
+  return /invalid[\s_-]*account/i.test(message);
+}
+
 /** Refus d'identifiants / de serveur, quand le libellé de STH le dit clairement. */
 function isCredentialError(message: string): boolean {
-  return /invalid account|server not found|wrong password|invalid password|investor password|invalid (login|server|credentials)|metatrader (login|server|password) (not found|invalid|incorrect)/i.test(message);
+  return isInvalidAccountMessage(message) || /server not found|wrong password|invalid password|investor password|invalid (login|server|credentials)|metatrader (login|server|password) (not found|invalid|incorrect)/i.test(message);
 }
 
 async function sthPost<T = Record<string, unknown>>(route: string, payload: Record<string, unknown>): Promise<SthResult<T>> {

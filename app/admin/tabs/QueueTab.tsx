@@ -93,20 +93,29 @@ export function QueueTab() {
                           <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--gold)', wordBreak: 'break-word' }}>
                             VERIFY → {label ? label.toUpperCase() : broker ? broker.toUpperCase() : '⚠ broker ?'} · {bname ?? '⚠ no name — ask'} · {dep ? `$${dep} declared` : '⚠ no deposit declared — ask'}{uname ? <span style={{ color: 'var(--cyan)' }}> · @{uname}</span> : ''}
                           </div>
-                          {/* CE QUE LE MEMBRE A JURÉ (14/08) : compte né du lien Algoria + compte financé.
-                              Les demandes ANTÉRIEURES au formulaire n'ont pas ces champs — on affiche donc
-                              « not asked » plutôt qu'une croix, pour ne pas faire porter au membre une
-                              case qu'on ne lui a jamais montrée. */}
+                          {/* ORIGINE DU COMPTE (17/11/2026). Les cases ack_link / ack_funded ont été
+                              retirées : elles ne prouvaient rien. On affiche l'origine archivée (new /
+                              existing) et, le cas échéant, le clic sur le lien partenaire dans l'app.
+                              Les anciennes cartes qui ont encore les cases gardent l'affichage d'avant.
+                              Les demandes antérieures aux deux formulaires restent en « not asked ». */}
                           <div style={{ fontSize: 10, marginTop: 2, color: 'var(--dim)' }}>
-                            {a.detail?.ack_link == null && a.detail?.ack_funded == null
-                              ? 'claims: not asked (request predates the checkboxes)'
-                              : <>claims: {a.detail?.direct_access
-                                  // ACCÈS DIRECT : il a payé son accès à Mathieu et garde son broker. Il n'y
-                                  // a AUCUN lien qu'il aurait pu emprunter — afficher « ✗ NOT via our link »
-                                  // en rouge, c'est afficher une faute là où il n'y en a pas, et c'est ce qui
-                                  // poussait à lui faire cocher une case fausse pour passer.
-                                  ? <b style={{ color: 'var(--cyan)' }}>💳 DIRECT ACCESS — keeps own broker (no link expected){a.detail?.ack_paid ? ` · declared paid $${String(a.detail?.direct_price_usd ?? '?')}` : ' · ⚠ payment NOT declared'}</b>
-                                  : <b style={{ color: a.detail?.ack_link ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_link ? '✓ opened via our link' : '✗ NOT via our link'}</b>} · <b style={{ color: a.detail?.ack_funded ? 'var(--up)' : '#ff8a5c' }}>{a.detail?.ack_funded ? '✓ funded' : '✗ not funded'}</b></>}
+                            {(() => {
+                              const d = a.detail ?? {};
+                              if (d.direct_access) {
+                                return <>claims: <b style={{ color: 'var(--cyan)' }}>💳 DIRECT ACCESS — keeps own broker (no link expected){d.ack_paid ? ` · declared paid $${String(d.direct_price_usd ?? '?')}` : ' · ⚠ payment NOT declared'}</b></>;
+                              }
+                              if (d.origin === 'new' || d.origin === 'existing') {
+                                const originLbl = d.origin === 'existing'
+                                  ? 'origin: existing account — asked broker to attach'
+                                  : 'origin: new account';
+                                const linkLbl = d.clicked_partner_link ? ' · clicked partner link in the app' : '';
+                                return <>claims: <b style={{ color: d.origin === 'existing' ? 'var(--gold)' : 'var(--up)' }}>{originLbl}</b>{linkLbl}</>;
+                              }
+                              if (d.ack_link == null && d.ack_funded == null) {
+                                return 'claims: not asked (request predates origin / checkboxes)';
+                              }
+                              return <>claims: <b style={{ color: d.ack_link ? 'var(--up)' : '#ff8a5c' }}>{d.ack_link ? '✓ opened via our link' : '✗ NOT via our link'}</b> · <b style={{ color: d.ack_funded ? 'var(--up)' : '#ff8a5c' }}>{d.ack_funded ? '✓ funded' : '✗ not funded'}</b></>;
+                            })()}
                           </div>
                           {/* IDENTIFIANTS DÉJÀ TESTÉS À L'INSCRIPTION : 'ok' = STH a réellement joint ce
                               compte MetaTrader. Inutile de le refuser pour « invalid account » — s'il y a

@@ -73,6 +73,7 @@ export function useMe() {
   const [rejection, setRejection] = useState<{ code?: string; reason: string; at: string | null } | null>(null);
   const [prefill, setPrefill] = useState<Prefill | null>(null);
   const [declaredDeposit, setDeclaredDeposit] = useState<number | null>(null); // dépôt annoncé au wizard (grise les stratégies hors budget, même en reprise)
+  const [clickedBrokerLink, setClickedBrokerLink] = useState(false); // a cliqué le lien partenaire dans l'app (funnel ob_broker_link / ob_bonus_click)
   const [admin, setAdmin] = useState(false);
   const [srvUnlocked, setSrvUnlocked] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +91,7 @@ export function useMe() {
         .then(async (r) => {
           if (r.status === 403) { router.replace('/member/denied'); return null; } // accès révoqué (banni)
           if (r.status === 401) { router.replace('/member/login'); return null; }
-          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { code?: string; reason: string; at: string | null } | null; accounts?: MemberAccount[]; declaredDeposit?: number | null; prefill?: Prefill | null };
+          return (await r.json()) as { member: Member; admin: boolean; unlocked?: boolean; referral?: Referral; rejection?: { code?: string; reason: string; at: string | null } | null; accounts?: MemberAccount[]; declaredDeposit?: number | null; prefill?: Prefill | null; clickedBrokerLink?: boolean };
         })
         .then((d) => {
           if (!alive) return;
@@ -102,6 +103,7 @@ export function useMe() {
           setRejection(d.rejection ?? null);
           setPrefill(d.prefill ?? null);
           setDeclaredDeposit(d.declaredDeposit ?? null);
+          setClickedBrokerLink(d.clickedBrokerLink === true);
           setAdmin(!!d.admin);
           setSrvUnlocked(typeof d.unlocked === 'boolean' ? d.unlocked : null);
           setLoading(false);
@@ -127,7 +129,7 @@ export function useMe() {
   const locale: Locale = member?.locale ? asLocale(member.locale) : guessed;
   useEffect(() => { if (member?.locale) rememberLocale(asLocale(member.locale)); }, [member?.locale]);
   const t = useCallback((key: string) => tr(locale, key), [locale]);
-  return { member, setMember, accounts, referral, rejection, prefill, declaredDeposit, admin, unlocked, loading, failed, locale, t };
+  return { member, setMember, accounts, referral, rejection, prefill, declaredDeposit, clickedBrokerLink, admin, unlocked, loading, failed, locale, t };
 }
 
 /** Langue des écrans SANS session (login, accès refusé) : choix mémorisé, sinon langue du navigateur. */

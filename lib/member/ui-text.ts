@@ -75,10 +75,21 @@ export const UI: Dict = {
 
   // ===== wizard : étape 1 (broker) — l'écran qui décide du dépôt =====
   'ob.step1': { en: '1 · Open your broker account', it: '1 · Apri il tuo conto broker' },
+  // 17/11/2026 — objection « c'était annoncé gratuit » : l'accès Algoria est gratuit via le lien
+  // partenaire, mais un dépôt sur LE compte du membre reste nécessaire. Texte honnête, sans promesse
+  // de gain ni projection. Les montants sont les minimums déjà publiés ($200 / $500).
+  'ob.free.title': { en: 'Algoria is free — the deposit is yours', it: 'Algoria è gratuito — il deposito resta tuo' },
+  'ob.free.body': {
+    en: 'You don\'t pay Algoria a subscription when you open your account through our partner link. You do need to deposit your own money on your own broker account (minimum $200, we recommend $500). That money stays yours: you can withdraw it, and Algoria cannot take it out. The deposit is required because the AI copies trades on your account — without funds, there is nothing to trade.',
+    it: 'Non paghi un abbonamento ad Algoria se apri il conto tramite il nostro link partner. Devi però depositare i tuoi soldi sul tuo conto broker (minimo 200 $, consigliamo 500 $). Quel denaro resta tuo: puoi prelevarlo, e Algoria non può farlo. Il deposito è necessario perché l\'IA copia le operazioni sul tuo conto — senza fondi, non c\'è nulla da operare.',
+  },
+  'ob.origin.already': { en: 'I already had this account before Algoria — I need my broker to attach it', it: 'Avevo già questo conto prima di Algoria — devo chiedere al broker di collegarlo' },
+  'ob.finishing': { en: 'Your details are in — we\'re sending your request…', it: 'I tuoi dati sono arrivati — stiamo inviando la richiesta…' },
+
   'ob.budget.label': { en: 'HOW MUCH DO YOU PLAN TO START WITH?', it: 'CON QUANTO PENSI DI INIZIARE?' },
   'ob.budget.best': { en: '★ BEST MATCH FOR YOUR BUDGET', it: '★ IL MIGLIORE PER IL TUO BUDGET' },
   'ob.broker.recoNote': { en: 'is our recommended partner for your starting budget — fully supported, same hands-free copy.', it: 'è il partner consigliato per il tuo budget iniziale — pienamente supportato, stessa copia automatica.' },
-  'ob.broker.genericNote': { en: 'Open your account with one of our partner brokers.', it: 'Apri il tuo conto con uno dei nostri broker partner.' },
+  'ob.broker.genericNote': { en: 'Open your account with one of our partner brokers — Algoria access stays free. You still fund your own account.', it: 'Apri il tuo conto con uno dei nostri broker partner — l\'accesso ad Algoria resta gratuito. Il deposito sul tuo conto resta a tuo carico.' },
   'ob.broker.createCta': { en: '▲ CREATE MY', it: '▲ APRI IL MIO CONTO' },
   'ob.broker.createCtaEnd': { en: 'ACCOUNT', it: '' },
   'ob.min.title': { en: 'Recommended deposit: $500', it: 'Deposito consigliato: 500 $' },

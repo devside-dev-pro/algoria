@@ -106,3 +106,12 @@ export function canonicalServer(brokerKey: string | null | undefined, server: st
   const hits = list.filter((x) => norm(x) === norm(s));
   return hits.length === 1 ? hits[0] : s;
 }
+
+/** L'unique serveur live du broker, ou null s'il en a plusieurs (ou aucun).
+ *  17/11/2026 : RaiseFX (RaiseGlobal-Live) et TradingSphere (TradingSphere-Real1) n'en ont qu'un —
+ *  on le pré-remplit dans le formulaire. VT Markets, PU Prime et Xlence en ont plusieurs : on
+ *  ne choisit pas à leur place. Dérivé de la longueur de la liste, pas d'une liste en dur. */
+export function soleLiveServer(brokerKey: string | null | undefined): string | null {
+  const list = BROKERS.find((b) => b.key === brokerKey)?.servers ?? [];
+  return list.length === 1 ? list[0] : null;
+}
