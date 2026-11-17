@@ -39,7 +39,7 @@ async function queueAction(tgId: number, kind: string, detail: Record<string, un
   const who = `#${memberNo ?? '?'} ${detail.username ? `@${detail.username}` : ''}`.trim();
   const d = detail as Record<string, unknown>;
   const alerts: Record<string, { title: string; lines: string[] }> = {
-    connect: { title: '🆕 Dossier à valider', lines: [who, `${d.broker_name ?? d.broker ?? 'broker ?'} · ${d.platform ?? ''} ${d.login ?? ''}`.trim(), `dépôt déclaré ${d.declared_deposit ?? '?'} $ · S${d.strategy ?? '?'}`, d.waiting_broker ? '⏳ compte préexistant : le broker doit rattacher' : d.lots_claimed_at ? '✓ lot d’activation déclaré' : 'lot d’activation pas encore déclaré', d.add_strategy ? '(compte supplémentaire)' : ''] },
+    connect: { title: '🆕 Dossier à valider', lines: [who, `${d.broker_name ?? d.broker ?? 'broker ?'} · ${d.platform ?? ''} ${d.login ?? ''}`.trim(), `dépôt déclaré ${d.declared_deposit ?? '?'} $ · S${d.strategy ?? '?'}`, d.waiting_broker ? '⏳ compte préexistant : le broker doit rattacher' : d.lot_help_requested_at ? 'aide demandée pour le trade d’activation' : d.lots_claimed_at ? '✓ lot d’activation déclaré' : 'lot d’activation pas encore déclaré', d.add_strategy ? '(compte supplémentaire)' : ''] },
     disconnect: { title: '🔌 Membre déconnecté — copieur à retirer', lines: [who] },
     pause: { title: '⏸ Pause demandée — STH n’a pas répondu', lines: [who] },
     resume: { title: '▶️ Reprise demandée — STH n’a pas répondu', lines: [who] },
@@ -180,7 +180,7 @@ export async function GET(req: NextRequest) {
   // submittedAt / waitingBroker : l'écran d'attente dit depuis quand le dossier attend et pourquoi (audit
   // 03/09 : un texte fixe « quelques heures » restait affiché au bout de huit jours).
   const pendingCard = connQ.data?.[0] as { detail?: Record<string, unknown> | null; created_at?: string } | undefined;
-  const activation = { claimed: lots.claimedAt != null, claimedAt: lots.claimedAt, validated: lots.ok || lots.override != null, submittedAt: pendingCard?.created_at ?? null, waitingBroker: !!pendingCard?.detail?.waiting_broker };
+  const activation = { claimed: lots.claimedAt != null, claimedAt: lots.claimedAt, helpRequestedAt: lots.helpRequestedAt, validated: lots.ok || lots.override != null, submittedAt: pendingCard?.created_at ?? null, waitingBroker: !!pendingCard?.detail?.waiting_broker };
   const clickedBrokerLink = Boolean(linkClickQ.data?.length);
   return NextResponse.json({ member: ctx.member, admin, unlocked, referral, rejection, accounts: accountsQ.data ?? [], declaredDeposit, activation, prefill, clickedBrokerLink });
 }
@@ -301,6 +301,9 @@ export async function POST(req: NextRequest) {
       origin: preExistingAccount ? 'existing' : 'new',
       ...(clickedPartnerLink ? { clicked_partner_link: true } : {}),
       ...(body.ackLots === true ? { lots_claimed_at: new Date().toISOString() } : {}),
+      // Demande d'aide pour passer le trade : horodatée ici, recopiée sur la carte CONNECT. Aucun ordre
+      // n'est passé. lots_ok reste humain. Ignoré en accès direct (pas de lot d'activation).
+      ...(body.lotHelp === true && broker !== 'other' ? { lot_help_requested_at: new Date().toISOString() } : {}),
       ...(broker === 'other' ? {
         broker_label: String(body.brokerOther ?? '').trim().slice(0, 60) || null,
         manual_connect: true,
@@ -557,6 +560,32 @@ export async function POST(req: NextRequest) {
       void notifyOwner({ title: '✅ Lot d’activation déclaré — à pointer', lines: [`#${detail.member_no ?? ''} ${detail.username ? `@${detail.username}` : ''}`.trim(), `${detail.broker_name ?? detail.broker ?? ''} · ${detail.login ?? ''}`.trim()], path: '/', tag: 'owner-activation' });
     }
     return NextResponse.json({ ok: true, claimed: true });
+  } else if (body.action === 'activation_help') {
+    // LE MEMBRE DEMANDE DE L'AIDE POUR PASSER LE TRADE D'ACTIVATION.
+    //
+    // ⚠️ AUCUN ORDRE N'EST PASSÉ. Cette action n'écrit QUE `lot_help_requested_at` sur la carte
+    // connect en cours — jamais lots_ok, jamais lots_claimed_at, aucun appel STH / MetaApi / broker.
+    // Idempotente : re-cliquer ne réécrit pas la date et ne renvoie pas une seconde alerte.
+    const { data: card } = await db.from('member_actions')
+      .select('id,detail,member_no').eq('tg_id', s.tgId).eq('kind', 'connect').eq('status', 'pending')
+      .order('created_at', { ascending: false }).limit(1);
+    if (!card?.length) return NextResponse.json({ error: 'no connection request is pending on your account' }, { status: 404 });
+    const detail = (card[0].detail as Record<string, unknown>) ?? {};
+    const already = typeof detail.lot_help_requested_at === 'string' && detail.lot_help_requested_at.trim();
+    if (!already) {
+      const at = new Date().toISOString();
+      await db.from('member_actions')
+        .update({ detail: { ...detail, lot_help_requested_at: at } as never })
+        .eq('id', card[0].id);
+      void notifyOwner({
+        title: 'Aide demandée — trade d’activation',
+        lines: [`#${card[0].member_no ?? detail.member_no ?? ''} ${detail.username ? `@${detail.username}` : ''}`.trim(), `${detail.broker_name ?? detail.broker ?? ''} · ${detail.login ?? ''}`.trim(), 'Le membre ne sait pas passer le trade seul — aucun ordre n’a été placé.'],
+        path: '/',
+        tag: 'owner-activation-help',
+      });
+      return NextResponse.json({ ok: true, helpRequestedAt: at });
+    }
+    return NextResponse.json({ ok: true, helpRequestedAt: already });
   } else if (body.action === 'trc20') {
     // adresse de retrait USDT TRC20 — une seule par membre, format vérifié, changement horodaté (audit)
     const address = String(body.address ?? '').trim();
