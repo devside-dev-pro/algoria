@@ -6,8 +6,9 @@
 // Trois blocs + une ligne de risque, alignés sur la maquette :
 //   1. aperçu flouté (barres skeleton, aucune donnée réelle, aucun P&L lisible) + cadenas SVG + CTA ;
 //   2. carte « preuve vérifiée » Myfxbook (URL unique de lib/member/myfxbook.ts, bouton #579) ;
-//   3. « How it works » en 3 cartes (textes de la maquette). « 24/5 » est conservé : il décrit le
-//      trading de l'or, qui ne cote pas le week-end — « 24/7 » serait factuellement faux.
+//   3. « How it works » en 3 cartes. 17/11/2026, Mathieu : le titre « The AI trades gold 24/5 »
+//      devient « Available 24/7 in the app » — disponibilité de l'app, pas le trading de l'or
+//      (l'or ne cote pas le week-end).
 // Icônes : SVG en traits, même style que la nav membre (app/member/ui.tsx). Pas d'emoji.
 // Aucun chiffre de résultat. Aucune promesse de gain.
 import type { ReactNode } from 'react';
@@ -30,8 +31,8 @@ function Icon({ children, size = 18 }: { children: ReactNode; size?: number }) {
 
 const HOW_IT_WORKS: ReadonlyArray<{ title: string; body: string; icon: ReactNode }> = [
   {
-    title: 'The AI trades gold 24/5',
-    body: 'Algoria AI watches the gold market around the clock, whenever it\u2019s open (Monday to Friday).',
+    title: 'Available 24/7 in the app',
+    body: 'The app is here whenever you need it, including weekends. Gold is traded when the market is open (Monday to Friday).',
     icon: (
       <Icon>
         <circle cx="12" cy="12" r="8.5" />
