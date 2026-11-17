@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FAQ_CARD_ONLY, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, classifyFaq, faqCardButton, faqKeyboard,
+  FAQ_CARD_ONLY, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, faqCardButton, faqKeyboard,
   faqRecentlySent, faqVoiceDecision, parseAssetCallback, tagFaqVoice, type FaqClass, type FaqContext,
 } from './faqVoice';
 import { MYFXBOOK_URL } from './myfxbook';
@@ -120,7 +120,8 @@ test('lignes fixes : un libellé et une ligne par thème, liens autorisés seule
 test('ingestion : boutons de thème et callbacks', () => {
   const kb = faqKeyboard({ id: 42, situation: 'faq_deposit', active: true });
   const all = kb.inline_keyboard.flat();
-  assert.equal(all.filter((b) => b.callback_data.includes(':t:')).length, FAQ_TOPICS.length);
+  assert.equal(all.filter((b) => b.callback_data.includes(':t:')).length, FAQ_TOPICS.length + 1);
+  assert.ok(all.some((b) => b.callback_data === `sa:42:t:${FAQ_WAIT_TOPIC}` && b.text.includes('Attente')));
   assert.ok(all.some((b) => b.callback_data === 'sa:42:cv'));
   assert.ok(all.some((b) => b.callback_data === 'sa:42:x'));
   assert.ok(all.find((b) => b.callback_data === 'sa:42:t:faq_deposit')?.text.startsWith('✓ '));
@@ -131,6 +132,7 @@ test('ingestion : boutons de thème et callbacks', () => {
   assert.deepEqual(parseAssetCallback('sa:42:faq'), { id: 42, op: 'faq' });
   assert.deepEqual(parseAssetCallback('sa:42:cv'), { id: 42, op: 'country_voice' });
   assert.deepEqual(parseAssetCallback('sa:42:t:faq_broker'), { id: 42, op: 'topic', value: 'faq_broker' });
+  assert.deepEqual(parseAssetCallback('sa:42:t:faq_attente_5h9h'), { id: 42, op: 'topic', value: FAQ_WAIT_TOPIC });
   assert.equal(parseAssetCallback('sa:42:t:faq_unknown'), null);
   // les anciens boutons de la bibliothèque marchent toujours
   assert.deepEqual(parseAssetCallback('sa:7:c:GB'), { id: 7, op: 'country', value: 'GB' });

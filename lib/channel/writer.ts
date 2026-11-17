@@ -241,8 +241,9 @@ export const withRisk = (t: string, hasFigure: boolean) => (hasFigure ? `${strip
 
 /** Nettoie et contrôle un texte du modèle : le texte prêt, ou la raison du refus (renvoyée au modèle pour un 2e essai). */
 export function check(raw: string, o: GuardOpts): { ok: true; text: string } | { ok: false; why: string } {
-  // humanize : tiret long → virgule, gras markdown retiré ; puis l'espace de Mathieu avant ? et !, même collés à du gras
-  let t = humanize(raw.replace(/\r/g, ''), true).replace(/([^\s?!])([?!]+)(?=<\/[bi]>)/g, '$1 $2');
+  // humanize : tiret long → virgule, gras markdown retiré. Le canal est en anglais : pas d'espace avant ? et !
+  // (décision Mathieu, 17/11/2026). L'espace typographique du support business reste dans humanize(..., true).
+  let t = humanize(raw.replace(/\r/g, ''), false);
   if (o.fixLayout) t = airify(t);
   if (/<(?!\/?(?:b|i)>)[^>]*>/i.test(t)) return { ok: false, why: 'only <b> and <i> tags are allowed' };
   if (o.autoRisk) t = stripRisk(t);
