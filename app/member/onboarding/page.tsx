@@ -135,6 +135,7 @@ export default function Onboarding() {
   const exAffiliate = exEntry?.affiliateId ?? null;
   const exMessage = exEntry && exAffiliate ? brokerAttachMessage(exEntry.name, exAffiliate, exAccount) : '';
   const [ackLots, setAckLots] = useState(false); // lot d'activation déclaré — jamais bloquant (voir le bloc)
+  const [lotHelp, setLotHelp] = useState(false); // demande d'aide pour passer le trade — aucun ordre n'est passé
   const [ackDirect, setAckDirect] = useState(false); // broker hors partenaires : Mathieu a confirmé l'accès direct (payant) — sinon refus certain
   // PRÉ-REMPLISSAGE (03/09) : un membre qui revient (refus, ou wizard laissé à l'étape 2) retrouve tout
   // sauf son mot de passe. Avant, le formulaire se refermait derrière un refus (origine remise à zéro) et
@@ -635,21 +636,38 @@ export default function Onboarding() {
               each other out, so <b style={{ color: 'var(--text)' }}>you take no market risk</b> — it costs you the spread, a few dollars.
               That&rsquo;s what registers your account with the broker and unlocks your copy and the VIP channel.
             </p>
-            <Check checked={ackLots} onToggle={() => setAckLots((v) => !v)}>
+            <Check checked={ackLots} onToggle={() => { setAckLots((v) => !v); setLotHelp(false); }}>
               I&rsquo;ve placed <b style={{ color: 'var(--text)' }}>both trades</b> ({ACTIVATION_LOTS} lot total) and closed them.
             </Check>
-            {!ackLots && (
+            <button
+              type="button"
+              onClick={() => { setLotHelp(true); setAckLots(false); }}
+              disabled={lotHelp}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', fontSize: 13, fontWeight: 700, cursor: lotHelp ? 'default' : 'pointer', color: lotHelp ? 'var(--muted)' : 'var(--text)', background: 'transparent' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              Let Algoria do it for me
+            </button>
+            {lotHelp ? (
+              <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.55, color: 'var(--text)' }}>
+                Our team will contact you shortly to help you place it. Send your account details below so we can see your request.
+              </p>
+            ) : !ackLots ? (
               <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
                 Not done yet? You can continue — the next screen will show it as the one thing left. Your access opens once it&rsquo;s done.
               </p>
-            )}
+            ) : null}
           </div>
           )}
           {origin === 'existing' && (
             <p style={{ margin: '-4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--gold)' }}>⏳ {t('ob.exist.pending')}</p>
           )}
 
-          <button disabled={mt5Blocked} onClick={() => { track('ob_mt5_click', 1, { broker: picked ?? '' }); run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLots: picked === 'other' ? false : ackLots, ackPaid: picked === 'other' ? ackDirect : undefined, origin: origin ?? (inferNew ? 'new' : undefined), clickedPartnerLink: inferNew }, 'done'); }} style={cta(mt5Blocked)}>
+          <button disabled={mt5Blocked} onClick={() => { track('ob_mt5_click', 1, { broker: picked ?? '' }); run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLots: picked === 'other' ? false : ackLots, lotHelp: picked === 'other' ? false : lotHelp, ackPaid: picked === 'other' ? ackDirect : undefined, origin: origin ?? (inferNew ? 'new' : undefined), clickedPartnerLink: inferNew }, 'done'); }} style={cta(mt5Blocked)}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
           {/* remplace l'ancien « Tick both boxes above » : il ne couvrait QUE les cases, alors que huit

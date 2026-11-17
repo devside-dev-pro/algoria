@@ -2,6 +2,7 @@
 // QUEUE — à appliquer dans Social Trade Hub
 // Découpé depuis app/admin/page.tsx (03/09/2026) : un fichier par onglet, l’état et les handlers restent
 // dans useAdminState (app/admin/_state.tsx) et arrivent ici par contexte.
+import { useState } from 'react';
 import { lotsStateOf, lotsCleared, ACTIVATION_LOTS } from '@/lib/member/activation';
 import { ask } from '@/components/admin/Dialog';
 import { useAdmin } from '../_state';
@@ -9,6 +10,14 @@ import { dangerBtn, dimP, goldBtn, miniBtn, okBtn, secH } from '../_shared';
 
 export function QueueTab() {
   const { KIND_LABEL, actions, busy, connectViaSth, goLive, copyDepositInfo, creds, depInfoCopied, legalOf, moveViaSth, nameOf, openMember, pending, pendingTotal, post, recordDepositAfterConnect, rejectConnect, reveal, rows, setCreds, setTab, validateLots, waitBroker } = useAdmin();
+  const [helpFilter, setHelpFilter] = useState(false);
+  const needsActivationHelp = (a: (typeof actions)[number]) => {
+    if (a.kind !== 'connect') return false;
+    const L = lotsStateOf(a.detail as Record<string, unknown>);
+    return L.helpRequestedAt != null && !lotsCleared(a.detail as Record<string, unknown>);
+  };
+  const helpCount = actions.filter(needsActivationHelp).length;
+  const visible = helpFilter ? actions.filter(needsActivationHelp) : actions;
   return (
           <section className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <h2 style={secH}>TO APPLY IN SOCIAL TRADE HUB {actions.length > 0 && `· ${pendingTotal ?? actions.length}`}{pendingTotal != null && pendingTotal > actions.length && ` (${actions.length} shown)`}</h2>
@@ -17,9 +26,24 @@ export function QueueTab() {
               const h = Math.floor(oldest / 3_600_000);
               return <p style={{ ...dimP, color: h >= 72 ? '#ff8a5c' : h >= 24 ? 'var(--gold)' : 'var(--dim)' }}>oldest card waiting {h >= 48 ? `${Math.floor(h / 24)} days` : `${h} h`} · sorted oldest first</p>;
             })()}
-            {actions.length === 0 && <p style={dimP}>Queue clear — nothing to apply.</p>}
-            {actions.map((a) => (
-              <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setHelpFilter((v) => !v)}
+                style={helpFilter ? { ...goldBtn, fontWeight: 800, color: 'var(--gold)' } : miniBtn}
+                title="Show only connect cards where the member asked for help placing the activation trade"
+              >
+                Needs help with activation trade{helpCount ? ` · ${helpCount}` : ''}
+              </button>
+            </div>
+            {visible.length === 0 && <p style={dimP}>{helpFilter ? 'No activation-help requests in the current queue.' : 'Queue clear — nothing to apply.'}</p>}
+            {visible.map((a) => (
+              <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 10, border: needsActivationHelp(a) ? '1px solid rgba(245,194,74,.65)' : '1px solid var(--border)', background: 'rgba(10,17,31,.55)' }}>
+                {needsActivationHelp(a) && (
+                  <div className="mono" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4, color: 'var(--gold)', padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(245,194,74,.45)', background: 'rgba(245,194,74,.08)' }}>
+                    Needs help with activation trade
+                  </div>
+                )}
                 {/* flexWrap : l'admin vit à 70% sur le téléphone de Mathieu — sans wrap, les boutons
                     débordaient sur le texte de la carte (vécu en screenshot). Les boutons passent
                     à la ligne proprement sur écran étroit. */}
@@ -163,7 +187,7 @@ export function QueueTab() {
                     if (L.ok || L.override) {
                       return <span className="mono" title={L.override ? `forcé : ${L.override}` : `validé par ${L.okBy ?? '?'}`} style={{ fontSize: 10.5, fontWeight: 800, color: L.override ? 'var(--gold)' : 'var(--up)', alignSelf: 'center' }}>{L.override ? '⚠ LOTS FORCÉS' : `✓ LOTS${L.lots ? ` ${L.lots}` : ''}`}</span>;
                     }
-                    return <button disabled={busy} onClick={() => validateLots(a)} title={`pointe le dashboard partenaire : ${ACTIVATION_LOTS} lot tradé ? Puis valide ici — c'est ce qui déverrouille le CONNECT.`} style={{ ...goldBtn, fontWeight: 800, color: 'var(--gold)' }}>{L.claimedAt ? '🙋 LOTS ? (déclaré)' : '✓ LOTS ?'}</button>;
+                    return <button disabled={busy} onClick={() => validateLots(a)} title={`pointe le dashboard partenaire : ${ACTIVATION_LOTS} lot tradé ? Puis valide ici — c'est ce qui déverrouille le CONNECT.`} style={{ ...goldBtn, fontWeight: 800, color: 'var(--gold)' }}>{L.helpRequestedAt ? 'LOTS ? (needs help)' : L.claimedAt ? '🙋 LOTS ? (déclaré)' : '✓ LOTS ?'}</button>;
                   })()}
                   {a.kind === 'connect' && !a.detail?.waiting_broker && (
                     <button disabled={busy} onClick={() => goLive(a)} title="one tap: validate the activation lot, connect the copier via STH, switch LIVE, log the deposit and the country — stops at the first failing step" style={{ ...okBtn, fontWeight: 800 }}>{pending === `golive:${a.id}` ? '⏳ CONNECTING…' : '⚡ GO LIVE'}</button>
