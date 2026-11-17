@@ -1,10 +1,11 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyFaq, FAQ_MIN_CONFIDENCE } from './faqVoice';
+import { hardRuleIssue, replyTextIssue } from './replyDraft';
 import {
   FAQ_WAIT_KIND, FAQ_WAIT_TOPIC, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA,
   decideSupportWindow, dubaiDayStartMs, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow,
-  parseWindowTopics, supportAutoWindowBounds, waitSentInWindow, windowReviewReason,
+  parseWindowTopics, sheetKnownPct, supportAutoWindowBounds, waitSentInWindow, windowReviewReason,
   type WindowConfig,
 } from './supportWindow';
 
@@ -156,5 +157,29 @@ describe('texte d’attente et constantes du vocal 19', () => {
     assert.equal(WINDOW_WAIT_VIA, 'window_wait');
     assert.equal(WINDOW_AUTO_VIA, 'window_auto');
     assert.ok(FAQ_WAIT_TOPIC.startsWith('faq_'));
+  });
+});
+
+describe('sheetKnownPct : % déjà présents dans une fiche validée', () => {
+  const broker = 'I usually recommend RaiseFX — and with RaiseFX you can use the code ALGORIA100 for a +100% deposit bonus from the broker. That bonus is trading credit under RaiseFX’s own conditions, not cash you can withdraw and not a profit.';
+  const risk = 'There’s also a daily safety rule: if the day reaches -5%, all positions are closed. That limits a bad day, it doesn’t remove the risk.';
+  const issue = (text: string, knownPct: string[]) =>
+    replyTextIssue(text, { biz: true, sys: '', userText: 'which broker?', holdResults: false, knowledge: null, knownPct })
+    ?? hardRuleIssue(text);
+
+  test('extrait les pourcentages de la fiche, pas le signe + ou −', () => {
+    assert.deepEqual(sheetKnownPct(broker), ['100%']);
+    assert.deepEqual(sheetKnownPct(risk), ['5%']);
+    assert.deepEqual(sheetKnownPct('no percentages here'), []);
+  });
+  test('sans ces faits, les fiches broker et lot sont refusées ; avec, elles passent', () => {
+    assert.equal(issue(broker, []), 'pourcentage introuvable dans les faits');
+    assert.equal(issue(risk, []), 'pourcentage introuvable dans les faits');
+    assert.equal(issue(broker, sheetKnownPct(broker)), null);
+    assert.equal(issue(risk, sheetKnownPct(risk)), null);
+  });
+  test('un pourcentage ajouté en plus du texte validé reste refusé', () => {
+    const invented = `${broker} You can expect 40% a month.`;
+    assert.equal(issue(invented, sheetKnownPct(broker)), 'pourcentage introuvable dans les faits');
   });
 });
