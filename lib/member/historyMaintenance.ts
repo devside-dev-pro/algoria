@@ -9,10 +9,11 @@
 // qui le voient, reste le 25 octobre 2026 (lib/member/trackSince.ts) : la nuit du 21-22 n'est PAS affichée.
 // Ce n'est PAS le livre complet non filtré.
 //
-// 17/11/2026 — Mathieu (via Charlie) : remettre l'historique en accès VIP seulement, comme avant le 06/11.
-// Les prospects voient de nouveau l'écran « TRADE HISTORY · MAINTENANCE ». La réactivation du 06/11 (#578)
-// faisait chuter les dépôts : les prospects voyaient la dernière semaine rouge. Le bouton Myfxbook officiel
-// (#579) reste visible pour les prospects (components/HistoryMaintenance.tsx).
+// 17/11/2026 — Mathieu (via Charlie) : historique en accès VIP seulement. Les routes publiques et le
+// feed ne servent aucun trade aux prospects. Plus tard le même jour : plus d'écran « maintenance » ;
+// les prospects voient un aperçu flouté (données factices masquées), la carte Myfxbook et un « How it
+// works » (components/HistoryMaintenance.tsx). Les membres live ou en pause, et l'admin, gardent
+// l'historique réel depuis le 25 octobre.
 // Client-safe : lu par les écrans (History, Home, Track record) et par les routes qui servent les chiffres.
 export const HISTORY_MAINTENANCE = true;
 
