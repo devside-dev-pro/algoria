@@ -21,6 +21,7 @@ import { liveTrades } from './recap';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { safeSlice, stripAppLines, wellFormed } from './text';
 import { firstLine, rationedIn, toneIssue, type ToneContext } from './tone';
+import { usd } from './usd';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -28,7 +29,6 @@ type Db = any;
 export const CM_MODEL = () => process.env.ALGORIA_CM_MODEL ?? 'claude-opus-5-5';
 const RISK = "Trading involves risk. Past results don't guarantee future results.";
 
-const usd = (v: number) => `${v >= 0 ? '+' : '−'}$${Math.abs(v) >= 100 ? Math.round(Math.abs(v)).toLocaleString('en-US') : Math.abs(v).toFixed(2)}`;
 export const amountsLine = (net10: number) => `${usd(net10 / 10)} at 0.01 lot · ${usd(net10)} at 0.10 lot`;
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const weekday = (day: string) => new Date(`${day}T12:00:00Z`).getUTCDay();
