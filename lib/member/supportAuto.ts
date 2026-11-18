@@ -36,8 +36,8 @@ import { detectCountry } from './countries';
 import { HISTORY_LOSS_NOTE, INCIDENT, INCIDENT_ESCALATE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, incidentReplyNote, resultsPolicy, wasAffected } from './incident';
 import { isLiveKeyword, liveSeatReply, upcomingSessions } from './webinar';
 import type { Conn } from './businessInbox';
-import { FAQ_KIND, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, faqAutoVoiceBlocked, faqCardButton, faqKeyboard, faqRecentlySent, faqSentTo, faqSituationLabel, faqVoiceDecision, isFaqSituation, isFaqTopic, parseAssetCallback, pickFaqVoice, tagFaqVoice, type FaqDecision, type FaqTopic } from './faqVoice';
-import { FAQ_WAIT_KIND, REVIEW_HOLD_TEXT, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow, faqSheetFallbackEnabled, faqVoiceSingleTopicEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain, howItWorksVoiceAllowed, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, reviewHoldingEnabled, sheetKnownPct, supportAutoWindowBounds, waitSentInWindow, type SheetMap, type WindowConfig } from './supportWindow';
+import { FAQ_KIND, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, canSendFaqVoiceToProspect, classifyFaq, faqAutoVoiceBlocked, faqCardButton, faqKeyboard, faqRecentlySent, faqSentTo, faqSituationLabel, faqVoiceDecision, isFaqSituation, isFaqTopic, isFaqWaitTopic, parseAssetCallback, pickFaqVoice, tagFaqVoice, type FaqDecision, type FaqTopic } from './faqVoice';
+import { FAQ_WAIT_KIND, REVIEW_HOLD_TEXT, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow, faqSheetFallbackEnabled, faqVoiceSingleTopicEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain, howItWorksVoiceAllowed, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, reviewHoldSend, reviewHoldingEnabled, sheetKnownPct, supportAutoWindowBounds, waitSentInWindow, type SheetMap, type WindowConfig } from './supportWindow';
 import { hardRuleIssue, replyTextIssue } from './replyDraft';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -727,7 +727,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     }
     return { status: 'done', result: { outcome: 'review', reason: why ?? faq.reason, ...extra, ...faqExtra } };
   }
-  if (faq.mode === 'auto' && faqAsset && faq.topic) {
+  if (faq.mode === 'auto' && faqAsset && faq.topic && canSendFaqVoiceToProspect(faq.topic) && !faqAutoVoiceBlocked(faqClass, strictVoice)) {
     // il a réécrit pendant la rédaction : la réponse suivante reprend tout (comme pour le texte)
     const { data: newerF } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', last.created_at).limit(1);
     if (newerF?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...extra, ...faqExtra } };
@@ -788,7 +788,7 @@ async function chainHowItWorks(
   const topic = 'faq_how_it_works' as const;
   const mark = { chained: 'faq_how_it_works' };
   const asset = await pickFaqVoice(db, topic).catch(() => null);
-  const voiceOk = howItWorksVoiceAllowed(c.joined);
+  const voiceOk = howItWorksVoiceAllowed(c.joined) && canSendFaqVoiceToProspect(topic);
   if (asset && voiceOk) {
     const { data: newerF } = await db.from('member_actions').select('id').eq('tg_id', c.job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', c.last.created_at).limit(1);
     if (newerF?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...mark } };
@@ -820,29 +820,14 @@ async function chainHowItWorks(
   return { status: 'done', result: { outcome: 'review', reason: 'how it works après l’accueil', ...mark } };
 }
 
-/** Accusé d'attente (vocal 19 s'il est tagué, seul, sans ligne fixe ; sinon le texte). N'envoie rien sur le fond, ne clôt PAS la carte. */
-async function sendWindowWait(db: Db, job: Job, member: MemberRow | null, text = WINDOW_WAIT_TEXT): Promise<{ ok: boolean; how: 'voice' | 'text'; error?: string }> {
-  const { tg } = await import('./businessInbox');
-  const asset = await pickFaqVoice(db, FAQ_WAIT_TOPIC).catch(() => null);
-  const biz = { business_connection_id: job.conn, chat_id: job.tg_id };
-  if (asset) {
-    await tg('sendChatAction', { ...biz, action: 'record_voice' });
-    const v = await tg('sendVoice', { ...biz, voice: asset.file_id });
-    if (!v.ok) return { ok: false, how: 'voice', error: v.description ?? 'vocal refusé' };
-    await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: WINDOW_WAIT_VIA, topic: FAQ_WAIT_TOPIC, asset_id: asset.id, conn: job.conn } });
-    await db.from('support_assets').update({ uses: (asset.uses ?? 0) + 1, last_used_at: new Date().toISOString() }).eq('id', asset.id);
-    return { ok: true, how: 'voice' };
-  }
-  const issue = windowTextIssue(text, '…');
-  if (issue) return { ok: false, how: 'text', error: issue };
-  const r = await tg('sendMessage', { ...biz, text, disable_web_page_preview: true });
-  if (!r.ok) return { ok: false, how: 'text', error: r.description ?? 'refusé' };
-  await db.from('member_actions').insert({ tg_id: job.tg_id, member_no: member?.member_no ?? null, kind: BIZ_KIND, status: 'done', done_by: 'algoria-ai', detail: { from: 'owner', via: WINDOW_WAIT_VIA, text, conn: job.conn } });
-  return { ok: true, how: 'text' };
+/** Ancien accusé (vocal 19 ou texte « je reviens »). 18/11/2026 : no-op. Le drapeau et l'heure restent lus par l'appelant.
+ *  Rien n'est envoyé au prospect, même si une ligne support_assets existe. */
+async function sendWindowWait(_db: Db, _job: Job, _member: MemberRow | null, _text = WINDOW_WAIT_TEXT): Promise<{ ok: boolean; how: 'voice' | 'text'; error?: string }> {
+  const blocked = reviewHoldSend();
+  return { ok: false, how: 'text', error: blocked.reason };
 }
 
-/** (e) Accusé tout de suite pour une vraie relecture, une fois par prospect et par fenêtre 05:00–09:00.
- *  Hors de cette plage, ou drapeau coupé : rien. Le vocal 19 s'il est actif, sinon REVIEW_HOLD_TEXT. */
+/** (e) Le drapeau SUPPORT_REVIEW_HOLDING est toujours consulté. L'envoi qui suivait (vocal 19 ou texte) est vide. */
 async function maybeReviewHold(db: Db, job: Job, member: MemberRow | null, manual: boolean): Promise<void> {
   if (!reviewHoldingEnabled() || manual) return;
   const cfg: WindowConfig = { enabled: true, start: '05:00', end: '09:00' };
@@ -876,12 +861,14 @@ async function handleAutoWindow(db: Db, c: WindowJobCtx): Promise<JobResult | nu
     ? { ...c.faqClass, topic: null, confidence: 0, reason: 'thème sans vocal, SUPPORT_AUTO_CLEAR_INTENTS coupé' }
     : c.faqClass;
   const topic = faqForWindow.topic;
-  const voiceExists = !!(topic && isFaqTopic(topic) && isWindowTopic(topic) && (c.faqAsset || await pickFaqVoice(db, topic).catch(() => null)));
+  const strictVoice = faqVoiceSingleTopicEnabled();
+  const voiceAllowed = !!topic && canSendFaqVoiceToProspect(topic) && !faqAutoVoiceBlocked(faqForWindow, strictVoice);
+  const voiceExists = !!(voiceAllowed && isFaqTopic(topic) && isWindowTopic(topic) && (c.faqAsset || await pickFaqVoice(db, topic).catch(() => null)));
   const waitAlreadySent = await windowWaitAlreadySent(db, c.job.tg_id, cfg, now).catch(() => false);
   const decision = decideSupportWindow({
     cfg, now, text: c.joined, faq: faqForWindow, modelSure: c.draft.auto, topics, sheets,
     voiceExists, waitAlreadySent, hasMedia: c.images.length > 0 || c.media.length > 0, manualHold: c.manual,
-    clearIntents: clearOn,
+    clearIntents: clearOn, strictSingleTopic: strictVoice,
   });
   const mark = { window: '5h9h', window_action: decision.action, window_topic: decision.topic, window_reason: decision.reason };
   const faqExtra = { ...c.faqExtra, ...mark };
@@ -891,7 +878,7 @@ async function handleAutoWindow(db: Db, c: WindowJobCtx): Promise<JobResult | nu
       Object.assign(decision, { action: waitAlreadySent || c.manual ? 'review_silent' : 'review_wait', reason: 'beaucoup de réponses automatiques dans l’heure' });
     }
   }
-  if (decision.action === 'auto_voice' && topic && c.faqAsset && isFaqTopic(topic)) {
+  if (decision.action === 'auto_voice' && voiceAllowed && topic && c.faqAsset && isFaqTopic(topic) && canSendFaqVoiceToProspect(topic) && !faqAutoVoiceBlocked(faqForWindow, strictVoice)) {
     const { data: newerF } = await db.from('member_actions').select('id').eq('tg_id', c.job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', c.last.created_at).limit(1);
     if (newerF?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...c.extra, ...faqExtra } };
     const sent = await sendFaqVoice(db, { id: c.last.id, tg_id: c.job.tg_id, member_no: c.member?.member_no ?? null, detail: { ...c.base, conn: c.job.conn, ...mark, window_action: 'auto_voice' } }, topic, c.faqAsset, 'algoria-ai', null);
@@ -949,6 +936,7 @@ async function sendFaqVoice(
   by: string,
   draftText: string | null,
 ): Promise<string | null> {
+  if (!canSendFaqVoiceToProspect(topic)) return 'vocal d’attente non envoyé';
   const { tg } = await import('./businessInbox');
   const d = row.detail ?? {};
   const biz = { business_connection_id: String(d.conn ?? ''), chat_id: row.tg_id };
@@ -1215,7 +1203,7 @@ async function libraryLine(db: Db): Promise<string> {
     videos.length ? `🎥 ${videos.length} bulle${videos.length > 1 ? 's' : ''} d’accueil · ${by.join(' · ')}` : '🎥 Aucune bulle d’accueil.',
     voices.length ? `🎙 ${voices.length} ${voices.length > 1 ? 'vocaux' : 'vocal'} pays · ${covered.length ? covered.map(flagOf).join(' ') : 'aucun pays choisi'}` : '🎙 Aucun vocal pays.',
     `❓ Vocaux FAQ : ${faqCovered.size}/${FAQ_TOPICS.length} thèmes${faqCovered.size < FAQ_TOPICS.length ? ` · manquent : ${FAQ_TOPICS.filter((t) => !faqCovered.has(t)).map((t) => FAQ_LABELS[t]).join(', ')}` : ''}`,
-    `⏳ Vocal d’attente 5h–9h (situation ${FAQ_WAIT_TOPIC}) : ${waitReady ? 'enregistré' : 'pas encore tagué'}`,
+    `⏳ Vocal d’attente (situation ${FAQ_WAIT_TOPIC}) : ${waitReady ? 'en base, jamais envoyé' : 'non utilisé'} — le support reste continu`,
   ].join('\n');
 }
 
@@ -1377,7 +1365,7 @@ export async function handleSupportAssetCallback(db: Db, cq: any): Promise<boole
     a = { ...before, kind: FAQ_KIND, situation: c.value, lang: 'en', active: true };
     toast = `✓ ${faqSituationLabel(c.value)}${r.replaced ? ' · l’ancien vocal de ce thème est désactivé' : ''}`;
     const waitNote = c.value === FAQ_WAIT_TOPIC
-      ? `⏳ Vocal d’attente « ${FAQ_WAIT_LABEL} » actif.${r.replaced ? ` L’ancien vocal de ce thème est désactivé (toujours dans la base : « bulles » puis ↩️ pour le remettre).` : ''}\nIl part une fois par prospect, entre 05:00 et 09:00 (Dubaï), quand le message reste en relecture. Pas de ligne de texte en plus, rien sur le fond.`
+      ? `⏳ Vocal gardé en base.${r.replaced ? ` L’ancien est désactivé (toujours dans la base).` : ''}\nIl ne part chez personne : pas de message d’absence. Le support reste disponible.`
       : `❓ Vocal FAQ « ${faqSituationLabel(c.value)} » actif.${r.replaced ? ` L’ancien vocal de ce thème est désactivé (toujours dans la base : « bulles » puis ↩️ pour le remettre).` : ''}\nIl part quand un prospect pose cette question (thème sûr), suivi de :\n« ${isFaqTopic(c.value) ? FAQ_LINES[c.value] : ''} »`;
     await tg('sendMessage', { chat_id: cq.message?.chat?.id, reply_to_message_id: cq.message?.message_id, text: waitNote, disable_web_page_preview: true });
   } else if (c.op === 'faq') {
@@ -1419,7 +1407,7 @@ async function sendFaqFromCard(db: Db, cq: any, assetId: number, rowId: string, 
   if (row.detail?.answered_at || row.detail?.draft_sent_at) { await answer('Déjà répondu.'); return true; }
   const { data: as } = await db.from('support_assets').select('id,file_id,uses,kind,situation,active').eq('id', assetId).limit(1);
   const asset = as?.[0] as { id: number; file_id: string; uses: number | null; kind: string; situation: string | null; active: boolean } | undefined;
-  if (!asset || asset.kind !== FAQ_KIND || !asset.active || !isFaqTopic(asset.situation)) { await answer('Ce vocal n’est plus actif.'); return true; }
+  if (!asset || asset.kind !== FAQ_KIND || !asset.active || !isFaqTopic(asset.situation) || isFaqWaitTopic(asset.situation) || !canSendFaqVoiceToProspect(asset.situation)) { await answer('Ce vocal n’est plus actif.'); return true; }
   const topic = asset.situation;
   if (faqRecentlySent(await faqSentTo(db, row.tg_id), topic)) { await answer('Déjà envoyé à cette personne récemment.'); return true; }
   const by = cq.from?.username ? `@${cq.from.username}` : String(cq.from?.id ?? 'admin');

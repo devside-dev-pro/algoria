@@ -12,8 +12,8 @@
 //   2. passer le drapeau auto_ok : support_settings `faq_auto_ok` = JSON {"faq_how_it_works":true} (ou liste
 //      séparée par des virgules). Sans ce drapeau, le sujet reste en relecture même si le vocal existe ;
 //   3. et/ou enregistrer le vocal FAQ du thème (kind faq_voice, situation = le topic, déjà prévu par la #583).
-// En auto, on envoie le VOCAL s'il est tagué, SINON le texte de la fiche, jamais les deux. Le vocal d'attente
-// n°19 se tague kind=faq_voice, situation=faq_attente_5h9h (voir FAQ_WAIT_TOPIC) : il part seul, sans ligne fixe.
+// En auto, on envoie le VOCAL s'il est tagué, SINON le texte de la fiche, jamais les deux.
+// 18/11/2026 : le vocal faq_attente_5h9h et l'accusé « je reviens » ne partent plus (support continu).
 //
 // Ce fichier est PUR (pas de base, pas de Telegram). Testé par lib/member/supportWindow.test.ts.
 import { FAQ_CARD_ONLY, FAQ_MIN_CONFIDENCE, FAQ_WAIT_KIND, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, faqAutoVoiceBlocked, isFaqWaitTopic, type FaqClass, type FaqTopic } from './faqVoice';
@@ -293,8 +293,13 @@ export function howItWorksVoiceAllowed(text: string, strict: boolean = faqVoiceS
   return !faqAutoVoiceBlocked(classifyFaq(text), true);
 }
 
-/** Accusé de relecture : pas de délai, pas d'heure, pas de chiffre. Le vocal 19, s'il est actif, part à la place, seul. */
+/** Ancien texte d'accusé. Conservé pour les tests et le drapeau ; reviewHoldSend ne l'envoie pas. */
 export const REVIEW_HOLD_TEXT = 'Hey, I got your message. You can keep going in the app at https://app.getalgoria.com (log in with Telegram). Please don’t send any passwords here.';
+
+/** L'accusé d'absence (vocal 19 ou texte équivalent) ne part pas. Le drapeau SUPPORT_REVIEW_HOLDING reste lu en amont. */
+export function reviewHoldSend(): { send: false; reason: string } {
+  return { send: false, reason: 'pas d’accusé d’absence' };
+}
 
 /** Vrai si un accusé d'attente (vocal 19 ou texte) a déjà été envoyé dans CETTE fenêtre. */
 export function waitSentInWindow(sentAt: Array<number | string>, now: number, cfg: WindowConfig): boolean {

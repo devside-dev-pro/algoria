@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FAQ_CARD_ONLY, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, faqCardButton, faqKeyboard,
+  FAQ_CARD_ONLY, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, canSendFaqVoiceToProspect, classifyFaq, faqCardButton, faqKeyboard, pickFaqVoice,
   faqRecentlySent, faqVoiceDecision, parseAssetCallback, tagFaqVoice, type FaqClass, type FaqContext,
 } from './faqVoice';
 import { MYFXBOOK_URL } from './myfxbook';
@@ -264,4 +264,30 @@ test('ingestion : un nouveau vocal sur un thème désactive l’ancien (pas de s
   assert.deepEqual(ops[0].filters, [['eq', 'kind', 'faq_voice'], ['eq', 'situation', 'faq_deposit'], ['eq', 'active', true], ['neq', 'id', 9]]);
   assert.deepEqual(ops[1].patch, { kind: 'faq_voice', situation: 'faq_deposit', lang: 'en', active: true });
   assert.deepEqual(ops[1].filters, [['eq', 'id', 9]]);
+});
+
+test('faq_attente_5h9h est refusé sur la recherche, même si la base a une ligne', async () => {
+  assert.equal(canSendFaqVoiceToProspect(FAQ_WAIT_TOPIC), false);
+  assert.equal(canSendFaqVoiceToProspect('faq_attente_5h9h'), false);
+  assert.equal(canSendFaqVoiceToProspect('faq_how_it_works'), true);
+  assert.equal(canSendFaqVoiceToProspect('faq_deposit'), true);
+  let queries = 0;
+  const db = {
+    from() {
+      queries++;
+      const q = {
+        select() { return q; },
+        eq() { return q; },
+        order() { return q; },
+        limit() { return q; },
+        then(res: (v: unknown) => void) { res({ data: [{ id: 19, file_id: 'voice-19', uses: 3 }], error: null }); },
+      };
+      return q;
+    },
+  };
+  assert.equal(await pickFaqVoice(db, FAQ_WAIT_TOPIC), null);
+  assert.equal(queries, 0, 'pas de lecture : le vocal d’attente ne peut pas être choisi');
+  const kept = await pickFaqVoice(db, 'faq_deposit');
+  assert.equal(queries, 1);
+  assert.equal(kept?.file_id, 'voice-19');
 });

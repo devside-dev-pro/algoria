@@ -4,7 +4,7 @@ import { classifyFaq, FAQ_MIN_CONFIDENCE } from './faqVoice';
 import { hardRuleIssue, replyTextIssue } from './replyDraft';
 import {
   FAQ_WAIT_KIND, FAQ_WAIT_TOPIC, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA,
-  CLEAR_AUTO_TOPICS, REVIEW_HOLD_TEXT, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow,
+  CLEAR_AUTO_TOPICS, REVIEW_HOLD_TEXT, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow, reviewHoldSend,
   dubaiDayStartMs, faqSheetFallbackEnabled, faqVoiceSingleTopicEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain,
   howItWorksVoiceAllowed, isInSupportAutoWindow,
   isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, reviewHoldingEnabled, sheetKnownPct,
@@ -368,6 +368,10 @@ describe('(e) accusé de relecture sans délai promis', () => {
   });
   test('le texte d’attente historique de la fenêtre ne change pas', () => {
     assert.match(WINDOW_WAIT_TEXT, /get back to you shortly/i);
+  });
+  test('l’accusé d’absence ne part pas, drapeau allumé ou vocal 19 en base', () => {
+    assert.deepEqual(reviewHoldSend(), { send: false, reason: 'pas d’accusé d’absence' });
+    assert.equal(reviewHoldSend().send, false);
   });
 });
 
