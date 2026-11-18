@@ -6,7 +6,9 @@ import { VOICE_SCRIPTS, scriptPrompt, type VoiceScript } from './voiceScripts';
 export const RECORDER_TOTAL = VOICE_SCRIPTS.length;
 
 export type RecorderStatus = 'idle' | 'active' | 'stopped' | 'done';
-export type RecorderState = { status: RecorderStatus; index: number };
+/** Vocal reçu, pas encore écrit en base (écart de script : on attend Redo ou Keep anyway). */
+export type PendingVoice = { file_id: string; file_unique_id: string; message_id: number };
+export type RecorderState = { status: RecorderStatus; index: number; pending?: PendingVoice | null };
 export type RecorderAction = 'start' | 'resume' | 'saved' | 'skip' | 'stop' | 'redo';
 
 export type RecorderPrompt = { progress: string; text: string };
@@ -40,9 +42,9 @@ export function recorderKeyboard() {
   };
 }
 
-export function parseRecorderCallback(data: unknown): 'redo' | 'skip' | 'stop' | null {
-  const m = /^vr:(redo|skip|stop)$/i.exec(String(data ?? ''));
-  return m ? m[1].toLowerCase() as 'redo' | 'skip' | 'stop' : null;
+export function parseRecorderCallback(data: unknown): 'redo' | 'skip' | 'stop' | 'keep' | null {
+  const m = /^vr:(redo|skip|stop|keep)$/i.exec(String(data ?? ''));
+  return m ? m[1].toLowerCase() as 'redo' | 'skip' | 'stop' | 'keep' : null;
 }
 
 export type SavePlan = {
@@ -63,9 +65,19 @@ export function savePlan(s: VoiceScript): SavePlan {
   };
 }
 
+function readPending(raw: unknown): PendingVoice | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const p = raw as Record<string, unknown>;
+  const file_id = typeof p.file_id === 'string' ? p.file_id : '';
+  const file_unique_id = typeof p.file_unique_id === 'string' ? p.file_unique_id : '';
+  const message_id = Number(p.message_id);
+  if (!file_id || !file_unique_id || !Number.isFinite(message_id) || message_id <= 0) return null;
+  return { file_id, file_unique_id, message_id };
+}
+
 export function parseRecorderState(raw: unknown): RecorderState {
   try {
-    const j = typeof raw === 'string' ? JSON.parse(raw) as { status?: unknown; index?: unknown } : null;
+    const j = typeof raw === 'string' ? JSON.parse(raw) as { status?: unknown; index?: unknown; pending?: unknown } : null;
     const status: RecorderStatus = j?.status === 'active' || j?.status === 'stopped' || j?.status === 'done' ? j.status : 'idle';
     const index = Number.isInteger(j?.index) ? Number(j?.index) : 0;
     if (index < 0) return initialRecorderState();
@@ -74,13 +86,18 @@ export function parseRecorderState(raw: unknown): RecorderState {
     if (index > RECORDER_TOTAL || (index === RECORDER_TOTAL && status !== 'done')) {
       return { status: 'done', index: RECORDER_TOTAL };
     }
-    return { status, index };
+    const pending = status === 'active' ? readPending(j?.pending) : null;
+    return pending ? { status, index, pending } : { status, index };
   } catch {
     return initialRecorderState();
   }
 }
 
-export const serializeRecorderState = (s: RecorderState): string => JSON.stringify({ status: s.status, index: s.index });
+export const serializeRecorderState = (s: RecorderState): string => JSON.stringify({
+  status: s.status,
+  index: s.index,
+  ...(s.pending ? { pending: s.pending } : {}),
+});
 
 const at = (index: number): VoiceScript | null => VOICE_SCRIPTS[index] ?? null;
 

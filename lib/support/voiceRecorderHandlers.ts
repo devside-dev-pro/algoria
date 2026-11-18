@@ -4,7 +4,13 @@
 // Le webhook n'est pas touché : ces fonctions sont appelées depuis app/api/telegram/route.ts, le seul webhook.
 import { adminTgIds } from '../member/notifyOwner';
 import { FAQ_WAIT_TOPIC, tagFaqVoice, type FaqTopic } from '../member/faqVoice';
+import {
+  STT_FAIL_NOTICE, allScriptRefs, assessRecording, mismatchKeyboard, parseSttThreshold, scriptRef, sttCheckEnabled,
+  type RecordingAssessment,
+} from './voiceCheck';
 import { formatRecorderMessage } from './voiceScripts';
+import { isCheckVoicesCommand, loadActiveVoices, runCheckVoices } from './voiceAudit';
+import { transcribeTelegramVoice } from './voiceStt';
 import {
   applyRecorderAction, currentScript, isRetryableOwnerVoice, parseRecorderCallback, parseRecorderCommand,
   parseRecorderState, recorderEnabled, recorderKeyboard, savePlan, serializeRecorderState,
@@ -65,10 +71,27 @@ async function run(db: Db, chatId: number, state: RecorderState, action: Recorde
 /** /record_voices et /record_voices resume. false = ce n'est pas pour nous (le webhook continue). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleVoiceRecorderCommand(db: Db, msg: any): Promise<boolean> {
-  if (!parseRecorderCommand(typeof msg?.text === 'string' ? msg.text : '')) return false;
+  const text = typeof msg?.text === 'string' ? msg.text : '';
+  const audit = isCheckVoicesCommand(text);
+  if (!audit && !parseRecorderCommand(text)) return false;
   if (!ownPrivate(msg)) return false;
   if (!(await isOwner(msg.from?.id))) return false;
   const chatId = Number(msg.chat.id);
+  if (audit) {
+    await runCheckVoices({
+      chatId,
+      enabled: sttCheckEnabled(),
+      hasKey: Boolean(process.env.ELEVENLABS_API_KEY),
+      scripts: allScriptRefs(),
+      loadAssets: () => loadActiveVoices(db),
+      transcribe: transcribeTelegramVoice,
+      send: async (id, body) => { await tgSend('sendMessage', { chat_id: id, text: body, disable_web_page_preview: true }); },
+    }).catch(async (e) => {
+      console.error('[voice-recorder] check_voices', (e as Error)?.message ?? e);
+      await tgSend('sendMessage', { chat_id: chatId, text: 'Contrôle impossible (lecture ou transcription). Rien n’a été modifié.' });
+    });
+    return true;
+  }
   if (!enabled()) {
     await tgSend('sendMessage', { chat_id: chatId, text: 'Mode enregistrement coupé (SUPPORT_VOICE_RECORDER est off).' });
     return true;
@@ -89,6 +112,10 @@ export async function handleVoiceRecorderCallback(db: Db, cq: any): Promise<bool
   const chatId = Number(cq.message?.chat?.id ?? cq.from?.id);
   if (!enabled()) { await answer('Mode enregistrement coupé.'); return true; }
   if (cq.message?.chat?.type && cq.message.chat.type !== 'private') { await answer('Privé seulement.'); return true; }
+  if (action === 'keep') {
+    await keepDespiteMismatch(db, chatId, answer);
+    return true;
+  }
   const step = await run(db, chatId, await loadState(db), action);
   await answer(step.note.slice(0, 180) || step.prompt?.progress || 'OK');
   return true;
@@ -109,13 +136,66 @@ export async function handleVoiceRecorderVoice(db: Db, msg: any): Promise<boolea
   const script = currentScript(state);
   if (!script) return false;
   const chatId = Number(msg.chat.id);
-  const saved = await saveOwnerVoice(db, script, msg.voice, { chatId, messageId: Number(msg.message_id) });
+  const voice = { file_id: String(msg.voice.file_id ?? ''), file_unique_id: String(msg.voice.file_unique_id ?? '') };
+  const messageId = Number(msg.message_id);
+  let assessment: RecordingAssessment;
+  try {
+    assessment = await assessRecording({
+      enabled: sttCheckEnabled(),
+      hasKey: Boolean(process.env.ELEVENLABS_API_KEY),
+      fileId: voice.file_id,
+      expected: scriptRef(script),
+      all: allScriptRefs(),
+      threshold: parseSttThreshold(),
+      transcribe: transcribeTelegramVoice,
+      log: (m) => console.info('[voice-recorder]', m),
+    });
+  } catch (e) {
+    console.error('[voice-recorder] vérification', (e as Error)?.message ?? e);
+    assessment = { action: 'save', failed: true, notice: STT_FAIL_NOTICE };
+  }
+  // Écart : on ne sauve pas sous ce thème. Le propriétaire choisit, dans son privé uniquement.
+  if (assessment.action === 'hold') {
+    await storeState(db, { ...state, pending: { ...voice, message_id: messageId } });
+    await tgSend('sendMessage', { chat_id: chatId, text: assessment.notice, reply_markup: mismatchKeyboard() });
+    return true;
+  }
+  const saved = await saveOwnerVoice(db, script, voice, { chatId, messageId });
   if (saved.error || !saved.id) {
     await tgSend('sendMessage', { chat_id: chatId, reply_to_message_id: msg.message_id, text: `Pas enregistré (${String(saved.error ?? 'erreur').slice(0, 120)}). Renvoie le vocal.` });
     return true;
   }
-  await run(db, chatId, state, 'saved');
+  if (assessment.notice) await tgSend('sendMessage', { chat_id: chatId, reply_to_message_id: msg.message_id, text: assessment.notice });
+  await run(db, chatId, { status: state.status, index: state.index }, 'saved');
   return true;
+}
+
+/** Keep anyway : le propriétaire accepte l’écart. On enregistre alors sur le script demandé, et on le note. */
+async function keepDespiteMismatch(db: Db, chatId: number, answer: (text: string) => Promise<unknown>): Promise<void> {
+  const state = await loadState(db);
+  const script = currentScript(state);
+  const pending = state.pending;
+  if (!script || !pending) { await answer('Rien à garder.'); return; }
+  const saved = await saveOwnerVoice(db, script, pending, { chatId, messageId: pending.message_id });
+  if (saved.error || !saved.id) {
+    await answer('Pas enregistré.');
+    await tgSend('sendMessage', { chat_id: chatId, text: `Pas enregistré (${String(saved.error ?? 'erreur').slice(0, 120)}).` });
+    return;
+  }
+  await noteKeptMismatch(db, saved.id, script.n, script.key).catch(() => null);
+  await tgSend('sendMessage', { chat_id: chatId, text: `Gardé sur le script ${script.n} — ${script.title}, malgré l’écart.` });
+  await run(db, chatId, { status: state.status, index: state.index }, 'saved');
+  await answer('Gardé');
+}
+
+async function noteKeptMismatch(db: Db, assetId: number, n: number, key: string): Promise<void> {
+  const setting = 'voice_stt_flags';
+  const { data } = await db.from('support_settings').select('value').eq('key', setting).limit(1);
+  let cur: Record<string, unknown> = {};
+  try { cur = JSON.parse(String(data?.[0]?.value ?? '{}')) as Record<string, unknown>; } catch { cur = {}; }
+  if (!cur || typeof cur !== 'object' || Array.isArray(cur)) cur = {};
+  cur[String(assetId)] = { script: n, key, kept: true, at: new Date().toISOString() };
+  await db.from('support_settings').upsert({ key: setting, value: JSON.stringify(cur), updated_by: 'voice-stt' }, { onConflict: 'key' });
 }
 
 type VoiceFile = { file_id: string; file_unique_id: string };
