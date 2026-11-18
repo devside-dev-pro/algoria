@@ -5,7 +5,8 @@ import { hardRuleIssue, replyTextIssue } from './replyDraft';
 import {
   FAQ_WAIT_KIND, FAQ_WAIT_TOPIC, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA,
   CLEAR_AUTO_TOPICS, REVIEW_HOLD_TEXT, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow, reviewHoldSend,
-  dubaiDayStartMs, faqSheetFallbackEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain, isInSupportAutoWindow,
+  dubaiDayStartMs, faqSheetFallbackEnabled, faqVoiceSingleTopicEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain,
+  howItWorksVoiceAllowed, isInSupportAutoWindow,
   isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, reviewHoldingEnabled, sheetKnownPct,
   supportAutoWindowBounds, waitSentInWindow, windowReviewReason, type WindowConfig,
 } from './supportWindow';
@@ -162,7 +163,7 @@ describe('texte d’attente et constantes du vocal 19', () => {
 });
 
 describe('drapeaux des correctifs, tous coupés par défaut', () => {
-  for (const fn of [faqSheetFallbackEnabled, reviewHoldingEnabled, clearIntentsEnabled, howItWorksAfterWelcomeEnabled]) {
+  for (const fn of [faqSheetFallbackEnabled, reviewHoldingEnabled, clearIntentsEnabled, howItWorksAfterWelcomeEnabled, faqVoiceSingleTopicEnabled]) {
     test(`${fn.name} absent = coupé`, () => {
       for (const v of [undefined, null, '', 'off', '0', 'false', 'no']) assert.equal(fn(v), false);
       assert.equal(fn('on'), true);
@@ -247,6 +248,89 @@ describe('(a) fiche à la place de « pas de vocal » — vocal et texte jamais 
   });
 });
 
+describe('SUPPORT_FAQ_VOICE_SINGLE_TOPIC : vocal auto seulement pour un seul sujet clair', () => {
+  const depositSheet = 'Recommended start is about $500 on your own broker account.';
+  const wired = sheets(['faq_deposit', 'faq_broker', 'faq_cost_free', 'faq_how_it_works', 'faq_kyc_raisefx'], {
+    faq_deposit: depositSheet,
+    faq_broker: 'Open the app and tap the partner broker step.',
+    faq_cost_free: 'Partner broker = free access.',
+    faq_how_it_works: 'Algoria is an AI that trades gold.',
+    faq_kyc_raisefx: 'Finish broker KYC first, then connect in the app.',
+  });
+  const atWindow = { cfg: on, now: at('07:00'), modelSure: true, sheets: wired, voiceExists: true };
+
+  test('une question claire : le vocal part, interrupteur allumé', () => {
+    const text = "What's the minimum deposit?";
+    const faq = classifyFaq(text);
+    assert.equal(faq.voiceFit, 'single');
+    const d = decideSupportWindow({ ...atWindow, text, faq, strictSingleTopic: true });
+    assert.equal(d.action, 'auto_voice');
+    assert.equal(d.topic, 'faq_deposit');
+  });
+
+  test('dépôt + 400, ou broker + abonnement : pas de vocal, le texte de fiche part', () => {
+    const text = "What's the minimum deposit and what about the 400?";
+    const faq = classifyFaq(text);
+    assert.equal(faq.voiceFit, 'multiple', JSON.stringify(faq));
+    assert.ok(faq.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(faq));
+    const off = decideSupportWindow({ ...atWindow, text, faq, strictSingleTopic: false });
+    assert.equal(off.action, 'auto_voice');
+    const strict = decideSupportWindow({ ...atWindow, text, faq, strictSingleTopic: true });
+    assert.equal(strict.action, 'auto_text');
+    assert.equal(strict.body, depositSheet);
+    assert.notEqual(strict.action, 'auto_voice');
+
+    const broker = 'Which broker do you use and the subscription?';
+    const faqBroker = classifyFaq(broker);
+    assert.equal(decideSupportWindow({ ...atWindow, text: broker, faq: faqBroker, strictSingleTopic: false }).action, 'auto_voice');
+    const textOnly = decideSupportWindow({ ...atWindow, text: broker, faq: faqBroker, strictSingleTopic: true });
+    assert.equal(textOnly.action, 'auto_text');
+    assert.match(textOnly.body ?? '', /broker/i);
+  });
+
+  test('dépôt + retrait, ou broker + prix + résultats : pas de vocal, relecture ou texte', () => {
+    for (const text of [
+      "What's the minimum deposit and how do I withdraw my money?",
+      'Which broker do you use, is it free, and do you have any records on Myfxbook?',
+    ]) {
+      const faq = classifyFaq(text);
+      assert.equal(faq.voiceFit, 'multiple', JSON.stringify(faq));
+      for (const strictSingleTopic of [false, true]) {
+        const d = decideSupportWindow({ ...atWindow, text, faq, strictSingleTopic });
+        assert.notEqual(d.action, 'auto_voice', `${text} strict=${strictSingleTopic} ${d.action}`);
+        assert.ok(d.action === 'auto_text' || d.action === 'review_wait' || d.action === 'review_silent', d.action);
+      }
+    }
+  });
+
+  test('un mot seul : pas de vocal. « kyc » partait seul avant, plus maintenant', () => {
+    const text = 'kyc';
+    const faq = classifyFaq(text);
+    assert.equal(faq.voiceFit, 'ambiguous');
+    assert.equal(decideSupportWindow({ ...atWindow, text, faq, strictSingleTopic: false }).action, 'auto_voice');
+    const strict = decideSupportWindow({ ...atWindow, text, faq, strictSingleTopic: true });
+    assert.notEqual(strict.action, 'auto_voice');
+    assert.equal(strict.action, 'auto_text');
+    assert.match(strict.body ?? '', /KYC/i);
+    for (const word of ['broker', 'deposit', 'gold', 'results', 'free']) {
+      const w = classifyFaq(word);
+      assert.equal(w.voiceFit, 'ambiguous', word);
+      assert.notEqual(decideSupportWindow({ ...atWindow, text: word, faq: w, strictSingleTopic: true }).action, 'auto_voice', word);
+    }
+  });
+
+  test('sans fiche, un message ambigu ou mêlé va en relecture, pas en vocal', () => {
+    const text = "What's the minimum deposit and what about the 400?";
+    const faq = classifyFaq(text);
+    const d = decideSupportWindow({
+      ...atWindow, text, faq, strictSingleTopic: true,
+      sheets: sheets(['faq_deposit']),
+    });
+    assert.equal(d.action, 'review_wait');
+    assert.notEqual(d.action, 'auto_voice');
+  });
+});
+
 describe('(d) « How does it work? » après l’accueil', () => {
   test('drapeau coupé : ce n’est pas un enchaînement', () => {
     assert.equal(howItWorksChain('How does it work?', false), false);
@@ -258,6 +342,19 @@ describe('(d) « How does it work? » après l’accueil', () => {
     assert.equal(howItWorksChain("What's the minimum deposit?", true), false);
     assert.equal(howItWorksChain('hi', true), false);
     assert.equal(howItWorksChain('How do I withdraw?', true), false);
+  });
+  test('vocal de l’enchaînement : une question claire seulement, si l’interrupteur single-topic est allumé', () => {
+    const mixed = 'How does it work? Explain the process. Also gold.';
+    const c = classifyFaq(mixed);
+    assert.equal(c.topic, 'faq_how_it_works', JSON.stringify(c));
+    assert.ok(c.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(c));
+    assert.equal(c.voiceFit, 'multiple', JSON.stringify(c));
+    assert.equal(howItWorksChain(mixed, true), true);
+    assert.equal(howItWorksVoiceAllowed(mixed, false), true);
+    assert.equal(howItWorksVoiceAllowed(mixed, true), false);
+    assert.equal(howItWorksVoiceAllowed('How does it work?', false), true);
+    assert.equal(howItWorksVoiceAllowed('How does it work?', true), true);
+    assert.equal(howItWorksVoiceAllowed('kyc', true), false);
   });
 });
 

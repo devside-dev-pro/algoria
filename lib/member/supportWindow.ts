@@ -16,7 +16,7 @@
 // 18/11/2026 : le vocal faq_attente_5h9h et l'accusé « je reviens » ne partent plus (support continu).
 //
 // Ce fichier est PUR (pas de base, pas de Telegram). Testé par lib/member/supportWindow.test.ts.
-import { FAQ_CARD_ONLY, FAQ_MIN_CONFIDENCE, FAQ_WAIT_KIND, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, isFaqWaitTopic, type FaqClass, type FaqTopic } from './faqVoice';
+import { FAQ_CARD_ONLY, FAQ_MIN_CONFIDENCE, FAQ_WAIT_KIND, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, faqAutoVoiceBlocked, isFaqWaitTopic, type FaqClass, type FaqTopic } from './faqVoice';
 
 export const SUPPORT_AUTO_WINDOW_TZ = 'Asia/Dubai';
 export const SUPPORT_AUTO_WINDOW_DEFAULT = { start: '05:00', end: '09:00' } as const;
@@ -192,6 +192,8 @@ export type WindowInput = {
   manualHold?: boolean;
   /** SUPPORT_AUTO_CLEAR_INTENTS : une intention claire ne reste pas en relecture seulement parce que le modèle n'est pas sûr. */
   clearIntents?: boolean;
+  /** SUPPORT_FAQ_VOICE_SINGLE_TOPIC. Défaut : la variable d'environnement. false = le vocal auto suit le score, comme avant. */
+  strictSingleTopic?: boolean;
 };
 
 export function decideSupportWindow(i: WindowInput): WindowDecision {
@@ -204,6 +206,9 @@ export function decideSupportWindow(i: WindowInput): WindowDecision {
   const allowed = !!topic && isWindowTopic(topic) && topics.has(topic);
   const sheet = topic && isWindowTopic(topic) ? i.sheets?.[topic] : undefined;
   const confOk = i.faq.confidence >= FAQ_MIN_CONFIDENCE;
+  // Vocal auto seulement. Un message à plusieurs sujets ou ambigu garde le texte de fiche (ou la relecture), pas le vocal.
+  const strictVoice = i.strictSingleTopic ?? faqVoiceSingleTopicEnabled();
+  const voiceExists = !!i.voiceExists && !faqAutoVoiceBlocked(i.faq, strictVoice);
   const ambiguous = !topic || !confOk || (typeof i.faq.reason === 'string' && /plusieurs|ambigu/i.test(i.faq.reason));
   const otherStrong = Object.entries(i.faq.scores ?? {}).filter(([k, s]) => k !== topic && (s ?? 0) >= 0.9);
   const mixedSensitive = otherStrong.some(([k]) => k === 'faq_incident' || k === 'faq_withdraw_30d' || !isWindowTopic(k));
@@ -216,7 +221,7 @@ export function decideSupportWindow(i: WindowInput): WindowDecision {
   if (!why && mixedSensitive) why = 'plusieurs sujets dont un sensible';
   if (!why && !allowed) why = topic ? `sujet hors liste blanche (${topic})` : (i.faq.reason ?? 'aucun thème auto OK');
   if (!why && !sheet?.autoOk) why = 'fiche pas encore branchée (auto_ok)';
-  if (!why && !i.voiceExists && !sheet?.body) why = 'ni vocal ni texte de fiche pour ce sujet';
+  if (!why && !voiceExists && !sheet?.body) why = 'ni vocal ni texte de fiche pour ce sujet';
 
   if (why) {
     if (i.manualHold || i.waitAlreadySent) return { action: 'review_silent', topic, reason: why };
@@ -224,7 +229,7 @@ export function decideSupportWindow(i: WindowInput): WindowDecision {
   }
 
   // Vocal XOR texte de fiche. Le vocal, s'il est tagué, l'emporte (sa ligne fixe #583 peut l'accompagner, pas le pavé).
-  if (i.voiceExists) return { action: 'auto_voice', topic, reason: 'ok' };
+  if (voiceExists) return { action: 'auto_voice', topic, reason: 'ok' };
   return { action: 'auto_text', topic, reason: 'ok', body: sheet!.body! };
 }
 
@@ -242,6 +247,9 @@ export const clearIntentsEnabled = (raw: string | null | undefined = process.env
 export const howItWorksAfterWelcomeEnabled = (raw: string | null | undefined = process.env.SUPPORT_HOWIT_AFTER_WELCOME) => envOn(raw);
 /** (e) SUPPORT_REVIEW_HOLDING — accusé seulement entre 05:00 et 09:00 Asia/Dubai. Absent = coupé. */
 export const reviewHoldingEnabled = (raw: string | null | undefined = process.env.SUPPORT_REVIEW_HOLDING) => envOn(raw);
+/** SUPPORT_FAQ_VOICE_SINGLE_TOPIC — un vocal FAQ auto seulement si le message porte UN sujet clair.
+ *  Absent = comportement d'aujourd'hui (le score seul décide). N'assouplit aucun garde-fou. */
+export const faqVoiceSingleTopicEnabled = (raw: string | null | undefined = process.env.SUPPORT_FAQ_VOICE_SINGLE_TOPIC) => envOn(raw);
 
 /** Intentions dont « le modèle n'est pas sûr » ne suffit plus à bloquer l'envoi. Pas les retraits, pas l'activation. */
 export const CLEAR_AUTO_TOPICS = ['faq_how_it_works', 'faq_deposit', 'faq_results_myfxbook', 'faq_connect', 'faq_existing_account'] as const;
@@ -276,6 +284,13 @@ export function howItWorksChain(text: string, enabled: boolean): boolean {
   if (!enabled) return false;
   const c = classifyFaq(text);
   return c.topic === 'faq_how_it_works' && c.confidence >= FAQ_MIN_CONFIDENCE;
+}
+
+/** Vocal de cet enchaînement. Interrupteur coupé : le vocal part comme aujourd'hui dès que l'enchaînement est pris.
+ *  Allumé : pas de vocal si le message n'est pas un seul sujet clair (la fiche ou la relecture prennent le relais). */
+export function howItWorksVoiceAllowed(text: string, strict: boolean = faqVoiceSingleTopicEnabled()): boolean {
+  if (!strict) return true;
+  return !faqAutoVoiceBlocked(classifyFaq(text), true);
 }
 
 /** Ancien texte d'accusé. Conservé pour les tests et le drapeau ; reviewHoldSend ne l'envoie pas. */

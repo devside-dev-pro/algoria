@@ -76,7 +76,12 @@ test('garde-fou incident : seulement si l’incident est explicitement évoqué'
 });
 
 const ok: FaqContext = { modelSure: true, reviewReason: null, webinarLead: false, beforeIntro: false, introJustSent: false, brokerLinkAsk: false, hasMedia: false, assetExists: true, recentlySent: false };
-const cls = (topic: FaqClass['topic'], confidence = 0.9): FaqClass => ({ topic, confidence, scores: {} });
+const cls = (topic: FaqClass['topic'], confidence = 0.9): FaqClass => ({
+  topic, confidence, scores: {},
+  matched: topic ? [topic] : [],
+  strong: topic ? [topic] : [],
+  voiceFit: topic ? 'single' : 'none',
+});
 
 test('décision : auto seulement si tout est vert', () => {
   assert.equal(faqVoiceDecision(cls('faq_deposit'), ok).mode, 'auto');
@@ -100,6 +105,83 @@ test('décision : incident et retraits ne partent jamais seuls', () => {
   assert.ok(FAQ_CARD_ONLY.has('faq_incident'));
   assert.equal(faqVoiceDecision(cls('faq_incident'), ok).mode, 'card');
   assert.equal(faqVoiceDecision(cls('faq_withdraw_30d'), ok).mode, 'card');
+});
+
+test('un seul sujet clair : le vocal auto part, interrupteur allumé ou non', () => {
+  const clear = [
+    "What's the minimum deposit?",
+    'How does Algoria work?',
+    'Which broker do you use in the UK?',
+    'How do I connect my MT5?',
+    'Do you have any records on Myfxbook?',
+    'What is the minimum to start with RaiseFX?',
+    'What lot size and stop loss do you use?',
+  ];
+  for (const text of clear) {
+    const c = classifyFaq(text);
+    assert.equal(c.voiceFit, 'single', `${text} → ${JSON.stringify(c)}`);
+    assert.ok(c.confidence >= FAQ_MIN_CONFIDENCE, text);
+    assert.equal(c.matched.length >= 1, true, text);
+    assert.equal(faqVoiceDecision(c, { ...ok, strictSingleTopic: true }).mode, 'auto', text);
+    assert.equal(faqVoiceDecision(c, { ...ok, strictSingleTopic: false }).mode, 'auto', text);
+  }
+});
+
+test('plusieurs sujets : pas de vocal auto si l’interrupteur est allumé, inchangé s’il est coupé', () => {
+  const depositFee = "What's the minimum deposit and what about the 400?";
+  const fee = classifyFaq(depositFee);
+  assert.ok(fee.matched.includes('faq_deposit'), JSON.stringify(fee));
+  assert.ok(fee.matched.includes('faq_cost_free'), JSON.stringify(fee));
+  assert.equal(fee.voiceFit, 'multiple', JSON.stringify(fee));
+  assert.ok(fee.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(fee));
+  assert.equal(faqVoiceDecision(fee, ok).mode, 'auto');
+  assert.equal(faqVoiceDecision(fee, { ...ok, strictSingleTopic: false }).mode, 'auto');
+  const blocked = faqVoiceDecision(fee, { ...ok, strictSingleTopic: true });
+  assert.equal(blocked.mode, 'none');
+  assert.match(blocked.reason, /plusieurs/);
+
+  const brokerSub = 'Which broker do you use and the subscription?';
+  const broker = classifyFaq(brokerSub);
+  assert.equal(broker.voiceFit, 'multiple', JSON.stringify(broker));
+  assert.ok(broker.matched.includes('faq_broker') && broker.matched.includes('faq_cost_free'), JSON.stringify(broker));
+  assert.equal(faqVoiceDecision(broker, { ...ok, strictSingleTopic: false }).mode, 'auto');
+  assert.equal(faqVoiceDecision(broker, { ...ok, strictSingleTopic: true }).mode, 'none');
+
+  const depositWithdraw = "What's the minimum deposit and how do I withdraw my money?";
+  const dw = classifyFaq(depositWithdraw);
+  assert.ok(dw.matched.includes('faq_deposit') && dw.matched.includes('faq_withdraw_30d'), JSON.stringify(dw));
+  assert.equal(dw.voiceFit, 'multiple');
+  assert.equal(faqVoiceDecision(dw, { ...ok, strictSingleTopic: true }).mode, 'none');
+  assert.equal(faqVoiceDecision(dw, { ...ok, strictSingleTopic: false }).mode, 'none');
+
+  const triple = 'Which broker do you use, is it free, and do you have any records on Myfxbook?';
+  const three = classifyFaq(triple);
+  assert.ok(three.matched.includes('faq_broker'), JSON.stringify(three));
+  assert.ok(three.matched.includes('faq_cost_free'), JSON.stringify(three));
+  assert.ok(three.matched.includes('faq_results_myfxbook'), JSON.stringify(three));
+  assert.equal(three.voiceFit, 'multiple');
+  assert.equal(faqVoiceDecision(three, { ...ok, strictSingleTopic: true }).mode, 'none');
+  assert.equal(faqVoiceDecision(three, { ...ok, strictSingleTopic: false }).mode, 'none');
+});
+
+test('un mot seul est ambigu : pas de vocal auto quand l’interrupteur est allumé', () => {
+  for (const text of ['broker', 'deposit', 'gold', 'results', 'free', 'kyc', 'myfxbook', 'withdraw']) {
+    const c = classifyFaq(text);
+    assert.equal(c.voiceFit, 'ambiguous', `${text} → ${JSON.stringify(c)}`);
+    assert.notEqual(faqVoiceDecision(c, { ...ok, strictSingleTopic: true }).mode, 'auto', text);
+  }
+  const kyc = classifyFaq('kyc');
+  assert.ok(kyc.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(kyc));
+  assert.equal(faqVoiceDecision(kyc, ok).mode, 'auto');
+  assert.equal(faqVoiceDecision(kyc, { ...ok, strictSingleTopic: true }).mode, 'none');
+  assert.equal(faqVoiceDecision(classifyFaq('broker'), ok).mode, 'none');
+});
+
+test('le bouton « Envoyer le vocal » reste sur une carte, interrupteur allumé ou non', () => {
+  const deposit = classifyFaq("What's the minimum deposit?");
+  assert.equal(faqVoiceDecision(deposit, { ...ok, strictSingleTopic: true, reviewReason: 'pilote automatique coupé' }).mode, 'card');
+  assert.equal(faqVoiceDecision(classifyFaq('How are the withdrawals?'), { ...ok, strictSingleTopic: true }).mode, 'card');
+  assert.equal(faqVoiceDecision(classifyFaq('withdraw'), { ...ok, strictSingleTopic: true }).mode, 'card');
 });
 
 test('anti-spam : un thème par personne en 30 jours, 2 vocaux FAQ max en 24 h', () => {
