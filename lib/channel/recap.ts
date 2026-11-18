@@ -15,6 +15,7 @@ import { adminTgIds, notifyOwner } from '@/lib/member/notifyOwner';
 import { publishToChannels, sourceChannel } from '@/lib/channel/publish';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { stripAppLines } from './text';
+import { usd } from './usd';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -32,8 +33,6 @@ const weekday = (day: string) => new Date(`${day}T12:00:00Z`).getUTCDay(); // 0 
 const label = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
 const shortDate = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-/** +$14.80 à 0.01 ; +$148 à 0.10 (les centimes n'aident plus à lire au-delà de 100 $). */
-const usd = (v: number) => `${v >= 0 ? '+' : '−'}$${Math.abs(v) >= 100 ? Math.round(Math.abs(v)).toLocaleString('en-US') : Math.abs(v).toFixed(2)}`;
 const amounts = (net10: number) => `✅ ${usd(net10 / 10)} at 0.01 lot · ${usd(net10)} at 0.10 lot`;
 const RISK = "Trading involves risk. Past results don't guarantee future results.";
 const APP = '👉 app.getalgoria.com';

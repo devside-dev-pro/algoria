@@ -22,6 +22,9 @@
 import { atOneLot, atRef, REF_LABEL, sumAtRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs } from '@/lib/display/tradingDay';
 import { liveTrades, type Trade } from './recap';
+import { stripUsdSign, usd } from './usd';
+
+export { usd };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -42,9 +45,6 @@ export function vipTemplateOf(text: string | null | undefined, report: unknown):
   const stored = (rep.vip_template || rep.recap_template || '').trim();
   return hasVipPlaceholders(stored) ? stored : null;
 }
-
-/** +$14.80 sous 100 $, +$148 au-delà (même règle que writer.ts / recap.ts). */
-export const usd = (v: number) => `${v >= 0 ? '+' : '−'}$${Math.abs(v) >= 100 ? Math.round(Math.abs(v)).toLocaleString('en-US') : Math.abs(v).toFixed(2)}`;
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const weekday = (day: string) => new Date(`${day}T12:00:00Z`).getUTCDay(); // 0 dimanche … 6 samedi
@@ -90,10 +90,10 @@ export function fillVipTemplate(template: string, fills: Partial<Record<'X' | 'Y
   for (const k of ['X', 'Y', 'Z', 'NET'] as const) {
     const v = fills[k];
     if (!v) continue;
-    const amount = v; // déjà formaté avec le signe, ex. +$148
+    const amount = v; // déjà formaté par usd(), signe collé au $ par U+2060
     t = t.replace(new RegExp(`\\+\\$\\[${k}\\]`, 'gi'), amount);
     t = t.replace(new RegExp(`\\$\\[${k}\\]`, 'gi'), amount);
-    t = t.replace(new RegExp(`\\[${k}\\]`, 'gi'), amount.replace(/^[+−\-]?\$/, ''));
+    t = t.replace(new RegExp(`\\[${k}\\]`, 'gi'), stripUsdSign(amount));
   }
   if (fills.lot) t = t.replace(/\[lot\]/gi, fills.lot);
   if (fills.N) t = t.replace(/\[N\]/gi, fills.N);

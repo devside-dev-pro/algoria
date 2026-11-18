@@ -241,7 +241,6 @@ const isWeekend = (day: string) => [0, 6].includes(new Date(`${day}T12:00:00Z`).
 const dayLabel = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const plain = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-const usd = (v: number) => `${v >= 0 ? '+' : '−'}$${Math.abs(v) >= 100 ? Math.round(Math.abs(v)).toLocaleString('en-US') : Math.abs(v).toFixed(2)}`;
 const px = (n: number | null | undefined) => (n == null ? null : Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
 type Row = { id: number; day: string; slot: string; kind: string; ref: string | null; text: string | null; button_text: string | null; button_url: string | null; photo_url: string | null; scheduled_at: string; status: string; report: unknown };
