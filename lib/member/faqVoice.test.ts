@@ -43,6 +43,20 @@ test('seuil : les mots-clés voisins de la même famille ne cassent pas la confi
   assert.equal(high('How do I connect my account in the app?'), 'faq_connect');
 });
 
+test('compte déjà ouvert et trades d’activation : règles qui n’existaient pas', () => {
+  const opened = classifyFaq('I have opened the account since yesterday');
+  assert.equal(opened.topic, 'faq_existing_account');
+  assert.ok(opened.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(opened));
+  const act = classifyFaq('When do the activation trades start?');
+  assert.equal(act.topic, 'faq_activation');
+  assert.ok(act.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(act));
+  // une question de connexion reste la connexion, pas le compte déjà ouvert
+  assert.equal(high('How do I connect my MT5?'), 'faq_connect');
+  // deux sujets forts : pas une intention claire
+  const mixed = classifyFaq('I have opened the account and how do I withdraw my money?');
+  assert.ok(mixed.confidence < FAQ_MIN_CONFIDENCE || mixed.topic === 'faq_withdraw_30d');
+});
+
 test('les messages tout faits de l’app et les identifiants ne déclenchent jamais de vocal', () => {
   assert.equal(classifyFaq('I already have the app, how do I get connected now ? 🙏🏼').topic, null);
   assert.equal(classifyFaq('how do I connect? my password: Abc123!').topic, null);

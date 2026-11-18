@@ -4,9 +4,10 @@ import { classifyFaq, FAQ_MIN_CONFIDENCE } from './faqVoice';
 import { hardRuleIssue, replyTextIssue } from './replyDraft';
 import {
   FAQ_WAIT_KIND, FAQ_WAIT_TOPIC, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA,
-  decideSupportWindow, dubaiDayStartMs, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow,
-  parseWindowTopics, sheetKnownPct, supportAutoWindowBounds, waitSentInWindow, windowReviewReason,
-  type WindowConfig,
+  CLEAR_AUTO_TOPICS, REVIEW_HOLD_TEXT, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow,
+  dubaiDayStartMs, faqSheetFallbackEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain, isInSupportAutoWindow,
+  isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, reviewHoldingEnabled, sheetKnownPct,
+  supportAutoWindowBounds, waitSentInWindow, windowReviewReason, type WindowConfig,
 } from './supportWindow';
 
 const on: WindowConfig = { enabled: true, start: '05:00', end: '09:00' };
@@ -157,6 +158,119 @@ describe('texte d’attente et constantes du vocal 19', () => {
     assert.equal(WINDOW_WAIT_VIA, 'window_wait');
     assert.equal(WINDOW_AUTO_VIA, 'window_auto');
     assert.ok(FAQ_WAIT_TOPIC.startsWith('faq_'));
+  });
+});
+
+describe('drapeaux des correctifs, tous coupés par défaut', () => {
+  for (const fn of [faqSheetFallbackEnabled, reviewHoldingEnabled, clearIntentsEnabled, howItWorksAfterWelcomeEnabled]) {
+    test(`${fn.name} absent = coupé`, () => {
+      for (const v of [undefined, null, '', 'off', '0', 'false', 'no']) assert.equal(fn(v), false);
+      assert.equal(fn('on'), true);
+    });
+  }
+});
+
+describe('(b) intentions claires : ne plus tomber en « pas sûr »', () => {
+  const opened = 'I have opened the account since yesterday';
+  const faqOpened = classifyFaq(opened);
+  test('drapeau coupé : le contournement est faux', () => {
+    assert.equal(clearIntentBypass(opened, faqOpened, false), false);
+    assert.equal(clearIntentBypass(how, faqHow, false), false);
+  });
+  test('compte déjà ouvert, comment ça marche, dépôt minimum, Myfxbook, connexion', () => {
+    assert.equal(clearIntentBypass(opened, faqOpened, true), true);
+    assert.equal(clearIntentBypass(how, faqHow, true), true);
+    assert.equal(clearIntentBypass("What's the minimum deposit?", classifyFaq("What's the minimum deposit?"), true), true);
+    assert.equal(clearIntentBypass('Do you have any records on Myfxbook?', classifyFaq('Do you have any records on Myfxbook?'), true), true);
+    assert.equal(clearIntentBypass('How do I connect my MT5?', classifyFaq('How do I connect my MT5?'), true), true);
+    const clear = CLEAR_AUTO_TOPICS as readonly string[];
+    assert.ok(clear.includes('faq_existing_account'));
+    assert.ok(!clear.includes('faq_activation'));
+    assert.ok(!clear.includes('faq_withdraw_30d'));
+  });
+  test('les sujets sensibles restent en relecture, drapeau allumé ou non', () => {
+    const cases = [
+      'How do I withdraw my money?',
+      'I already deposited 500',
+      'My deposit was refused by the broker',
+      'What happened in October with the accounts?',
+      'I lost money last month',
+      'I want a refund',
+      'This is a scam',
+      'password is Abc123xyz',
+      'My KYC was rejected by RaiseFX',
+      'Here is my passport, please check',
+    ];
+    for (const text of cases) {
+      const faq = classifyFaq(text);
+      assert.equal(clearIntentBypass(text, faq, true), false, text);
+      assert.ok(windowReviewReason(text, faq), text);
+    }
+  });
+  test('dans la fenêtre, une intention claire part même si le modèle n’est pas sûr', () => {
+    const wired = sheets(['faq_how_it_works', 'faq_existing_account'], {
+      faq_how_it_works: 'Algoria copies gold trades. Open https://app.getalgoria.com and log in with Telegram.',
+      faq_existing_account: 'Now connect the account in the app: https://app.getalgoria.com/member/onboarding',
+    });
+    const baseClear = { cfg: on, now: at('07:00'), text: how, faq: faqHow, sheets: wired, voiceExists: false as boolean };
+    const held = decideSupportWindow({ ...baseClear, modelSure: false, clearIntents: false });
+    assert.equal(held.action, 'review_wait');
+    const go = decideSupportWindow({ ...baseClear, modelSure: false, clearIntents: true });
+    assert.equal(go.action, 'auto_text');
+    assert.equal(go.body?.includes('app.getalgoria.com'), true);
+    const voice = decideSupportWindow({ cfg: on, now: at('07:00'), text: how, faq: faqHow, modelSure: false, sheets: wired, voiceExists: true, clearIntents: true });
+    assert.equal(voice.action, 'auto_voice');
+    assert.equal(voice.body, undefined);
+    const sensitive = decideSupportWindow({
+      cfg: on, now: at('07:00'), text: 'How do I withdraw my money?', faq: classifyFaq('How do I withdraw my money?'),
+      modelSure: false, sheets: wired, voiceExists: true, clearIntents: true,
+    });
+    assert.equal(sensitive.action, 'review_wait');
+  });
+});
+
+describe('(a) fiche à la place de « pas de vocal » — vocal et texte jamais ensemble', () => {
+  const body = 'Connect it in the app only.';
+  test('drapeau coupé : le brouillon reste le texte, comme aujourd’hui hors fenêtre', () => {
+    assert.equal(chooseAutoBody({ sheetFallback: false, autoOk: true, body, voiceExists: false, eligible: true }), 'draft');
+  });
+  test('drapeau allumé, pas de vocal, fiche branchée : texte seul', () => {
+    assert.equal(chooseAutoBody({ sheetFallback: true, autoOk: true, body, voiceExists: false, eligible: true }), 'sheet');
+  });
+  test('un vocal actif gagne, la fiche ne part pas avec', () => {
+    assert.equal(chooseAutoBody({ sheetFallback: true, autoOk: true, body, voiceExists: true, eligible: true }), 'voice');
+  });
+  test('pas éligible, ou fiche pas branchée : rien de ce chemin', () => {
+    assert.equal(chooseAutoBody({ sheetFallback: true, autoOk: true, body, voiceExists: false, eligible: false }), 'none');
+    assert.equal(chooseAutoBody({ sheetFallback: true, autoOk: false, body, voiceExists: false, eligible: true }), 'draft');
+    assert.equal(chooseAutoBody({ sheetFallback: true, autoOk: true, body: '  ', voiceExists: false, eligible: true }), 'draft');
+  });
+});
+
+describe('(d) « How does it work? » après l’accueil', () => {
+  test('drapeau coupé : ce n’est pas un enchaînement', () => {
+    assert.equal(howItWorksChain('How does it work?', false), false);
+    assert.equal(howItWorksChain('How does Algoria work?', false), false);
+  });
+  test('drapeau allumé : seulement cette question, pas le dépôt ni le bonjour', () => {
+    assert.equal(howItWorksChain('How does it work?', true), true);
+    assert.equal(howItWorksChain('Hello how does this work?', true), true);
+    assert.equal(howItWorksChain("What's the minimum deposit?", true), false);
+    assert.equal(howItWorksChain('hi', true), false);
+    assert.equal(howItWorksChain('How do I withdraw?', true), false);
+  });
+});
+
+describe('(e) accusé de relecture sans délai promis', () => {
+  test('le texte ne promet ni délai, ni heure, ni chiffre, et passe les règles dures', () => {
+    assert.equal(/\bshortly\b|\bget back\b|\bin an hour\b|\b\d+\s*(?:h|min|hour|day)/i.test(REVIEW_HOLD_TEXT), false);
+    assert.equal(/\b(?:today|tomorrow|monday|asap)\b/i.test(REVIEW_HOLD_TEXT), false);
+    assert.equal(hardRuleIssue(REVIEW_HOLD_TEXT), null);
+    assert.match(REVIEW_HOLD_TEXT, /don.?t send any passwords/i);
+    assert.ok(REVIEW_HOLD_TEXT.includes('https://app.getalgoria.com'));
+  });
+  test('le texte d’attente historique de la fenêtre ne change pas', () => {
+    assert.match(WINDOW_WAIT_TEXT, /get back to you shortly/i);
   });
 });
 

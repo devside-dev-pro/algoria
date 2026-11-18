@@ -190,6 +190,8 @@ export type WindowInput = {
   hasMedia?: boolean;
   /** Mathieu a écrit dans la conversation il y a moins de 2 h : pas d'accusé d'attente, la carte lui reste. */
   manualHold?: boolean;
+  /** SUPPORT_AUTO_CLEAR_INTENTS : une intention claire ne reste pas en relecture seulement parce que le modèle n'est pas sûr. */
+  clearIntents?: boolean;
 };
 
 export function decideSupportWindow(i: WindowInput): WindowDecision {
@@ -208,7 +210,8 @@ export function decideSupportWindow(i: WindowInput): WindowDecision {
 
   let why: string | null = review;
   if (!why && i.hasMedia) why = 'pièce jointe ou capture : relecture';
-  if (!why && !i.modelSure) why = 'confiance faible (le modèle n’est pas sûr)';
+  const clear = !!i.clearIntents && clearIntentBypass(i.text, i.faq, true);
+  if (!why && !i.modelSure && !clear) why = 'confiance faible (le modèle n’est pas sûr)';
   if (!why && ambiguous) why = i.faq.reason ?? 'question ambiguë ou confiance faible';
   if (!why && mixedSensitive) why = 'plusieurs sujets dont un sensible';
   if (!why && !allowed) why = topic ? `sujet hors liste blanche (${topic})` : (i.faq.reason ?? 'aucun thème auto OK');
@@ -224,6 +227,59 @@ export function decideSupportWindow(i: WindowInput): WindowDecision {
   if (i.voiceExists) return { action: 'auto_voice', topic, reason: 'ok' };
   return { action: 'auto_text', topic, reason: 'ok', body: sheet!.body! };
 }
+
+// ── CORRECTIFS (tous coupés par défaut) ────────────────────────────────────────────────────────────────
+const envOn = (raw: string | null | undefined) => {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return v === 'on' || v === 'true' || v === '1' || v === 'yes';
+};
+
+/** (a) SUPPORT_FAQ_SHEET_FALLBACK — toute la journée, chemin principal. Absent = coupé. */
+export const faqSheetFallbackEnabled = (raw: string | null | undefined = process.env.SUPPORT_FAQ_SHEET_FALLBACK) => envOn(raw);
+/** (b) SUPPORT_AUTO_CLEAR_INTENTS — toute la journée, et dans la fenêtre si elle est allumée. Absent = coupé. */
+export const clearIntentsEnabled = (raw: string | null | undefined = process.env.SUPPORT_AUTO_CLEAR_INTENTS) => envOn(raw);
+/** (d) SUPPORT_HOWIT_AFTER_WELCOME — après l'accueil, toute la journée. Absent = coupé. */
+export const howItWorksAfterWelcomeEnabled = (raw: string | null | undefined = process.env.SUPPORT_HOWIT_AFTER_WELCOME) => envOn(raw);
+/** (e) SUPPORT_REVIEW_HOLDING — accusé seulement entre 05:00 et 09:00 Asia/Dubai. Absent = coupé. */
+export const reviewHoldingEnabled = (raw: string | null | undefined = process.env.SUPPORT_REVIEW_HOLDING) => envOn(raw);
+
+/** Intentions dont « le modèle n'est pas sûr » ne suffit plus à bloquer l'envoi. Pas les retraits, pas l'activation. */
+export const CLEAR_AUTO_TOPICS = ['faq_how_it_works', 'faq_deposit', 'faq_results_myfxbook', 'faq_connect', 'faq_existing_account'] as const;
+export const isClearAutoTopic = (t: unknown): t is (typeof CLEAR_AUTO_TOPICS)[number] =>
+  typeof t === 'string' && (CLEAR_AUTO_TOPICS as readonly string[]).includes(t);
+
+/** true seulement si le drapeau est allumé, le thème est clair, la confiance est haute, et rien de sensible n'est dans le message. */
+export function clearIntentBypass(text: string, faq: FaqClass, enabled: boolean): boolean {
+  if (!enabled) return false;
+  const topic = faq.topic;
+  if (!isClearAutoTopic(topic)) return false;
+  if (faq.confidence < FAQ_MIN_CONFIDENCE) return false;
+  if (windowReviewReason(text, faq)) return false;
+  const otherStrong = Object.entries(faq.scores ?? {}).filter(([k, s]) => k !== topic && (s ?? 0) >= 0.9);
+  if (otherStrong.length) return false;
+  if (typeof faq.reason === 'string' && /plusieurs|ambigu|pertes|identifiant/i.test(faq.reason)) return false;
+  return true;
+}
+
+export type AutoBodyChoice = 'voice' | 'sheet' | 'draft' | 'none';
+
+/** Vocal XOR fiche. Le drapeau coupé laisse le brouillon du modèle (chemin hors fenêtre d'aujourd'hui). */
+export function chooseAutoBody(o: { sheetFallback: boolean; autoOk: boolean; body: string | null; voiceExists: boolean; eligible: boolean }): AutoBodyChoice {
+  if (!o.eligible) return 'none';
+  if (o.voiceExists) return 'voice';
+  if (o.sheetFallback && o.autoOk && String(o.body ?? '').trim()) return 'sheet';
+  return 'draft';
+}
+
+/** (d) La question « comment ça marche » juste après l'accueil. Le drapeau coupé ne change pas le skip. */
+export function howItWorksChain(text: string, enabled: boolean): boolean {
+  if (!enabled) return false;
+  const c = classifyFaq(text);
+  return c.topic === 'faq_how_it_works' && c.confidence >= FAQ_MIN_CONFIDENCE;
+}
+
+/** Accusé de relecture : pas de délai, pas d'heure, pas de chiffre. Le vocal 19, s'il est actif, part à la place, seul. */
+export const REVIEW_HOLD_TEXT = 'Hey, I got your message. You can keep going in the app at https://app.getalgoria.com (log in with Telegram). Please don’t send any passwords here.';
 
 /** Vrai si un accusé d'attente (vocal 19 ou texte) a déjà été envoyé dans CETTE fenêtre. */
 export function waitSentInWindow(sentAt: Array<number | string>, now: number, cfg: WindowConfig): boolean {
