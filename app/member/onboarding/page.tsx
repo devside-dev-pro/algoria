@@ -1,14 +1,16 @@
 'use client';
-// Wizard d'adhésion en 3 étapes : broker (budget demandé D'ABORD → le partenaire recommandé pour la
-// tranche prend la vedette, Raise par défaut ; minimum PAR STRATÉGIE $200/$500/$1000) → connexion MT5 (chiffrée) → profil de risque.
-// Chaque étape est persistée (onboarding_step) : on peut fermer l'app et reprendre où on en était.
+// Wizard d'adhésion en 2 étapes (17/11/2026) : broker (budget demandé D'ABORD → le partenaire
+// recommandé pour la tranche prend la vedette, Raise par défaut ; minimum $200, recommandé $500) →
+// connexion MT5 (chiffrée). L'envoi du formulaire crée la carte connect et passe le membre en
+// pending_copier : plus d'écran de confirmation sans choix. Chaque étape est persistée
+// (onboarding_step) : on peut fermer l'app et reprendre où on en était.
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMe, LoadFailed, useUILocale, SUPPORT_TG, Check } from '../ui';
 import { tgHref } from '@/lib/telegram';
-import { BROKERS, PARTNER_BROKERS, canonicalServer, selectableBrokers, type Broker } from '@/lib/member/brokers';
+import { BROKERS, PARTNER_BROKERS, canonicalServer, selectableBrokers, soleLiveServer, type Broker } from '@/lib/member/brokers';
 import { brokerAttachMessage } from '@/lib/member/ui-text';
-import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, minDepositFor, RECOMMENDED_DEPOSIT } from '@/lib/member/minimums';
+import { STRATEGY_MIN_DEPOSIT, MIN_ENTRY_DEPOSIT, RECOMMENDED_DEPOSIT } from '@/lib/member/minimums';
 import { LIVE_STRATEGY } from '@/lib/member/maintenance';
 import { BUDGET_BRACKETS, brokerOrderFor } from '@/lib/member/brokerSteering';
 import { ACTIVATION_LEGS, ACTIVATION_LOTS, ACTIVATION_SYMBOL } from '@/lib/member/activation';
@@ -91,7 +93,7 @@ function SubmitError({ msg, t }: { msg: string | null; t: (k: string) => string 
 }
 
 export default function Onboarding() {
-  const { member, rejection, prefill, declaredDeposit, loading, t } = useMe();
+  const { member, rejection, prefill, clickedBrokerLink, loading, t } = useMe();
   const router = useRouter();
   const [step, setStep] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -116,9 +118,11 @@ export default function Onboarding() {
   // (localStorage). Celui qui avance tout seul ne la voit jamais : pas besoin de sortir un bonus
   // pour quelqu'un de déjà convaincu. Hook AVANT les early-returns (règle des hooks).
   const [bonusPop, setBonusPop] = useState(false);
-  // ORIGINE DU COMPTE + les deux engagements — voir le bloc « Where does this account come from? » :
-  // 74% des refus de connexion venaient d'un compte ouvert avant Algoria, donc invisible côté broker.
+  // ORIGINE DU COMPTE. Si le membre a cliqué le lien partenaire dans l'app, « new » est déduit et
+  // la question n'est plus posée (17/11/2026). Le chemin « j'avais déjà un compte » reste accessible
+  // par un lien discret, avec le message de rattachement IB.
   const [origin, setOrigin] = useState<'new' | 'existing' | null>(null);
+  const [clickedPartnerLink, setClickedPartnerLink] = useState(false);
   // COMPTE PRÉEXISTANT : de quoi composer le message de rattachement à envoyer au support du broker.
   const [exBroker, setExBroker] = useState('');
   const [exAccount, setExAccount] = useState('');
@@ -130,9 +134,8 @@ export default function Onboarding() {
   const exEntry = BROKERS.find((b) => b.key === exBroker);
   const exAffiliate = exEntry?.affiliateId ?? null;
   const exMessage = exEntry && exAffiliate ? brokerAttachMessage(exEntry.name, exAffiliate, exAccount) : '';
-  const [ackLink, setAckLink] = useState(false);
-  const [ackFunded, setAckFunded] = useState(false);
   const [ackLots, setAckLots] = useState(false); // lot d'activation déclaré — jamais bloquant (voir le bloc)
+  const [lotHelp, setLotHelp] = useState(false); // demande d'aide pour passer le trade — aucun ordre n'est passé
   const [ackDirect, setAckDirect] = useState(false); // broker hors partenaires : Mathieu a confirmé l'accès direct (payant) — sinon refus certain
   // PRÉ-REMPLISSAGE (03/09) : un membre qui revient (refus, ou wizard laissé à l'étape 2) retrouve tout
   // sauf son mot de passe. Avant, le formulaire se refermait derrière un refus (origine remise à zéro) et
@@ -157,6 +160,32 @@ export default function Onboarding() {
     if (prefill.name) setFullName(prefill.name);
     if (prefill.deposit) setDeposit(String(prefill.deposit));
   }, [prefill, member, prefilled]);
+
+  // Clic sur le lien partenaire : mémoire de session + événement funnel déjà en base (clickedBrokerLink).
+  useEffect(() => {
+    try { if (sessionStorage.getItem('alg_ob_broker_link') === '1') setClickedPartnerLink(true); } catch { /* sessionStorage indispo */ }
+  }, []);
+  useEffect(() => {
+    if (clickedBrokerLink) setClickedPartnerLink(true);
+  }, [clickedBrokerLink]);
+  const inferNew = clickedPartnerLink || clickedBrokerLink;
+  useEffect(() => {
+    if (!inferNew) return;
+    setOrigin((o) => (o == null ? 'new' : o));
+  }, [inferNew]);
+
+  // Serveur pré-rempli quand le broker n'en a qu'un (RaiseFX, TradingSphere). Pas pour VT / PU / Xlence.
+  useEffect(() => {
+    const key = brokerPick ?? member?.broker ?? null;
+    const only = soleLiveServer(key);
+    const list = BROKERS.find((b) => b.key === key)?.servers ?? [];
+    setServer((cur) => {
+      if (only) return only;
+      if (cur && list.length && !list.includes(canonicalServer(key, cur))) return '';
+      return cur;
+    });
+  }, [brokerPick, member?.broker]);
+
   useEffect(() => {
     if (!member || member.status !== 'onboarding' || bonusPop) return;
     if ((step ?? member.onboarding_step) !== 0 || (brokerPick ?? member.broker) != null) return;
@@ -182,6 +211,25 @@ export default function Onboarding() {
     return () => document.removeEventListener('visibilitychange', onHide);
   }, [obCur]);
 
+  // Reprise : un membre déjà à l'ancienne étape 3 (identifiants envoyés, confirmation pas encore
+  // validée) ne doit pas rester bloqué sans écran. On termine la demande automatiquement.
+  const finishingLegacy = useRef(false);
+  useEffect(() => {
+    if (!member || member.status !== 'onboarding' || finishingLegacy.current) return;
+    const s = step ?? member.onboarding_step;
+    if (s !== 2) return;
+    finishingLegacy.current = true;
+    setBusy(true);
+    setErr(null);
+    post({ action: 'strategy', choice: LIVE_STRATEGY })
+      .then(() => router.replace('/member/pending'))
+      .catch((e) => {
+        finishingLegacy.current = false;
+        setErr((e as Error).message);
+        setBusy(false);
+      });
+  }, [member, step, router]);
+
   if (loading) return <Center>loading…</Center>;
   if (!member) return <LoadFailed />; // échec de chargement : une issue, jamais un « loading… » sans fin
   if (member.status !== 'onboarding') { router.replace('/member'); return <Center>redirecting…</Center>; }
@@ -200,17 +248,11 @@ export default function Onboarding() {
   const rest = ranked.slice(1);
   const othersOpen = showOthers || (picked != null && picked !== lead.key);
 
-  // ÉTAPE 3 — il n'y a plus de sélection : une seule stratégie, donc un seul chemin. Ne reste que le
-  // contrôle du minimum. Le dépôt vient du champ local (étape 2) ou de la fiche KYC (reprise plus tard).
-  // serveur de démonstration : son nom le dit toujours (« …-Demo », « Demo-Server »). 7% des refus.
+  // Serveur de démonstration : son nom le dit toujours (« …-Demo », « Demo-Server »). 7% des refus.
   const demoServer = /demo/i.test(server);
   // un login MetaTrader est un NUMÉRO (6-10 chiffres en base). Une adresse email ou des lettres = la
   // personne a saisi l'identifiant de son espace client broker — 1er motif de refus. On avertit seulement.
   const loginLooksWrong = login.trim().length > 0 && !/^\d{4,12}$/.test(login.trim());
-  const budgetUsd = Number(deposit) > 0 ? Number(deposit) : declaredDeposit ?? undefined;
-  // Reste le SEUL garde de cette étape : le dépôt déclaré couvre-t-il le minimum ? Le serveur le revérifie.
-  const belowMinimum = budgetUsd != null && budgetUsd > 0 && budgetUsd < minDepositFor(LIVE_STRATEGY);
-
   // CE QUI MANQUE ENCORE, NOMMÉ (02/09/2026). Le bouton CONNECT portait une condition `disabled` de dix
   // termes et ne disait rien : champ oublié = bouton inerte, sans un mot. Le même tableau sert maintenant
   // aux trois usages — désactiver, griser, et ÉNUMÉRER au membre ce qu'il lui reste à faire. Une seule
@@ -229,7 +271,6 @@ export default function Onboarding() {
   if (fullName.trim().length < 3) mt5Missing.push(t('ob.miss.name'));
   if (!Number(deposit)) mt5Missing.push(t('ob.miss.deposit'));
   else if (Number(deposit) < MIN_ENTRY_DEPOSIT) mt5Missing.push(t('ob.miss.depositMin')); // vérifié ici, pas après le mot de passe (audit §2.5)
-  if (!ackLink || !ackFunded) mt5Missing.push(t('ob.miss.acks'));
   const mt5Blocked = busy || mt5Missing.length > 0;
 
   const run = (body: Record<string, unknown>, next: number | 'done') => {
@@ -241,14 +282,23 @@ export default function Onboarding() {
       .finally(() => setBusy(false));
   };
 
+  const markPartnerLink = (brokerKey: string, lead: boolean, fromBonus = false) => {
+    setClickedPartnerLink(true);
+    setBrokerPick(brokerKey);
+    setOrigin((o) => (o === 'existing' ? o : 'new'));
+    try { sessionStorage.setItem('alg_ob_broker_link', '1'); } catch { /* sessionStorage indispo */ }
+    if (fromBonus) track('ob_bonus_click', 0, { broker: brokerKey });
+    else track('ob_broker_link', 0, { broker: brokerKey, lead });
+  };
+
   return (
     <main style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h1 style={{ fontSize: 19, margin: 0 }}>Activate your access</h1>
-        <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>STEP {Math.min(cur + 1, 3)}/3</span>
+        <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>STEP {Math.min(cur + 1, 2)}/2</span>
       </header>
       <div style={{ display: 'flex', gap: 5 }}>
-        {[0, 1, 2].map((i) => (
+        {[0, 1].map((i) => (
           <span key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= cur ? 'linear-gradient(90deg,#2be3f5,#2e8bf0)' : 'rgba(130,152,190,.2)' }} />
         ))}
       </div>
@@ -273,6 +323,16 @@ export default function Onboarding() {
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h2 style={{ fontSize: 15, margin: 0 }}>{t('ob.step1')}</h2>
 
+          {/* 17/11/2026 — objection « c'était annoncé gratuit » : l'accès est gratuit via le lien
+              partenaire, le dépôt sur le compte du membre reste nécessaire. Texte honnête, sans
+              promesse de gain ni projection. */}
+          <div style={{ borderLeft: '3px solid var(--cyan)', background: 'rgba(43,227,245,.06)', borderRadius: 8, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
+              <strong style={{ color: 'var(--cyan)' }}>{t('ob.free.title')}</strong>
+            </p>
+            <p style={{ ...pMuted, margin: 0, fontSize: 12, lineHeight: 1.55 }}>{t('ob.free.body')}</p>
+          </div>
+
           {/* le budget D'ABORD : la réponse choisit quel partenaire prend la vedette juste en dessous */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>{t('ob.budget.label')}</span>
@@ -293,7 +353,7 @@ export default function Onboarding() {
             <span className="mono" style={{ alignSelf: 'flex-start', fontSize: 9, letterSpacing: 1.4, color: 'var(--gold)', border: '1px solid rgba(245,194,74,.4)', borderRadius: 5, padding: '2px 7px', fontWeight: 800 }}>{t('ob.budget.best')}</span>
           )}
           <p style={pMuted}>{lead.note ?? (budget ? `${lead.name} ${t('ob.broker.recoNote')}` : t('ob.broker.genericNote'))}</p>
-          <a href={lead.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(lead.key); track('ob_broker_link', 0, { broker: lead.key, lead: true }); }} style={ctaGold}>{t('ob.broker.createCta')} {lead.name.toUpperCase()} {t('ob.broker.createCtaEnd')}</a>
+          <a href={lead.url} target="_blank" rel="noreferrer" onClick={() => markPartnerLink(lead.key, true)} style={ctaGold}>{t('ob.broker.createCta')} {lead.name.toUpperCase()} {t('ob.broker.createCtaEnd')}</a>
           <div style={{ borderLeft: '3px solid var(--gold)', background: 'rgba(245,194,74,.06)', borderRadius: 8, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
             <p style={{ ...pMuted, margin: 0, fontSize: 12.5 }}>
               <strong style={{ color: 'var(--gold)' }}>{t('ob.min.title')}</strong> {t('ob.min.body')}
@@ -317,7 +377,7 @@ export default function Onboarding() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span className="mono" style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--dim)' }}>{t('ob.othersLabel')}</span>
               {rest.map((b) => (
-                <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(b.key); track('ob_broker_link', 0, { broker: b.key, lead: false }); }}
+                <a key={b.key} href={b.url} target="_blank" rel="noreferrer" onClick={() => markPartnerLink(b.key, false)}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 11, textDecoration: 'none', color: 'var(--text)', border: `1px solid ${picked === b.key ? 'rgba(43,227,245,.5)' : 'var(--border)'}`, background: picked === b.key ? 'rgba(43,227,245,.07)' : 'var(--surface)' }}>
                   <span style={{ fontWeight: 750, fontSize: 13.5 }}>{b.name}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: picked === b.key ? 'var(--cyan)' : 'var(--dim)' }}>{picked === b.key ? t('ob.selected') : t('ob.openAccount')}</span>
@@ -345,6 +405,9 @@ export default function Onboarding() {
               Rien dans le formulaire ne posait la question. On la pose AVANT les identifiants, et on
               détourne le cas au lieu de le laisser devenir un refus — un refus coûte un aller-retour
               au support, et souvent le prospect. */}
+          {/* Question d'origine : masquée si le lien partenaire a été cliqué dans l'app (« new » déduit).
+              Le chemin « existing » reste accessible par un lien discret. */}
+          {!(inferNew && origin !== 'existing') && (
           <div style={grp}>
             <span style={grpLbl}>Where does this account come from?</span>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -359,6 +422,12 @@ export default function Onboarding() {
               ))}
             </div>
           </div>
+          )}
+          {inferNew && origin !== 'existing' && (
+            <button type="button" onClick={() => { setOrigin('existing'); setExContinued(false); track('ob_origin', 1, { origin: 'existing' }); }} style={{ ...linkBtn, textAlign: 'left' }}>
+              {t('ob.origin.already')}
+            </button>
+          )}
 
           {/* COMPTE PRÉEXISTANT → LA DÉMARCHE, PAS UN RENVOI (17/08/2026).
               Première version : « écris à Mathieu d'abord ». Mauvais destinataire. Mathieu ne peut que
@@ -543,30 +612,6 @@ export default function Onboarding() {
             </div>
           )}
 
-          {/* LES DEUX ENGAGEMENTS — ils ne vérifient rien à eux seuls, mais ils INFORMENT (beaucoup
-              ignorent que le compte doit naître de notre lien) et ils laissent une trace de ce que le
-              membre a déclaré, visible à l'examen. Cases décochées par défaut, et obligatoires. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-            {/* Un compte préexistant ne peut PAS cocher « je l'ai créé via le lien Algoria » — ce serait
-                lui faire signer un mensonge, et la déclaration archivée deviendrait inexploitable à
-                l'examen. Il confirme donc ce qu'il a RÉELLEMENT fait : demandé le rattachement. */}
-            {/* Le même raisonnement vaut pour l'ACCÈS DIRECT (17/09/2026). Celui qui a payé son accès par
-                carte garde son propre broker : aucun lien partenaire n'existe pour lui, donc la case
-                d'origine était fausse par construction. Il fallait la cocher quand même pour franchir le
-                formulaire — vécu sur le membre #1469, ack_link:true archivé sur un dossier où c'est faux.
-                Il déclare donc ce qu'il a RÉELLEMENT fait : il a payé, et il reste chez son broker. */}
-            <Check checked={ackLink} onToggle={() => setAckLink((v) => !v)}>
-              {picked === 'other'
-                ? <>{t('ob.other.ackPaid')}</>
-                : origin === 'existing'
-                  ? <>{t('ob.exist.ackAttach')} — <b style={{ color: 'var(--text)' }}>ID {exAffiliate ?? '—'}</b></>
-                  : <>I created this trading account <b style={{ color: 'var(--text)' }}>through the Algoria broker link</b> — not an account I already had.</>}
-            </Check>
-            <Check checked={ackFunded} onToggle={() => setAckFunded((v) => !v)}>
-              I have <b style={{ color: 'var(--text)' }}>deposited real money</b> into it — it&rsquo;s a live account, not a demo.
-            </Check>
-          </div>
-
           {/* ── LOT D'ACTIVATION, DEMANDÉ ICI ET PAS PLUS TARD (01/09/2026) ────────────────────────────
               Le membre est DANS son terminal à cet instant précis : il vient d'y lire son login et son
               serveur. C'est le seul moment du parcours où la demande ne lui coûte rien. Sur l'écran
@@ -591,21 +636,38 @@ export default function Onboarding() {
               each other out, so <b style={{ color: 'var(--text)' }}>you take no market risk</b> — it costs you the spread, a few dollars.
               That&rsquo;s what registers your account with the broker and unlocks your copy and the VIP channel.
             </p>
-            <Check checked={ackLots} onToggle={() => setAckLots((v) => !v)}>
+            <Check checked={ackLots} onToggle={() => { setAckLots((v) => !v); setLotHelp(false); }}>
               I&rsquo;ve placed <b style={{ color: 'var(--text)' }}>both trades</b> ({ACTIVATION_LOTS} lot total) and closed them.
             </Check>
-            {!ackLots && (
+            <button
+              type="button"
+              onClick={() => { setLotHelp(true); setAckLots(false); }}
+              disabled={lotHelp}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', fontSize: 13, fontWeight: 700, cursor: lotHelp ? 'default' : 'pointer', color: lotHelp ? 'var(--muted)' : 'var(--text)', background: 'transparent' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              Let Algoria do it for me
+            </button>
+            {lotHelp ? (
+              <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.55, color: 'var(--text)' }}>
+                Our team will contact you shortly to help you place it. Send your account details below so we can see your request.
+              </p>
+            ) : !ackLots ? (
               <p style={{ margin: 0, fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
                 Not done yet? You can continue — the next screen will show it as the one thing left. Your access opens once it&rsquo;s done.
               </p>
-            )}
+            ) : null}
           </div>
           )}
           {origin === 'existing' && (
             <p style={{ margin: '-4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--gold)' }}>⏳ {t('ob.exist.pending')}</p>
           )}
 
-          <button disabled={mt5Blocked} onClick={() => { track('ob_mt5_click', 1, { broker: picked ?? '' }); run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLink, ackFunded, ackLots: picked === 'other' ? false : ackLots, ackPaid: picked === 'other' ? ackDirect : undefined, origin: origin ?? undefined }, 2); }} style={cta(mt5Blocked)}>
+          <button disabled={mt5Blocked} onClick={() => { track('ob_mt5_click', 1, { broker: picked ?? '' }); run({ action: 'mt5', broker: picked, brokerOther: picked === 'other' ? brokerOther : undefined, platform, login, server, password, name: fullName, deposit, ackLots: picked === 'other' ? false : ackLots, lotHelp: picked === 'other' ? false : lotHelp, ackPaid: picked === 'other' ? ackDirect : undefined, origin: origin ?? (inferNew ? 'new' : undefined), clickedPartnerLink: inferNew }, 'done'); }} style={cta(mt5Blocked)}>
             {busy ? t('ob.encrypting') : t('ob.connectCta')}
           </button>
           {/* remplace l'ancien « Tick both boxes above » : il ne couvrait QUE les cases, alors que huit
@@ -637,30 +699,13 @@ export default function Onboarding() {
         </section>
       )}
 
+      {/* Reprise d'un membre déjà à l'ancienne étape 3 : l'effet plus haut envoie la demande.
+          On affiche un état, et un bouton de retry si ça échoue, pour ne pas laisser un écran vide. */}
       {cur === 2 && (
         <section className="panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h2 style={{ fontSize: 15, margin: 0 }}>{t('ob.step3')}</h2>
-          <p style={pMuted}>{t('ob.step3.sub')}</p>
-          {/* PLUS DE SÉLECTEUR (11/09/2026). Cette étape demandait au membre de choisir entre trois
-              stratégies ; il n'y en a plus qu'une, et deux des trois n'ont même plus de master. Une question
-              dont toutes les réponses sauf une sont fausses n'est pas un choix, c'est un piège. L'étape
-              confirme donc ce qu'il rejoint, au lieu de le lui faire deviner. */}
-          <div className="panel" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 13, borderColor: 'rgba(43,227,245,.32)' }}>
-            <span style={{ fontSize: 22, minWidth: 32 }}>⚡</span>
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: 1 }}>ALGORIA 2.0</span>
-              <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>Copied to your account automatically — you never place an order yourself.</span>
-            </span>
-          </div>
-          {belowMinimum && (
-            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: 'var(--gold)' }}>
-              Your declared deposit (${budgetUsd}) is below the ${MIN_ENTRY_DEPOSIT} minimum to start copying.
-              Fund your account, then go back and update the amount — or message us and we&rsquo;ll sort it out.
-            </p>
-          )}
-          <button disabled={busy || belowMinimum} onClick={() => { track('ob_strategy_done', 2); run({ action: 'strategy', choice: LIVE_STRATEGY }, 'done'); }} style={cta(busy || belowMinimum)}>{busy ? t('ob.saving') : t('ob.startCta')}</button>
+          <p style={pMuted}>{t('ob.finishing')}</p>
           <SubmitError msg={err} t={t} />
-          <button onClick={() => { track('ob_back', 2, { to: 1 }); setStep(1); }} style={linkBtn}>{t('ob.backMt5')}</button>
+          {err && <button disabled={busy} onClick={() => { finishingLegacy.current = false; setErr(null); run({ action: 'strategy', choice: LIVE_STRATEGY }, 'done'); }} style={cta(busy)}>{busy ? t('ob.saving') : t('ob.startCta')}</button>}
         </section>
       )}
 
@@ -675,7 +720,7 @@ export default function Onboarding() {
               <b className="goldText">{FEATURED.bonus.pct}% deposit bonus</b> at {FEATURED.name} with the code below — deposit $300, the AI trades with <b style={{ color: 'var(--text)' }}>$600 of buying power</b>. Enter it when you fund your account.
             </p>
             <div className="mono" style={{ textAlign: 'center', fontSize: 20, fontWeight: 800, letterSpacing: 3, color: 'var(--gold)', border: '1px dashed rgba(245,194,74,.55)', borderRadius: 10, padding: '10px 12px' }}>{FEATURED.bonus.code}</div>
-            <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => { setBrokerPick(FEATURED.key); setBonusPop(false); track('ob_bonus_click', 0, { broker: FEATURED.key }); }} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
+            <a href={FEATURED.url} target="_blank" rel="noreferrer" onClick={() => { setBonusPop(false); markPartnerLink(FEATURED.key, true, true); }} style={ctaGold}>▲ CREATE MY {FEATURED.name.toUpperCase()} ACCOUNT</a>
             <button onClick={() => setBonusPop(false)} style={linkBtn}>Maybe later</button>
             <p className="mono" style={{ margin: 0, fontSize: 9.5, color: 'var(--dim)', textAlign: 'center', letterSpacing: 0.4, lineHeight: 1.5 }}>BONUS = TRADING CREDIT ON YOUR BROKER ACCOUNT · YOUR OWN DEPOSIT STAYS YOURS, WITHDRAWABLE ANYTIME</p>
           </section>

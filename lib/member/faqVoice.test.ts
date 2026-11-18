@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FAQ_CARD_ONLY, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, classifyFaq, faqCardButton, faqKeyboard,
+  FAQ_CARD_ONLY, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, canSendFaqVoiceToProspect, classifyFaq, faqCardButton, faqKeyboard, pickFaqVoice,
   faqRecentlySent, faqVoiceDecision, parseAssetCallback, tagFaqVoice, type FaqClass, type FaqContext,
 } from './faqVoice';
 import { MYFXBOOK_URL } from './myfxbook';
@@ -43,6 +43,20 @@ test('seuil : les mots-clés voisins de la même famille ne cassent pas la confi
   assert.equal(high('How do I connect my account in the app?'), 'faq_connect');
 });
 
+test('compte déjà ouvert et trades d’activation : règles qui n’existaient pas', () => {
+  const opened = classifyFaq('I have opened the account since yesterday');
+  assert.equal(opened.topic, 'faq_existing_account');
+  assert.ok(opened.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(opened));
+  const act = classifyFaq('When do the activation trades start?');
+  assert.equal(act.topic, 'faq_activation');
+  assert.ok(act.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(act));
+  // une question de connexion reste la connexion, pas le compte déjà ouvert
+  assert.equal(high('How do I connect my MT5?'), 'faq_connect');
+  // deux sujets forts : pas une intention claire
+  const mixed = classifyFaq('I have opened the account and how do I withdraw my money?');
+  assert.ok(mixed.confidence < FAQ_MIN_CONFIDENCE || mixed.topic === 'faq_withdraw_30d');
+});
+
 test('les messages tout faits de l’app et les identifiants ne déclenchent jamais de vocal', () => {
   assert.equal(classifyFaq('I already have the app, how do I get connected now ? 🙏🏼').topic, null);
   assert.equal(classifyFaq('how do I connect? my password: Abc123!').topic, null);
@@ -62,7 +76,12 @@ test('garde-fou incident : seulement si l’incident est explicitement évoqué'
 });
 
 const ok: FaqContext = { modelSure: true, reviewReason: null, webinarLead: false, beforeIntro: false, introJustSent: false, brokerLinkAsk: false, hasMedia: false, assetExists: true, recentlySent: false };
-const cls = (topic: FaqClass['topic'], confidence = 0.9): FaqClass => ({ topic, confidence, scores: {} });
+const cls = (topic: FaqClass['topic'], confidence = 0.9): FaqClass => ({
+  topic, confidence, scores: {},
+  matched: topic ? [topic] : [],
+  strong: topic ? [topic] : [],
+  voiceFit: topic ? 'single' : 'none',
+});
 
 test('décision : auto seulement si tout est vert', () => {
   assert.equal(faqVoiceDecision(cls('faq_deposit'), ok).mode, 'auto');
@@ -86,6 +105,83 @@ test('décision : incident et retraits ne partent jamais seuls', () => {
   assert.ok(FAQ_CARD_ONLY.has('faq_incident'));
   assert.equal(faqVoiceDecision(cls('faq_incident'), ok).mode, 'card');
   assert.equal(faqVoiceDecision(cls('faq_withdraw_30d'), ok).mode, 'card');
+});
+
+test('un seul sujet clair : le vocal auto part, interrupteur allumé ou non', () => {
+  const clear = [
+    "What's the minimum deposit?",
+    'How does Algoria work?',
+    'Which broker do you use in the UK?',
+    'How do I connect my MT5?',
+    'Do you have any records on Myfxbook?',
+    'What is the minimum to start with RaiseFX?',
+    'What lot size and stop loss do you use?',
+  ];
+  for (const text of clear) {
+    const c = classifyFaq(text);
+    assert.equal(c.voiceFit, 'single', `${text} → ${JSON.stringify(c)}`);
+    assert.ok(c.confidence >= FAQ_MIN_CONFIDENCE, text);
+    assert.equal(c.matched.length >= 1, true, text);
+    assert.equal(faqVoiceDecision(c, { ...ok, strictSingleTopic: true }).mode, 'auto', text);
+    assert.equal(faqVoiceDecision(c, { ...ok, strictSingleTopic: false }).mode, 'auto', text);
+  }
+});
+
+test('plusieurs sujets : pas de vocal auto si l’interrupteur est allumé, inchangé s’il est coupé', () => {
+  const depositFee = "What's the minimum deposit and what about the 400?";
+  const fee = classifyFaq(depositFee);
+  assert.ok(fee.matched.includes('faq_deposit'), JSON.stringify(fee));
+  assert.ok(fee.matched.includes('faq_cost_free'), JSON.stringify(fee));
+  assert.equal(fee.voiceFit, 'multiple', JSON.stringify(fee));
+  assert.ok(fee.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(fee));
+  assert.equal(faqVoiceDecision(fee, ok).mode, 'auto');
+  assert.equal(faqVoiceDecision(fee, { ...ok, strictSingleTopic: false }).mode, 'auto');
+  const blocked = faqVoiceDecision(fee, { ...ok, strictSingleTopic: true });
+  assert.equal(blocked.mode, 'none');
+  assert.match(blocked.reason, /plusieurs/);
+
+  const brokerSub = 'Which broker do you use and the subscription?';
+  const broker = classifyFaq(brokerSub);
+  assert.equal(broker.voiceFit, 'multiple', JSON.stringify(broker));
+  assert.ok(broker.matched.includes('faq_broker') && broker.matched.includes('faq_cost_free'), JSON.stringify(broker));
+  assert.equal(faqVoiceDecision(broker, { ...ok, strictSingleTopic: false }).mode, 'auto');
+  assert.equal(faqVoiceDecision(broker, { ...ok, strictSingleTopic: true }).mode, 'none');
+
+  const depositWithdraw = "What's the minimum deposit and how do I withdraw my money?";
+  const dw = classifyFaq(depositWithdraw);
+  assert.ok(dw.matched.includes('faq_deposit') && dw.matched.includes('faq_withdraw_30d'), JSON.stringify(dw));
+  assert.equal(dw.voiceFit, 'multiple');
+  assert.equal(faqVoiceDecision(dw, { ...ok, strictSingleTopic: true }).mode, 'none');
+  assert.equal(faqVoiceDecision(dw, { ...ok, strictSingleTopic: false }).mode, 'none');
+
+  const triple = 'Which broker do you use, is it free, and do you have any records on Myfxbook?';
+  const three = classifyFaq(triple);
+  assert.ok(three.matched.includes('faq_broker'), JSON.stringify(three));
+  assert.ok(three.matched.includes('faq_cost_free'), JSON.stringify(three));
+  assert.ok(three.matched.includes('faq_results_myfxbook'), JSON.stringify(three));
+  assert.equal(three.voiceFit, 'multiple');
+  assert.equal(faqVoiceDecision(three, { ...ok, strictSingleTopic: true }).mode, 'none');
+  assert.equal(faqVoiceDecision(three, { ...ok, strictSingleTopic: false }).mode, 'none');
+});
+
+test('un mot seul est ambigu : pas de vocal auto quand l’interrupteur est allumé', () => {
+  for (const text of ['broker', 'deposit', 'gold', 'results', 'free', 'kyc', 'myfxbook', 'withdraw']) {
+    const c = classifyFaq(text);
+    assert.equal(c.voiceFit, 'ambiguous', `${text} → ${JSON.stringify(c)}`);
+    assert.notEqual(faqVoiceDecision(c, { ...ok, strictSingleTopic: true }).mode, 'auto', text);
+  }
+  const kyc = classifyFaq('kyc');
+  assert.ok(kyc.confidence >= FAQ_MIN_CONFIDENCE, JSON.stringify(kyc));
+  assert.equal(faqVoiceDecision(kyc, ok).mode, 'auto');
+  assert.equal(faqVoiceDecision(kyc, { ...ok, strictSingleTopic: true }).mode, 'none');
+  assert.equal(faqVoiceDecision(classifyFaq('broker'), ok).mode, 'none');
+});
+
+test('le bouton « Envoyer le vocal » reste sur une carte, interrupteur allumé ou non', () => {
+  const deposit = classifyFaq("What's the minimum deposit?");
+  assert.equal(faqVoiceDecision(deposit, { ...ok, strictSingleTopic: true, reviewReason: 'pilote automatique coupé' }).mode, 'card');
+  assert.equal(faqVoiceDecision(classifyFaq('How are the withdrawals?'), { ...ok, strictSingleTopic: true }).mode, 'card');
+  assert.equal(faqVoiceDecision(classifyFaq('withdraw'), { ...ok, strictSingleTopic: true }).mode, 'card');
 });
 
 test('anti-spam : un thème par personne en 30 jours, 2 vocaux FAQ max en 24 h', () => {
@@ -120,7 +216,8 @@ test('lignes fixes : un libellé et une ligne par thème, liens autorisés seule
 test('ingestion : boutons de thème et callbacks', () => {
   const kb = faqKeyboard({ id: 42, situation: 'faq_deposit', active: true });
   const all = kb.inline_keyboard.flat();
-  assert.equal(all.filter((b) => b.callback_data.includes(':t:')).length, FAQ_TOPICS.length);
+  assert.equal(all.filter((b) => b.callback_data.includes(':t:')).length, FAQ_TOPICS.length + 1);
+  assert.ok(all.some((b) => b.callback_data === `sa:42:t:${FAQ_WAIT_TOPIC}` && b.text.includes('Attente')));
   assert.ok(all.some((b) => b.callback_data === 'sa:42:cv'));
   assert.ok(all.some((b) => b.callback_data === 'sa:42:x'));
   assert.ok(all.find((b) => b.callback_data === 'sa:42:t:faq_deposit')?.text.startsWith('✓ '));
@@ -131,6 +228,7 @@ test('ingestion : boutons de thème et callbacks', () => {
   assert.deepEqual(parseAssetCallback('sa:42:faq'), { id: 42, op: 'faq' });
   assert.deepEqual(parseAssetCallback('sa:42:cv'), { id: 42, op: 'country_voice' });
   assert.deepEqual(parseAssetCallback('sa:42:t:faq_broker'), { id: 42, op: 'topic', value: 'faq_broker' });
+  assert.deepEqual(parseAssetCallback('sa:42:t:faq_attente_5h9h'), { id: 42, op: 'topic', value: FAQ_WAIT_TOPIC });
   assert.equal(parseAssetCallback('sa:42:t:faq_unknown'), null);
   // les anciens boutons de la bibliothèque marchent toujours
   assert.deepEqual(parseAssetCallback('sa:7:c:GB'), { id: 7, op: 'country', value: 'GB' });
@@ -166,4 +264,30 @@ test('ingestion : un nouveau vocal sur un thème désactive l’ancien (pas de s
   assert.deepEqual(ops[0].filters, [['eq', 'kind', 'faq_voice'], ['eq', 'situation', 'faq_deposit'], ['eq', 'active', true], ['neq', 'id', 9]]);
   assert.deepEqual(ops[1].patch, { kind: 'faq_voice', situation: 'faq_deposit', lang: 'en', active: true });
   assert.deepEqual(ops[1].filters, [['eq', 'id', 9]]);
+});
+
+test('faq_attente_5h9h est refusé sur la recherche, même si la base a une ligne', async () => {
+  assert.equal(canSendFaqVoiceToProspect(FAQ_WAIT_TOPIC), false);
+  assert.equal(canSendFaqVoiceToProspect('faq_attente_5h9h'), false);
+  assert.equal(canSendFaqVoiceToProspect('faq_how_it_works'), true);
+  assert.equal(canSendFaqVoiceToProspect('faq_deposit'), true);
+  let queries = 0;
+  const db = {
+    from() {
+      queries++;
+      const q = {
+        select() { return q; },
+        eq() { return q; },
+        order() { return q; },
+        limit() { return q; },
+        then(res: (v: unknown) => void) { res({ data: [{ id: 19, file_id: 'voice-19', uses: 3 }], error: null }); },
+      };
+      return q;
+    },
+  };
+  assert.equal(await pickFaqVoice(db, FAQ_WAIT_TOPIC), null);
+  assert.equal(queries, 0, 'pas de lecture : le vocal d’attente ne peut pas être choisi');
+  const kept = await pickFaqVoice(db, 'faq_deposit');
+  assert.equal(queries, 1);
+  assert.equal(kept?.file_id, 'voice-19');
 });

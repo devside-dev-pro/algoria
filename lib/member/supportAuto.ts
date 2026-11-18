@@ -24,6 +24,8 @@
 //
 // Coupe-circuits (env Vercel, sans redéploiement de code) : SUPPORT_WELCOME=off (plus d'accueil auto),
 // SUPPORT_AUTOPILOT=off (plus d'envoi seul : toutes les réponses redeviennent des cartes à valider).
+// SUPPORT_AUTO_WINDOW=off (défaut) : pas de réponse FAQ seule ni d'accusé d'attente entre 05:00 et 09:00
+//   Asia/Dubai. « on » n'active la fenêtre qu'après que Mathieu a posé la variable lui-même (lib/member/supportWindow.ts).
 import { draftReply, draftTraceDetail } from './replyDraft';
 import { adminTgIds } from './notifyOwner';
 import { batchPromptText, splitBatch } from './supportBatch';
@@ -34,7 +36,9 @@ import { detectCountry } from './countries';
 import { HISTORY_LOSS_NOTE, INCIDENT, INCIDENT_ESCALATE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, incidentReplyNote, resultsPolicy, wasAffected } from './incident';
 import { isLiveKeyword, liveSeatReply, upcomingSessions } from './webinar';
 import type { Conn } from './businessInbox';
-import { FAQ_KIND, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, classifyFaq, faqCardButton, faqKeyboard, faqRecentlySent, faqSentTo, faqVoiceDecision, isFaqTopic, parseAssetCallback, pickFaqVoice, tagFaqVoice, type FaqDecision, type FaqTopic } from './faqVoice';
+import { FAQ_KIND, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, canSendFaqVoiceToProspect, classifyFaq, faqAutoVoiceBlocked, faqCardButton, faqKeyboard, faqRecentlySent, faqSentTo, faqSituationLabel, faqVoiceDecision, isFaqSituation, isFaqTopic, isFaqWaitTopic, parseAssetCallback, pickFaqVoice, tagFaqVoice, type FaqDecision, type FaqTopic } from './faqVoice';
+import { FAQ_WAIT_KIND, REVIEW_HOLD_TEXT, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow, faqSheetFallbackEnabled, faqVoiceSingleTopicEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain, howItWorksVoiceAllowed, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, reviewHoldSend, reviewHoldingEnabled, sheetKnownPct, supportAutoWindowBounds, waitSentInWindow, type SheetMap, type WindowConfig } from './supportWindow';
+import { hardRuleIssue, replyTextIssue } from './replyDraft';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -62,7 +66,7 @@ const STALE_RUNNING_MS = 5 * 60_000;
 // déjà clients : pas d'accueil (ni bulle ni message), la réponse part directement
 const NO_WELCOME = new Set(['live', 'paused', 'pending_copier']);
 // ce que le bot envoie de lui-même et qui ne RÉPOND à rien : l'accueil, le vocal du pays, le lien différé
-const NOT_AN_ANSWER = new Set(['welcome', 'country_voice', 'intro', 'link', 'live_welcome', 'followup']);
+const NOT_AN_ANSWER = new Set(['welcome', 'country_voice', 'intro', 'link', 'live_welcome', 'followup', WINDOW_WAIT_VIA]);
 const LINK_AFTER_MS = 2 * 3_600_000;
 // LES CONVERSATIONS DU COMPTE SUPPORT NE SONT ENREGISTRÉES QUE DEPUIS LE 29/09/2026 (10 h 47 UTC). 19/10/2026 : Ben (compte
 // de l'app depuis le 12/08, bulle et questions de Mathieu le 05/09) a reçu la bulle d'accueil « welcome to Algoria » comme
@@ -105,14 +109,16 @@ const SENSITIVE = /\b(withdraw\w*|refund\w*|money back|lost|losing|loss(es)?|sca
 /** 27/10/2026 : le modèle renvoie parfois un JSON valide avec reply vide juste après l'accueil (la consigne dit
  *  déjà « skip » pour un bonjour, le bouton de l'app, ou une question d'étapes). On ne fait pas de carte vide pour
  *  ça. La politesse (« how are you ? ») et un sujet sensible restent une carte : le modèle aurait dû répondre. */
-function welcomeEmptyIsSkip(text: string): boolean {
+function welcomeEmptyIsSkip(text: string, skipHowItWorks = true): boolean {
   const t = text.trim();
   if (!t || t.length > 180 || SENSITIVE.test(t)) return false;
   if (APP_BUTTON.test(t)) return true;
   if (/\b(how are you|how r you|how're you|ça va|ca va|come stai)\b/i.test(t)) return false;
   const words = t.split(/\s+/).filter(Boolean);
   if (/^(hi+|hello+|hey+|yo|hola|ciao|salve|bonjour|good\s+(?:morning|afternoon|evening))\b/i.test(t) && words.length <= 4) return true;
-  if (/\b(how (?:does |do )?it works?|what is algoria|the steps|guide me|(?:create|open) an account|which broker|what broker|the minimum|how much does it cost|what(?:'s| is) the price)\b/i.test(t)) return true;
+  // (d) SUPPORT_HOWIT_AFTER_WELCOME coupé : « how does it work ? » reste un skip, comme avant.
+  if (skipHowItWorks && /\b(how (?:does |do )?it works?|what is algoria)\b/i.test(t)) return true;
+  if (/\b(the steps|guide me|(?:create|open) an account|which broker|what broker|the minimum|how much does it cost|what(?:'s| is) the price)\b/i.test(t)) return true;
   return false;
 }
 // 🔁 UNE RELANCE (« Hi », « any update ? », « Mathieu ? ») : rien de nouveau à répondre, la question d'avant attend
@@ -549,7 +555,11 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // Riyaz : « guide me through the steps » → lien RaiseFX et « deposit $500 » juste sous la bulle, « en pleine figure »).
   const welcomeAt = rows.filter((r) => r.detail?.via === 'welcome' && r.detail?.text !== '[video bubble]').map((r) => Date.parse(r.created_at)).pop();
   const justWelcomed = welcomeAt != null && newbie && !stepDone && !introduced && batch.every((b) => Date.parse(b.created_at) < welcomeAt);
-  if (justWelcomed) note = 'Mathieu\'s welcome (his video bubble + "Hey <name>, welcome to Algoria ! … ask you where you\'re from ?") was JUST sent in answer to these first messages. Only a plain hello ("hi", "hello") or the app\'s ready-made message ("I already have the app, how do I get connected now ?", "book a quick call…", "skip the waiting list…") → intent "skip". Small talk only ("how are you ?", "how is work ?") → a short friendly answer ("All good thanks, and you ? 🙏🏼"), WITHOUT asking where they are from again and without welcoming them again. ANY question about how it works, the steps, creating an account, the broker, depositing, the minimum, the price → intent "skip": Mathieu\'s intro (what Algoria is, free with a partner broker, the app) goes out as soon as they say where they are from, and it answers that. Never a broker link, a deposit amount or the setup steps now.';
+  // (d) coupé : la consigne et le skip « how does it work ? » ne bougent pas.
+  const howitOn = howItWorksAfterWelcomeEnabled();
+  const chainHow = howitOn && justWelcomed && howItWorksChain(joined, true) && !webinarLead && images.length === 0 && media.length === 0 && !SENSITIVE.test(joined);
+  if (justWelcomed && !chainHow) note = 'Mathieu\'s welcome (his video bubble + "Hey <name>, welcome to Algoria ! … ask you where you\'re from ?") was JUST sent in answer to these first messages. Only a plain hello ("hi", "hello") or the app\'s ready-made message ("I already have the app, how do I get connected now ?", "book a quick call…", "skip the waiting list…") → intent "skip". Small talk only ("how are you ?", "how is work ?") → a short friendly answer ("All good thanks, and you ? 🙏🏼"), WITHOUT asking where they are from again and without welcoming them again. ANY question about how it works, the steps, creating an account, the broker, depositing, the minimum, the price → intent "skip": Mathieu\'s intro (what Algoria is, free with a partner broker, the app) goes out as soon as they say where they are from, and it answers that. Never a broker link, a deposit amount or the setup steps now.';
+  if (chainHow) note = 'Mathieu\'s welcome was JUST sent. Their message asks how Algoria works. Do not use intent "skip". One or two short sentences on what Algoria is (an AI that trades gold). No broker link, no deposit amount, no setup steps.';
 
   // PREMIER CONTACT SANS ACCUEIL (pas de bulle enregistrée, ou l'accueil coupé) : pas de réponse en texte seul à un
   // nouveau venu, la carte va à Mathieu (19/10/2026)
@@ -593,18 +603,25 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // 🎙 LE THÈME FAQ (10/11/2026, lib/member/faqVoice.ts) : noté sur son message dès qu'il est reconnu avec une confiance
   // haute, vocal envoyé ou non (la mesure compare « vocal » et « texte seul » sur le même thème, migration 0042)
   const faqClass = classifyFaq(joined);
-  const faqTopic = faqClass.topic && faqClass.confidence >= FAQ_MIN_CONFIDENCE ? faqClass.topic : null;
+  const faqTopic = faqClass.topic && isFaqTopic(faqClass.topic) && faqClass.confidence >= FAQ_MIN_CONFIDENCE ? faqClass.topic : null;
+  // (d) après l'accueil : vocal faq_how_it_works (ligne fixe comprise) ou fiche officielle. Jamais le brouillon
+  // du modèle (pas de lien broker ni de montant sous la bulle). Les autres questions restent en skip.
   if (faqTopic) base = { ...base, faq_topic: faqTopic, faq_conf: faqClass.confidence };
+  if (chainHow && canSend) {
+    const chained = await chainHowItWorks(db, { job, conn, last, base, member, joined });
+    return chained;
+  }
 
   if (!draft) {
     // Reply vide après l'accueil, sur un bonjour ou une question que l'intro couvrira : on n'envoie rien et on ne
     // laisse pas une carte « réponse vide ». Un JSON cassé ou un garde-fou, lui, reste une carte.
-    if (outcome.trace.issue === 'réponse vide du modèle' && justWelcomed && !images.length && !SENSITIVE.test(joined) && welcomeEmptyIsSkip(joined)) {
+    if (outcome.trace.issue === 'réponse vide du modèle' && justWelcomed && !images.length && !SENSITIVE.test(joined) && welcomeEmptyIsSkip(joined, !howitOn)) {
       await db.from('member_actions').update({ detail: { ...base, draft_intent: 'skip' } }).eq('id', last.id);
       await markRead(conn, job.conn, job.tg_id, last);
       return { status: 'done', result: { outcome: 'skip', reason: 'accueil : rien à ajouter', ...extra } };
     }
     await reviewCard(db, conn, last.id, base, member, null, webinarLead ? WEBINAR_WHY : `pas de proposition (${outcome.trace.issue ?? 'modèle indisponible ou réponse refusée'})`);
+    if (!webinarLead) await maybeReviewHold(db, job, member, manual);
     return { status: 'done', result: { outcome: 'review', reason: 'no draft', ...extra } };
   }
   // 🎤 « WEBINAR » tout seul n'appelle pas de réponse du modèle, mais il appelle Mathieu
@@ -621,7 +638,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     await reviewCard(db, conn, last.id, base, member, null, 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir');
     return { status: 'done', result: { outcome: 'review', reason: 'premier contact sans accueil', ...extra } };
   }
-  if (draft.spam || draft.skip) {
+  if ((draft.spam || draft.skip) && !chainHow) {
     await db.from('member_actions').update({ detail: { ...base, draft_intent: draft.spam ? 'spam' : 'skip' } }).eq('id', last.id);
     await markRead(conn, job.conn, job.tg_id, last);
     return { status: 'done', result: { outcome: draft.spam ? 'spam' : 'skip', ...extra } };
@@ -644,7 +661,7 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
     : incidentHold ? incidentHold
     : manual ? 'tu as écrit dans cette conversation il y a moins de 2 h'
     : firstNoWelcome ? 'premier contact : pas encore de bulle d’accueil, à toi de l’accueillir'
-    : !draft.auto ? 'Claude n’est pas sûr'
+    : (!draft.auto && !clearIntentBypass(joined, faqClass, clearIntentsEnabled())) ? 'Claude n’est pas sûr'
     : SENSITIVE.test(joined) ? 'sujet sensible (argent, plainte, paiement…)'
     : HOLDING.test(draft.text) ? 'réponse d’attente'
     : justWelcomed && /where (are|r) (you|u) from|which country|what country/i.test(draft.text) ? 'redemande son pays juste après l’accueil'
@@ -658,22 +675,59 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // ci-dessus n'est relâché : une carte reste une carte, avec un bouton « 🎙 Envoyer le vocal » pour Mathieu)
   let faq: FaqDecision = { mode: 'none', topic: faqTopic, reason: faqClass.reason ?? '' };
   const faqAsset = faqTopic ? await pickFaqVoice(db, faqTopic).catch(() => null) : null;
+  // Vocal auto plus strict si SUPPORT_FAQ_VOICE_SINGLE_TOPIC est allumé. Le bouton manuel ne passe pas par ici.
+  const strictVoice = faqVoiceSingleTopicEnabled();
   if (faqTopic) {
     const sentFaq = faqAsset ? await faqSentTo(db, job.tg_id).catch(() => []) : [];
     faq = faqVoiceDecision(faqClass, {
-      modelSure: draft.auto, reviewReason: why, webinarLead, beforeIntro: welcomed && !stepDone && !introduced, introJustSent: voiced || introduced,
+      modelSure: draft.auto || clearIntentBypass(joined, faqClass, clearIntentsEnabled()), reviewReason: why, webinarLead, beforeIntro: welcomed && !stepDone && !introduced, introJustSent: voiced || introduced,
       brokerLinkAsk: directAsk, hasMedia: images.length > 0 || media.length > 0, assetExists: !!faqAsset, recentlySent: faqRecentlySent(sentFaq, faqTopic),
+      strictSingleTopic: strictVoice,
     });
   }
   const faqExtra = faqTopic ? { faq_topic: faqTopic, faq_mode: faq.mode, faq_reason: faq.reason } : {};
+  // 🌙 FENÊTRE 05:00–09:00 Asia/Dubai : seulement si SUPPORT_AUTO_WINDOW est allumé. Sinon le chemin ci-dessous
+  // est strictement le même qu'avant (aucun garde-fou relâché).
+  const windowHandled = await handleAutoWindow(db, { job, conn, last, base, member, joined, draft, faqClass, faq, faqAsset, faqExtra, extra, why, manual, images, media, recentAuto: recentAuto ?? [], recentFaq: recentFaq ?? [] });
+  if (windowHandled) return windowHandled;
+  // (a) hors fenêtre (la fenêtre a déjà renvoyé si elle traitait le message) : fiche officielle à la place
+  // du brouillon quand il n'y a pas de vocal. Jamais vocal + texte. Drapeau coupé : le brouillon part comme avant.
+  if (!why && canSend && faqSheetFallbackEnabled()) {
+    const sheetTopic = faqClass.topic;
+    // Pas de vocal (asset absent, ou message pas un seul sujet clair) : la fiche peut partir, jamais les deux.
+    const voiceExists = !!(faqTopic && faqAsset) && !faqAutoVoiceBlocked(faqClass, strictVoice);
+    if (sheetTopic && isWindowTopic(sheetTopic) && faqClass.confidence >= FAQ_MIN_CONFIDENCE) {
+      const sheets = await loadSheetFlags(db).catch(() => parseSheetFlags({}));
+      const sheet = sheets[sheetTopic];
+      const choice = chooseAutoBody({ sheetFallback: true, autoOk: !!sheet?.autoOk, body: sheet?.body ?? null, voiceExists, eligible: true });
+      if (choice === 'sheet' && sheet?.body) {
+        const issue = windowTextIssue(sheet.body, joined, sheetTopic === 'faq_results_myfxbook', sheetKnownPct(sheet.body));
+        if (!issue) {
+          const { data: newerS } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', last.created_at).limit(1);
+          if (newerS?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...extra, ...faqExtra } };
+          const detail = { ...base, draft: sheet.body, draft_intent: 'faq_sheet', faq_topic: sheetTopic, faq_arm: 'text' };
+          await db.from('member_actions').update({ detail }).eq('id', last.id);
+          const err = await sendAsOwner(db, { id: last.id, tg_id: job.tg_id, member_no: member?.member_no ?? null, detail }, sheet.body, 'faq_sheet', 'algoria-ai');
+          if (err) {
+            await reviewCard(db, conn, last.id, base, member, sheet.body, `fiche FAQ refusée à l’envoi (${err})`);
+            await maybeReviewHold(db, job, member, manual || webinarLead);
+            return { status: 'done', result: { outcome: 'review', reason: err, ...extra, ...faqExtra } };
+          }
+          await markRead(conn, job.conn, job.tg_id, last);
+          return { status: 'done', result: { outcome: 'auto', via: 'faq_sheet', topic: sheetTopic, chars: sheet.body.length, ...extra, ...faqExtra } };
+        }
+      }
+    }
+  }
   if (why || faq.mode === 'card') {
     await reviewCard(db, conn, last.id, base, member, draft.text, why ?? `🎙 vocal FAQ à valider (${faq.reason})`);
+    await maybeReviewHold(db, job, member, manual || webinarLead);
     if (faq.mode === 'card' && faqAsset && faq.topic) {
       await tg('sendMessage', { chat_id: conn.userChatId, text: `🎙 Ton vocal FAQ « ${FAQ_LABELS[faq.topic]} » colle à sa question. Un tap l’envoie dans sa conversation, avec la ligne :\n« ${FAQ_LINES[faq.topic]} »`, disable_web_page_preview: true, reply_markup: faqCardButton(faqAsset.id, last.id, faq.topic) }).catch(() => null);
     }
     return { status: 'done', result: { outcome: 'review', reason: why ?? faq.reason, ...extra, ...faqExtra } };
   }
-  if (faq.mode === 'auto' && faqAsset && faq.topic) {
+  if (faq.mode === 'auto' && faqAsset && faq.topic && canSendFaqVoiceToProspect(faq.topic) && !faqAutoVoiceBlocked(faqClass, strictVoice)) {
     // il a réécrit pendant la rédaction : la réponse suivante reprend tout (comme pour le texte)
     const { data: newerF } = await db.from('member_actions').select('id').eq('tg_id', job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', last.created_at).limit(1);
     if (newerF?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...extra, ...faqExtra } };
@@ -704,6 +758,174 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   return { status: 'done', result: { outcome: 'auto', chars: draft.text.length, ...extra, ...faqExtra } };
 }
 
+/** Les mêmes garde-fous que le support, sans en relâcher aucun. null = le texte peut partir. */
+function windowTextIssue(text: string, userText: string, holdResults = false, knownPct: string[] = []): string | null {
+  return replyTextIssue(text, { biz: true, sys: '', userText, holdResults, knowledge: null, knownPct })
+    ?? hardRuleIssue(text);
+}
+
+/** Charge les drapeaux auto_ok et les textes de fiches (support_settings), sans rien créer. */
+async function loadSheetFlags(db: Db): Promise<SheetMap> {
+  const { data } = await db.from('support_settings').select('key,value').or('key.eq.faq_auto_ok,key.like.faq_sheet_%');
+  const map: Record<string, string> = {};
+  for (const r of (data ?? []) as Array<{ key: string; value: string | null }>) if (r.key) map[r.key] = String(r.value ?? '');
+  return parseSheetFlags(map);
+}
+
+async function windowWaitAlreadySent(db: Db, tgId: number, cfg: WindowConfig, now: number): Promise<boolean> {
+  const { startMs } = supportAutoWindowBounds(now, cfg);
+  const { data } = await db.from('member_actions').select('created_at').eq('tg_id', tgId).eq('kind', BIZ_KIND).eq('detail->>via', WINDOW_WAIT_VIA).gte('created_at', iso(startMs)).limit(8);
+  return waitSentInWindow(((data ?? []) as Array<{ created_at: string }>).map((r) => r.created_at), now, cfg);
+}
+
+/** (d) Après l'accueil, enchaîne faq_how_it_works. Vocal + ligne fixe s'il est actif, sinon la fiche si elle est branchée.
+ *  Pas le brouillon du modèle. Sinon la carte reste, le fond n'est pas inventé sous la bulle. */
+async function chainHowItWorks(
+  db: Db,
+  c: { job: Job; conn: Conn; last: BizRow; base: Record<string, unknown>; member: MemberRow | null; joined: string },
+): Promise<JobResult> {
+  const { reviewCard, sendAsOwner } = await import('./businessInbox');
+  const topic = 'faq_how_it_works' as const;
+  const mark = { chained: 'faq_how_it_works' };
+  const asset = await pickFaqVoice(db, topic).catch(() => null);
+  const voiceOk = howItWorksVoiceAllowed(c.joined) && canSendFaqVoiceToProspect(topic);
+  if (asset && voiceOk) {
+    const { data: newerF } = await db.from('member_actions').select('id').eq('tg_id', c.job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', c.last.created_at).limit(1);
+    if (newerF?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...mark } };
+    const sent = await sendFaqVoice(db, { id: c.last.id, tg_id: c.job.tg_id, member_no: c.member?.member_no ?? null, detail: { ...c.base, conn: c.job.conn } }, topic, asset, 'algoria-ai', null);
+    if (sent === null) {
+      await markRead(c.conn, c.job.conn, c.job.tg_id, c.last);
+      return { status: 'done', result: { outcome: 'auto', via: FAQ_KIND, topic, ...mark } };
+    }
+  }
+  const sheets = await loadSheetFlags(db).catch(() => parseSheetFlags({}));
+  const sheet = sheets.faq_how_it_works;
+  if (sheet?.autoOk && sheet.body) {
+    const issue = windowTextIssue(sheet.body, c.joined, false, sheetKnownPct(sheet.body));
+    if (!issue) {
+      const detail = { ...c.base, draft: sheet.body, draft_intent: 'faq_sheet', faq_topic: topic, faq_arm: 'text' };
+      await db.from('member_actions').update({ detail }).eq('id', c.last.id);
+      const err = await sendAsOwner(db, { id: c.last.id, tg_id: c.job.tg_id, member_no: c.member?.member_no ?? null, detail }, sheet.body, 'faq_sheet', 'algoria-ai');
+      if (!err) {
+        await markRead(c.conn, c.job.conn, c.job.tg_id, c.last);
+        return { status: 'done', result: { outcome: 'auto', via: 'faq_sheet', topic, ...mark } };
+      }
+      await reviewCard(db, c.conn, c.last.id, c.base, c.member, sheet.body, `how it works après l’accueil : envoi refusé (${err})`);
+      await maybeReviewHold(db, c.job, c.member, false);
+      return { status: 'done', result: { outcome: 'review', reason: err, ...mark } };
+    }
+  }
+  await reviewCard(db, c.conn, c.last.id, c.base, c.member, null, voiceOk ? 'how it works après l’accueil : pas de vocal actif ni de fiche branchée' : 'how it works après l’accueil : plusieurs sujets ou message ambigu, pas de vocal');
+  await maybeReviewHold(db, c.job, c.member, false);
+  return { status: 'done', result: { outcome: 'review', reason: 'how it works après l’accueil', ...mark } };
+}
+
+/** Ancien accusé (vocal 19 ou texte « je reviens »). 18/11/2026 : no-op. Le drapeau et l'heure restent lus par l'appelant.
+ *  Rien n'est envoyé au prospect, même si une ligne support_assets existe. */
+async function sendWindowWait(_db: Db, _job: Job, _member: MemberRow | null, _text = WINDOW_WAIT_TEXT): Promise<{ ok: boolean; how: 'voice' | 'text'; error?: string }> {
+  const blocked = reviewHoldSend();
+  return { ok: false, how: 'text', error: blocked.reason };
+}
+
+/** (e) Le drapeau SUPPORT_REVIEW_HOLDING est toujours consulté. L'envoi qui suivait (vocal 19 ou texte) est vide. */
+async function maybeReviewHold(db: Db, job: Job, member: MemberRow | null, manual: boolean): Promise<void> {
+  if (!reviewHoldingEnabled() || manual) return;
+  const cfg: WindowConfig = { enabled: true, start: '05:00', end: '09:00' };
+  const now = Date.now();
+  if (!isInSupportAutoWindow(now, cfg)) return;
+  if (await windowWaitAlreadySent(db, job.tg_id, cfg, now).catch(() => true)) return;
+  await sendWindowWait(db, job, member, REVIEW_HOLD_TEXT).catch(() => null);
+}
+
+type WindowJobCtx = {
+  job: Job; conn: Conn; last: BizRow; base: Record<string, unknown>; member: MemberRow | null;
+  joined: string; draft: { text: string; auto: boolean }; faqClass: ReturnType<typeof classifyFaq>;
+  faq: FaqDecision; faqAsset: { id: number; file_id: string; uses: number | null } | null;
+  faqExtra: Record<string, unknown>; extra: Record<string, unknown>; why: string | null;
+  manual: boolean; images: unknown[]; media: string[];
+  recentAuto: unknown[]; recentFaq: unknown[];
+};
+
+/** null = hors fenêtre (le chemin habituel continue). Sinon le résultat à renvoyer, la fenêtre a tout traité. */
+async function handleAutoWindow(db: Db, c: WindowJobCtx): Promise<JobResult | null> {
+  const { reviewCard, sendAsOwner, tg } = await import('./businessInbox');
+  const cfg = parseSupportAutoWindow(process.env.SUPPORT_AUTO_WINDOW);
+  const now = Date.now();
+  if (!cfg.enabled || !isInSupportAutoWindow(now, cfg)) return null;
+  const topics = parseWindowTopics(process.env.SUPPORT_AUTO_WINDOW_TOPICS);
+  const sheets = await loadSheetFlags(db).catch(() => parseSheetFlags({}));
+  // Les thèmes sans vocal (compte déjà ouvert, activation) n'entrent dans la fenêtre que si (b) est allumé.
+  // Drapeau coupé : la fenêtre les voit comme « aucun thème », comme avant ces règles.
+  const clearOn = clearIntentsEnabled();
+  const faqForWindow = c.faqClass.topic && !isFaqTopic(c.faqClass.topic) && !clearOn
+    ? { ...c.faqClass, topic: null, confidence: 0, reason: 'thème sans vocal, SUPPORT_AUTO_CLEAR_INTENTS coupé' }
+    : c.faqClass;
+  const topic = faqForWindow.topic;
+  const strictVoice = faqVoiceSingleTopicEnabled();
+  const voiceAllowed = !!topic && canSendFaqVoiceToProspect(topic) && !faqAutoVoiceBlocked(faqForWindow, strictVoice);
+  const voiceExists = !!(voiceAllowed && isFaqTopic(topic) && isWindowTopic(topic) && (c.faqAsset || await pickFaqVoice(db, topic).catch(() => null)));
+  const waitAlreadySent = await windowWaitAlreadySent(db, c.job.tg_id, cfg, now).catch(() => false);
+  const decision = decideSupportWindow({
+    cfg, now, text: c.joined, faq: faqForWindow, modelSure: c.draft.auto, topics, sheets,
+    voiceExists, waitAlreadySent, hasMedia: c.images.length > 0 || c.media.length > 0, manualHold: c.manual,
+    clearIntents: clearOn, strictSingleTopic: strictVoice,
+  });
+  const mark = { window: '5h9h', window_action: decision.action, window_topic: decision.topic, window_reason: decision.reason };
+  const faqExtra = { ...c.faqExtra, ...mark };
+  if (decision.action === 'auto_voice' || decision.action === 'auto_text') {
+    if ((c.recentAuto.length + c.recentFaq.length) >= MAX_AUTO_PER_HOUR) {
+      // plafond horaire : on ne force pas un 7e envoi, la carte reste à Mathieu
+      Object.assign(decision, { action: waitAlreadySent || c.manual ? 'review_silent' : 'review_wait', reason: 'beaucoup de réponses automatiques dans l’heure' });
+    }
+  }
+  if (decision.action === 'auto_voice' && voiceAllowed && topic && c.faqAsset && isFaqTopic(topic) && canSendFaqVoiceToProspect(topic) && !faqAutoVoiceBlocked(faqForWindow, strictVoice)) {
+    const { data: newerF } = await db.from('member_actions').select('id').eq('tg_id', c.job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', c.last.created_at).limit(1);
+    if (newerF?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...c.extra, ...faqExtra } };
+    const sent = await sendFaqVoice(db, { id: c.last.id, tg_id: c.job.tg_id, member_no: c.member?.member_no ?? null, detail: { ...c.base, conn: c.job.conn, ...mark, window_action: 'auto_voice' } }, topic, c.faqAsset, 'algoria-ai', null);
+    if (sent === null) {
+      await markRead(c.conn, c.job.conn, c.job.tg_id, c.last);
+      return { status: 'done', result: { outcome: 'auto', via: FAQ_KIND, topic, window_auto: true, ...c.extra, ...faqExtra } };
+    }
+    await reviewCard(db, c.conn, c.last.id, { ...c.base, ...mark }, c.member, c.draft.text, `fenêtre 5h–9h Dubaï : vocal refusé par Telegram (${sent})`);
+    return { status: 'done', result: { outcome: 'review', reason: sent, ...c.extra, ...faqExtra } };
+  }
+  if (decision.action === 'auto_text' && decision.body && topic) {
+    const holdResults = topic === 'faq_results_myfxbook';
+    const issue = windowTextIssue(decision.body, c.joined, holdResults, sheetKnownPct(decision.body));
+    if (issue) {
+      await reviewCard(db, c.conn, c.last.id, { ...c.base, ...mark }, c.member, c.draft.text, `fenêtre 5h–9h Dubaï : fiche refusée par un garde-fou (${issue})`);
+      if (!waitAlreadySent && !c.manual) {
+        const w = await sendWindowWait(db, c.job, c.member, reviewHoldingEnabled() ? REVIEW_HOLD_TEXT : WINDOW_WAIT_TEXT);
+        if (w.ok) await db.from('member_actions').update({ detail: { ...c.base, ...mark, window_wait_at: new Date().toISOString(), window_wait_how: w.how, draft_intent: 'review', review_reason: issue } }).eq('id', c.last.id);
+      }
+      return { status: 'done', result: { outcome: 'review', reason: issue, ...c.extra, ...faqExtra } };
+    }
+    const { data: newer } = await db.from('member_actions').select('id').eq('tg_id', c.job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', c.last.created_at).limit(1);
+    if (newer?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...c.extra, ...faqExtra } };
+    const detail = { ...c.base, ...mark, window_action: 'auto_text', draft: decision.body, draft_intent: WINDOW_AUTO_VIA };
+    await db.from('member_actions').update({ detail }).eq('id', c.last.id);
+    const err = await sendAsOwner(db, { id: c.last.id, tg_id: c.job.tg_id, member_no: c.member?.member_no ?? null, detail }, decision.body, WINDOW_AUTO_VIA, 'algoria-ai');
+    if (err) {
+      await reviewCard(db, c.conn, c.last.id, c.base, c.member, decision.body, `fenêtre 5h–9h Dubaï : envoi refusé par Telegram (${err})`);
+      return { status: 'done', result: { outcome: 'review', reason: err, ...c.extra, ...faqExtra } };
+    }
+    await markRead(c.conn, c.job.conn, c.job.tg_id, c.last);
+    return { status: 'done', result: { outcome: 'auto', via: WINDOW_AUTO_VIA, topic, chars: decision.body.length, ...c.extra, ...faqExtra } };
+  }
+  // Relecture : la carte reste chez Mathieu. Accusé d'attente une fois par prospect et par fenêtre, rien sur le fond.
+  const why = `fenêtre 5h–9h Dubaï : ${decision.reason}`;
+  await reviewCard(db, c.conn, c.last.id, { ...c.base, ...mark }, c.member, c.draft.text, why);
+  if (decision.action === 'review_wait') {
+    const w = await sendWindowWait(db, c.job, c.member, reviewHoldingEnabled() ? REVIEW_HOLD_TEXT : WINDOW_WAIT_TEXT);
+    const { data: row } = await db.from('member_actions').select('detail').eq('id', c.last.id).limit(1);
+    const d = ((row?.[0] as { detail?: Record<string, unknown> } | undefined)?.detail) ?? { ...c.base, ...mark, draft_intent: 'review', review_reason: why };
+    if (w.ok) await db.from('member_actions').update({ detail: { ...d, ...mark, window_wait_at: new Date().toISOString(), window_wait_how: w.how, window_action: 'wait' } }).eq('id', c.last.id);
+    else await db.from('member_actions').update({ detail: { ...d, ...mark, window_wait_error: w.error } }).eq('id', c.last.id);
+    return { status: 'done', result: { outcome: 'review', reason: decision.reason, wait: w.ok, wait_how: w.how, ...c.extra, ...faqExtra } };
+  }
+  return { status: 'done', result: { outcome: 'review', reason: decision.reason, ...c.extra, ...faqExtra } };
+}
+
 /** 🎙 Envoie le vocal FAQ puis sa ligne fixe, DEPUIS le compte de Mathieu, et l'enregistre : une ligne via='faq_voice'
  *  (topic, asset_id) pour la mesure et l'anti-spam, une ligne via='faq_voice_line' pour le texte. null = parti. */
 async function sendFaqVoice(
@@ -714,6 +936,7 @@ async function sendFaqVoice(
   by: string,
   draftText: string | null,
 ): Promise<string | null> {
+  if (!canSendFaqVoiceToProspect(topic)) return 'vocal d’attente non envoyé';
   const { tg } = await import('./businessInbox');
   const d = row.detail ?? {};
   const biz = { business_connection_id: String(d.conn ?? ''), chat_id: row.tg_id };
@@ -970,6 +1193,7 @@ async function libraryLine(db: Db): Promise<string> {
   const voices = all.filter((a) => a.kind === 'country_voice');
   const faqs = all.filter((a) => a.kind === FAQ_KIND && isFaqTopic(a.situation));
   const faqCovered = new Set(faqs.map((a) => a.situation));
+  const waitReady = all.some((a) => a.kind === FAQ_KIND && a.situation === FAQ_WAIT_TOPIC);
   const by = (Object.keys(SITUATIONS) as Situation[]).map((k) => {
     const n = videos.filter((a) => (a.situation ?? 'all') === k);
     return n.length ? `${SITUATIONS[k]} : ${n.length}${n.some((a) => a.lang === 'it') ? ` (dont ${n.filter((a) => a.lang === 'it').length} 🇮🇹)` : ''}` : null;
@@ -979,6 +1203,7 @@ async function libraryLine(db: Db): Promise<string> {
     videos.length ? `🎥 ${videos.length} bulle${videos.length > 1 ? 's' : ''} d’accueil · ${by.join(' · ')}` : '🎥 Aucune bulle d’accueil.',
     voices.length ? `🎙 ${voices.length} ${voices.length > 1 ? 'vocaux' : 'vocal'} pays · ${covered.length ? covered.map(flagOf).join(' ') : 'aucun pays choisi'}` : '🎙 Aucun vocal pays.',
     `❓ Vocaux FAQ : ${faqCovered.size}/${FAQ_TOPICS.length} thèmes${faqCovered.size < FAQ_TOPICS.length ? ` · manquent : ${FAQ_TOPICS.filter((t) => !faqCovered.has(t)).map((t) => FAQ_LABELS[t]).join(', ')}` : ''}`,
+    `⏳ Vocal d’attente (situation ${FAQ_WAIT_TOPIC}) : ${waitReady ? 'en base, jamais envoyé' : 'non utilisé'} — le support reste continu`,
   ].join('\n');
 }
 
@@ -1008,7 +1233,7 @@ export async function handleSupportVideo(db: Db, msg: any): Promise<boolean> {
   const { data: row } = await db.from('support_assets').select('id,kind,situation,lang,countries,active').eq('file_unique_id', v.file_unique_id).limit(1);
   const a = row?.[0] as AssetRow | undefined;
   const head = voice && a?.kind === FAQ_KIND
-    ? `🎙 Déjà dans ta bibliothèque, en vocal FAQ${isFaqTopic(a.situation) ? ` « ${FAQ_LABELS[a.situation]} »` : ''} (remis dans la rotation si tu l’avais retiré). Change le thème en dessous si besoin.`
+    ? `🎙 Déjà dans ta bibliothèque, en vocal FAQ${isFaqSituation(a.situation) ? ` « ${faqSituationLabel(a.situation)} »` : ''} (remis dans la rotation si tu l’avais retiré). Change le thème en dessous si besoin.`
     : voice
     ? `🎙 ${dup ? 'Déjà dans ta bibliothèque (remis dans la rotation si tu l’avais retiré).' : 'Vocal enregistré.'}\nVocal PAYS : touche le(s) pays en dessous (plusieurs possibles ; un autre pays : réponds à ce message avec son nom ou son drapeau). Il part quand la personne dit qu’elle vient de ce pays.\nVocal FAQ : touche « ❓ C’est un vocal FAQ », puis le thème. Il part quand un prospect pose cette question (et remplace l’ancien vocal du thème).\nTant que tu n’as rien touché, il ne part chez personne.`
     : `🎥 ${dup ? 'Déjà dans tes bulles (remise dans la rotation si tu l’avais retirée).' : 'Bulle d’accueil enregistrée.'}\nPour qui ? Touche en dessous (sinon : tout le monde, en anglais).`;
@@ -1071,7 +1296,7 @@ export async function handleSupportLibrary(db: Db, msg: any): Promise<boolean> {
     text: `${await libraryLine(db)}\n\n🎥 À l’accueil : une bulle de sa situation et de sa langue, sinon une « tout le monde », en rotation.\n🎙 Quand il dit son pays : le vocal de ce pays, sinon celui des « autres pays ».\n❓ Quand un prospect pose une question FAQ (thème sûr) : le vocal de ce thème + une ligne fixe. « faq » : la couverture et la mesure.\nSous chacun : à qui il va, 🗑 pour le retirer. Pour en ajouter : envoie-le-moi.`,
   });
   for (const a of all) {
-    if (a.kind === FAQ_KIND) await tg('sendVoice', { chat_id: msg.chat.id, voice: a.file_id, caption: `❓ ${isFaqTopic(a.situation) ? FAQ_LABELS[a.situation] : 'thème pas encore choisi'} · envoyé ${a.uses ?? 0} fois`, reply_markup: assetKeyboard(a) });
+    if (a.kind === FAQ_KIND) await tg('sendVoice', { chat_id: msg.chat.id, voice: a.file_id, caption: `❓ ${faqSituationLabel(a.situation)} · envoyé ${a.uses ?? 0} fois`, reply_markup: assetKeyboard(a) });
     else if (a.kind === 'country_voice') await tg('sendVoice', { chat_id: msg.chat.id, voice: a.file_id, caption: `🎙 ${countriesLine(a.countries)} · envoyé ${a.uses ?? 0} fois`, reply_markup: assetKeyboard(a) });
     else await tg('sendVideoNote', { chat_id: msg.chat.id, video_note: a.file_id, reply_markup: assetKeyboard(a) });
   }
@@ -1138,8 +1363,11 @@ export async function handleSupportAssetCallback(db: Db, cq: any): Promise<boole
     const r = await tagFaqVoice(db, id, c.value);
     if (r.error) { await answer(`⨯ Pas enregistré (${r.error.slice(0, 80)})`); return true; }
     a = { ...before, kind: FAQ_KIND, situation: c.value, lang: 'en', active: true };
-    toast = `✓ ${FAQ_LABELS[c.value]}${r.replaced ? ' · l’ancien vocal de ce thème est désactivé' : ''}`;
-    await tg('sendMessage', { chat_id: cq.message?.chat?.id, reply_to_message_id: cq.message?.message_id, text: `❓ Vocal FAQ « ${FAQ_LABELS[c.value]} » actif.${r.replaced ? ` L’ancien vocal de ce thème est désactivé (toujours dans la base : « bulles » puis ↩️ pour le remettre).` : ''}\nIl part quand un prospect pose cette question (thème sûr), suivi de :\n« ${FAQ_LINES[c.value]} »`, disable_web_page_preview: true });
+    toast = `✓ ${faqSituationLabel(c.value)}${r.replaced ? ' · l’ancien vocal de ce thème est désactivé' : ''}`;
+    const waitNote = c.value === FAQ_WAIT_TOPIC
+      ? `⏳ Vocal gardé en base.${r.replaced ? ` L’ancien est désactivé (toujours dans la base).` : ''}\nIl ne part chez personne : pas de message d’absence. Le support reste disponible.`
+      : `❓ Vocal FAQ « ${faqSituationLabel(c.value)} » actif.${r.replaced ? ` L’ancien vocal de ce thème est désactivé (toujours dans la base : « bulles » puis ↩️ pour le remettre).` : ''}\nIl part quand un prospect pose cette question (thème sûr), suivi de :\n« ${isFaqTopic(c.value) ? FAQ_LINES[c.value] : ''} »`;
+    await tg('sendMessage', { chat_id: cq.message?.chat?.id, reply_to_message_id: cq.message?.message_id, text: waitNote, disable_web_page_preview: true });
   } else if (c.op === 'faq') {
     // vocal pays → vocal FAQ, thème à choisir (tant qu'il n'est pas choisi, il ne part chez personne)
     await db.from('support_assets').update({ kind: FAQ_KIND, situation: 'all', countries: [] }).eq('id', id);
@@ -1151,7 +1379,7 @@ export async function handleSupportAssetCallback(db: Db, cq: any): Promise<boole
     toast = '🌍 Vocal pays : choisis le(s) pays en dessous';
   } else {
     // remis dans la bibliothèque, un vocal FAQ reprend son thème : l'autre vocal actif du thème est désactivé
-    if (c.op === 'active' && c.value && before.kind === FAQ_KIND && isFaqTopic(before.situation)) {
+    if (c.op === 'active' && c.value && before.kind === FAQ_KIND && isFaqSituation(before.situation)) {
       await db.from('support_assets').update({ active: false }).eq('kind', FAQ_KIND).eq('situation', before.situation).eq('active', true).neq('id', id);
     }
     const patch = c.op === 'situation' ? { situation: c.value } : c.op === 'lang' ? { lang: c.value } : c.op === 'country'
@@ -1179,7 +1407,7 @@ async function sendFaqFromCard(db: Db, cq: any, assetId: number, rowId: string, 
   if (row.detail?.answered_at || row.detail?.draft_sent_at) { await answer('Déjà répondu.'); return true; }
   const { data: as } = await db.from('support_assets').select('id,file_id,uses,kind,situation,active').eq('id', assetId).limit(1);
   const asset = as?.[0] as { id: number; file_id: string; uses: number | null; kind: string; situation: string | null; active: boolean } | undefined;
-  if (!asset || asset.kind !== FAQ_KIND || !asset.active || !isFaqTopic(asset.situation)) { await answer('Ce vocal n’est plus actif.'); return true; }
+  if (!asset || asset.kind !== FAQ_KIND || !asset.active || !isFaqTopic(asset.situation) || isFaqWaitTopic(asset.situation) || !canSendFaqVoiceToProspect(asset.situation)) { await answer('Ce vocal n’est plus actif.'); return true; }
   const topic = asset.situation;
   if (faqRecentlySent(await faqSentTo(db, row.tg_id), topic)) { await answer('Déjà envoyé à cette personne récemment.'); return true; }
   const by = cq.from?.username ? `@${cq.from.username}` : String(cq.from?.id ?? 'admin');

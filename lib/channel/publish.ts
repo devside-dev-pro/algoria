@@ -107,3 +107,52 @@ export async function publishToChannels(db: any, p: { chatId: string; text: stri
   }
   return { ok: true, messageId: main.messageId, report };
 }
+
+// 📊 LE SONDAGE TELEGRAM NATIF (10/11/2026, refonte du CM) : sendPoll sur la source, le miroir UK et les miroirs
+// supplémentaires (même langue), et sur le canal IT avec la question et les réponses traduites. Une traduction qui ne
+// rend pas autant de lignes que de textes n'est pas envoyée (le rapport le dit). Dans un canal, un sondage est
+// toujours anonyme. Aucun bouton.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function publishPollToChannels(db: any, p: { chatId: string; question: string; options: string[] }): Promise<PublishResult> {
+  const report: ChannelReport = [];
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, error: 'TELEGRAM_BOT_TOKEN missing', report };
+  const send = async (dst: string, question: string, options: string[]): Promise<{ ok: boolean; messageId: number | null; error: string }> => {
+    try {
+      const r = await fetch(`https://api.telegram.org/bot${token}/sendPoll`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+        body: JSON.stringify({ chat_id: dst, question: question.slice(0, 300), options: options.map((text) => ({ text: text.slice(0, 100) })), is_anonymous: true }),
+      });
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+      return d.ok ? { ok: true, messageId: d.result?.message_id ?? null, error: '' } : { ok: false, messageId: null, error: d.description ?? 'unknown' };
+    } catch (e) {
+      return { ok: false, messageId: null, error: String((e as { message?: string })?.message ?? e) };
+    }
+  };
+  const chatId = p.chatId.trim();
+  const main = await send(chatId, p.question, p.options);
+  report.push({ channel: 'source', ok: main.ok, ...(main.ok ? {} : { error: main.error }) });
+  if (!main.ok) return { ok: false, error: `Telegram refused: ${main.error}`, report };
+  if (chatId === sourceChannel()) {
+    const lock = async (dst: string, messageId: number | null, error?: string) => {
+      try {
+        await db.from('channel_translations').insert({ src_chat_id: Number(chatId), src_message_id: Number(main.messageId ?? 0), dst_chat_id: Number(dst), dst_message_id: messageId, status: error ? 'failed' : 'sent', kind: 'poll_api', error: error?.slice(0, 200) ?? null });
+      } catch { /* confort */ }
+    };
+    const mirror = (process.env.TELEGRAM_CHANNEL_MIRROR ?? '').trim();
+    const it = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
+    if (mirror) { const m = await send(mirror, p.question, p.options); report.push({ channel: 'mirror UK', ok: m.ok, ...(m.ok ? {} : { error: m.error }) }); await lock(mirror, m.messageId, m.ok ? undefined : m.error); }
+    if (it) {
+      const { translateToItalian } = await import('@/lib/member/translate');
+      const lines = (await translateToItalian([p.question, ...p.options].join('\n')))?.split('\n').map((l) => l.trim()).filter(Boolean) ?? [];
+      if (lines.length !== p.options.length + 1) { report.push({ channel: 'canale IT', ok: false, error: 'poll translation rejected — post it by hand' }); await lock(it, null, 'translation rejected'); }
+      else { const i = await send(it, lines[0], lines.slice(1)); report.push({ channel: 'canale IT', ok: i.ok, ...(i.ok ? {} : { error: i.error }) }); await lock(it, i.messageId, i.ok ? undefined : i.error); }
+    }
+    for (const x of extraMirrors()) {
+      const m = await send(x.chat, p.question, p.options);
+      report.push({ channel: x.label, ok: m.ok, ...(m.ok ? {} : { error: m.error }) });
+      await lock(x.chat, m.messageId, m.ok ? undefined : m.error);
+    }
+  }
+  return { ok: true, messageId: main.messageId, report };
+}

@@ -23,6 +23,35 @@ export const sthConfiguredMaster = (): string => MASTER_ID;
 
 type SthResult<T = Record<string, unknown>> = { ok: boolean; errorMessage: string; data: T };
 
+// JOURNAL STH (13/11/2026) : le message d'erreur brut, sans secret. Le GO LIVE de #652 a échoué sans
+// aucune trace Vercel — on ne voyait que le libellé crafté, pas la réponse de STH. On n'écrit JAMAIS le
+// body (il porte PartnerLicense et le mot de passe MT5), ni un token, ni une licence.
+function sthSafeError(message: string): string {
+  return message
+    .replace(/(partner\s*license|license|password|passwd|token|authorization|bearer|api[_-]?key)\s*[=:]\s*\S+/gi, '$1=[redacted]')
+    .replace(/\b(eyJ[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9_-]{10,})\b/g, '[redacted]')
+    .slice(0, 300);
+}
+
+function sthLogError(context: string, message: string): void {
+  console.warn(`[sth] ${context}: ${sthSafeError(message)}`);
+}
+
+/** STH dit parfois « Invalid account », parfois « INVALID_ACCOUNT » (tiret bas). Les deux
+ *  veulent dire la même chose. On les reconnaît tous les deux (17/11/2026) : avant, le
+ *  pré-check ne classait jamais le cas en `invalid` et le rangeait en `error`.
+ *  ⚠️ AMBIGUÏTÉ CONSERVÉE : un UserID déjà enregistré chez STH peut renvoyer le même
+ *  message (cliente #7, 03/08). Ce helper ne tranche pas ce cas — c'est sthPrecheck
+ *  (disconnect / saut `known` sur le même login) et l'admin qui le font. */
+export function isInvalidAccountMessage(message: string): boolean {
+  return /invalid[\s_-]*account/i.test(message);
+}
+
+/** Refus d'identifiants / de serveur, quand le libellé de STH le dit clairement. */
+function isCredentialError(message: string): boolean {
+  return isInvalidAccountMessage(message) || /server not found|wrong password|invalid password|investor password|invalid (login|server|credentials)|metatrader (login|server|password) (not found|invalid|incorrect)/i.test(message);
+}
+
 async function sthPost<T = Record<string, unknown>>(route: string, payload: Record<string, unknown>): Promise<SthResult<T>> {
   if (!LICENSE) return { ok: false, errorMessage: 'STH not configured (STH_PARTNER_LICENSE missing)', data: {} as T };
   try {
@@ -34,9 +63,12 @@ async function sthPost<T = Record<string, unknown>>(route: string, payload: Reco
     });
     const data = (await res.json().catch(() => ({}))) as T & { errorMessage?: string };
     const err = (data?.errorMessage ?? '').toString().trim() || (res.ok ? '' : `HTTP ${res.status}`);
+    if (err) sthLogError(route, err);
     return { ok: !err, errorMessage: err, data };
   } catch (e) {
-    return { ok: false, errorMessage: (e as { message?: string })?.message ?? 'network error', data: {} as T };
+    const message = (e as { message?: string })?.message ?? 'network error';
+    sthLogError(route, message);
+    return { ok: false, errorMessage: message, data: {} as T };
   }
 }
 
@@ -49,12 +81,30 @@ type SthUserStatus = { isTradingAccountConnected?: boolean; tradingAccountConnec
 export const sthConnected = (d: SthUserStatus | null | undefined): boolean =>
   (d?.isTradingAccountConnected ?? d?.tradingAccountConnected) === true;
 
+function statusFlag(v: boolean | undefined): string {
+  return v === undefined ? 'unset' : String(v);
+}
+
+/** Une ligne par appel, succès compris. Uniquement le verdict : pas le body (licence, mot de passe,
+ *  login, serveur, noms). Le UserID est l'identifiant qu'on a envoyé — rien d'autre. */
+function sthLogUserStatus(userId: string, st: SthResult<SthUserStatus>): void {
+  const d = st.data ?? {};
+  const masters = Array.isArray(d.masterAccountsList) ? d.masterAccountsList.length : 0;
+  const err = sthSafeError(st.errorMessage || '').replace(/[\r\n]+/g, ' ');
+  const id = String(userId).replace(/[\r\n]+/g, ' ').slice(0, 80);
+  console.warn(
+    `[sth] get-user-status UserID=${id} ok=${st.ok} isTradingAccountConnected=${statusFlag(d.isTradingAccountConnected)} tradingAccountConnected=${statusFlag(d.tradingAccountConnected)} masterAccountsList=${masters} errorMessage=${err}`,
+  );
+}
+
 /** Statut d'un utilisateur du copieur : compte connecté ? + liste des masters de la licence. */
-export function sthStatus(userId: string) {
-  return sthPost<SthUserStatus>(
+export async function sthStatus(userId: string) {
+  const st = await sthPost<SthUserStatus>(
     '/Partner/get-user-status',
     { UserID: userId },
   );
+  sthLogUserStatus(userId, st);
+  return st;
 }
 
 /** Connecte le compte MetaTrader du client au copieur (1re étape). Lots = taille de copie fixe. */
@@ -152,10 +202,10 @@ export async function sthPauseCopy(userId: string): Promise<{ ok: boolean; error
 // tradingAccountConnected pendant 27 s, et le formulaire d'inscription REFUSAIT l'envoi si le pont
 // n'était pas monté. Effet en production : 0 inscription en 24 h (5 à 7 par jour la semaine d'avant), et
 // des membres aux identifiants parfaitement valides refusés en boucle.
-// La raison est écrite dix lignes plus bas, dans sthConnectAndJoin : après ~25 s d'attente, le message
-// dit lui-même « STH is still connecting — retry CONNECT in 1-2 min ». L'absence de pont à 27 secondes
-// est donc le cas NORMAL, pas un signe d'identifiants faux. Le provisioning MetaTrader côté STH prend
-// souvent plus longtemps que ce qu'une requête HTTP peut attendre.
+// La raison est écrite plus bas, dans sthConnectAndJoin : même après ~50 s d'attente du join, le pont
+// peut encore être en cours (« STH is still connecting — retry CONNECT in 1-2 min »). L'absence de pont
+// à ce délai est donc encore possible, pas un signe d'identifiants faux. Le provisioning MetaTrader
+// côté STH prend souvent plus longtemps que ce qu'une requête HTTP peut attendre.
 // Si le besoin revient : contrôle ASYNCHRONE après enregistrement, résultat INDICATIF sur la fiche admin,
 // et jamais dans le chemin de l'envoi.
 
@@ -167,6 +217,7 @@ export async function sthPauseCopy(userId: string): Promise<{ ok: boolean; error
 export async function sthConnectAndJoin(o: {
   userId: string; login: string | number; password: string; server: string; isMt4: boolean; lots: number; strategy?: number;
 }): Promise<{ ok: boolean; error: string }> {
+  const started = Date.now();
   // 0) ⚠️ IL Y AVAIT ICI UN PRÉ-DÉCONNECT, ET IL DÉCONNECTAIT TOUT LE MONDE (retiré le 26/08/2026).
   //
   //    Le code lisait `pre.data.tradingAccountConnected === false` pour repérer un utilisateur « connu mais
@@ -195,13 +246,32 @@ export async function sthConnectAndJoin(o: {
     // qu'au mot « already ». STH répond « Invalid account » pour un compte déjà enregistré — message que
     // rien ne laisse deviner. Résultat : une cliente parfaitement connectée chez eux était déclarée
     // invalide chez nous, et le support ne pouvait plus la rebrancher.
-    // On redemande donc l'état RÉEL : si le compte est connecté, l'échec du connect n'en est pas un et on
+    // On redemande donc l'état RÉEL : si le pont MT est branché, l'échec du connect n'en est pas un et on
     // continue vers le join. Un fait vérifié vaut mieux qu'une chaîne de caractères devinée.
-    // On redemande l'état RÉEL — via isApiKnown, PAS via le drapeau seul. Le drapeau étant faux pour tout
-    // le monde, ce test transformait la moindre erreur de connect en échec définitif, y compris sur un
-    // compte parfaitement abonné : c'est exactement le faux négatif que isApiKnown documente.
     const after = await sthStatus(o.userId);
-    if (!isApiKnown(after)) return { ok: false, error: c.errorMessage };
+    if (isInvalidAccountMessage(c.errorMessage)) {
+      // 18/11/2026, membre #652. isApiKnown répondait vrai si le statut n'était pas ok, si le pont était
+      // branché, OU si masterAccountsList n'était pas vide. Sur un utilisateur absent du dashboard STH
+      // (identifiants faux : INVALID_ACCOUNT), ça lançait join-master-account ~45 s
+      // (« MetaTrader account not connected ») puis « retry in 1-2 minutes ». On n'enchaîne le join que
+      // si le pont est réellement connecté — c'est le filet #7 (déjà enregistré). Sinon on s'arrête tout
+      // de suite : le message remonte tel quel à l'admin (toast GO LIVE / alerte CONNECT).
+      if (!sthConnected(after.data)) {
+        return {
+          ok: false,
+          error: 'identifiants refusés par STH : INVALID_ACCOUNT — vérifie le mot de passe principal (pas investor) et le nom exact du serveur.',
+        };
+      }
+    } else if (!isApiKnown(after)) {
+      // Autre refus de connect, utilisateur pas connu : si le libellé désigne clairement
+      // les identifiants ou le serveur, on le dit. Sinon on remonte le message brut.
+      // isApiKnown reste ici (et seulement ici) : un statut injoignable ne doit pas transformer
+      // une erreur réseau en refus d'identifiants.
+      if (isCredentialError(c.errorMessage)) {
+        return { ok: false, error: `credentials rejected by STH: ${c.errorMessage} — check it's the MAIN password, not investor, and the exact server name.` };
+      }
+      return { ok: false, error: c.errorMessage };
+    }
   }
   // 2) master id : la variable d'environnement, sinon auto-découverte sous la licence.
   let masterId = MASTER_ID;
@@ -222,17 +292,40 @@ export async function sthConnectAndJoin(o: {
   //    tout le monde, donc elle brûlait ses 24 secondes puis abandonnait TOUJOURS, y compris quand le join
   //    serait passé du premier coup au deuxième essai. Interroger l'opération qu'on veut réellement réussir
   //    vaut mieux que surveiller un indicateur qui prétend la prédire.
+  // 13/11/2026 — l'attente du join passe de ~25 s à ~50 s (accord de Mathieu, cas #652) : 25 s suffisent
+  // souvent trop peu, le commentaire ci-dessus le disait déjà. On reste sous le maxDuration de 60 s de
+  // la route admin (deadline 55 s depuis le début de cette fonction, pour laisser une marge). Le timeout
+  // HTTP de 20 s de sthPost n'est pas modifié. Les appels join répondent en général en 1-3 s quand STH
+  // dit « not connected » ; un appel qui pendrait 20 s tout près de la deadline reste un cas rare, déjà
+  // vrai avec l'ancienne boucle de 8 essais.
+  const JOIN_WAIT_MS = 50_000;
+  const DEADLINE_MS = 55_000;
+  const JOIN_GAP_MS = 3_000;
+  const joinStarted = Date.now();
   let j = await sthJoinMaster({ userId: o.userId, masterId, lots: o.lots });
-  for (let attempt = 0; attempt < 8 && !j.ok && /not connected/i.test(j.errorMessage); attempt++) {
-    await new Promise((r) => setTimeout(r, 3000));
+  while (!j.ok && /not connected/i.test(j.errorMessage)) {
+    const now = Date.now();
+    if (now - joinStarted >= JOIN_WAIT_MS) break;
+    if (now - started + JOIN_GAP_MS >= DEADLINE_MS) break;
+    await new Promise((r) => setTimeout(r, JOIN_GAP_MS));
     j = await sthJoinMaster({ userId: o.userId, masterId, lots: o.lots });
   }
-  if (!j.ok && /not connected/i.test(j.errorMessage))
+  if (!j.ok && /not connected/i.test(j.errorMessage)) {
+    const waitedSec = Math.max(1, Math.round((Date.now() - joinStarted) / 1000));
+    sthLogError('join still not connected', j.errorMessage);
+    // Le compte a été enregistré (ou l'utilisateur était déjà connu) : « not connected » après l'attente
+    // signifie que le pont MT n'est pas encore là, pas un refus d'identifiants — ceux-là sortent du
+    // connect, plus haut, quand STH les formule.
     return {
       ok: false,
-      error:
-        "account saved but STH can't reach the MetaTrader account (after ~25s). Either STH is still connecting — retry CONNECT in 1-2 min — or the login/password/server is wrong (check it's the MAIN password, not investor, and the exact server name).",
+      error: `STH is still connecting to the MetaTrader account (after ~${waitedSec}s). Retry CONNECT in 1-2 min.`,
     };
-  if (!j.ok) return { ok: false, error: `connected, but join failed: ${j.errorMessage}` };
+  }
+  if (!j.ok) {
+    if (isCredentialError(j.errorMessage)) {
+      return { ok: false, error: `connected, but credentials rejected at join: ${j.errorMessage} — check it's the MAIN password, not investor, and the exact server name.` };
+    }
+    return { ok: false, error: `connected, but join failed: ${j.errorMessage}` };
+  }
   return { ok: true, error: '' };
 }

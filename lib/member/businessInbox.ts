@@ -25,6 +25,7 @@
 // SÉCURITÉ : n'importe quel compte Premium peut brancher n'importe quel bot à son compte. On n'accepte QUE les
 // connexions dont le propriétaire est un admin (adminTgIds) — sinon on ignore tout, sans rédiger ni rien envoyer.
 import { adminTgIds } from './notifyOwner';
+import { outboundSendGate, runTelegramAttempts, tgSendRetryEnabled } from './tgRetry';
 import { appendAgentMemory } from './agentDocs';
 import { isReplayRequest, replayLang, requestReplay, runReplaySoon } from './replay';
 import { WEBINAR_HOLD_MS, WEBINAR_WORD, cancelPendingJobs, scheduleOnClientMessage, webinarAlert } from './supportAuto';
@@ -37,15 +38,23 @@ type Db = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TgResult = { ok: boolean; result?: any; description?: string };
 
+const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 export async function tg(method: string, payload: Record<string, unknown>): Promise<TgResult> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return { ok: false, description: 'TELEGRAM_BOT_TOKEN missing' };
-  try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000), body: JSON.stringify(payload) });
-    return (await r.json().catch(() => ({ ok: false, description: `HTTP ${r.status}` }))) as TgResult;
-  } catch (e) {
-    return { ok: false, description: (e as { message?: string })?.message ?? 'network error' };
-  }
+  // Drapeau coupé : un seul fetch, comme avant. Allumé : 3 essais max sur timeout / abort, uniquement
+  // pour les envois de contenu. Un ok arrête la boucle (pas de second envoi).
+  return runTelegramAttempts(async () => {
+    try {
+      const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000), body: JSON.stringify(payload) });
+      return (await r.json().catch(() => ({ ok: false, description: `HTTP ${r.status}` }))) as TgResult;
+    } catch (e) {
+      const name = (e as { name?: string })?.name ?? '';
+      const message = (e as { message?: string })?.message ?? 'network error';
+      return { ok: false, description: /timeout|aborted/i.test(name) ? `${name}: ${message}` : message };
+    }
+  }, { enabled: tgSendRetryEnabled(), method, sleep: sleepMs });
 }
 
 export interface Conn { ownerId: number; userChatId: number; canReply: boolean; enabled: boolean; canRead: boolean }
@@ -240,8 +249,16 @@ export async function reviewCard(db: Db, conn: Conn, rowId: string, base: Record
 export type Row = { id: string; tg_id: number; member_no: number | null; detail: Record<string, unknown> };
 
 /** Envoie `text` au client DEPUIS le compte de Mathieu (Telegram n'étiquette le bot que chez lui). null = parti. */
-export async function sendAsOwner(db: Db, row: Row, text: string, via: 'draft' | 'corrected' | 'auto', by: string): Promise<string | null> {
+export async function sendAsOwner(db: Db, row: Row, text: string, via: 'draft' | 'corrected' | 'auto' | 'window_auto' | 'faq_sheet', by: string): Promise<string | null> {
   const d = row.detail ?? {};
+  // Verrou seulement si le retry est allumé : un second passage ne renvoie pas un texte déjà parti,
+  // ni un envoi encore dans sa fenêtre de retry. Drapeau coupé : aucun contrôle ajouté.
+  if (tgSendRetryEnabled()) {
+    const gate = outboundSendGate(d, Date.now());
+    if (gate === 'already_sent') return 'déjà envoyé';
+    if (gate === 'in_flight') return 'envoi déjà en cours';
+    await db.from('member_actions').update({ detail: { ...d, tg_send_lock: Date.now() } }).eq('id', row.id);
+  }
   const r = await tg('sendMessage', { business_connection_id: d.conn, chat_id: row.tg_id, text, disable_web_page_preview: true });
   // Refus typiques : conversation inactive depuis plus de 24 h, ou « Reply to Messages » décoché dans Chat Automation.
   if (!r.ok) return r.description ?? 'refusé';

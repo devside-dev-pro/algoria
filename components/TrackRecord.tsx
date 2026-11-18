@@ -188,7 +188,7 @@ export function TrackRecord() {
   const [mode, setMode] = useState<'pct' | 'usd'>('pct');
   const [lot, setLot] = useState(0.1);
   const [openMonth, setOpenMonth] = useState<string | null>(null);
-  const [maintenance, setMaintenance] = useState(false); // 🛠 lib/member/historyMaintenance.ts
+  const [maintenance, setMaintenance] = useState(false); // teaser prospect (lib/member/historyMaintenance.ts)
 
   useEffect(() => {
     void fetch('/api/public/track').then(async (r) => {

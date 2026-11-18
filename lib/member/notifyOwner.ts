@@ -49,6 +49,8 @@ export interface OwnerAlert {
   tag: string; // regroupe les pushs de même nature
   /** Boutons d'action dans le DM (callback_data, traités par le webhook Telegram). Ex. « Envoyer la réponse ». */
   buttons?: Array<{ text: string; data: string }>;
+  /** Plusieurs rangées de boutons (bulles : Faite / Pas cette fois sous chaque demande). Si présent, remplace `buttons`. */
+  buttonRows?: Array<Array<{ text: string; data: string }>>;
 }
 
 /** Envoie l'alerte aux admins (DM Telegram + push). Retourne ce qui est parti ; n'échoue jamais. */
@@ -64,7 +66,7 @@ export async function notifyOwner(a: OwnerAlert): Promise<{ dm: number; push: nu
       await Promise.all(ids.map(async (chat_id) => {
         const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000),
-          body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [...(a.buttons?.length ? [a.buttons.map((b) => ({ text: b.text, callback_data: b.data.slice(0, 64) }))] : []), [{ text: 'Ouvrir l’admin', url }]] } }),
+          body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [...(a.buttonRows?.length ? a.buttonRows.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data.slice(0, 64) }))) : a.buttons?.length ? [a.buttons.map((b) => ({ text: b.text, callback_data: b.data.slice(0, 64) }))] : []), [{ text: 'Ouvrir l’admin', url }]] } }),
         }).catch(() => null);
         if (r?.ok) dm++;
       }));

@@ -58,8 +58,13 @@ export function lockDaysLeft(depositedAt: string | Date | null | undefined, now:
 //                        débloque le copieur.
 //   · lots_override    — motif écrit d'un passage en force. Rend l'exception VISIBLE au lieu de silencieuse ;
 //                        sans motif obligatoire, un bouton « forcer » redevient le comportement par défaut.
+//   · lot_help_requested_at — le membre a demandé de l'aide pour passer le trade (« Let Algoria do it
+//                        for me »). N'écrit AUCUN ordre, ne touche pas lots_ok ni lots_claimed_at.
+//                        Idempotent : une seule horodate, même après plusieurs clics. L'équipe est
+//                        prévenue (notifyOwner) au premier enregistrement seulement.
 export type LotsState = {
   claimedAt: string | null;
+  helpRequestedAt: string | null;
   ok: boolean;
   okBy: string | null;
   okAt: string | null;
@@ -73,6 +78,7 @@ export function lotsStateOf(detail: Record<string, unknown> | null | undefined):
   const n = Number(d.lots_traded);
   return {
     claimedAt: str(d.lots_claimed_at),
+    helpRequestedAt: str(d.lot_help_requested_at),
     ok: d.lots_ok === true,
     okBy: str(d.lots_ok_by),
     okAt: str(d.lots_ok_at),

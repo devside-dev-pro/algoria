@@ -9,11 +9,13 @@ import { handleBusinessConnection, handleBusinessMessage, handleBusinessCallback
 import { JOIN_SWITCH_CB, canToggleJoins, joinSwitch, joinSwitchMessage, noteJoinSwitch, parseJoinSwitch } from '@/lib/member/joinSwitch';
 import { handleReplayAdmin, handleReplayUpload, isReplayRequest, replayLang, requestReplay, runReplaySoon } from '@/lib/member/replay';
 import { handleSupportAssetCallback, handleSupportAssetReply, handleSupportLibrary, handleSupportVideo, handleSupportVideoRemove } from '@/lib/member/supportAuto';
+import { handleVoiceRecorderCallback, handleVoiceRecorderCommand, handleVoiceRecorderVoice } from '@/lib/support/voiceRecorderHandlers';
 import { handleDigestCallback, handleDigestReply } from '@/lib/member/supportDigest';
 import { handleWebinarAdmin, handleWebinarCallback, isLiveKeyword, noteBotBlocked, notifyNoUpcomingWebinar, parseWebinarStart, registerForWebinar, upcomingSessions } from '@/lib/member/webinar';
 import { logFunnelEvent } from '@/lib/member/funnel';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
+import { handleBubbleCallback } from '@/lib/channel/bubbles';
 import { extraMirrors } from '@/lib/channel/mirrors';
 import { recordMemberEvent } from '@/lib/channel/members';
 
@@ -431,8 +433,10 @@ export async function POST(req: Request) {
     try {
       if (await handleBusinessCallback(db, cq)) return NextResponse.json({ ok: true });
       if (await handleRecapCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 récap du soir (lib/channel/recap.ts)
+      if (await handleBubbleCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles : Faite / Pas cette fois
       if (await handleCmCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 posts du jour du canal (lib/channel/cm.ts)
       if (await handleSupportAssetCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles d'accueil (lib/member/supportAuto.ts)
+      if (await handleVoiceRecorderCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎙 enregistrement guidé des vocaux (SUPPORT_VOICE_RECORDER)
       if (await handleDigestCallback(db, cq)) return NextResponse.json({ ok: true }); // 🌙 règles du récap du soir (lib/member/supportDigest.ts)
       if (await handleWebinarCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎤 « Save my seat » sous l'invitation (lib/member/webinar.ts)
       const m = /^r([dxu]):([0-9a-f-]{36})$/i.exec(String(cq.data ?? ''));
@@ -502,9 +506,13 @@ export async function POST(req: Request) {
   // 🎥🎙 la bibliothèque du support (lib/member/supportAuto.ts) : une bulle vidéo envoyée au bot par un admin devient
   // une bulle d'accueil, un vocal devient un vocal pays ; « retire » en réponse à l'un d'eux le sort ; un nom de pays en
   // réponse à la confirmation d'un vocal l'ajoute ; « bulles » montre la bibliothèque, « pays » le tableau par pays.
+  // 🎙 mode guidé (SUPPORT_VOICE_RECORDER, coupé par défaut) : un vocal pendant la session est classé tout seul.
+  // Avant la bibliothèque, sinon il serait tagué à la main comme vocal pays. Pas un second webhook.
+  if (db && msg?.chat?.type === 'private' && msg.voice && (await handleVoiceRecorderVoice(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && (msg.video_note || msg.voice) && (await handleSupportVideo(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && (msg.reply_to_message?.video_note || msg.reply_to_message?.voice) && (await handleSupportVideoRemove(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && msg.reply_to_message?.reply_markup && (await handleSupportAssetReply(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
+  if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (await handleVoiceRecorderCommand(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   if (db && msg?.chat?.type === 'private' && typeof msg.text === 'string' && (await handleSupportLibrary(db, msg).catch(() => false))) return NextResponse.json({ ok: true });
   // 🎥 le replay du webinaire (lib/member/replay.ts) : une vidéo envoyée au bot par un admin devient LE replay (le bot
   // répond « Replay enregistré ✅ » et la renvoie en aperçu) ; « replay » montre l'état, « replay off » coupe.

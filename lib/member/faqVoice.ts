@@ -13,6 +13,17 @@ import { MYFXBOOK_URL } from './myfxbook';
 
 export const FAQ_KIND = 'faq_voice';
 
+/** Ancien vocal d'attente (situation faq_attente_5h9h). 18/11/2026 : il ne part plus chez un prospect.
+ *  Le support est continu. Une ligne peut rester en base ; pickFaqVoice la refuse. */
+export const FAQ_WAIT_KIND = FAQ_KIND;
+export const FAQ_WAIT_TOPIC = 'faq_attente_5h9h';
+export const FAQ_WAIT_LABEL = '⏳ Attente 5h–9h';
+
+/** false uniquement pour le vocal d'attente : aucun chemin prospect ne doit l'envoyer. */
+export function canSendFaqVoiceToProspect(topic: unknown): boolean {
+  return !isFaqWaitTopic(topic);
+}
+
 /** Les thèmes, dans l'ordre des boutons (les 10 premiers de la spec, puis la suite). */
 export const FAQ_TOPICS = [
   'faq_how_it_works', 'faq_broker', 'faq_deposit', 'faq_cost_free', 'faq_connect',
@@ -21,6 +32,11 @@ export const FAQ_TOPICS = [
 ] as const;
 export type FaqTopic = (typeof FAQ_TOPICS)[number];
 export const isFaqTopic = (t: unknown): t is FaqTopic => typeof t === 'string' && (FAQ_TOPICS as readonly string[]).includes(t);
+
+/** Sujets de la fenêtre 5h–9h qui n'ont pas de vocal FAQ (#583) : le classifieur les reconnaît, ils ne partent pas en vocal. */
+export const FAQ_EXTRA_TOPICS = ['faq_existing_account', 'faq_activation'] as const;
+export type FaqExtraTopic = (typeof FAQ_EXTRA_TOPICS)[number];
+export type ClassifiedTopic = FaqTopic | FaqExtraTopic;
 
 /** Le libellé des boutons chez Mathieu (court : 2 boutons par ligne). */
 export const FAQ_LABELS: Record<FaqTopic, string> = {
@@ -38,6 +54,10 @@ export const FAQ_LABELS: Record<FaqTopic, string> = {
   faq_not_copying_yet: '⏳ Pas encore de trades',
   faq_incident: '🚨 Incident (si demandé)',
 };
+export const isFaqWaitTopic = (t: unknown): t is typeof FAQ_WAIT_TOPIC => t === FAQ_WAIT_TOPIC;
+export const isFaqSituation = (t: unknown): t is FaqTopic | typeof FAQ_WAIT_TOPIC => isFaqTopic(t) || isFaqWaitTopic(t);
+export const faqSituationLabel = (t: string | null | undefined): string =>
+  t && isFaqTopic(t) ? FAQ_LABELS[t] : t === FAQ_WAIT_TOPIC ? FAQ_WAIT_LABEL : 'thème pas encore choisi';
 
 /** LA LIGNE FIXE sous le vocal (spec section 4, « Texte »). Liens : app.getalgoria.com (domaine actuel) et le
  *  Myfxbook officiel, seul lien de résultats. Jamais de mot de passe demandé, or uniquement, aucune promesse. */
@@ -67,6 +87,8 @@ export const FAQ_CARD_ONLY: ReadonlySet<FaqTopic> = new Set<FaqTopic>(['faq_inci
 // routine, il est sûr). Confiance : 0,9 pour une formulation forte, 0,55 pour un simple mot-clé ; moins 0,4 si un
 // AUTRE thème est aussi clairement là (deux questions : un vocal ne répondrait qu'à une), moins 0,15 pour un mot-clé
 // d'un autre thème ; moins 0,15 au-delà de 280 caractères, 0,3 au-delà de 500 (message long = plus qu'une FAQ).
+// SUPPORT_FAQ_VOICE_SINGLE_TOPIC (envOn, coupé par défaut) ne change PAS ce score : il ajoute voiceFit
+// (single / multiple / ambiguous). Allumé, le vocal auto exige voiceFit === 'single' en plus du seuil.
 export const FAQ_MIN_CONFIDENCE = 0.8;
 
 type Rule = { strong: RegExp[]; weak?: RegExp[] };
@@ -124,6 +146,28 @@ const RULES: Record<FaqTopic, Rule> = {
   },
 };
 
+const EXTRA_RULES: Record<FaqExtraTopic, Rule> = {
+  // « I have opened the account since yesterday » → connecter dans l'app, pas un dépôt déjà fait
+  faq_existing_account: {
+    strong: [
+      /\bi(?:'ve| have)? (?:just |already )?opened (?:an |the |my )?(?:broker |trading )?account\b/i,
+      /\bopened (?:an |the |my )?(?:broker |trading )?account\b/i,
+      /\bi have opened the account\b/i,
+      /\balready have (?:a |an )?(?:broker |trading |live |real )account\b/i,
+      /\bmy account is (?:already )?open(?:ed)?\b/i,
+      /\baccount (?:has been |is already |was )opened\b/i,
+    ],
+  },
+  faq_activation: {
+    strong: [
+      /\bactivation trades?\b/i,
+      /\btrades? (?:of |for )activation\b/i,
+      /\bwhen (?:do|will|does|can) (?:the |my )?activation\b/i,
+      /\bactivate (?:the |my )?(?:copy(?:ing)?|account|algoria)\b/i,
+    ],
+  },
+};
+
 // une conversation sur la nuit du 21-22/10 (mots de lib/member/incident.ts, INCIDENT_TALK) : seul faq_incident, et
 // seulement explicite ; jamais un vocal joyeux sur un autre sujet sous un message qui parle de pertes
 const INCIDENT_WORDS = /\b(incident|blown|wiped|liquidat\w*|margin call|stop ?out|stopped out|what happened|crash\w*|bug|glitch|malfunction\w*|compensat\w*|refund\w*|money back|lost (?:my|all|everything|it|money)|(?<!stop[ -]?)losses?|scam\w*|fraud\w*)\b/i;
@@ -132,31 +176,64 @@ const APP_BUTTON = /book a quick call to activate|quick call to set up my algori
 // il colle un identifiant, un mot de passe, un token : jamais de vocal, la carte va à Mathieu (garde du modèle)
 const CREDENTIALS = /\b(?:password|passcode|pwd|pass|token|seed(?: phrase)?|otp|investor|trader)\s*(?:is|:|=|-)\s*\S+/i;
 
-export type FaqClass = { topic: FaqTopic | null; confidence: number; reason?: string; scores: Partial<Record<FaqTopic, number>> };
+/** single = un seul sujet clair · multiple = plusieurs sujets · ambiguous = mot seul ou mot-clé sans question · none = pas de thème.
+ *  Le score (topic / confidence) ne change pas : ce champ ne sert qu'à l'interrupteur SUPPORT_FAQ_VOICE_SINGLE_TOPIC. */
+export type FaqVoiceFit = 'single' | 'multiple' | 'ambiguous' | 'none';
 
-export function classifyFaq(text: string): FaqClass {
-  const t = String(text ?? '').replace(/[’]/g, "'").trim();
-  if (!t) return { topic: null, confidence: 0, reason: 'vide', scores: {} };
-  if (APP_BUTTON.test(t)) return { topic: null, confidence: 0, reason: 'message tout fait de l’app', scores: {} };
-  if (CREDENTIALS.test(t)) return { topic: null, confidence: 0, reason: 'identifiant ou mot de passe dans le message', scores: {} };
-  const scores: Partial<Record<FaqTopic, number>> = {};
-  const strongOf: Partial<Record<FaqTopic, boolean>> = {};
-  for (const topic of FAQ_TOPICS) {
-    const r = RULES[topic];
+export type FaqClass = {
+  topic: ClassifiedTopic | null;
+  confidence: number;
+  reason?: string;
+  scores: Partial<Record<ClassifiedTopic, number>>;
+  /** Tous les thèmes qui ont matché (formulation forte ou mot-clé), du plus fort au plus faible. */
+  matched: ClassifiedTopic[];
+  /** Thèmes avec au moins une formulation forte. */
+  strong: ClassifiedTopic[];
+  voiceFit: FaqVoiceFit;
+};
+
+type ScoreHit = { scores: Partial<Record<ClassifiedTopic, number>>; strongOf: Partial<Record<ClassifiedTopic, boolean>>; matched: ClassifiedTopic[]; strong: ClassifiedTopic[] };
+
+function scoreTopics(t: string): ScoreHit {
+  const scores: Partial<Record<ClassifiedTopic, number>> = {};
+  const strongOf: Partial<Record<ClassifiedTopic, boolean>> = {};
+  const topics: ClassifiedTopic[] = [...FAQ_TOPICS, ...FAQ_EXTRA_TOPICS];
+  for (const topic of topics) {
+    const r = isFaqTopic(topic) ? RULES[topic] : EXTRA_RULES[topic];
     const strong = r.strong.filter((re) => re.test(t)).length;
     const weak = (r.weak ?? []).filter((re) => re.test(t)).length;
     if (!strong && !weak) continue;
     scores[topic] = strong ? Math.min(1, 0.9 + 0.05 * (strong - 1)) : 0.55;
     strongOf[topic] = strong > 0;
   }
-  const ranked = (Object.keys(scores) as FaqTopic[]).sort((a, b) => (scores[b] ?? 0) - (scores[a] ?? 0) || FAQ_TOPICS.indexOf(a) - FAQ_TOPICS.indexOf(b));
-  const top = ranked[0];
-  if (!top) return { topic: null, confidence: 0, reason: 'aucun thème', scores };
+  const orderOf = (topic: ClassifiedTopic) => {
+    const i = FAQ_TOPICS.indexOf(topic as FaqTopic);
+    return i >= 0 ? i : FAQ_TOPICS.length + FAQ_EXTRA_TOPICS.indexOf(topic as FaqExtraTopic);
+  };
+  const matched = (Object.keys(scores) as ClassifiedTopic[]).sort((a, b) => (scores[b] ?? 0) - (scores[a] ?? 0) || orderOf(a) - orderOf(b));
+  return { scores, strongOf, matched, strong: matched.filter((topic) => strongOf[topic]) };
+}
+
+const emptyClass = (reason: string, extra?: Partial<FaqClass>): FaqClass => ({
+  topic: null, confidence: 0, reason, scores: {}, matched: [], strong: [], voiceFit: 'none', ...extra,
+});
+
+export function classifyFaq(text: string): FaqClass {
+  const t = String(text ?? '').replace(/[’]/g, "'").trim();
+  if (!t) return emptyClass('vide');
+  if (APP_BUTTON.test(t)) return emptyClass('message tout fait de l’app');
+  if (CREDENTIALS.test(t)) return emptyClass('identifiant ou mot de passe dans le message');
+  const hit = scoreTopics(t);
+  const { scores, strongOf, matched } = hit;
+  const top = matched[0];
+  if (!top) return emptyClass('aucun thème');
   // l'incident : explicite et rien d'autre ; sinon des mots de la nuit bloquent tout vocal
-  if (INCIDENT_WORDS.test(t) && !strongOf.faq_incident) return { topic: null, confidence: 0, reason: 'parle de pertes / de la nuit sans question explicite', scores };
-  const pick: FaqTopic = strongOf.faq_incident ? 'faq_incident' : top;
+  if (INCIDENT_WORDS.test(t) && !strongOf.faq_incident) {
+    return emptyClass('parle de pertes / de la nuit sans question explicite', { scores, matched, strong: hit.strong });
+  }
+  const pick: ClassifiedTopic = strongOf.faq_incident ? 'faq_incident' : top;
   let confidence = scores[pick] ?? 0;
-  for (const other of ranked) {
+  for (const other of matched) {
     if (other === pick) continue;
     // un mot-clé faible d'un thème voisin dans une formulation forte (« which broker » contient « broker ») ne compte pas
     if (strongOf[other]) confidence -= 0.4;
@@ -165,18 +242,71 @@ export function classifyFaq(text: string): FaqClass {
   if (t.length > 500) confidence -= 0.3;
   else if (t.length > 280) confidence -= 0.15;
   confidence = Math.max(0, Math.round(confidence * 100) / 100);
-  return { topic: pick, confidence, scores };
+  const voiceFit = faqVoiceFit(t, pick, hit);
+  return { topic: pick, confidence, scores, matched, strong: hit.strong, voiceFit };
 }
 
 // des thèmes qui partagent naturellement leurs mots-clés faibles (« minimum deposit … broker account »)
-const FAMILIES: FaqTopic[][] = [
+const FAMILIES: string[][] = [
   ['faq_deposit', 'faq_broker', 'faq_cost_free'],
-  ['faq_connect', 'faq_app_login', 'faq_not_copying_yet'],
+  ['faq_connect', 'faq_app_login', 'faq_not_copying_yet', 'faq_existing_account', 'faq_activation'],
   ['faq_kyc_raisefx', 'faq_broker'],
   ['faq_results_myfxbook', 'faq_risk_lots'],
   ['faq_withdraw_30d', 'faq_broker'],
 ];
-const sameFamily = (a: FaqTopic, b: FaqTopic) => FAMILIES.some((f) => f.includes(a) && f.includes(b));
+const sameFamily = (a: string, b: string) => FAMILIES.some((f) => f.includes(a) && f.includes(b));
+
+/** Découpe un message en bouts qui peuvent poser des questions différentes (autre phrase, « and », « also », « + »). */
+function faqClauses(text: string): string[] {
+  const parts = text
+    .split(/\?+|(?<=[.!])\s+|\s*(?:&|\+)\s*|\b(?:and also|as well as|what about|how about|and|also|plus)\b/i)
+    .map((s) => s.replace(/^[\s,;:.-]+|[\s,;:.-]+$/g, '').trim())
+    .filter((s) => /[\p{L}\p{N}]{2,}/u.test(s));
+  return parts.length ? parts : [text.trim()];
+}
+
+function wordCount(text: string): number {
+  const bare = text.replace(/[^\p{L}\p{N}’']+/gu, ' ').trim();
+  return bare ? bare.split(/\s+/).length : 0;
+}
+
+/** Sujets que le message DEMANDE, pas un mot de contexte dans la même phrase (« minimum deposit with RaiseFX »). */
+function distinctAsks(text: string): ClassifiedTopic[] {
+  const parts = faqClauses(text);
+  const asks = new Set<ClassifiedTopic>();
+  const take = (part: string, lone: boolean) => {
+    const hit = scoreTopics(part);
+    if (lone) {
+      for (const s of hit.strong) asks.add(s);
+      if (hit.strong.length === 1) {
+        for (const m of hit.matched) if (m !== hit.strong[0] && !sameFamily(hit.strong[0], m)) asks.add(m);
+      }
+      return;
+    }
+    if (hit.strong.length) for (const s of hit.strong) asks.add(s);
+    else if (hit.matched[0]) asks.add(hit.matched[0]);
+  };
+  if (parts.length <= 1) take(text, true);
+  else for (const part of parts) take(part, false);
+  return [...asks];
+}
+
+/** Un vocal auto n'est légitime que pour UN sujet fort, dans une vraie question. Un mot seul (« kyc », « broker »)
+ *  ou deux demandes (dépôt + retrait, broker + prix + résultats) ne le sont pas. N'entre pas dans le score. */
+function faqVoiceFit(text: string, topic: ClassifiedTopic, hit: ScoreHit): FaqVoiceFit {
+  if (wordCount(text) <= 1) return 'ambiguous';
+  const asks = distinctAsks(text);
+  if (asks.length > 1) return 'multiple';
+  if (hit.strong.length !== 1) return 'ambiguous';
+  if (asks.length === 1 && asks[0] !== topic && asks[0] !== hit.strong[0]) return 'multiple';
+  return 'single';
+}
+
+/** Vrai quand l'interrupteur est allumé et que le message n'est pas un seul sujet clair. Le départ AUTO du vocal
+ *  est alors refusé. Une carte (bouton manuel) ne passe pas par ici. */
+export function faqAutoVoiceBlocked(c: Pick<FaqClass, 'voiceFit'>, strict: boolean): boolean {
+  return !!strict && c.voiceFit !== 'single';
+}
 
 // ── LA DÉCISION ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -199,6 +329,8 @@ export type FaqContext = {
   assetExists: boolean;
   /** un faq_voice de ce thème lui a déjà été envoyé dans la fenêtre anti-spam (ou trop de vocaux FAQ en 24 h) */
   recentlySent: boolean;
+  /** SUPPORT_FAQ_VOICE_SINGLE_TOPIC : le vocal auto seulement si voiceFit === 'single'. Absent = comportement d'aujourd'hui. */
+  strictSingleTopic?: boolean;
 };
 
 export type FaqDecision = { mode: 'auto' | 'card' | 'none'; topic: FaqTopic | null; reason: string };
@@ -206,9 +338,10 @@ export type FaqDecision = { mode: 'auto' | 'card' | 'none'; topic: FaqTopic | nu
 /** auto = le vocal part seul à la place du texte · card = bouton « 🎙 Envoyer le vocal » sous la carte de Mathieu ·
  *  none = comportement actuel inchangé. Ne relâche AUCUN garde-fou : une réponse qui irait en carte reste une carte. */
 export function faqVoiceDecision(c: FaqClass, ctx: FaqContext): FaqDecision {
-  const topic = c.topic;
+  const topic = c.topic && isFaqTopic(c.topic) ? c.topic : null;
   const none = (reason: string): FaqDecision => ({ mode: 'none', topic, reason });
-  if (!topic) return none(c.reason ?? 'aucun thème');
+  if (!c.topic) return none(c.reason ?? 'aucun thème');
+  if (!isFaqTopic(c.topic)) return none('pas un vocal FAQ');
   if (c.confidence < FAQ_MIN_CONFIDENCE) return none(`confiance ${c.confidence} < ${FAQ_MIN_CONFIDENCE}`);
   if (ctx.webinarLead) return none('lead webinaire : à Mathieu');
   if (ctx.beforeIntro || ctx.introJustSent) return none('accueil / intro en cours');
@@ -216,9 +349,13 @@ export function faqVoiceDecision(c: FaqClass, ctx: FaqContext): FaqDecision {
   if (ctx.hasMedia) return none('captures ou médias à lire');
   if (!ctx.assetExists) return none('pas de vocal actif pour ce thème');
   if (ctx.recentlySent) return none('déjà envoyé récemment (anti-spam)');
-  if (ctx.reviewReason || FAQ_CARD_ONLY.has(topic)) return { mode: 'card', topic, reason: ctx.reviewReason ?? 'thème à valider par Mathieu' };
-  if (!ctx.modelSure) return { mode: 'card', topic, reason: 'le modèle n’est pas sûr' };
-  return { mode: 'auto', topic, reason: 'ok' };
+  if (ctx.reviewReason || FAQ_CARD_ONLY.has(c.topic)) return { mode: 'card', topic: c.topic, reason: ctx.reviewReason ?? 'thème à valider par Mathieu' };
+  if (!ctx.modelSure) return { mode: 'card', topic: c.topic, reason: 'le modèle n’est pas sûr' };
+  // Uniquement le départ seul. La carte et le bouton « Envoyer le vocal » ne sont pas touchés.
+  if (faqAutoVoiceBlocked(c, !!ctx.strictSingleTopic)) {
+    return none(c.voiceFit === 'multiple' ? 'plusieurs thèmes' : 'ambigu');
+  }
+  return { mode: 'auto', topic: c.topic, reason: 'ok' };
 }
 
 // ── L'ANTI-SPAM ────────────────────────────────────────────────────────────────────────────────────────
@@ -241,6 +378,7 @@ export function faqKeyboard(a: { id: number; situation?: string | null; active?:
   const btns: Btn[] = FAQ_TOPICS.map((t) => ({ text: `${a.situation === t ? '✓ ' : ''}${FAQ_LABELS[t]}`, callback_data: `sa:${a.id}:t:${t}` }));
   const rows: Btn[][] = [];
   for (let k = 0; k < btns.length; k += 2) rows.push(btns.slice(k, k + 2));
+  rows.push([{ text: `${a.situation === FAQ_WAIT_TOPIC ? '✓ ' : ''}${FAQ_WAIT_LABEL}`, callback_data: `sa:${a.id}:t:${FAQ_WAIT_TOPIC}` }]);
   rows.push([{ text: '🌍 C’est un vocal pays', callback_data: `sa:${a.id}:cv` }, { text: '🗑 Retirer', callback_data: `sa:${a.id}:x` }]);
   return { inline_keyboard: rows };
 }
@@ -258,7 +396,7 @@ export type AssetCallback =
   | { id: number; op: 'active'; value: boolean }
   | { id: number; op: 'faq' }
   | { id: number; op: 'country_voice' }
-  | { id: number; op: 'topic'; value: FaqTopic }
+  | { id: number; op: 'topic'; value: FaqTopic | typeof FAQ_WAIT_TOPIC }
   | { id: number; op: 'send'; rowId: string };
 
 export function parseAssetCallback(data: unknown): AssetCallback | null {
@@ -268,7 +406,7 @@ export function parseAssetCallback(data: unknown): AssetCallback | null {
   if (m[3]) return { id, op: 'situation', value: m[3] as 'new' | 'app' | 'all' };
   if (m[4]) return { id, op: 'lang', value: m[4] as 'en' | 'it' };
   if (m[5]) return { id, op: 'country', value: m[5].toUpperCase() };
-  if (m[6]) return isFaqTopic(m[6]) ? { id, op: 'topic', value: m[6] } : null;
+  if (m[6]) return isFaqSituation(m[6]) ? { id, op: 'topic', value: m[6] } : null;
   if (m[7]) return { id, op: 'send', rowId: m[7].toLowerCase() };
   if (m[2] === 'faq') return { id, op: 'faq' };
   if (m[2] === 'cv') return { id, op: 'country_voice' };
@@ -280,14 +418,15 @@ type Db = any;
 
 /** Tague un vocal sur un thème. REMPLACEMENT : l'ancien vocal actif de ce thème est désactivé (jamais supprimé), AVANT
  *  d'activer le nouveau (l'index unique partiel de la migration 0042 l'exige). Renvoie le nombre de vocaux désactivés. */
-export async function tagFaqVoice(db: Db, id: number, topic: FaqTopic): Promise<{ replaced: number; error?: string }> {
+export async function tagFaqVoice(db: Db, id: number, topic: FaqTopic | typeof FAQ_WAIT_TOPIC): Promise<{ replaced: number; error?: string }> {
   const { data: old } = await db.from('support_assets').update({ active: false }).eq('kind', FAQ_KIND).eq('situation', topic).eq('active', true).neq('id', id).select('id');
   const { error } = await db.from('support_assets').update({ kind: FAQ_KIND, situation: topic, lang: 'en', active: true }).eq('id', id);
   return { replaced: (old ?? []).length, ...(error ? { error: String(error.message ?? error) } : {}) };
 }
 
 /** Le vocal actif d'un thème (le plus récent s'il en reste plusieurs, avant migration). */
-export async function pickFaqVoice(db: Db, topic: FaqTopic): Promise<{ id: number; file_id: string; uses: number | null } | null> {
+export async function pickFaqVoice(db: Db, topic: FaqTopic | typeof FAQ_WAIT_TOPIC): Promise<{ id: number; file_id: string; uses: number | null } | null> {
+  if (!canSendFaqVoiceToProspect(topic)) return null;
   const { data } = await db.from('support_assets').select('id,file_id,uses').eq('kind', FAQ_KIND).eq('situation', topic).eq('active', true).order('id', { ascending: false }).limit(1);
   return (data?.[0] ?? null) as { id: number; file_id: string; uses: number | null } | null;
 }
