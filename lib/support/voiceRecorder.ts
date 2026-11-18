@@ -68,7 +68,12 @@ export function parseRecorderState(raw: unknown): RecorderState {
     const j = typeof raw === 'string' ? JSON.parse(raw) as { status?: unknown; index?: unknown } : null;
     const status: RecorderStatus = j?.status === 'active' || j?.status === 'stopped' || j?.status === 'done' ? j.status : 'idle';
     const index = Number.isInteger(j?.index) ? Number(j?.index) : 0;
-    if (index < 0 || index > RECORDER_TOTAL) return initialRecorderState();
+    if (index < 0) return initialRecorderState();
+    // Ancien parcours à 19 étapes : l'index 18 était le vocal d'attente, l'index 19 voulait dire « terminé ».
+    // Les deux sont finis. Un index 18 « done » est aussi la fin du parcours à 18.
+    if (index > RECORDER_TOTAL || (index === RECORDER_TOTAL && status !== 'done')) {
+      return { status: 'done', index: RECORDER_TOTAL };
+    }
     return { status, index };
   } catch {
     return initialRecorderState();

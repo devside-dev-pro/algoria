@@ -13,10 +13,16 @@ import { MYFXBOOK_URL } from './myfxbook';
 
 export const FAQ_KIND = 'faq_voice';
 
-/** Vocal d'attente n°19 (fenêtre 05:00–09:00 Asia/Dubai). Même modèle que la #583 : kind = 'faq_voice', situation = 'faq_attente_5h9h'. Pas un thème classifié. */
+/** Ancien vocal d'attente (situation faq_attente_5h9h). 18/11/2026 : il ne part plus chez un prospect.
+ *  Le support est continu. Une ligne peut rester en base ; pickFaqVoice la refuse. */
 export const FAQ_WAIT_KIND = FAQ_KIND;
 export const FAQ_WAIT_TOPIC = 'faq_attente_5h9h';
 export const FAQ_WAIT_LABEL = '⏳ Attente 5h–9h';
+
+/** false uniquement pour le vocal d'attente : aucun chemin prospect ne doit l'envoyer. */
+export function canSendFaqVoiceToProspect(topic: unknown): boolean {
+  return !isFaqWaitTopic(topic);
+}
 
 /** Les thèmes, dans l'ordre des boutons (les 10 premiers de la spec, puis la suite). */
 export const FAQ_TOPICS = [
@@ -331,6 +337,7 @@ export async function tagFaqVoice(db: Db, id: number, topic: FaqTopic | typeof F
 
 /** Le vocal actif d'un thème (le plus récent s'il en reste plusieurs, avant migration). */
 export async function pickFaqVoice(db: Db, topic: FaqTopic | typeof FAQ_WAIT_TOPIC): Promise<{ id: number; file_id: string; uses: number | null } | null> {
+  if (!canSendFaqVoiceToProspect(topic)) return null;
   const { data } = await db.from('support_assets').select('id,file_id,uses').eq('kind', FAQ_KIND).eq('situation', topic).eq('active', true).order('id', { ascending: false }).limit(1);
   return (data?.[0] ?? null) as { id: number; file_id: string; uses: number | null } | null;
 }

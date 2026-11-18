@@ -4,6 +4,7 @@
 // Le webhook n'est pas touché : ces fonctions sont appelées depuis app/api/telegram/route.ts, le seul webhook.
 import { adminTgIds } from '../member/notifyOwner';
 import { FAQ_WAIT_TOPIC, tagFaqVoice, type FaqTopic } from '../member/faqVoice';
+import { formatRecorderMessage } from './voiceScripts';
 import {
   applyRecorderAction, currentScript, isRetryableOwnerVoice, parseRecorderCallback, parseRecorderCommand,
   parseRecorderState, recorderEnabled, recorderKeyboard, savePlan, serializeRecorderState,
@@ -43,11 +44,12 @@ async function tgSend(method: string, payload: Record<string, unknown>): Promise
 }
 
 async function say(chatId: number, step: RecorderStep): Promise<void> {
-  const text = [step.note, step.prompt?.text].filter(Boolean).join('\n');
+  const text = formatRecorderMessage(step.note, step.prompt?.text ?? null);
   if (!text) return;
   await tgSend('sendMessage', {
     chat_id: chatId,
     text,
+    parse_mode: 'HTML',
     disable_web_page_preview: true,
     ...(step.prompt ? { reply_markup: recorderKeyboard() } : {}),
   });
