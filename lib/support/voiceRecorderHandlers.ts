@@ -9,6 +9,7 @@ import {
   type RecordingAssessment,
 } from './voiceCheck';
 import { formatRecorderMessage } from './voiceScripts';
+import { isCheckVoicesCommand, loadActiveVoices, runCheckVoices } from './voiceAudit';
 import { transcribeTelegramVoice } from './voiceStt';
 import {
   applyRecorderAction, currentScript, isRetryableOwnerVoice, parseRecorderCallback, parseRecorderCommand,
@@ -70,10 +71,27 @@ async function run(db: Db, chatId: number, state: RecorderState, action: Recorde
 /** /record_voices et /record_voices resume. false = ce n'est pas pour nous (le webhook continue). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleVoiceRecorderCommand(db: Db, msg: any): Promise<boolean> {
-  if (!parseRecorderCommand(typeof msg?.text === 'string' ? msg.text : '')) return false;
+  const text = typeof msg?.text === 'string' ? msg.text : '';
+  const audit = isCheckVoicesCommand(text);
+  if (!audit && !parseRecorderCommand(text)) return false;
   if (!ownPrivate(msg)) return false;
   if (!(await isOwner(msg.from?.id))) return false;
   const chatId = Number(msg.chat.id);
+  if (audit) {
+    await runCheckVoices({
+      chatId,
+      enabled: sttCheckEnabled(),
+      hasKey: Boolean(process.env.ELEVENLABS_API_KEY),
+      scripts: allScriptRefs(),
+      loadAssets: () => loadActiveVoices(db),
+      transcribe: transcribeTelegramVoice,
+      send: async (id, body) => { await tgSend('sendMessage', { chat_id: id, text: body, disable_web_page_preview: true }); },
+    }).catch(async (e) => {
+      console.error('[voice-recorder] check_voices', (e as Error)?.message ?? e);
+      await tgSend('sendMessage', { chat_id: chatId, text: 'Contrôle impossible (lecture ou transcription). Rien n’a été modifié.' });
+    });
+    return true;
+  }
   if (!enabled()) {
     await tgSend('sendMessage', { chat_id: chatId, text: 'Mode enregistrement coupé (SUPPORT_VOICE_RECORDER est off).' });
     return true;
