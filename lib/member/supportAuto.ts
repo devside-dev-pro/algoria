@@ -36,8 +36,8 @@ import { detectCountry } from './countries';
 import { HISTORY_LOSS_NOTE, INCIDENT, INCIDENT_ESCALATE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, INCIDENT_TOPIC, RESULTS_REPLY_NOTE, incidentActive, incidentReplyNote, resultsPolicy, wasAffected } from './incident';
 import { isLiveKeyword, liveSeatReply, upcomingSessions } from './webinar';
 import type { Conn } from './businessInbox';
-import { FAQ_KIND, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, faqCardButton, faqKeyboard, faqRecentlySent, faqSentTo, faqSituationLabel, faqVoiceDecision, isFaqSituation, isFaqTopic, parseAssetCallback, pickFaqVoice, tagFaqVoice, type FaqDecision, type FaqTopic } from './faqVoice';
-import { FAQ_WAIT_KIND, REVIEW_HOLD_TEXT, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow, faqSheetFallbackEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, reviewHoldingEnabled, sheetKnownPct, supportAutoWindowBounds, waitSentInWindow, type SheetMap, type WindowConfig } from './supportWindow';
+import { FAQ_KIND, FAQ_LABELS, FAQ_LINES, FAQ_MIN_CONFIDENCE, FAQ_TOPICS, FAQ_WAIT_LABEL, FAQ_WAIT_TOPIC, classifyFaq, faqAutoVoiceBlocked, faqCardButton, faqKeyboard, faqRecentlySent, faqSentTo, faqSituationLabel, faqVoiceDecision, isFaqSituation, isFaqTopic, parseAssetCallback, pickFaqVoice, tagFaqVoice, type FaqDecision, type FaqTopic } from './faqVoice';
+import { FAQ_WAIT_KIND, REVIEW_HOLD_TEXT, WINDOW_AUTO_VIA, WINDOW_TOPIC_ALLOWLIST, WINDOW_WAIT_TEXT, WINDOW_WAIT_VIA, chooseAutoBody, clearIntentBypass, clearIntentsEnabled, decideSupportWindow, faqSheetFallbackEnabled, faqVoiceSingleTopicEnabled, howItWorksAfterWelcomeEnabled, howItWorksChain, howItWorksVoiceAllowed, isInSupportAutoWindow, isWindowTopic, parseSheetFlags, parseSupportAutoWindow, parseWindowTopics, reviewHoldingEnabled, sheetKnownPct, supportAutoWindowBounds, waitSentInWindow, type SheetMap, type WindowConfig } from './supportWindow';
 import { hardRuleIssue, replyTextIssue } from './replyDraft';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -675,11 +675,14 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // ci-dessus n'est relâché : une carte reste une carte, avec un bouton « 🎙 Envoyer le vocal » pour Mathieu)
   let faq: FaqDecision = { mode: 'none', topic: faqTopic, reason: faqClass.reason ?? '' };
   const faqAsset = faqTopic ? await pickFaqVoice(db, faqTopic).catch(() => null) : null;
+  // Vocal auto plus strict si SUPPORT_FAQ_VOICE_SINGLE_TOPIC est allumé. Le bouton manuel ne passe pas par ici.
+  const strictVoice = faqVoiceSingleTopicEnabled();
   if (faqTopic) {
     const sentFaq = faqAsset ? await faqSentTo(db, job.tg_id).catch(() => []) : [];
     faq = faqVoiceDecision(faqClass, {
       modelSure: draft.auto || clearIntentBypass(joined, faqClass, clearIntentsEnabled()), reviewReason: why, webinarLead, beforeIntro: welcomed && !stepDone && !introduced, introJustSent: voiced || introduced,
       brokerLinkAsk: directAsk, hasMedia: images.length > 0 || media.length > 0, assetExists: !!faqAsset, recentlySent: faqRecentlySent(sentFaq, faqTopic),
+      strictSingleTopic: strictVoice,
     });
   }
   const faqExtra = faqTopic ? { faq_topic: faqTopic, faq_mode: faq.mode, faq_reason: faq.reason } : {};
@@ -691,7 +694,8 @@ async function doReply(db: Db, job: Job): Promise<JobResult> {
   // du brouillon quand il n'y a pas de vocal. Jamais vocal + texte. Drapeau coupé : le brouillon part comme avant.
   if (!why && canSend && faqSheetFallbackEnabled()) {
     const sheetTopic = faqClass.topic;
-    const voiceExists = !!(faqTopic && faqAsset);
+    // Pas de vocal (asset absent, ou message pas un seul sujet clair) : la fiche peut partir, jamais les deux.
+    const voiceExists = !!(faqTopic && faqAsset) && !faqAutoVoiceBlocked(faqClass, strictVoice);
     if (sheetTopic && isWindowTopic(sheetTopic) && faqClass.confidence >= FAQ_MIN_CONFIDENCE) {
       const sheets = await loadSheetFlags(db).catch(() => parseSheetFlags({}));
       const sheet = sheets[sheetTopic];
@@ -784,7 +788,8 @@ async function chainHowItWorks(
   const topic = 'faq_how_it_works' as const;
   const mark = { chained: 'faq_how_it_works' };
   const asset = await pickFaqVoice(db, topic).catch(() => null);
-  if (asset) {
+  const voiceOk = howItWorksVoiceAllowed(c.joined);
+  if (asset && voiceOk) {
     const { data: newerF } = await db.from('member_actions').select('id').eq('tg_id', c.job.tg_id).eq('kind', BIZ_KIND).eq('detail->>from', 'client').gt('created_at', c.last.created_at).limit(1);
     if (newerF?.length) return { status: 'done', result: { outcome: 'skip', reason: 'nouveau message pendant la rédaction : la réponse suivante reprend tout', ...mark } };
     const sent = await sendFaqVoice(db, { id: c.last.id, tg_id: c.job.tg_id, member_no: c.member?.member_no ?? null, detail: { ...c.base, conn: c.job.conn } }, topic, asset, 'algoria-ai', null);
@@ -810,7 +815,7 @@ async function chainHowItWorks(
       return { status: 'done', result: { outcome: 'review', reason: err, ...mark } };
     }
   }
-  await reviewCard(db, c.conn, c.last.id, c.base, c.member, null, 'how it works après l’accueil : pas de vocal actif ni de fiche branchée');
+  await reviewCard(db, c.conn, c.last.id, c.base, c.member, null, voiceOk ? 'how it works après l’accueil : pas de vocal actif ni de fiche branchée' : 'how it works après l’accueil : plusieurs sujets ou message ambigu, pas de vocal');
   await maybeReviewHold(db, c.job, c.member, false);
   return { status: 'done', result: { outcome: 'review', reason: 'how it works après l’accueil', ...mark } };
 }
