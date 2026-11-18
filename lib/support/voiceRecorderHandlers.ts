@@ -10,6 +10,7 @@ import {
 } from './voiceCheck';
 import { formatRecorderMessage } from './voiceScripts';
 import { isCheckVoicesCommand, loadActiveVoices, runCheckVoices } from './voiceAudit';
+import { dispatchPlayVoice, isOwnerPrivateChat, parsePlayVoiceCommand } from './voicePlay';
 import { transcribeTelegramVoice } from './voiceStt';
 import {
   applyRecorderAction, currentScript, isRetryableOwnerVoice, parseRecorderCallback, parseRecorderCommand,
@@ -29,12 +30,6 @@ async function isOwner(fromId: unknown): Promise<boolean> {
   return (await adminTgIds()).includes(id);
 }
 
-/** Privé avec le bot, et l'expéditeur EST ce chat (pas un groupe, pas une conversation Business). */
-function ownPrivate(msg: { chat?: { type?: string; id?: unknown }; from?: { id?: unknown }; business_connection_id?: unknown }): boolean {
-  if (msg?.chat?.type !== 'private' || msg.business_connection_id) return false;
-  return Number(msg.chat?.id) > 0 && Number(msg.chat?.id) === Number(msg.from?.id);
-}
-
 async function loadState(db: Db): Promise<RecorderState> {
   const { data } = await db.from('support_settings').select('value').eq('key', KEY).limit(1);
   return parseRecorderState(data?.[0]?.value);
@@ -44,9 +39,9 @@ async function storeState(db: Db, state: RecorderState): Promise<void> {
   await db.from('support_settings').upsert({ key: KEY, value: serializeRecorderState(state), updated_by: 'voice-recorder' }, { onConflict: 'key' });
 }
 
-async function tgSend(method: string, payload: Record<string, unknown>): Promise<void> {
+async function tgSend(method: string, payload: Record<string, unknown>) {
   const { tg } = await import('../member/businessInbox');
-  await tg(method, payload);
+  return tg(method, payload);
 }
 
 async function say(chatId: number, step: RecorderStep): Promise<void> {
@@ -68,13 +63,23 @@ async function run(db: Db, chatId: number, state: RecorderState, action: Recorde
   return step;
 }
 
-/** /record_voices et /record_voices resume. false = ce n'est pas pour nous (le webhook continue). */
+/** /record_voices, /check_voices et /play_voice. false = ce n'est pas pour nous (le webhook continue). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleVoiceRecorderCommand(db: Db, msg: any): Promise<boolean> {
   const text = typeof msg?.text === 'string' ? msg.text : '';
+  // /play_voice : même privé, même propriétaire. Lecture seule, drapeau du recorder, pas un second webhook.
+  if (parsePlayVoiceCommand(text)) {
+    return dispatchPlayVoice({
+      db,
+      msg,
+      isOwner,
+      enabled: enabled(),
+      send: (method, payload) => tgSend(method, payload),
+    });
+  }
   const audit = isCheckVoicesCommand(text);
   if (!audit && !parseRecorderCommand(text)) return false;
-  if (!ownPrivate(msg)) return false;
+  if (!isOwnerPrivateChat(msg)) return false;
   if (!(await isOwner(msg.from?.id))) return false;
   const chatId = Number(msg.chat.id);
   if (audit) {
@@ -128,7 +133,7 @@ export async function handleVoiceRecorderCallback(db: Db, cq: any): Promise<bool
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleVoiceRecorderVoice(db: Db, msg: any): Promise<boolean> {
   if (!msg?.voice || msg.video_note || msg.reply_to_message) return false;
-  if (!ownPrivate(msg)) return false;
+  if (!isOwnerPrivateChat(msg)) return false;
   if (!enabled()) return false;
   if (!(await isOwner(msg.from?.id))) return false;
   const state = await loadState(db);
