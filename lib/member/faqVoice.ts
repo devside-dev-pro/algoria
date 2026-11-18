@@ -27,6 +27,11 @@ export const FAQ_TOPICS = [
 export type FaqTopic = (typeof FAQ_TOPICS)[number];
 export const isFaqTopic = (t: unknown): t is FaqTopic => typeof t === 'string' && (FAQ_TOPICS as readonly string[]).includes(t);
 
+/** Sujets de la fenêtre 5h–9h qui n'ont pas de vocal FAQ (#583) : le classifieur les reconnaît, ils ne partent pas en vocal. */
+export const FAQ_EXTRA_TOPICS = ['faq_existing_account', 'faq_activation'] as const;
+export type FaqExtraTopic = (typeof FAQ_EXTRA_TOPICS)[number];
+export type ClassifiedTopic = FaqTopic | FaqExtraTopic;
+
 /** Le libellé des boutons chez Mathieu (court : 2 boutons par ligne). */
 export const FAQ_LABELS: Record<FaqTopic, string> = {
   faq_how_it_works: '⚙️ Comment ça marche',
@@ -133,6 +138,28 @@ const RULES: Record<FaqTopic, Rule> = {
   },
 };
 
+const EXTRA_RULES: Record<FaqExtraTopic, Rule> = {
+  // « I have opened the account since yesterday » → connecter dans l'app, pas un dépôt déjà fait
+  faq_existing_account: {
+    strong: [
+      /\bi(?:'ve| have)? (?:just |already )?opened (?:an |the |my )?(?:broker |trading )?account\b/i,
+      /\bopened (?:an |the |my )?(?:broker |trading )?account\b/i,
+      /\bi have opened the account\b/i,
+      /\balready have (?:a |an )?(?:broker |trading |live |real )account\b/i,
+      /\bmy account is (?:already )?open(?:ed)?\b/i,
+      /\baccount (?:has been |is already |was )opened\b/i,
+    ],
+  },
+  faq_activation: {
+    strong: [
+      /\bactivation trades?\b/i,
+      /\btrades? (?:of |for )activation\b/i,
+      /\bwhen (?:do|will|does|can) (?:the |my )?activation\b/i,
+      /\bactivate (?:the |my )?(?:copy(?:ing)?|account|algoria)\b/i,
+    ],
+  },
+};
+
 // une conversation sur la nuit du 21-22/10 (mots de lib/member/incident.ts, INCIDENT_TALK) : seul faq_incident, et
 // seulement explicite ; jamais un vocal joyeux sur un autre sujet sous un message qui parle de pertes
 const INCIDENT_WORDS = /\b(incident|blown|wiped|liquidat\w*|margin call|stop ?out|stopped out|what happened|crash\w*|bug|glitch|malfunction\w*|compensat\w*|refund\w*|money back|lost (?:my|all|everything|it|money)|(?<!stop[ -]?)losses?|scam\w*|fraud\w*)\b/i;
@@ -141,29 +168,34 @@ const APP_BUTTON = /book a quick call to activate|quick call to set up my algori
 // il colle un identifiant, un mot de passe, un token : jamais de vocal, la carte va à Mathieu (garde du modèle)
 const CREDENTIALS = /\b(?:password|passcode|pwd|pass|token|seed(?: phrase)?|otp|investor|trader)\s*(?:is|:|=|-)\s*\S+/i;
 
-export type FaqClass = { topic: FaqTopic | null; confidence: number; reason?: string; scores: Partial<Record<FaqTopic, number>> };
+export type FaqClass = { topic: ClassifiedTopic | null; confidence: number; reason?: string; scores: Partial<Record<ClassifiedTopic, number>> };
 
 export function classifyFaq(text: string): FaqClass {
   const t = String(text ?? '').replace(/[’]/g, "'").trim();
   if (!t) return { topic: null, confidence: 0, reason: 'vide', scores: {} };
   if (APP_BUTTON.test(t)) return { topic: null, confidence: 0, reason: 'message tout fait de l’app', scores: {} };
   if (CREDENTIALS.test(t)) return { topic: null, confidence: 0, reason: 'identifiant ou mot de passe dans le message', scores: {} };
-  const scores: Partial<Record<FaqTopic, number>> = {};
-  const strongOf: Partial<Record<FaqTopic, boolean>> = {};
-  for (const topic of FAQ_TOPICS) {
-    const r = RULES[topic];
+  const scores: Partial<Record<ClassifiedTopic, number>> = {};
+  const strongOf: Partial<Record<ClassifiedTopic, boolean>> = {};
+  const topics: ClassifiedTopic[] = [...FAQ_TOPICS, ...FAQ_EXTRA_TOPICS];
+  for (const topic of topics) {
+    const r = isFaqTopic(topic) ? RULES[topic] : EXTRA_RULES[topic];
     const strong = r.strong.filter((re) => re.test(t)).length;
     const weak = (r.weak ?? []).filter((re) => re.test(t)).length;
     if (!strong && !weak) continue;
     scores[topic] = strong ? Math.min(1, 0.9 + 0.05 * (strong - 1)) : 0.55;
     strongOf[topic] = strong > 0;
   }
-  const ranked = (Object.keys(scores) as FaqTopic[]).sort((a, b) => (scores[b] ?? 0) - (scores[a] ?? 0) || FAQ_TOPICS.indexOf(a) - FAQ_TOPICS.indexOf(b));
+  const orderOf = (topic: ClassifiedTopic) => {
+    const i = FAQ_TOPICS.indexOf(topic as FaqTopic);
+    return i >= 0 ? i : FAQ_TOPICS.length + FAQ_EXTRA_TOPICS.indexOf(topic as FaqExtraTopic);
+  };
+  const ranked = (Object.keys(scores) as ClassifiedTopic[]).sort((a, b) => (scores[b] ?? 0) - (scores[a] ?? 0) || orderOf(a) - orderOf(b));
   const top = ranked[0];
   if (!top) return { topic: null, confidence: 0, reason: 'aucun thème', scores };
   // l'incident : explicite et rien d'autre ; sinon des mots de la nuit bloquent tout vocal
   if (INCIDENT_WORDS.test(t) && !strongOf.faq_incident) return { topic: null, confidence: 0, reason: 'parle de pertes / de la nuit sans question explicite', scores };
-  const pick: FaqTopic = strongOf.faq_incident ? 'faq_incident' : top;
+  const pick: ClassifiedTopic = strongOf.faq_incident ? 'faq_incident' : top;
   let confidence = scores[pick] ?? 0;
   for (const other of ranked) {
     if (other === pick) continue;
@@ -178,14 +210,14 @@ export function classifyFaq(text: string): FaqClass {
 }
 
 // des thèmes qui partagent naturellement leurs mots-clés faibles (« minimum deposit … broker account »)
-const FAMILIES: FaqTopic[][] = [
+const FAMILIES: string[][] = [
   ['faq_deposit', 'faq_broker', 'faq_cost_free'],
-  ['faq_connect', 'faq_app_login', 'faq_not_copying_yet'],
+  ['faq_connect', 'faq_app_login', 'faq_not_copying_yet', 'faq_existing_account', 'faq_activation'],
   ['faq_kyc_raisefx', 'faq_broker'],
   ['faq_results_myfxbook', 'faq_risk_lots'],
   ['faq_withdraw_30d', 'faq_broker'],
 ];
-const sameFamily = (a: FaqTopic, b: FaqTopic) => FAMILIES.some((f) => f.includes(a) && f.includes(b));
+const sameFamily = (a: string, b: string) => FAMILIES.some((f) => f.includes(a) && f.includes(b));
 
 // ── LA DÉCISION ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -215,9 +247,10 @@ export type FaqDecision = { mode: 'auto' | 'card' | 'none'; topic: FaqTopic | nu
 /** auto = le vocal part seul à la place du texte · card = bouton « 🎙 Envoyer le vocal » sous la carte de Mathieu ·
  *  none = comportement actuel inchangé. Ne relâche AUCUN garde-fou : une réponse qui irait en carte reste une carte. */
 export function faqVoiceDecision(c: FaqClass, ctx: FaqContext): FaqDecision {
-  const topic = c.topic;
+  const topic = c.topic && isFaqTopic(c.topic) ? c.topic : null;
   const none = (reason: string): FaqDecision => ({ mode: 'none', topic, reason });
-  if (!topic) return none(c.reason ?? 'aucun thème');
+  if (!c.topic) return none(c.reason ?? 'aucun thème');
+  if (!isFaqTopic(c.topic)) return none('pas un vocal FAQ');
   if (c.confidence < FAQ_MIN_CONFIDENCE) return none(`confiance ${c.confidence} < ${FAQ_MIN_CONFIDENCE}`);
   if (ctx.webinarLead) return none('lead webinaire : à Mathieu');
   if (ctx.beforeIntro || ctx.introJustSent) return none('accueil / intro en cours');
@@ -225,9 +258,9 @@ export function faqVoiceDecision(c: FaqClass, ctx: FaqContext): FaqDecision {
   if (ctx.hasMedia) return none('captures ou médias à lire');
   if (!ctx.assetExists) return none('pas de vocal actif pour ce thème');
   if (ctx.recentlySent) return none('déjà envoyé récemment (anti-spam)');
-  if (ctx.reviewReason || FAQ_CARD_ONLY.has(topic)) return { mode: 'card', topic, reason: ctx.reviewReason ?? 'thème à valider par Mathieu' };
-  if (!ctx.modelSure) return { mode: 'card', topic, reason: 'le modèle n’est pas sûr' };
-  return { mode: 'auto', topic, reason: 'ok' };
+  if (ctx.reviewReason || FAQ_CARD_ONLY.has(c.topic)) return { mode: 'card', topic: c.topic, reason: ctx.reviewReason ?? 'thème à valider par Mathieu' };
+  if (!ctx.modelSure) return { mode: 'card', topic: c.topic, reason: 'le modèle n’est pas sûr' };
+  return { mode: 'auto', topic: c.topic, reason: 'ok' };
 }
 
 // ── L'ANTI-SPAM ────────────────────────────────────────────────────────────────────────────────────────
