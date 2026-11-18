@@ -81,12 +81,30 @@ type SthUserStatus = { isTradingAccountConnected?: boolean; tradingAccountConnec
 export const sthConnected = (d: SthUserStatus | null | undefined): boolean =>
   (d?.isTradingAccountConnected ?? d?.tradingAccountConnected) === true;
 
+function statusFlag(v: boolean | undefined): string {
+  return v === undefined ? 'unset' : String(v);
+}
+
+/** Une ligne par appel, succès compris. Uniquement le verdict : pas le body (licence, mot de passe,
+ *  login, serveur, noms). Le UserID est l'identifiant qu'on a envoyé — rien d'autre. */
+function sthLogUserStatus(userId: string, st: SthResult<SthUserStatus>): void {
+  const d = st.data ?? {};
+  const masters = Array.isArray(d.masterAccountsList) ? d.masterAccountsList.length : 0;
+  const err = sthSafeError(st.errorMessage || '').replace(/[\r\n]+/g, ' ');
+  const id = String(userId).replace(/[\r\n]+/g, ' ').slice(0, 80);
+  console.warn(
+    `[sth] get-user-status UserID=${id} ok=${st.ok} isTradingAccountConnected=${statusFlag(d.isTradingAccountConnected)} tradingAccountConnected=${statusFlag(d.tradingAccountConnected)} masterAccountsList=${masters} errorMessage=${err}`,
+  );
+}
+
 /** Statut d'un utilisateur du copieur : compte connecté ? + liste des masters de la licence. */
-export function sthStatus(userId: string) {
-  return sthPost<SthUserStatus>(
+export async function sthStatus(userId: string) {
+  const st = await sthPost<SthUserStatus>(
     '/Partner/get-user-status',
     { UserID: userId },
   );
+  sthLogUserStatus(userId, st);
+  return st;
 }
 
 /** Connecte le compte MetaTrader du client au copieur (1re étape). Lots = taille de copie fixe. */
@@ -228,15 +246,27 @@ export async function sthConnectAndJoin(o: {
     // qu'au mot « already ». STH répond « Invalid account » pour un compte déjà enregistré — message que
     // rien ne laisse deviner. Résultat : une cliente parfaitement connectée chez eux était déclarée
     // invalide chez nous, et le support ne pouvait plus la rebrancher.
-    // On redemande donc l'état RÉEL : si le compte est connecté, l'échec du connect n'en est pas un et on
+    // On redemande donc l'état RÉEL : si le pont MT est branché, l'échec du connect n'en est pas un et on
     // continue vers le join. Un fait vérifié vaut mieux qu'une chaîne de caractères devinée.
-    // On redemande l'état RÉEL — via isApiKnown, PAS via le drapeau seul. Le drapeau étant faux pour tout
-    // le monde, ce test transformait la moindre erreur de connect en échec définitif, y compris sur un
-    // compte parfaitement abonné : c'est exactement le faux négatif que isApiKnown documente.
     const after = await sthStatus(o.userId);
-    if (!isApiKnown(after)) {
-      // STH a refusé le connect ET l'utilisateur n'est pas connu : si le libellé désigne clairement
+    if (isInvalidAccountMessage(c.errorMessage)) {
+      // 18/11/2026, membre #652. isApiKnown répondait vrai si le statut n'était pas ok, si le pont était
+      // branché, OU si masterAccountsList n'était pas vide. Sur un utilisateur absent du dashboard STH
+      // (identifiants faux : INVALID_ACCOUNT), ça lançait join-master-account ~45 s
+      // (« MetaTrader account not connected ») puis « retry in 1-2 minutes ». On n'enchaîne le join que
+      // si le pont est réellement connecté — c'est le filet #7 (déjà enregistré). Sinon on s'arrête tout
+      // de suite : le message remonte tel quel à l'admin (toast GO LIVE / alerte CONNECT).
+      if (!sthConnected(after.data)) {
+        return {
+          ok: false,
+          error: 'identifiants refusés par STH : INVALID_ACCOUNT — vérifie le mot de passe principal (pas investor) et le nom exact du serveur.',
+        };
+      }
+    } else if (!isApiKnown(after)) {
+      // Autre refus de connect, utilisateur pas connu : si le libellé désigne clairement
       // les identifiants ou le serveur, on le dit. Sinon on remonte le message brut.
+      // isApiKnown reste ici (et seulement ici) : un statut injoignable ne doit pas transformer
+      // une erreur réseau en refus d'identifiants.
       if (isCredentialError(c.errorMessage)) {
         return { ok: false, error: `credentials rejected by STH: ${c.errorMessage} — check it's the MAIN password, not investor, and the exact server name.` };
       }
