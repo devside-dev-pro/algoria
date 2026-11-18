@@ -1,7 +1,7 @@
 // Liste des 19 vocaux du mode guidé (SUPPORT_VOICE_RECORDER).
 // `key` et `situation` servent à l'enregistrement. Le prompt montré au propriétaire n'affiche ni l'un ni l'autre :
 // progression, titre, « Quand il part », et le texte anglais à lire.
-import { FAQ_KIND, FAQ_WAIT_TOPIC, type FaqTopic } from '../member/faqVoice';
+import { FAQ_KIND, type FaqTopic } from '../member/faqVoice';
 
 /** Où le code envoie déjà quelque chose de proche. `none` = ce vocal n'est branché nulle part. */
 export type VoiceAutoSend = 'faq' | 'wait' | 'none';
@@ -104,12 +104,6 @@ export const VOICE_SCRIPTS: readonly VoiceScript[] = [
     'Juste après un refus `wrong_credentials`. Action : corriger numéro de compte / mot de passe trader dans l\'app, puis « CONNECT MY ACCOUNT → ».',
     'Hey, I couldn\'t log in with the details that were entered, so the connection didn\'t go through. Please check the MetaTrader account number — the digits at the top of MT5 — and the trader password, not your broker website login, and not the investor password, that\'s read-only. Enter those only in the app, never send the password here. Then fix just those in the app, and tap Connect my account again. If it fails again, send me a screenshot of the error, with no passwords, and I\'ll help you from there.',
     'reject:wrong_credentials'),
-  {
-    n: 19, key: 'attente_5h9h', title: 'Attente 05:00–09:00 Asia/Dubai',
-    when: 'Fenêtre 05:00–09:00 Asia/Dubai, quand le message n\'est pas auto-OK et reste en relecture. Au plus une fois par prospect et par fenêtre. Aucun délai chiffré.',
-    script: 'Hey, I got your message, thank you for writing in. I\'ll get back to you shortly — I just can\'t go through it properly right now. In the meantime, if you were in the middle of the setup, you can keep going in the app at app.getalgoria.com. Log in with Telegram, one tap, and the steps are explained there. Please don\'t send any passwords or trading logins in this chat — those only go in the app. I\'ll come back to you as soon as I can. If you\'re stuck on a screen, leave me a screenshot of the error, no passwords.',
-    kind: FAQ_KIND, situation: FAQ_WAIT_TOPIC, fixedLine: false, autoSend: 'wait',
-  },
 ];
 
 export const scriptByKey = (key: string): VoiceScript | undefined => VOICE_SCRIPTS.find((s) => s.key === key);

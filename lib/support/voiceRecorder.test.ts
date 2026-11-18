@@ -2,13 +2,12 @@
 // npm test — aucun envoi vers un prospect : fonctions pures et fausse base.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FAQ_WAIT_TOPIC, FAQ_KIND } from '../member/faqVoice';
 import {
   TELEGRAM_TEXT_LIMIT, VOICE_SCRIPTS, escapeTgHtml, formatRecorderMessage, scriptByKey, scriptPrompt,
 } from './voiceScripts';
 import {
   RECORDER_TOTAL, applyRecorderAction, initialRecorderState, isRetryableOwnerVoice,
-  parseRecorderCommand, recorderEnabled, recorderKeyboard, savePlan, type RecorderState,
+  parseRecorderCommand, parseRecorderState, recorderEnabled, recorderKeyboard, savePlan, type RecorderState,
 } from './voiceRecorder';
 import { saveOwnerVoice } from './voiceRecorderHandlers';
 
@@ -21,16 +20,17 @@ test('drapeau SUPPORT_VOICE_RECORDER coupé par défaut', () => {
   assert.equal(recorderEnabled('1'), true);
 });
 
-test('19 clés dans l’ordre, chaque entrée a un when et un script', () => {
-  assert.equal(VOICE_SCRIPTS.length, 19);
-  assert.equal(RECORDER_TOTAL, 19);
+test('18 clés dans l’ordre, chaque entrée a un when et un script, pas d’attente', () => {
+  assert.equal(VOICE_SCRIPTS.length, 18);
+  assert.equal(RECORDER_TOTAL, 18);
   const keys = [
     'faq_how_it_works', 'faq_broker', 'faq_deposit', 'faq_cost_free', 'faq_connect',
     'faq_results_myfxbook', 'faq_gold_only', 'faq_withdraw_30d', 'faq_risk_lots', 'faq_kyc_raisefx',
     'accueil_generique', 'relance_avant_broker', 'relance_already_have_account', 'relance_apres_origine',
-    'pre_depot_rassurance', 'refus_no_deposit', 'refus_not_partner', 'refus_wrong_credentials', 'attente_5h9h',
+    'pre_depot_rassurance', 'refus_no_deposit', 'refus_not_partner', 'refus_wrong_credentials',
   ];
   assert.deepEqual(VOICE_SCRIPTS.map((s) => s.key), keys);
+  assert.equal(VOICE_SCRIPTS.some((s) => s.key === 'attente_5h9h' || s.situation === 'faq_attente_5h9h'), false);
   for (const s of VOICE_SCRIPTS) {
     assert.ok(s.when.trim().length > 0, s.key);
     assert.ok(s.script.trim().length > 0, s.key);
@@ -39,19 +39,21 @@ test('19 clés dans l’ordre, chaque entrée a un when et un script', () => {
   assert.match(scriptByKey('faq_how_it_works')?.script ?? '', /^Hey, quick one — Algoria is an AI/);
 });
 
-test('le 19 est un vocal FAQ d’attente, sans ligne fixe', () => {
-  const s = VOICE_SCRIPTS[18];
-  assert.equal(s.key, 'attente_5h9h');
-  assert.equal(s.kind, FAQ_KIND);
-  assert.equal(s.situation, FAQ_WAIT_TOPIC);
-  assert.equal(s.title, 'Attente 05:00–09:00 Asia/Dubai');
-  assert.equal(s.fixedLine, false);
-  assert.equal(s.autoSend, 'wait');
-  const plan = savePlan(s);
-  assert.equal(plan.kind, 'faq_voice');
-  assert.equal(plan.situation, 'faq_attente_5h9h');
-  assert.equal(plan.activateLikeFaq, true);
-  assert.equal(plan.sendsFixedLine, false);
+test('une progression sauvée à l’ancienne étape 19 est terminée', () => {
+  for (const raw of [
+    JSON.stringify({ status: 'active', index: 18 }),
+    JSON.stringify({ status: 'stopped', index: 18 }),
+    JSON.stringify({ status: 'done', index: 19 }),
+  ]) {
+    const state = parseRecorderState(raw);
+    assert.equal(state.status, 'done');
+    assert.equal(state.index, 18);
+    const resumed = applyRecorderAction(state, 'resume');
+    assert.equal(resumed.state.status, 'done');
+    assert.equal(resumed.prompt, null);
+    assert.match(resumed.note, /terminé/);
+  }
+  assert.equal(parseRecorderState(JSON.stringify({ status: 'active', index: 17 })).index, 17);
 });
 
 test('1–10 : vocal FAQ du thème, activation comme le tag manuel', () => {
@@ -87,10 +89,10 @@ test('11–18 : pas de vocal déjà envoyé par le code, situation explicite', (
 
 test('prompt : progression et titre, jamais la clé technique, script entier sous la limite Telegram', () => {
   for (const s of VOICE_SCRIPTS) {
-    const text = scriptPrompt(s, s.n, 19);
+    const text = scriptPrompt(s, s.n, RECORDER_TOTAL);
     assert.equal(text.includes(s.key), false, `clé affichée : ${s.key}`);
     assert.equal(text.includes(s.situation), false, `situation affichée : ${s.situation}`);
-    assert.match(text, new RegExp(`^<b>${s.n}/19 — `));
+    assert.match(text, new RegExp(`^<b>${s.n}/${RECORDER_TOTAL} — `));
     assert.ok(text.includes(escapeTgHtml(s.title)), s.key);
     assert.ok(text.includes('Quand il part :'), s.key);
     assert.ok(text.includes(escapeTgHtml(s.when.trim())), s.key);
@@ -100,7 +102,7 @@ test('prompt : progression et titre, jamais la clé technique, script entier sou
     assert.equal(sent.includes(s.key), false, s.key);
     assert.equal(sent.includes(s.situation), false, s.situation);
   }
-  const nasty = scriptPrompt({ ...VOICE_SCRIPTS[0], when: 'a < b & c', script: '1 < 2 & 3 > 0' }, 1, 19);
+  const nasty = scriptPrompt({ ...VOICE_SCRIPTS[0], when: 'a < b & c', script: '1 < 2 & 3 > 0' }, 1, RECORDER_TOTAL);
   assert.ok(nasty.includes('a &lt; b &amp; c'));
   assert.ok(nasty.includes('<pre>1 &lt; 2 &amp; 3 &gt; 0</pre>'));
   assert.equal(nasty.includes('1 < 2'), false);
@@ -123,10 +125,10 @@ test('parcours : vocal enregistré, skip, stop, resume, redo, fin', () => {
   st = applyRecorderAction(st, 'start').state;
   assert.equal(st.status, 'active');
   assert.equal(st.index, 0);
-  assert.equal(applyRecorderAction(st, 'start').prompt?.progress, '1/19');
+  assert.equal(applyRecorderAction(st, 'start').prompt?.progress, '1/18');
   st = applyRecorderAction(st, 'saved').state;
   assert.equal(st.index, 1);
-  assert.equal(applyRecorderAction(st, 'saved').prompt?.progress, '3/19');
+  assert.equal(applyRecorderAction(st, 'saved').prompt?.progress, '3/18');
   st = applyRecorderAction(st, 'skip').state;
   assert.equal(st.index, 2);
   const stopped = applyRecorderAction(st, 'stop');
@@ -136,7 +138,7 @@ test('parcours : vocal enregistré, skip, stop, resume, redo, fin', () => {
   const resumed = applyRecorderAction(stopped.state, 'resume');
   assert.equal(resumed.state.status, 'active');
   assert.equal(resumed.state.index, 2);
-  assert.equal(resumed.prompt?.progress, '3/19');
+  assert.equal(resumed.prompt?.progress, '3/18');
   const redo = applyRecorderAction(resumed.state, 'redo');
   assert.equal(redo.state.index, 2);
   assert.equal(redo.state.status, 'active');
@@ -144,7 +146,7 @@ test('parcours : vocal enregistré, skip, stop, resume, redo, fin', () => {
   let cur = resumed.state;
   while (cur.status === 'active') cur = applyRecorderAction(cur, 'skip').state;
   assert.equal(cur.status, 'done');
-  assert.equal(cur.index, 19);
+  assert.equal(cur.index, 18);
 });
 
 test('un vocal ne compte que si la session est active', () => {
