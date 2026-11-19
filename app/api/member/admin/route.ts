@@ -1367,7 +1367,7 @@ async function run(body: Body, s: AdminSession, req: NextRequest): Promise<NextR
   if (body.channelAutojoin) {
     // 🚪 ACCEPTATION AUTOMATIQUE DES DEMANDES D'ADHÉSION AU CANAL PUBLIC (26/10/2026, Mathieu : « on fait des échanges
     // de pubs, on doit pouvoir compter les demandes précisément »). Le runner lit support_settings 'public_autojoin' à
-    // chaque passage (runner/index.ts, autoApproveJoins). Coupée, les demandes restent en attente dans Telegram ; le
+    // chaque passage (runner/joinApproval.ts). Coupée, les demandes restent en attente dans Telegram ; le
     // panneau les compte par lien d'invitation depuis la coupure. Le VIP a son propre interrupteur ('vip_autojoin').
     if (body.channelAutojoin !== 'get') {
       const { error } = await db.from('support_settings').upsert({ key: 'public_autojoin', value: body.channelAutojoin, updated_at: new Date().toISOString(), updated_by: who }, { onConflict: 'key' });
