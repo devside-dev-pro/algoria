@@ -17,7 +17,7 @@ export const vipReady = (): boolean => Boolean(TOKEN && VIP);
 
 /** Id du canal VIP, tel que posé dans TELEGRAM_VIP_CHAT ('' si non configuré).
  *  Exporté pour que l'auto-approbation des adhésions puisse EXCLURE ce canal : le VIP se valide à la
- *  main (décision Mathieu du 24/08 — voir autoApproveJoins dans runner/index.ts). */
+ *  main (décision Mathieu du 24/08 — voir runner/joinApproval.ts). */
 export const VIP_CHAT: string = VIP;
 
 /** Étiquette portée par chaque message du canal.

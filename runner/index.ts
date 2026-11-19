@@ -34,6 +34,7 @@ import { runSentinel } from './sentinel';
 import { startCopyObserver } from './observer';
 import { startGuard } from './guard';
 import { startSourceHistorySync } from './sourceHistory';
+import { startJoinApproval } from './joinApproval';
 
 // MODE COPIE : ce compte reçoit ses trades d'un copieur externe, nos moteurs ne décident plus rien ici.
 // Lu une fois, au chargement, parce que plusieurs endroits doivent se taire quand il est actif — voir
@@ -45,7 +46,7 @@ import { tradingDayOf, tradingHour } from '../lib/display/tradingDay';
 import { goldFeedExpected } from '../lib/market/goldHours';
 import { ensureDeployed } from './metaapi/ensureDeployed';
 import { freshDeployGuard, isDeployedState } from './metaapi/deployGuard';
-import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, listRipeJoinRequests, listRipeVipRequests, markJoinApproved, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, runnerSwitch, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
+import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, runnerSwitch, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
 import type { Bar, Confluence, EngineState, MarketContext, Mode, Signal } from '../lib/engine/types';
@@ -105,6 +106,11 @@ async function deskNarrationOn(): Promise<boolean> {
 
 async function main() {
   console.log('[algoria] runner démarre…');
+  // Avant MetaApi (19/11/2026). connectMaster() ne rend la main que lorsque le broker est joint.
+  // Tant qu'il boucle (« Timed out waiting for account … to connect »), tout ce qui est enregistré
+  // après cet await — dont l'approbation des adhésions — ne tourne pas. La file est indépendante du
+  // prix et du déploiement : même lot de 25, mêmes interrupteurs, un seul runner.
+  startJoinApproval({ secondary: SECONDARY });
   const { account, stream, terminal } = await connectMaster();
 
   const instruments = activeInstruments();
@@ -1530,66 +1536,8 @@ async function main() {
   };
   if (!SECONDARY) setInterval(() => void maybeSthAudit(), 10 * 60_000);
 
-  // ===== AUTO-APPROBATION des demandes d'adhésion au canal (31/07 — Mathieu les acceptait par lots de
-  // 10-20 à la main quand il les voyait). Le webhook Vercel ne peut pas « attendre 3 minutes » (fonction
-  // serverless) : c'est le runner, allumé en permanence, qui balaie la file chaque minute. Le délai laisse
-  // au DM d'onboarding le temps d'être lu et évite l'effet « accepté à la milliseconde ».
-  // ALGORIA_AUTOJOIN_MIN = délai en minutes (défaut 3) · 0 ou négatif = fonction DÉSACTIVÉE (retour au manuel).
-  //
-  // ⚠️ LE CANAL VIP EN EST EXCLU (24/08/2026, décision Mathieu). Le balayage ne filtrait AUCUN canal : il
-  // acceptait donc aussi bien le canal public que le VIP, trois minutes après la demande. Mesuré sur la
-  // période : 14 demandes VIP, 14 auto-approuvées, ZÉRO jamais restée en attente — Mathieu n'a pas pu en
-  // voir une seule passer, alors que c'est LUI qui envoie ce lien, un par un, aux gens qu'il a choisis.
-  // Aucun intrus au moment du constat (les 14 étaient des membres avec dépôt), mais un lien VIP transféré
-  // faisait entrer n'importe qui sans le moindre contrôle.
-  //
-  // MISE À JOUR 01/09/2026 — LE VIP EST DE NOUVEAU AUTOMATIQUE, MAIS SOUS CONDITION. Le passage au
-  // manuel avait rouvert le problème d'origine (« je n'ai même pas le temps de les voir ») : la file
-  // dormait. Ce n'est plus le lien qui donne l'accès, c'est le LOT D'ACTIVATION VALIDÉ — une signature
-  // humaine sur le dashboard partenaire, qu'un membre ne peut pas se délivrer lui-même. Celui qui a
-  // rempli sa part entre en 3 minutes ; les autres restent en attente, avec une raison concrète d'agir.
-  // Voir listRipeVipRequests dans lib/supabase/sync.ts.
-  const AUTOJOIN_MIN = Number(process.env.ALGORIA_AUTOJOIN_MIN ?? 3);
-  const autoApproveJoins = async () => {
-    try {
-      const { approveJoinRequest, VIP_CHAT } = await import('./telegram');
-      // VIP_CHAT vide ou non numérique = on ne sait pas identifier le canal VIP, donc rien à exclure :
-      // on retombe sur le comportement d'avant plutôt que de bloquer toutes les adhésions par excès de zèle.
-      const vipId = Number(VIP_CHAT);
-      // CANAL PUBLIC : tout le monde, après le délai. VIP : uniquement ceux dont le lot d'activation est
-      // VALIDÉ (01/09) — le volume tradé décide à la place de Mathieu. Les deux files restent séparées
-      // pour la raison expliquée dans listRipeJoinRequests : le VIP, filtré, ne doit jamais affamer le
-      // public en occupant la limite avec des demandes qui ne passeront pas.
-      // VIP EN ATTENTE (22/10/2026, après l'incident de la nuit) : support_settings 'vip_autojoin' = 'off' → les
-      // demandes VIP restent en file, Mathieu fait patienter les nouveaux 2-3 jours. Le canal public, lui, continue.
-      // Repassé à 'on' : la file entière est approuvée au passage suivant (aucun âge maximum).
-      const vipOpen = Number.isFinite(vipId) && (await runnerSwitch('vip_autojoin')) === 'on';
-      // ÉCHANGES DE PUBS (26/10/2026, Mathieu : « on doit pouvoir compter les demandes précisément ») : support_settings
-      // 'public_autojoin' = 'off' → les demandes du canal public restent en attente, Telegram les compte par lien.
-      // Interrupteur dans l'admin (Tools). Repassé à 'on' : la file entière est approuvée au passage suivant.
-      const publicOpen = (await runnerSwitch('public_autojoin')) !== 'off';
-      const [publiques, vip] = await Promise.all([
-        publicOpen ? listRipeJoinRequests(AUTOJOIN_MIN, 25, Number.isFinite(vipId) ? [vipId] : []) : Promise.resolve([]),
-        vipOpen ? listRipeVipRequests(AUTOJOIN_MIN, vipId, 25) : Promise.resolve([]),
-      ]);
-      const ripe = [...publiques, ...vip];
-      if (!ripe.length) return;
-      let ok = 0;
-      for (const r of ripe) {
-        const res = await approveJoinRequest(Number(r.chat_id), Number(r.user_id));
-        if (res.ok) { ok++; await markJoinApproved(r.id, null); }
-        else if (res.error) await markJoinApproved(r.id, res.error.slice(0, 200)); // refus structurel : ne pas boucler
-        // res.error null = pépin réseau → on laisse la ligne en file pour le prochain passage
-      }
-      if (ok) await logNote(`🚪 ${ok} join request(s) auto-approved after ${AUTOJOIN_MIN} min${vip.length ? ` · dont ${vip.length} VIP (lots validés)` : ''}`, 'info');
-    } catch (e) {
-      console.error('[algoria] auto-approbation des adhésions échouée:', e);
-    }
-  };
-  if (!SECONDARY && AUTOJOIN_MIN > 0) {
-    setInterval(() => void autoApproveJoins(), 60_000); // un seul runner balaie, sinon triple approbation
-    console.log(`[algoria] auto-approbation des demandes d'adhésion : ON (délai ${AUTOJOIN_MIN} min)`);
-  }
+  // Auto-approbation des adhésions : armée au début de main(), avant la connexion broker.
+  // Ne pas la réenregistrer ici — une deuxième boucle approuverait deux fois.
 
   // ===== CONTENU VIP À VALEUR (au-delà des trades) : briefing du matin + pédagogie tournante — pour que le
   // canal VIT et donne des messages « forwardables » vers le public. Postés par le SEUL runner primaire (S2).

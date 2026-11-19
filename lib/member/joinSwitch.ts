@@ -10,7 +10,7 @@
 // aucune route de l'admin ne lit JOIN_SWITCH_TG_IDS.
 //
 // QUOI : la même écriture que le panneau de l'admin (app/api/member/admin/route.ts, `channelAutojoin`) : support_settings
-// 'public_autojoin' = 'on' | 'off', lu par le runner à chaque passage (runner/index.ts). Le VIP garde son interrupteur.
+// 'public_autojoin' = 'on' | 'off', lu par le runner à chaque passage (runner/joinApproval.ts). Le VIP garde son interrupteur.
 // Chaque bascule faite par quelqu'un d'autre qu'un admin est signalée à Mathieu (notifyOwner).
 import { adminTgIds, notifyOwner } from './notifyOwner';
 
