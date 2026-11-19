@@ -16,9 +16,20 @@ const NOW = Date.parse('2026-11-21T18:00:00Z');
 // 1 lot, +2000 $ → +200 $ à 0.10 lot ; 1 lot, +180 $ → +18.00 $ à 0.10 lot (seuil 150 $ à 1 lot)
 
 test('usd formats like the rest of the channel', () => {
-  assert.equal(usd(148), '+$148');
-  assert.equal(usd(14.8), '+$14.80');
-  assert.equal(usd(-20.5), '−$20.50');
+  assert.equal(usd(148), '+\u2060$148');
+  assert.equal(usd(14.8), '+\u2060$14.80');
+  assert.equal(usd(-20.5), '\u2212\u2060$20.50');
+});
+
+test('usd(74.4) glues the sign to the dollar with a word joiner', () => {
+  const s = usd(74.4);
+  assert.equal(s, '+\u2060$74.40');
+  assert.deepEqual([...s].slice(0, 3).map((c) => c.codePointAt(0)), [0x2b, 0x2060, 0x24]);
+  assert.equal(s.replace(/\u2060/g, ''), '+$74.40');
+  assert.equal(/\s/u.test(s), false);
+  assert.equal(/[<>&]/.test(s), false);
+  assert.equal(usd(-74.4), '\u2212\u2060$74.40');
+  assert.equal(fillVipTemplate('+$[X] and [X]', { X: s }), '+\u2060$74.40 and 74.40');
 });
 
 test('fillVipTemplate keeps English punctuation, italicises the risk line, does not double +$', () => {
@@ -70,7 +81,7 @@ test('fillFromTrades daily: last win of the day, skip if none left', () => {
   assert.equal(ok.ok, true);
   if (ok.ok) {
     assert.equal(ok.ref, '11');
-    assert.match(ok.text, /\+\$180 at 0\.10 lot/);
+    assert.match(ok.text, /\+\u2060\$180 at 0\.10 lot/);
   }
   const skip = fillFromTrades(template, trades, { day: '2026-11-18', usedTickets: ['10', '11'], now: NOW });
   assert.equal(skip.ok, false);
@@ -87,7 +98,7 @@ test('fillFromTrades weekly: three best wins, no total required, skip if fewer t
   const ok = fillFromTrades(template, trades, { day: '2026-11-21', weekly: true, now: NOW });
   assert.equal(ok.ok, true);
   if (ok.ok) {
-    assert.match(ok.text, /\+\$300, \+\$250 and \+\$180 at 0\.10 lot/);
+    assert.match(ok.text, /\+\u2060\$300, \+\u2060\$250 and \+\u2060\$180 at 0\.10 lot/);
     assert.doesNotMatch(ok.text, /\[/);
   }
   const few = fillFromTrades(template, trades.slice(0, 2), { day: '2026-11-21', weekly: true, now: NOW });
@@ -96,7 +107,7 @@ test('fillFromTrades weekly: three best wins, no total required, skip if fewer t
 
 test('fillsFromWin uses 0.10 lot display, never the master lot size', () => {
   const f = fillsFromWin(t({ ticket: '9', pnl: 2000, lot: 1, closed_at: '2026-11-18T10:00:00Z' }));
-  assert.equal(f.X, '+$200');
+  assert.equal(f.X, '+\u2060$200');
   assert.equal(f.lot, '0.10');
 });
 
