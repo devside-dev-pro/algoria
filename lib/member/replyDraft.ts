@@ -24,7 +24,7 @@ import { getAgentDocMeta } from './agentDocs';
 import { trackFacts } from './trackFacts';
 import { webinarFacts } from './webinar';
 import { sdb } from './server';
-import { ALLOWED_RESULT_LINKS, FOLLOW_UP_LINE, HISTORY_RESULTS_NOTE, INCIDENT, INCIDENT_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, LOSSES_LINE, MYFXBOOK_URL, PAST_RESULTS_LINE, resultsPolicy, type ResultsPolicy } from './incident';
+import { ALLOWED_RESULT_LINKS, FOLLOW_UP_LINE, HISTORY_RESULTS_NOTE, INCIDENT, INCIDENT_NOTE, INCIDENT_PARAGRAPH, INCIDENT_TALK, LOSSES_REPLY_RULE, MYFXBOOK_URL, resultsPolicy, type ResultsPolicy } from './incident';
 
 const MODEL = process.env.ALGORIA_REPLY_MODEL ?? 'claude-haiku-4-5-20251001';
 const SUPPORT_MODEL = process.env.ALGORIA_SUPPORT_MODEL ?? 'claude-sonnet-5-5';
@@ -65,8 +65,8 @@ function hardRules(bot: boolean): string {
 - NO DEADLINE, NO COMPENSATION: never "today", "tonight", "tomorrow", "this week", "in a few hours", "in the next few days", "very soon" with a time, a weekday, or any date for when ${me} will answer, check, fix or find a solution. Never promise or hint at a compensation, a refund, a reimbursement, getting money back or recovering funds ("we'll find solutions", "don't worry, we'll sort it"). To say you will follow up: "${follow}"
 - NEVER INVENT A FACT OR AN ACTION: never say what a screenshot proves ("your identity is verified", "the deposit arrived", "the transfer is done"): you cannot verify it. For a screenshot or a document you cannot fully answer: "Thanks, I've received it, I'll check and get back to you." Never say someone is checking or looking at something right now ("${bot ? "he's looking at it right now" : "I'm checking your account right now"}"): it is not happening. Never recompute or reinterpret someone's balance, profit or loss ("so you actually gained…"): if their numbers look odd, simply ask them to confirm. Never call something "last night" or "yesterday" unless it was: the incident was on 21-22 October.
 - ONLY GOLD: Algoria AI trades gold (XAU/USD) only, never crypto or Bitcoin.
-- THE INCIDENT: never bring it up yourself, never paste the incident paragraph (safeguards, broker contact) under a greeting, an emoji, a photo or an unrelated question, and never repeat it to someone who already got it. If asked directly whether there were losses: "${LOSSES_LINE}" then ${MYFXBOOK_URL} then "${PAST_RESULTS_LINE}". Never deny it, never say it cannot happen again.
-- TRACK RECORD: whenever you give results or proof, the link is ${MYFXBOOK_URL} (the verified record of the new version since 26 October, never "the whole history"), always followed by "${PAST_RESULTS_LINE}". Never promise to share it later: it already exists. Never quote a number of trades, days or wins (the sample is small).
+- THE INCIDENT: never bring it up yourself, never paste the incident paragraph (safeguards, broker contact) under a greeting, an emoji, a photo or an unrelated question, and never repeat it to someone who already got it. If asked directly whether there were losses: ${LOSSES_REPLY_RULE}. Never deny it, never say it cannot happen again.
+- TRACK RECORD: only when they ask for results, proof or the track record, the link is ${MYFXBOOK_URL} (the verified record of the new version since 26 October, never "the whole history"). Do not send this link on a reaction, a thanks, small talk, or any message that does not ask for results, proof or the track record. Do not add a disclaimer after it. Never promise to share it later: it already exists. Never quote a number of trades, days or wins (the sample is small).
 - PASSWORDS: never ask for or accept a password, token or code in the chat. The trader password: "${TRADER_PASSWORD_LINE}" Never call it read-only.
 - Links: the app is ${APP_URL} (never algoria.tech).`;
 }
@@ -96,7 +96,7 @@ function facts(): string {
     `Demo accounts: NOT offered — the free access needs a REAL account opened through the partner link (that is how the broker registers it and how Algoria stays free). To judge BEFORE depositing: the real track record page (month by month since July 2026, every single trade since October 2026, losing months included) and the app History (every closed trade, wins and losses). Whoever wants to start small deposits the minimum and copies at 0.01 lot — that is real money, at real risk, and it must stay ${WITHDRAW_LOCK_DAYS} days.`,
     // 29/09/2026 : la page n'est PLUS une simulation — c'est l'historique réel du compte copié (MetaApi,
     // lecture seule). Le bot l'écrivait encore « historical SIMULATION » aux prospects.
-    `Results: every closed trade, wins and losses, is in the app History (grouped by day, since Algoria 2.0). The track record page (https://getalgoria.com/track-record, also in the app: History, or from Algoria AI, the central button) shows the REAL account's results since July 2026: total, curve and month by month, in % or in $ at any lot size, losing months included. From October 2026, tapping a month opens every trade one by one (time, buy or sell, entry, exit, result). The months before October have NO trade-by-trade detail on that page: never say they do. It is real history, NOT a simulation or a backtest. Trading involves risk; past results do not predict future results.`,
+    `Results: every closed trade, wins and losses, is in the app History (grouped by day, since Algoria 2.0). The track record page (https://getalgoria.com/track-record, also in the app: History, or from Algoria AI, the central button) shows the REAL account's results since July 2026: total, curve and month by month, in % or in $ at any lot size, losing months included. From October 2026, tapping a month opens every trade one by one (time, buy or sell, entry, exit, result). The months before October have NO trade-by-trade detail on that page: never say they do. It is real history, NOT a simulation or a backtest.`,
     `Support: Mathieu answers personally on Telegram (@mathieu_algoria).`,
     // 29/09/2026 : les ARGUMENTS de Mathieu face au « c'est une martingale ? » — une base de raisonnement,
     // pas un texte à coller (décision Mathieu : « adapte à la question, pas du mot à mot »).
@@ -131,12 +131,13 @@ function brokerLinks(): string {
   }).join('\n');
 }
 
-/** Règle « résultats passés ». Ouverte : on peut citer le bloc REAL PAST RESULTS et le lien (texte du 30/09/2026,
- *  inchangé). Retenue (incident, ou historique en maintenance pour un prospect) : aucun chiffre, aucun lien.
- *  La perte d'octobre ne se dit que si on la demande, en une phrase (LOSSES_LINE), sans chiffre (28/10/2026 : plus de
- *  « about 85% »), et jamais sous le mot « maintenance ». */
-const PAST_RESULTS_OPEN = `PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://getalgoria.com/track-record and the reminder that past results do not guarantee future results. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars.`;
-const PAST_RESULTS_HELD = `PAST RESULTS: do NOT quote any performance figure, win rate or dollar result, and do NOT send the track record page. The RESULTS block (under MORE FACTS, at the end) wins over the KNOWLEDGE and the older lessons. The only results link you may send is the Myfxbook link written there, copied exactly: it replaces every result figure. The only percentage you may write is the −5% daily safeguard. About the night of 21-22 October, if they ask what happened or why there is a new account: only the single sentence "${LOSSES_LINE}" then the Myfxbook URL and "${PAST_RESULTS_LINE}"; never a figure about that loss, never call it "maintenance", never minimise it. No other percentage.`;
+/** Règle « résultats passés ». Ouverte : on peut citer le bloc REAL PAST RESULTS et le lien de la page.
+ *  Retenue (incident, ou historique en maintenance pour un prospect) : aucun chiffre, aucun lien de page.
+ *  23/11/2026 : plus de rappel « past results do not guarantee… ». La perte d'octobre ne se dit que si on la
+ *  demande, en une phrase (LOSSES_LINE), sans chiffre (28/10/2026 : plus de « about 85% »), sans lien Myfxbook
+ *  sauf demande de track record, et jamais sous le mot « maintenance ». */
+const PAST_RESULTS_OPEN = `PAST RESULTS (decision Mathieu, 30/09/2026: past performance is a fact, not something to hide; the future is what we never talk about): you MAY quote figures from the REAL PAST RESULTS block, exactly as written there, always in the past tense ("the account did +X% in September"), always with https://getalgoria.com/track-record. NEVER a figure that is not in that block (if the block is missing, send the link instead), NEVER an average per day, week or month, NEVER an estimate, projection or promise of what someone will make, NEVER the account size or a balance in dollars. Do not add a disclaimer.`;
+const PAST_RESULTS_HELD = `PAST RESULTS: do NOT quote any performance figure, win rate or dollar result, and do NOT send the track record page. The RESULTS block (under MORE FACTS, at the end) wins over the KNOWLEDGE and the older lessons. The only results link you may send is the Myfxbook link written there, copied exactly, and only when they ask for results, proof or the track record: it replaces every result figure. Do not send it on a reaction, a thanks, small talk, or a losses question that does not also ask for the record. Do not add a disclaimer after it. The only percentage you may write is the −5% daily safeguard. About the night of 21-22 October, if they ask what happened or why there is a new account: ${LOSSES_REPLY_RULE}; never a figure about that loss, never call it "maintenance", never minimise it. No other percentage.`;
 const pastResultsRule = (hold: boolean) => (hold ? PAST_RESULTS_HELD : PAST_RESULTS_OPEN);
 
 /** Les leçons apprises des corrections de Mathieu : elles priment sur tout le reste. */
@@ -523,7 +524,8 @@ const RETRY_HINT: Record<string, string> = {
   'promesse ou abonnement (« guarantee », « per month »)': 'it used "guarantee" or "per month"',
   'lien du track record': 'it included a track record page link. Remove it. No result figure. The only results link is the Myfxbook URL from the FACTS, copied exactly.',
   'lien de résultats non autorisé': 'it used a Myfxbook URL that is not the one in the FACTS. Copy that URL exactly, or send no results link.',
-  'lien myfxbook manquant': 'they asked for results or proof and the reply has no Myfxbook link. Add the exact Myfxbook URL from the FACTS. No result figure.',
+  'lien myfxbook manquant': 'they asked for results or proof and the reply has no Myfxbook link. Add the exact Myfxbook URL from the FACTS. No result figure. Do not add a disclaimer.',
+  'lien myfxbook non demandé': 'they did not ask for results, proof or a track record. Remove the Myfxbook link. Do not add a disclaimer.',
   'chiffre de résultat': 'it quoted a figure about the October loss. Remove it: about the loss, only the single sentence from the FACTS, then the Myfxbook URL. No figure.',
   // L'indice ne redit pas le chiffre : sinon la 2e tentative le recopie.
   // 28/10/2026 : les règles dures (hardRules). L'indice dit quoi enlever, sans recopier la phrase fautive.
@@ -538,7 +540,7 @@ const RETRY_HINT: Record<string, string> = {
   'actif non tradé (crypto)': 'it said Algoria trades crypto or Bitcoin. Algoria AI trades gold (XAU/USD) only.',
   'ça ne se reproduira pas': 'it said the incident cannot happen again. Never say that.',
   'petit échantillon': 'it quoted a number of trades, days or wins. Remove it: the Myfxbook link is the proof.',
-  'track record promis plus tard': `it promised the track record later. It exists now: ${MYFXBOOK_URL} then "${PAST_RESULTS_LINE}"`,
+  'track record promis plus tard': `it promised the track record later. It exists now: ${MYFXBOOK_URL}. Do not add a disclaimer.`,
   'paragraphe incident déjà envoyé': 'it repeated the incident message (safeguards, broker contact) that this person already received. Answer only their new message, without it.',
   'phrase déjà envoyée': 'it repeated a sentence already sent in this conversation. Say only what is new.',
   'plafond de positions': 'it mentioned a limit on how many trades or positions can be open at once. Delete that limit. The only safeguards to name are a stop within 2 minutes and closing everything if the day reaches −5%.',
@@ -774,12 +776,6 @@ export function fixOldDomain(text: string): string {
     .replace(/https?:\/\/(?:www\.)?algoria\.tech/gi, 'https://getalgoria.com')
     .replace(/\b(?:www\.)?algoria\.tech\/([\w-])/gi, 'getalgoria.com/$1');
 }
-const HAS_DISCLAIMER = /(?:past|previous) (?:results?|performance)[^.!?\n]*?(?:do not|don't|does not|doesn't|never|can't|cannot) (?:guarantee|predict)/i;
-/** Le lien Myfxbook est toujours suivi de l'avertissement (28/10/2026) : ajouté s'il manque. */
-export function withPastDisclaimer(text: string): string {
-  if (!text.includes(MYFXBOOK_URL) || HAS_DISCLAIMER.test(text)) return text;
-  return `${text.replace(/\s+$/, '')}${/[.!?]$/.test(text.trim()) || text.trim().endsWith(MYFXBOOK_URL) ? '' : '.'} ${PAST_RESULTS_LINE}`;
-}
 /** Le premier refus des règles dures, ou null. */
 export function hardRuleIssue(text: string, o: { sentBefore?: string[]; now?: number } = {}): string | null {
   if (deadlineIssue(text)) return 'délai promis';
@@ -825,6 +821,8 @@ export function replyTextIssue(out: string, opts: ReplyTextOpts): string | null 
     if (WANTS_PROOF.test(opts.userText) && !out.includes(MYFXBOOK_URL)) return 'lien myfxbook manquant';
     if (mentionsPositionCap(out)) return 'plafond de positions';
   }
+  // 23/11/2026 : le lien officiel ne part pas sur une réaction, un merci ou une question qui ne demande pas les résultats.
+  if (out.includes(MYFXBOOK_URL) && !WANTS_PROOF.test(opts.userText)) return 'lien myfxbook non demandé';
   const known = new Set(opts.knownPct ?? (() => {
     const src = opts.holdResults && opts.knowledge ? opts.sys.split(opts.knowledge).join('') : opts.sys;
     return (src.match(/\d+(?:[.,]\d+)?\s?%/g) ?? []).map(normPct);
@@ -865,9 +863,9 @@ export function assessModelOutput(raw: string, opts: {
   if (intent === 'spam') return { draft: { text: '', auto: false, spam: true }, issue: null };
   if (opts.biz && intent === 'skip') return { draft: { text: '', auto: false, skip: true, country, hot }, issue: null };
   const reply = j.reply == null ? '' : String(j.reply);
-  // 28/10/2026 : l'ancien domaine est réécrit, puis l'avertissement suit toujours le Myfxbook (avant les gardes :
-  // ce qui part est ce qui est contrôlé)
-  const out = withPastDisclaimer(fixOldDomain(humanize(reply.trim().replace(/^["“«]\s*|\s*["”»]$/g, ''), opts.biz)));
+  // 28/10/2026 : l'ancien domaine est réécrit avant les gardes (ce qui part est ce qui est contrôlé).
+  // 23/11/2026 : plus d'avertissement ajouté après le Myfxbook.
+  const out = fixOldDomain(humanize(reply.trim().replace(/^["“«]\s*|\s*["”»]$/g, ''), opts.biz));
   const textIssue = replyTextIssue(out, opts);
   if (textIssue) return { draft: null, issue: textIssue };
   if (opts.biz) return { draft: { text: out, auto: intent === 'auto', country, hot }, issue: null };

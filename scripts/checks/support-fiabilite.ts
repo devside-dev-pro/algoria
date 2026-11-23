@@ -112,6 +112,7 @@ function held(now: string, status: string | null, biz = true) {
 // ── prompt ───────────────────────────────────────────────────────────────────
 {
   check('RESULTS_REPLY_NOTE porte le Myfxbook et le 26 octobre', RESULTS_REPLY_NOTE.includes(MYFXBOOK_URL) && /26 October/.test(RESULTS_REPLY_NOTE) && /third party/i.test(RESULTS_REPLY_NOTE) && !RESULTS_REPLY_NOTE.includes('getalgoria.com/track-record') && !/few weeks/i.test(RESULTS_REPLY_NOTE));
+  check('RESULTS_REPLY_NOTE ne demande plus le disclaimer', !/Past results don't guarantee|always followed by|then always/i.test(RESULTS_REPLY_NOTE) && !/Past results don't guarantee|always followed by/i.test(HISTORY_LOSS_NOTE + HISTORY_RESULTS_NOTE + INCIDENT_NOTE));
   check('aucune note ne cite un plafond de 10 trades ou positions', [RESULTS_REPLY_NOTE, HISTORY_RESULTS_NOTE, HISTORY_LOSS_NOTE, INCIDENT_NOTE, INCIDENT_REPLY_NOTE].every((n) => !mentionsPositionCap(n)));
   check('les sécurités restantes restent : stop sous 2 minutes, fermeture à −5 %', [RESULTS_REPLY_NOTE, HISTORY_RESULTS_NOTE, INCIDENT_NOTE, INCIDENT_REPLY_NOTE].every((n) => /2 minutes/.test(n) && n.includes('−5%')));
 
@@ -158,7 +159,7 @@ function held(now: string, status: string | null, biz = true) {
   check('reply sur deux lignes', nl.issue === null && (nl.draft?.text.includes('All good') ?? false));
 
   const good = judge(JSON.stringify({ intent: 'auto', reply: GOOD }), 'what are your results?');
-  check('réponse prévue (26/10 + Myfxbook, aucun chiffre de résultat) passe', good.issue === null && good.draft != null && good.draft.text.includes(MYFXBOOK_URL) && good.draft.auto === true && !mentionsPositionCap(good.draft.text), good.issue ?? '');
+  check('réponse prévue (26/10 + Myfxbook, aucun chiffre de résultat) passe', good.issue === null && good.draft != null && good.draft.text.includes(MYFXBOOK_URL) && good.draft.auto === true && !mentionsPositionCap(good.draft.text) && !/past results/i.test(good.draft.text), good.issue ?? '');
   console.log('--- réponse prévue ---');
   console.log(good.draft?.text ?? '(aucune)');
   console.log('--- fin ---');
@@ -183,11 +184,17 @@ function held(now: string, status: string | null, biz = true) {
 
   const loss = judge(JSON.stringify({ intent: 'auto', reply: `On 21-22 October the main account lost about 85%. The new version started on 26 October. ${MYFXBOOK_URL}` }), 'what happened in October?');
   check('85 % refusé même si on demande octobre (28/10)', loss.issue === 'chiffre de résultat' && loss.draft === null, loss.issue ?? '');
-  const sentence = judge(JSON.stringify({ intent: 'auto', reply: `${LOSSES_LINE} ${MYFXBOOK_URL}` }), 'what happened in October?');
-  check('la phrase unique passe, avertissement ajouté', sentence.issue === null && (sentence.draft?.text.endsWith("Past results don't guarantee future results.") ?? false), sentence.issue ?? '');
+  const sentence = judge(JSON.stringify({ intent: 'auto', reply: LOSSES_LINE }), 'what happened in October?');
+  check('la phrase unique passe, sans lien ni disclaimer', sentence.issue === null && sentence.draft != null && !sentence.draft.text.includes(MYFXBOOK_URL) && !/past results/i.test(sentence.draft.text), sentence.issue ?? '');
+  const sentenceLink = judge(JSON.stringify({ intent: 'auto', reply: `${LOSSES_LINE} ${MYFXBOOK_URL}` }), 'what happened in October?');
+  check('pertes seules avec le lien → refusé', sentenceLink.issue === 'lien myfxbook non demandé', sentenceLink.issue ?? '');
+  const both = judge(JSON.stringify({ intent: 'auto', reply: `${LOSSES_LINE} ${MYFXBOOK_URL}` }), 'what happened in October? is there a track record?');
+  check('pertes et track record : le lien passe, sans disclaimer', both.issue === null && (both.draft?.text.includes(MYFXBOOK_URL) ?? false) && !/past results/i.test(both.draft?.text ?? ''), both.issue ?? '');
 
   const missing = judge(JSON.stringify({ intent: 'auto', reply: 'The new version started on 26 October on a new account, with new safeguards.' }), 'can you prove the results?');
   check('question de preuve sans le lien → refusé', missing.issue === 'lien myfxbook manquant');
+  const thanks = judge(JSON.stringify({ intent: 'auto', reply: 'My pleasure, I am here if you need anything.' }), '👍👍');
+  check('réaction sans lien → pas « lien myfxbook manquant »', thanks.issue === null && thanks.draft != null && !thanks.draft.text.includes(MYFXBOOK_URL), thanks.issue ?? '');
 
   const cap = judge(JSON.stringify({ intent: 'auto', reply: `${GOOD} Never more than 10 trades open at once.` }), 'what are your results?');
   check('plafond de 10 trades refusé, même collé à la bonne réponse', cap.issue === 'plafond de positions' && cap.draft === null);

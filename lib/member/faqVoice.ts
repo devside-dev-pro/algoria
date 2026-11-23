@@ -9,6 +9,7 @@
 // Ce fichier est PUR (pas de base, pas de Telegram) : thèmes, lignes fixes, classement, garde-fous, anti-spam. Il est
 // testé par lib/member/faqVoice.test.ts (npm test).
 import { APP_URL } from './i18n';
+import { LOSSES_LINE } from './incident';
 import { MYFXBOOK_URL } from './myfxbook';
 
 export const FAQ_KIND = 'faq_voice';
@@ -60,21 +61,21 @@ export const faqSituationLabel = (t: string | null | undefined): string =>
   t && isFaqTopic(t) ? FAQ_LABELS[t] : t === FAQ_WAIT_TOPIC ? FAQ_WAIT_LABEL : 'thème pas encore choisi';
 
 /** LA LIGNE FIXE sous le vocal (spec section 4, « Texte »). Liens : app.getalgoria.com (domaine actuel) et le
- *  Myfxbook officiel, seul lien de résultats. Jamais de mot de passe demandé, or uniquement, aucune promesse. */
+ *  Myfxbook officiel, seul lien de résultats. Pas de disclaimer automatique. Jamais de mot de passe demandé, or uniquement, aucune promesse. */
 export const FAQ_LINES: Record<FaqTopic, string> = {
   faq_how_it_works: `Here’s the short version + the app link when you’re ready: ${APP_URL}/member`,
   faq_broker: 'Open the app and tap the partner broker step — it’ll give you the right link for your country.',
   faq_deposit: 'Recommended start is about $500 on your own broker account. Absolute minimum is $200.',
   faq_cost_free: 'Partner broker = free access. Own broker or prop = $400 lifetime in the app.',
   faq_connect: `Connect only in the app: ${APP_URL}/member/onboarding — never send your trader password in chat.`,
-  faq_results_myfxbook: `Verified record: ${MYFXBOOK_URL} — past results don’t guarantee future results.`,
+  faq_results_myfxbook: `Verified record: ${MYFXBOOK_URL}`,
   faq_gold_only: 'Algoria trades gold (XAUUSD) only — not crypto.',
   faq_withdraw_30d: 'Withdrawals are on your broker. First 30 days: don’t withdraw or it disconnects Algoria.',
   faq_risk_lots: 'Default sizing is about 0.01 lot per ~$500 balance — change it anytime in the app.',
   faq_kyc_raisefx: 'Finish broker KYC first — especially RaiseFX level 2 — then come back to connect in the app.',
   faq_app_login: `App: ${APP_URL} — if an old icon is broken, delete it and reinstall from ${APP_URL}/download.`,
   faq_not_copying_yet: 'If you’re connected, the AI only trades when there’s a clean gold setup — quiet days are normal.',
-  faq_incident: `Verified record of the new engine: ${MYFXBOOK_URL} — past results don’t guarantee future results.`,
+  faq_incident: LOSSES_LINE,
 };
 
 /** Les thèmes qui ne partent JAMAIS seuls : un bouton sous la carte « À toi », Mathieu décide d'un tap.

@@ -36,7 +36,14 @@ test('18 clés dans l’ordre, chaque entrée a un when et un script, pas d’at
     assert.ok(s.script.trim().length > 0, s.key);
   }
   assert.equal(scriptByKey('faq_deposit')?.n, 3);
-  assert.match(scriptByKey('faq_how_it_works')?.script ?? '', /^Hey, quick one — Algoria is an AI/);
+  assert.equal(
+    scriptByKey('faq_how_it_works')?.script,
+    'Algoria is an AI that trades gold for you on MetaTrader 5. You open your own account with a partner broker through the link in the app, fund it, connect it once, and every trade the AI takes is copied on your account at the size you choose. Your money stays on your own account the whole time — we never hold it. When you\'re ready, open app.getalgoria.com, log in with Telegram — one tap, no password — and start the partner broker step. Everything is explained there, and if you get stuck, just text me here.',
+  );
+  assert.equal(
+    scriptByKey('faq_results_myfxbook')?.script,
+    'For proof, don\'t take screenshots from random people — use the verified track record on Myfxbook. I\'ll drop the official link right after this voice. That\'s the live record of the current engine, followed by a third party. You\'ll see winning days and losing days, nothing hidden — that\'s why I point you there, not to screenshots of winning days. Have a look on Myfxbook, then we continue with your setup when you\'re ready.',
+  );
 });
 
 test('une progression sauvée à l’ancienne étape 19 est terminée', () => {
