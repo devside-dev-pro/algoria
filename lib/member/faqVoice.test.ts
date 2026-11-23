@@ -209,7 +209,10 @@ test('lignes fixes : un libellé et une ligne par thème, liens autorisés seule
   }
   // le seul lien de résultats est le Myfxbook officiel
   assert.ok(FAQ_LINES.faq_results_myfxbook.includes(MYFXBOOK_URL));
-  assert.ok(FAQ_LINES.faq_incident.includes(MYFXBOOK_URL));
+  assert.equal(FAQ_LINES.faq_incident.includes(MYFXBOOK_URL), false);
+  assert.match(FAQ_LINES.faq_incident, /21-22 October/);
+  assert.equal(/past results/i.test(FAQ_LINES.faq_results_myfxbook), false);
+  assert.equal(/past results/i.test(FAQ_LINES.faq_incident), false);
   assert.ok(!/refund|compensat/i.test(FAQ_LINES.faq_incident));
 });
 

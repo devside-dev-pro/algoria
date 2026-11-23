@@ -6,8 +6,8 @@
 // fautive ET laisser passer les bonnes réponses (la phrase de suivi, la réponse à une capture, la règle des 30 jours,
 // le mot de passe dans l'app…), sinon on fabrique des cartes sans proposition.
 import { readFileSync } from 'node:fs';
-import { FOLLOW_UP_LINE, HISTORY_LOSS_NOTE, HISTORY_RESULTS_NOTE, INCIDENT, INCIDENT_NOTE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, LOSSES_LINE, MYFXBOOK_URL, PAST_RESULTS_LINE, RESULTS_REPLY_NOTE, incidentReplyNote } from '../../lib/member/incident';
-import { TRADER_PASSWORD_LINE, assessModelOutput, buildDraftSystem, fixOldDomain, hardRuleIssue, humanize, withPastDisclaimer } from '../../lib/member/replyDraft';
+import { FOLLOW_UP_LINE, HISTORY_LOSS_NOTE, HISTORY_RESULTS_NOTE, INCIDENT, INCIDENT_NOTE, INCIDENT_OTHER_NOTE, INCIDENT_PARAGRAPH, LOSSES_LINE, MYFXBOOK_URL, RESULTS_REPLY_NOTE, incidentReplyNote } from '../../lib/member/incident';
+import { TRADER_PASSWORD_LINE, assessModelOutput, buildDraftSystem, fixOldDomain, hardRuleIssue, humanize } from '../../lib/member/replyDraft';
 
 let failed = 0;
 function check(name: string, ok: boolean, detail?: string): void {
@@ -63,15 +63,10 @@ passes('mot de passe investisseur en lecture seule', 'The investor password is t
 refuses('« once it has a few weeks of real trades » (auto, 26/10, tg 6418653105)', "I'll share it once it has a few weeks of real trades.", 'track record promis plus tard');
 refuses('« can\'t happen again »', 'This cannot happen again now.', 'ça ne se reproduira pas');
 refuses('petit échantillon', 'Already 10 winning trades since Monday!', 'petit échantillon');
-passes('LOSSES_LINE', `${LOSSES_LINE} ${MYFXBOOK_URL} ${PAST_RESULTS_LINE}`);
+passes('LOSSES_LINE', LOSSES_LINE);
+passes('LOSSES_LINE + lien quand on le demande', `${LOSSES_LINE} ${MYFXBOOK_URL}`);
 passes('règle des 30 jours', 'Keep the copy on for the first 30 days, that is the rule for the free access.');
-{
-  const t = withPastDisclaimer(`Here is the verified record: ${MYFXBOOK_URL}`);
-  check('Myfxbook sans avertissement → ajouté', t.endsWith(PAST_RESULTS_LINE) && t.includes(MYFXBOOK_URL), t);
-  const twice = withPastDisclaimer(`${MYFXBOOK_URL} Past results don't guarantee future results.`);
-  check('avertissement déjà là → pas en double', twice.split(PAST_RESULTS_LINE).length === 2, twice);
-  check('LOSSES_LINE survit à humanize (tiret simple)', humanize(LOSSES_LINE, true).includes('21-22 October'));
-}
+check('LOSSES_LINE survit à humanize (tiret simple)', humanize(LOSSES_LINE, true).includes('21-22 October') && !/myfxbook/i.test(LOSSES_LINE));
 
 // ── 2. le paragraphe d'incident ─────────────────────────────────────────────
 {
@@ -102,15 +97,32 @@ check('ancien domaine réécrit', fixOldDomain('Here: https://app.algoria.tech/m
   const promise = judge('Mathieu will get back to you personally today 🙏🏼', 'any news?');
   check('promesse de délai → pas de brouillon', promise.draft === null && promise.issue === 'délai promis', String(promise.issue));
   const proof = judge(`Here is the verified record of the new version since 26 October: ${MYFXBOOK_URL}`, 'do you have proof of results?');
-  check('Myfxbook passe, avertissement ajouté', proof.draft != null && proof.draft.text.endsWith(PAST_RESULTS_LINE), String(proof.issue));
+  check('Myfxbook passe, disclaimer non ajouté', proof.draft != null && proof.draft.text.includes(MYFXBOOK_URL) && !/past results/i.test(proof.draft.text), String(proof.issue));
+  const DISCLAIMER = /past results (?:don't|do not) guarantee|past results do not predict/i;
+  const leo = judge(`The verified record of the new version is here: ${MYFXBOOK_URL}`, 'Is there a track record?');
+  check('Leo « Is there a track record? » : lien, pas de disclaimer', leo.issue === null && (leo.draft?.text.includes(MYFXBOOK_URL) ?? false) && !DISCLAIMER.test(leo.draft?.text ?? ''), String(leo.issue));
+  const wakas = judge('Anytime bro 🙏🏼', '👍👍');
+  check('Wakas « 👍👍 » : ni lien ni disclaimer', wakas.issue === null && !wakas.draft?.text.includes(MYFXBOOK_URL) && !DISCLAIMER.test(wakas.draft?.text ?? ''), String(wakas.issue));
+  const wakasLink = judge(`Here you go ${MYFXBOOK_URL}`, '👍👍');
+  check('Wakas avec lien collé → refusé', wakasLink.draft === null && wakasLink.issue === 'lien myfxbook non demandé', String(wakasLink.issue));
+  const ivan = judge(`Yes, the new version is verified here: ${MYFXBOOK_URL}`, 'Can you prove the results?');
+  check('Ivan (preuve) : lien, sans disclaimer', ivan.issue === null && (ivan.draft?.text.includes(MYFXBOOK_URL) ?? false) && !DISCLAIMER.test(ivan.draft?.text ?? ''), String(ivan.issue));
+  const lossesOnly = judge(LOSSES_LINE, 'were there losses?');
+  check('pertes seules : phrase honnête, sans lien', lossesOnly.issue === null && lossesOnly.draft?.text.includes('21-22 October') === true && !lossesOnly.draft.text.includes(MYFXBOOK_URL), String(lossesOnly.issue));
+  const lossesLink = judge(`${LOSSES_LINE} ${MYFXBOOK_URL}`, 'were there losses?');
+  check('pertes seules avec le lien → refusé', lossesLink.issue === 'lien myfxbook non demandé', String(lossesLink.issue));
+  const lossesAndRecord = judge(`${LOSSES_LINE} ${MYFXBOOK_URL}`, 'were there losses? is there a track record?');
+  check('pertes et track record : le lien passe, sans disclaimer', lossesAndRecord.issue === null && (lossesAndRecord.draft?.text.includes(MYFXBOOK_URL) ?? false) && !DISCLAIMER.test(lossesAndRecord.draft?.text ?? ''), String(lossesAndRecord.issue));
   const old = judge('Your access is here: https://app.algoria.tech/member', 'link?');
   check('ancien lien réécrit en sortie', old.draft?.text.includes('app.getalgoria.com/member') === true && !old.draft?.text.includes('algoria.tech'), String(old.issue));
 
   const sys = built.system;
   check('prompt business : règles dures présentes', /HARD RULES/.test(sys) && sys.includes(FOLLOW_UP_LINE) && sys.includes(TRADER_PASSWORD_LINE) && sys.includes(MYFXBOOK_URL));
+  check('prompt business : pas de disclaimer automatique, lien seulement sur une vraie demande', !/Past results don't guarantee future results|always followed by|past results do not predict future results/i.test(sys) && /only when they ask for results, proof or the track record/i.test(sys));
   check('prompt business : or seul', /gold only|XAU\/USD only/i.test(sys) && !/gold and crypto|l'or et les cryptos/i.test(sys));
   const app = buildDraftSystem({ biz: false, locale: 'en', knowledge: null, memory: null, trackNow: null, webinar: null, status: null, now: NOW, historyMaintenance: true }).system;
   check('prompt du bot de l\'app : règles dures, plus « personally today »', /HARD RULES/.test(app) && !/personally today/i.test(app) && app.includes(TRADER_PASSWORD_LINE));
+  check('prompt du bot : pas de disclaimer dans le filet facts()', !/Past results don't guarantee future results|past results do not predict future results|always followed by/i.test(app));
 }
 
 // ── les notes ne promettent plus rien ───────────────────────────────────────
@@ -129,6 +141,7 @@ check('ancien domaine réécrit', fixOldDomain('Here: https://app.algoria.tech/m
   check('le CM ne reçoit pas le Myfxbook du knowledge', /myfxbook/i.test(writer) && /filter\(\(l\) => !\/myfxbook\/i/.test(writer));
   const mig = readFileSync('supabase/migrations/0038_support_kb_facts.sql', 'utf8');
   check('migration 0038 : sauvegarde, pas de DROP ni DELETE', mig.includes('sauvegarde avant 0038') && !/\b(?:drop|delete|truncate)\b/i.test(mig.replace(/--.*$/gm, '')));
+  check('migration 0038 : le seed ne réinjecte plus le disclaimer', !/Toujours suivi de/i.test(mig) && !/Past results don't guarantee future results/i.test(mig));
 }
 
 console.log(failed ? `\n${failed} contrôle(s) en échec` : '\ntous les contrôles passent');

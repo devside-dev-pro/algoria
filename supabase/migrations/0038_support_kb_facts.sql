@@ -31,13 +31,16 @@ begin
   if position($kb$- Le mot de passe demandé (mot de passe trader) sert uniquement à brancher le compte au copieur d'Algoria. Il permet de copier les trades ; il ne donne aucun accès à l'espace client du broker, aux dépôts ni aux retraits.$kb$ in k) = 0 then raise notice '0038 : knowledge, puce mot de passe introuvable (laissée)'; end if;
   k := replace(k, $kb$- Le mot de passe demandé (mot de passe trader) sert uniquement à brancher le compte au copieur d'Algoria. Il permet de copier les trades ; il ne donne aucun accès à l'espace client du broker, aux dépôts ni aux retraits.$kb$, $kb$- Le mot de passe demandé (mot de passe trader) n'est PAS en lecture seule (c'est le mot de passe investisseur qui l'est). Formulation à donner au membre : « It lets the copier place trades on your account. It gives no access to your broker client area, deposits or withdrawals. Enter it only in the app, never send it here. » On ne demande JAMAIS un mot de passe ni un token dans le chat, et on n'en accepte jamais : s'il en envoie un, on lui dit de le saisir seulement dans l'app.$kb$);
 
+  -- 23/11/2026 : le seed n'ajoute plus d'avertissement automatique après le lien Myfxbook.
+  -- Ce bloc ne s'insère que si le lien n'est pas déjà dans le knowledge.
+  -- Une base où 0038 a déjà tourné garde l'ancienne formulation jusqu'à une correction manuelle.
   if position('myfxbook.com/members/AlgoriaAI' in k) = 0 then
     k := rtrim(k, chr(10)) || $kb$
 
 ## Track record vérifié (nouvelle version, depuis le 26/10/2026)
-- Le track record vérifié de la nouvelle version, depuis le 26/10/2026, est sur Myfxbook : https://www.myfxbook.com/members/AlgoriaAI/algoria-ai/12279938 . Toujours suivi de « Past results don't guarantee future results. »
+- Le track record vérifié de la nouvelle version, depuis le 26/10/2026, est sur Myfxbook : https://www.myfxbook.com/members/AlgoriaAI/algoria-ai/12279938 . On ne l'envoie que si la personne demande les résultats, une preuve ou le track record. Pas de disclaimer après le lien.
 - Ce compte n'est pas tout l'historique : ne jamais le présenter comme l'historique complet, ne jamais citer un nombre de trades, de jours ou de gains (petit échantillon).
-- On n'évoque jamais l'incident de soi-même. Question directe sur des pertes, une phrase : « Yes, the previous engine had an incident on 21–22 October. The engine has been fully rebuilt since, and here's its verified record on Myfxbook. »
+- On n'évoque jamais l'incident de soi-même. Question directe sur des pertes, une phrase : « Yes, the previous engine had an incident on 21-22 October. The engine has been fully rebuilt since. » Pas de lien Myfxbook et pas de disclaimer, sauf si la personne demande aussi les résultats, une preuve ou le track record (alors le lien, toujours sans disclaimer).
 - Ne jamais nier, ne jamais dire que ça ne peut pas se reproduire, ne jamais promettre le track record « plus tard ».$kb$;
   end if;
 

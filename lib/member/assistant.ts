@@ -16,7 +16,7 @@
 // « machine à écrire » est fait côté client, sur le texte validé. Le modèle n'a AUCUN outil.
 import Anthropic from '@anthropic-ai/sdk';
 import { createHash } from 'node:crypto';
-import { buildAssistantSystem, fixOldDomain, humanize, modelUsage, replyTextIssue, systemParam, withPastDisclaimer } from './replyDraft';
+import { buildAssistantSystem, fixOldDomain, humanize, modelUsage, replyTextIssue, systemParam } from './replyDraft';
 import { INCIDENT_TALK } from './incident';
 import { getAgentDocMeta } from './agentDocs';
 import { trackFacts } from './trackFacts';
@@ -57,7 +57,7 @@ export function proactiveLossIssue(out: string, userText: string): string | null
 export function assessAssistantText(raw: string, o: { sys: string; userText: string; holdResults: boolean; knowledge: string | null; knownPct: string[]; sentBefore: string[]; stopReason?: string | null; now?: number }): { text: string | null; issue: string | null } {
   if (o.stopReason === 'refusal') return { text: null, issue: 'modèle a refusé' };
   if (o.stopReason === 'max_tokens') return { text: null, issue: 'réponse coupée (max_tokens)' };
-  const out = withPastDisclaimer(fixOldDomain(humanize(raw.trim().replace(/^["“«]\s*|\s*["”»]$/g, ''), false)));
+  const out = fixOldDomain(humanize(raw.trim().replace(/^["“«]\s*|\s*["”»]$/g, ''), false));
   const issue = replyTextIssue(out, { biz: false, sys: o.sys, userText: o.userText, holdResults: o.holdResults, knowledge: o.knowledge, knownPct: o.knownPct, sentBefore: o.sentBefore, now: o.now })
     ?? proactiveLossIssue(out, o.userText);
   return issue ? { text: null, issue } : { text: out, issue: null };
