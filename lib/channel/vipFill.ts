@@ -117,7 +117,7 @@ export function fillsFromBest(wins: Trade[]): Partial<Record<'X' | 'Y' | 'Z' | '
   return out;
 }
 
-export type VipFillOk = { ok: true; text: string; ref: string; tickets: string[] };
+export type VipFillOk = { ok: true; text: string; ref: string; tickets: string[]; strategy?: number | null };
 export type VipFillSkip = { ok: false; reason: string };
 
 /** Remplit un modèle du calendrier à partir des trades déjà chargés (testable sans base). */
@@ -141,13 +141,13 @@ export function fillFromTrades(
     if (need && best.length < need) return { ok: false, reason: `seulement ${best.length} gain(s) sur la semaine, ${need} demandés` };
     const text = fillVipTemplate(template, fillsFromBest(best));
     if (!text) return { ok: false, reason: 'placeholders du récap incomplets' };
-    return { ok: true, text, ref: best.map((t) => String(t.ticket)).join(','), tickets: best.map((t) => String(t.ticket)) };
+    return { ok: true, text, ref: best.map((t) => String(t.ticket)).join(','), tickets: best.map((t) => String(t.ticket)), strategy: best[0]?.strategy ?? undefined };
   }
   const win = pickLastWinOfDay(trades, opts.day, opts.usedTickets ?? [], now);
   if (!win) return { ok: false, reason: 'aucun gain assez net sur la séance' };
   const text = fillVipTemplate(template, fillsFromWin(win));
   if (!text) return { ok: false, reason: 'placeholders VIP incomplets' };
-  return { ok: true, text, ref: String(win.ticket), tickets: [String(win.ticket)] };
+  return { ok: true, text, ref: String(win.ticket), tickets: [String(win.ticket)], strategy: win.strategy ?? undefined };
 }
 
 /** Charge les trades copiés et remplit le modèle. */

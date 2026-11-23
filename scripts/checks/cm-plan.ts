@@ -131,10 +131,10 @@ const RISK = "Trading involves risk. Past results don't guarantee future results
 {
   const o = { tokens: { YESTERDAY: '+$2.10 at 0.01 lot · +$21 at 0.10 lot' }, noButton: true, allowedUsd: [] as number[], autoRisk: true };
   const withFig = guard('Yesterday went well.\n\n{{YESTERDAY}}', o);
-  check('risque : ajouté en une ligne en italique sur un post avec chiffre', withFig.ok && withFig.text.endsWith(`<i>${RISK}</i>`) && (withFig.text.match(/Trading involves risk/g) ?? []).length === 1, withFig.ok ? withFig.text : withFig.why);
+  check('risque : plus jamais ajouté automatiquement, même avec un chiffre', withFig.ok && !withFig.text.includes('Trading involves risk') && withFig.text.includes('Yesterday went well'), withFig.ok ? withFig.text : withFig.why);
   const noFig = guard(`The app is free.\n\n<i>${RISK}</i>`, o);
   check('risque : retiré d\'un post sans chiffre', noFig.ok && !noFig.text.includes('Trading involves risk'), noFig.ok ? noFig.text : noFig.why);
-  check('risque : withRisk ne double jamais', (withRisk(`x\n\n${RISK}`, true).match(/Trading involves risk/g) ?? []).length === 1);
+  check('risque : withRisk ne rajoute plus la phrase', (withRisk(`x\n\n${RISK}`, true).match(/Trading involves risk/g) ?? []).length === 0);
   check('risque : stripRisk retire la version courte', !stripRisk('a\n\nTrading involves risk.').includes('risk'));
 }
 
@@ -154,10 +154,10 @@ const RISK = "Trading involves risk. Past results don't guarantee future results
   let allOk = true, texts = new Set<string>();
   for (let n = 0; n < 200; n++) {
     const t = guardTrade(tradeFallback(facts, seeded(n)), result, null);
-    if (!t || !t.includes(result) || !t.endsWith(`<i>${RISK}</i>`) || /Closed by Algoria AI/.test(t)) { allOk = false; console.error(t); break; }
+    if (!t || !t.includes(result) || t.includes('Trading involves risk') || /Closed by Algoria AI/.test(t)) { allOk = false; console.error(t); break; }
     texts.add(t);
   }
-  check('trade : le secours passe les garde-fous, avec les vrais chiffres et le risque', allOk);
+  check('trade : le secours passe les garde-fous, avec les vrais chiffres, sans disclaimer auto', allOk);
   check('trade : le texte varie (≥ 8 versions)', texts.size >= 8, String(texts.size));
   check('trade : plus de modèle fixe « ✅ +$X at 0.10 lot »', ![...texts].some((t) => t.startsWith('✅')));
 }

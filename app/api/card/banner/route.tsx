@@ -9,6 +9,7 @@ import QRCode from 'qrcode';
 import { sdb } from '@/lib/member/server';
 import { loadFonts } from '@/lib/cards/ogFonts';
 import { bannerParts } from '@/lib/channel/cm';
+import { isBannerKind } from '@/lib/channel/publishMedia';
 import { renderBanner } from '@/lib/cards/banner';
 
 export const runtime = 'nodejs';
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (sdb() as any).from('channel_posts').select('id,kind,text,button_text,report,day').eq('id', id).limit(1);
   const row = data?.[0] as { id: number; kind: string; text: string | null; button_text: string | null; report: { variant?: number } | null; day: string } | undefined;
-  if (!row || !['morning', 'howto', 'cta', 'qa'].includes(row.kind)) return new Response('not found', { status: 404 });
+  if (!row || !isBannerKind(row.kind)) return new Response('not found', { status: 404 });
   const { kicker, title } = bannerParts(row);
 
   const qrSvg = await QRCode.toString('https://getalgoria.com', { type: 'svg', margin: 1, color: { dark: '#0b0e14', light: '#ffffff' } });
