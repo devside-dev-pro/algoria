@@ -8,8 +8,8 @@
 //   · la carte de gain fixe (« ✅ +$X at 0.10 lot … Closed by Algoria AI ») devient un trade commenté à la 1re personne ;
 //   · le guide de ton est contrôlé par le code (lib/channel/tone.ts) : un texte refusé est réécrit une fois, puis le
 //     post saute (plus de texte de banque en secours, sauf les annonces du webinaire) ;
-//   · la phrase de risque : une ligne en italique, seulement sur un post qui montre un chiffre de résultat ;
-//   · plus de bannière automatique : une image seulement quand c'est une vraie photo (les coulisses du matin) ;
+//   · plus d'ajout automatique du disclaimer « Trading involves risk… » (23/11/2026, décision Mathieu) ;
+//   · bannière de marque recollée sur les posts tagués report.banner / report.visual ; sinon une vraie photo (coulisses) ;
 //   · la photo vient du dossier Drive de Mathieu (lib/channel/photos.ts), marquée utilisée à la publication.
 // Les webinaires gardent leur logique (webinarPost, plus bas) : un CTA prévu devient l'annonce.
 //
@@ -55,6 +55,7 @@ import { appendAgentMemory } from '@/lib/member/agentDocs';
 import { amountsLine, check, dayContext, writePoll, writePost, type Brief, type DayContext, type TradeFacts } from './writer';
 import { renderBubblesPlanSection, sendDueBubbleDms } from './bubbles';
 import { fillApprovedVip, vipTemplateOf } from './vipFill';
+import { isTradeCardEnabled, resolvePublishPhoto, wantsBrandBanner } from './publishMedia';
 import { safeSlice, wellFormed } from './text';
 import { atOneLot, atRef } from '@/lib/display/scale';
 import { tradingDayOf, tradingDayStartMs, tradingTimeMs } from '@/lib/display/tradingDay';
@@ -602,11 +603,11 @@ export function tradeFallback(f: TradeFacts, rand: () => number = Math.random): 
   return [pick(open).replace(/\s+/g, ' ').replace(' ,', ','), '{{RESULT}}', pick(close)].join('\n\n');
 }
 
-/** support_settings 'cm_trade_card' = 'on' : le trade commenté garde l'image de la carte (/api/card/win). Par défaut non :
- *  une image seulement quand c'est une vraie photo (10/11/2026). */
+/** support_settings 'cm_trade_card' : la carte de gain (/api/card/win) est recollée sur les posts VIP, y compris
+ *  ceux au texte validé en +$[X]. Par défaut allumée (23/11/2026) ; 'off' l'éteint. */
 async function tradeCardOn(db: Db): Promise<boolean> {
   const { data } = await db.from('support_settings').select('value').eq('key', 'cm_trade_card').limit(1);
-  return String((data?.[0] as { value?: string } | undefined)?.value ?? 'off').trim().toLowerCase() === 'on';
+  return isTradeCardEnabled((data?.[0] as { value?: string } | undefined)?.value);
 }
 
 const asObj = (x: unknown): Record<string, unknown> => (x && typeof x === 'object' && !Array.isArray(x) ? (x as Record<string, unknown>) : {});
@@ -642,7 +643,8 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
       const filled = await fillApprovedVip(db, r, vipTpl).catch((e) => ({ ok: false as const, reason: String((e as Error).message).slice(0, 120) }));
       if (!filled.ok) { await db.from('channel_posts').update({ status: 'skipped', report: { ...rep, reason: filled.reason } }).eq('id', r.id); skipped++; continue; }
       text = filled.text; ref = filled.ref;
-      photo = '';
+      const cardOn = await tradeCardOn(db).catch(() => false);
+      photo = resolvePublishPhoto({ kind: r.kind, report: r.report, vipWin: { ticket: filled.tickets[0] ?? filled.ref, strategy: filled.strategy }, tradeCardOn: cardOn, appUrl: APP_URL });
     } else if (r.kind === 'tp' || r.kind === 'trade') {
       const w = await pickWin(db, r).catch((e) => ({ reason: String((e as Error).message).slice(0, 120) }));
       if ('reason' in w) { await db.from('channel_posts').update({ status: 'skipped', report: { ...rep, reason: w.reason } }).eq('id', r.id); skipped++; continue; }
@@ -653,9 +655,12 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
       if (!written) written = guardTrade(tradeFallback(w.facts), result, ctx);
       if (!written) { await db.from('channel_posts').update({ status: 'skipped', report: { ...rep, reason: 'commentaire refusé par les garde-fous' } }).eq('id', r.id); skipped++; continue; }
       text = written; ref = w.trade.ticket; btnText = ''; btnUrl = '';
-      photo = (await tradeCardOn(db).catch(() => false)) ? `${APP_URL}/api/card/win?ticket=${encodeURIComponent(String(w.trade.ticket))}&strategy=${Number(w.trade.strategy ?? 2)}` : '';
+      const cardOn = await tradeCardOn(db).catch(() => false);
+      photo = resolvePublishPhoto({ kind: r.kind, report: r.report, tradeWin: { ticket: String(w.trade.ticket), strategy: w.trade.strategy }, tradeCardOn: cardOn, appUrl: APP_URL });
+    } else if (!photo && wantsBrandBanner(r.kind, r.report)) {
+      photo = bannerUrl(r);
     }
-    // plus de bannière automatique (10/11/2026) : une image seulement quand c'est une vraie photo
+    // image : carte de gain si VIP, bannière de marque si le post est tagué, sinon la vraie photo déjà posée
     let out;
     const poll = (rep.poll as { question?: string; options?: string[] } | undefined);
     if (r.kind === 'poll' && poll?.question && poll.options?.length) out = await publishPollToChannels(db, { chatId: src, question: poll.question, options: poll.options });
@@ -798,8 +803,9 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
 // 15/10/2026 (Mathieu : « ça manque de couleurs, de bannières ») : une bannière générée sur chaque post sans photo.
 // 10/11/2026 (refonte) : c'est fini, une bannière sur chaque post faisait partie de l'effet « robot ». Une image
 // seulement quand c'est une VRAIE photo : celle des coulisses du matin (dossier Drive de Mathieu, sinon la banque
-// cm_photos). La route /api/card/banner et bannerParts restent pour les anciens posts déjà publiés ; la carte de gain
-// (/api/card/win) ne revient que si support_settings 'cm_trade_card' = 'on'.
+// cm_photos). La bannière de marque (/api/card/banner) est recollée sur les posts tagués report.banner / report.visual
+// (kinds acceptés : morning, howto, cta, qa, lesson, story). La carte de gain (/api/card/win) revient dès que
+// cm_trade_card n'est pas explicitement 'off' (allumée par défaut depuis le 23/11/2026), y compris sur un texte +$[X].
 
 const IMAGE_ASK = /\b(photo|image|visuel|banni[eè]re|picture)\b/i;
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')

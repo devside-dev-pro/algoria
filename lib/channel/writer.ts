@@ -227,17 +227,17 @@ function airify(t: string): string {
 type GuardOpts = { tokens: Record<string, string>; required?: string[]; allowNegative?: boolean; noButton?: boolean; allowedUsd?: number[]; allowedNumbers?: number[]; maxChars?: number; fixLayout?: boolean;
   /** le guide de ton (tone.ts) : refus des ouvertures sur le jour, des tournures usées, de plus de 2 emojis… (10/11/2026) */
   tone?: ToneContext;
-  /** la phrase de risque gérée par le code : retirée si le modèle l'écrit, ajoutée en UNE ligne en italique seulement si
-   *  le post montre un chiffre de résultat (un jeton de montant) (10/11/2026) */
+  /** la phrase de risque : si autoRisk, le code retire un disclaimer « Trading involves risk… » écrit par le modèle.
+   *  Depuis le 23/11/2026 (décision Mathieu), il ne le rajoute plus tout seul. */
   autoRisk?: boolean };
 
-/** Les jetons qui portent un chiffre de résultat : leur présence appelle la phrase de risque. */
+/** Les jetons qui portent un chiffre de résultat (gardés pour le reste des garde-fous). */
 export const FIGURE_TOKENS = ['YESTERDAY', 'WEEK', 'RESULT', 'AMOUNTS'];
 const RISK_ANY = /(?:<i>\s*)?Trading involves risk\.(?:\s*Past results don't guarantee future results\.)?(?:\s*<\/i>)?/gi;
-/** Retire la phrase de risque d'un texte (le code la remet, une fois, s'il y a un chiffre). */
+/** Retire la phrase de risque d'un texte. */
 export const stripRisk = (t: string) => t.replace(RISK_ANY, '').replace(/\n{3,}/g, '\n\n').trim();
-/** Le texte, plus la phrase de risque en une ligne en italique, seulement s'il montre un chiffre de résultat. */
-export const withRisk = (t: string, hasFigure: boolean) => (hasFigure ? `${stripRisk(t)}\n\n<i>${RISK}</i>` : stripRisk(t));
+/** Plus d'ajout automatique du disclaimer (23/11/2026). hasFigure est ignoré, conservé pour les appels existants. */
+export const withRisk = (t: string, _hasFigure?: boolean) => stripRisk(t);
 
 /** Nettoie et contrôle un texte du modèle : le texte prêt, ou la raison du refus (renvoyée au modèle pour un 2e essai). */
 export function check(raw: string, o: GuardOpts): { ok: true; text: string } | { ok: false; why: string } {
