@@ -492,3 +492,219 @@ OUTPUT: only a JSON object {"question": "...", "options": ["...", "..."]} with 2
 
 export { RISK as CM_RISK };
 export { stripAppLines };
+
+// ── BRIEFS DES BULLES VIDÉO (24/11/2026) ──────────────────────────────────────────────────────────────
+// Mathieu reçoit à 11:30 un seul message. Le modèle prépare les champs ; le code garde les mêmes
+// interdits que le canal (promesse, négatif, argent à mettre). Il ne choisit pas l'heure : c'est le
+// créneau, et il n'écrit pas de bulle « live » à part.
+
+export type BubbleScript = {
+  theme: string;
+  subject: string;
+  why: string;
+  duration: string;
+  hook: string;
+  points: string[];
+  closing: string;
+};
+
+export type EcoHit = { day: string; hhmm: string; plain: string; when: 'today' | 'tomorrow' };
+
+const ECO_PLAIN: Array<[RegExp, string]> = [
+  [/beige book/i, 'le Beige Book de la Fed'],
+  [/non-farm|nfp/i, "le gros rapport mensuel sur l'emploi américain (NFP)"],
+  [/federal funds|fomc/i, 'la décision de taux de la Fed'],
+  [/cpi|consumer price|inflation/i, "l'inflation américaine (CPI)"],
+  [/gdp|gross domestic/i, 'le PIB américain'],
+  [/durable goods/i, 'les biens durables américains'],
+  [/retail sales/i, 'les ventes au détail américaines'],
+  [/jobless claims/i, 'les inscriptions au chômage américaines'],
+  [/unemployment/i, 'le chômage américain'],
+  [/consumer confidence/i, 'la confiance des consommateurs américains'],
+  [/ppi|producer price/i, 'les prix à la production américains'],
+  [/ism|pmi/i, 'une enquête sur les entreprises américaines'],
+  [/adp/i, "l'emploi privé américain (ADP)"],
+];
+
+const bubbleDubai = (ms: number): { day: string; hhmm: string } | null => {
+  if (!Number.isFinite(ms)) return null;
+  const dtf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const p = Object.fromEntries(dtf.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  if (!p.year || !p.hour || !p.minute) return null;
+  return { day: `${p.year}-${p.month}-${p.day}`, hhmm: `${p.hour}:${p.minute}` };
+};
+
+export const plainEcoTitle = (title: string): string => {
+  const t = title.trim();
+  for (const [re, label] of ECO_PLAIN) if (re.test(t)) return label;
+  return t;
+};
+
+/** Annonces USD à fort impact (ou jour férié) pour le jour Dubaï et le lendemain. Jamais le forecast. */
+export function eventsForBubbleDays(raw: Array<{ title?: string; date?: string; country?: string; impact?: string; forecast?: string; previous?: string }>, day: string): EcoHit[] {
+  const next = new Date(Date.parse(`${day}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const out: EcoHit[] = [];
+  for (const e of raw) {
+    if (String(e.country ?? '').toUpperCase() !== 'USD') continue;
+    const impact = String(e.impact ?? '');
+    const title = String(e.title ?? '').trim();
+    if (impact !== 'High' && !/holiday/i.test(impact) && !/holiday|thanksgiving/i.test(title)) continue;
+    const when = bubbleDubai(Date.parse(String(e.date ?? '')));
+    if (!when || (when.day !== day && when.day !== next)) continue;
+    out.push({ day: when.day, hhmm: when.hhmm, plain: plainEcoTitle(title), when: when.day === day ? 'today' : 'tomorrow' });
+  }
+  return out.sort((a, b) => (a.day + a.hhmm).localeCompare(b.day + b.hhmm)).slice(0, 6);
+}
+
+const BUBBLE_PROMISE_FR = /tu vas gagner|vous allez gagner|devenir riche|sans risque|argent facile|liberté financière/i;
+const BUBBLE_NEGATIVE_FR = /\b(perte|pertes|perdre|perdant|drawdown|jour rouge|semaine rouge|en panne)\b/i;
+const BUBBLE_FORECAST = /\bgold\s+will\b|\b(price|xau)\s+will\b|\bwill\s+(?:rise|fall|pump|dump|go up|go down)\b|\bprice target\b|\bl'or va (?:monter|baisser|exploser)\b|\bva monter\b|\bva baisser\b/i;
+const FRENCH_HINT = /[àâçéèêëîïôùûü]|\b(je|j'|tu|on|demain|aujourd|parce|quoi|une|des|les|pour)\b/i;
+const SPOKEN_FR = /\b(je|j'|tu|nous|vous|aujourd'hui|demain|parce|voici|c'est|qu'on)\b/i;
+const STAGE_DIR = /^(dis|montre|filme|commence|regarde|raconte|cite)\b/i;
+
+/** Les mêmes interdits que check(), sur un texte court qui n'est pas un post. check() lui-même ne change pas. */
+function bubbleHardIssue(text: string): string | null {
+  const t = text.replace(/stop[- ]?loss(?:es)?/gi, '');
+  if (/https?:\/\/|t\.me\/|\.tech\b|www\./i.test(text)) return 'no links in the text';
+  if (PROMISE.test(text) || BUBBLE_PROMISE_FR.test(text)) return 'it sounds like a promise of gains';
+  if (NEGATIVE.test(t) || BUBBLE_NEGATIVE_FR.test(text)) return 'negative words are not allowed in this public channel';
+  if (MONEY_IN.test(text)) return 'never talk about money to put in (deposit, fund, minimum, balance)';
+  if (BUBBLE_FORECAST.test(text)) return 'no forecast on gold';
+  if (/\$\s?[\d]/.test(text)) return 'no amounts';
+  if (/\d\s?%/.test(text.replace(/\b100\s?%/g, ''))) return 'no percentages';
+  return null;
+}
+
+const oneLine = (s: unknown) => humanize(String(s ?? '').replace(/<[^>]+>/g, ''), false).replace(/\s+/g, ' ').trim();
+
+/** Valide le JSON du CM. `expected` = 3 le week-end, 4 en semaine. */
+export function validateBubbleScripts(raw: unknown, expected: 3 | 4): { ok: true; bubbles: BubbleScript[] } | { ok: false; why: string } {
+  const list = Array.isArray(raw) ? raw : (raw as { bubbles?: unknown })?.bubbles;
+  if (!Array.isArray(list)) return { ok: false, why: `expected ${expected} bubbles, got 0` };
+  if (list.length !== expected) return { ok: false, why: `expected ${expected} bubbles, got ${list.length}` };
+  const bubbles: BubbleScript[] = [];
+  for (const item of list) {
+    const x = item as Record<string, unknown>;
+    const theme = oneLine(x?.theme);
+    const subject = oneLine(x?.subject);
+    const why = oneLine(x?.why);
+    const duration = oneLine(x?.duration);
+    const hook = oneLine(x?.hook);
+    const closing = oneLine(x?.closing).replace(/@mathieu_algoria/ig, '@mathieu_algoria');
+    const points = Array.isArray(x?.points) ? x.points.map(oneLine).filter(Boolean) : [];
+    const fields = [theme, subject, why, duration, hook, closing, ...points];
+    for (const f of fields) {
+      const hard = bubbleHardIssue(f);
+      if (hard) return { ok: false, why: hard };
+    }
+    if (!theme || theme.length > 40) return { ok: false, why: 'theme must be a short French label' };
+    if (subject.length < 12 || subject.length > 220 || !FRENCH_HINT.test(subject)) return { ok: false, why: 'subject is one French sentence for Mathieu' };
+    if (why.length < 20 || why.length > 480 || !FRENCH_HINT.test(why)) return { ok: false, why: 'why is one or two French sentences for Mathieu' };
+    if (!/^\d{1,2}\s*à\s*\d{1,2}\s*secondes$/i.test(duration)) return { ok: false, why: 'duration looks like "30 à 45 secondes"' };
+    if (hook.length < 12 || hook.length > 240 || SPOKEN_FR.test(hook)) return { ok: false, why: 'the lines to say are in English' };
+    if (points.length < 2 || points.length > 4) return { ok: false, why: 'each bubble needs 2 to 4 points' };
+    for (const p of points) {
+      if (p.length < 8 || p.length > 280) return { ok: false, why: 'each point is one complete sentence' };
+      if (STAGE_DIR.test(p)) continue;
+      if (SPOKEN_FR.test(p)) return { ok: false, why: 'the lines to say are in English' };
+      if (!/[.?!]$/.test(p)) return { ok: false, why: 'each point is one complete sentence' };
+    }
+    if (closing.length < 12 || closing.length > 320 || SPOKEN_FR.test(closing)) return { ok: false, why: 'the lines to say are in English' };
+    if (!/@mathieu_algoria\b/.test(closing)) return { ok: false, why: 'closing must include @mathieu_algoria' };
+    bubbles.push({ theme, subject, why, duration, hook, points, closing });
+  }
+  return { ok: true, bubbles };
+}
+
+async function loadBubbleEvents(day: string): Promise<EcoHit[]> {
+  try {
+    const r = await fetch(process.env.ECO_CALENDAR_URL ?? 'https://nfs.faireconomy.media/ff_calendar_thisweek.json', {
+      signal: AbortSignal.timeout(5000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', Accept: 'application/json' },
+    });
+    if (!r.ok) return [];
+    const raw = (await r.json()) as Array<{ title?: string; date?: string; country?: string; impact?: string }>;
+    return eventsForBubbleDays(Array.isArray(raw) ? raw : [], day);
+  } catch { return []; }
+}
+
+async function bubbleSystem(): Promise<string> {
+  const [rawKnowledge, memory] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('cm_memory')]);
+  const knowledge = rawKnowledge ? rawKnowledge.split('\n').filter((l) => !/myfxbook/i.test(l)).join('\n') : rawKnowledge;
+  return `You prepare the spoken briefs for Mathieu's short video bubbles on Algoria's public Telegram channel. Algoria is an AI that trades gold; members copy it on their own broker account. Mathieu records the bubbles himself.
+
+The notes (subject, why, theme, duration) are in French. The lines he says (hook, points, closing) are in English, first person, plain words, short.
+
+HARD RULES, the same ones as the public channel (a brief that breaks one is thrown away):
+- No promises and no projections: never say people will earn, make money, double, get rich, or that a day will be green. No forecast on gold (no "gold will", no target, no level).
+- Nothing negative: no losses, red days, drawdowns, bugs, pauses.
+- Never talk about money people would put in: no deposit, no minimum, no balance, no "fund your account".
+- No links, no dollar amounts, no percentages, no account size, no 30-day rule.
+- Only facts from the calendar, the knowledge, or the questions. If you are not sure, leave it out.
+- Never an em dash.
+
+OUTPUT: only JSON.
+${knowledge ? `\nMATHIEU'S KNOWLEDGE (French, source of truth):\n${safeSlice(knowledge, AGENT_DOC_MAX)}` : ''}${memory ? `\n\nLESSONS FROM MATHIEU (French; they win over the style, never over the hard rules):\n${safeSlice(memory, 6000)}` : ''}`;
+}
+
+function bubbleUser(c: DayContext, hits: EcoHit[], n: number): string {
+  const cal = hits.length
+    ? `CALENDAR (Dubai clock, the ONLY releases you may mention; never a forecast, never a previous figure, never a number that is not one of these clocks):\n${hits.map((h) => `- ${h.when} ${h.hhmm}: ${h.plain}`).join('\n')}`
+    : 'CALENDAR: no listed US release today or tomorrow. Do not invent a data release, a central-bank event, a holiday, or a clock time.';
+  const lines = [`DAY: ${c.dateLabel}.${c.weekend ? ' Weekend: the gold market is closed. Do not invent a trading session.' : ''}`, cal];
+  if (c.webinar) lines.push(`WEBINAR: ${c.webinar}`);
+  if (c.questions.length) lines.push(`QUESTIONS PEOPLE ASKED (rewrite, never a name, never their exact words, never about results or money):\n- ${c.questions.slice(0, 12).join('\n- ')}`);
+  if (c.openings.length) lines.push(`OPENINGS ALREADY USED (do not reuse them):\n- ${c.openings.slice(0, 20).map((o) => safeSlice(o, 120)).join('\n- ')}`);
+  return `${lines.join('\n\n')}
+
+TASK:
+Write ${n} video-bubble briefs. Mathieu records them all at 11:30 Dubai. You do NOT choose when each one is published.
+
+For each bubble:
+- theme: short French label (Vie à Dubaï, Entrepreneuriat, Algoria, Or et marché, Discipline, Leadership, Citation, Coulisses). At most one "Or et marché" unless the calendar has a release.
+- subject: ONE sentence in French, for Mathieu, saying what the bubble is about.
+- why: ONE or TWO sentences in French, why this bubble is for today. Mention a release only if it is in the CALENDAR, in the plain words given, at that Dubai clock.
+- duration: French, exactly "30 à 45 secondes" or "30 à 60 secondes".
+- hook: ONE English sentence he says first, as-is.
+- points: 2 to 4 items. Each is a complete English sentence he says as-is, or a French stage direction that starts with "Dis ". No fragments.
+- closing: ONE or TWO English sentences he says last. Include @mathieu_algoria. Invite a question. No promise, no deposit, no negative word, no forecast.
+
+Vary the themes.
+OUTPUT: only a JSON object {"bubbles":[...]} . No markdown.`;
+}
+
+async function askBubbleJson(system: string, user: string): Promise<unknown> {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    // Pas de temperature : claude-sonnet-5-5 la refuse, et ce chemin n'en a pas besoin.
+    const res = await new Anthropic().messages.create({
+      model: CM_MODEL(),
+      max_tokens: 2800,
+      system: wellFormed(system),
+      messages: [{ role: 'user', content: wellFormed(user) }],
+    }, { timeout: 45_000, maxRetries: 0 });
+    const out = res.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('').trim();
+    return JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1));
+  } catch (e) {
+    console.error('[cm bubbles] échec:', (e as { message?: string })?.message ?? e);
+    return null;
+  }
+}
+
+/** 4 bulles en semaine, 3 le week-end. null si la clé manque ou si les garde-fous refusent deux fois. */
+export async function writeBubbleScripts(c: DayContext): Promise<BubbleScript[] | null> {
+  const expected: 3 | 4 = c.weekend ? 3 : 4;
+  const hits = await loadBubbleEvents(c.day);
+  const sys = await bubbleSystem();
+  let prompt = bubbleUser(c, hits, expected);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await askBubbleJson(sys, prompt);
+    if (!raw) return null;
+    const r = validateBubbleScripts(raw, expected);
+    if (r.ok) return r.bubbles;
+    console.error(`[cm bubbles] refusé (${r.why})`);
+    prompt = `${bubbleUser(c, hits, expected)}\n\nYOUR PREVIOUS DRAFT WAS REJECTED BECAUSE ${r.why.toUpperCase()}. Write it again and fix that.`;
+  }
+  return null;
+}

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  formatLiveDm, formatProgDm, formatNudgeDm, inLiveWindow, inProgWindow, inNudgeWindow, inSkipWindow,
-  isBubbleRow, pendingLive, pendingProg, pendingNudge, pendingSkip, isUnanswered,
-  renderBubblesPlanSection, dubaiNow, pickBubbleSlots, applyTimeChoice, atCallbackData, parseAtCallback,
-  occupiedScheduledAt, SLOT_PREF, SLOT_MIN, SKIP_REASON, PROG_AT, NUDGE_AT, SKIP_AT,
+  briefingDue, formatBriefingMessages, inProgWindow,
+  isBubbleRow, renderBubblesPlanSection, dubaiNow, pickBubbleSlots, applyTimeChoice, atCallbackData, parseAtCallback,
+  occupiedScheduledAt, bubbleRowsFromScripts, SLOT_PREF, SLOT_MIN, PROG_AT, TELEGRAM_TEXT_MAX,
   type BubbleRow,
 } from './bubbles';
 import { WEEK_BUBBLES, bubbleInsertRows as bubbleRows } from './bubbles.week';
@@ -26,6 +25,8 @@ test('catalog has 24 unique (day, slot) rows, bubble1 to bubble4 only, 18–24 N
   assert.ok(rows.every((r) => r.kind === 'video' && r.status === 'info' && r.scheduled_at.endsWith('+04')));
   assert.equal(rows.filter((r) => r.day === '2026-11-18').length, 3);
   assert.equal(rows.filter((r) => r.day === '2026-11-19').length, 4);
+  assert.ok(WEEK_BUBBLES.every((b) => b.mode === 'prog'), 'plus de bulle live à planifier');
+  assert.ok(rows.every((r) => r.report.mode === 'prog'));
 });
 
 test('PROG window is 11:30–13:00 Dubai every day, including Saturday and Sunday', () => {
@@ -47,78 +48,30 @@ test('PROG window is 11:30–13:00 Dubai every day, including Saturday and Sunda
   assert.equal(inProgWindow(dubaiNow(sun1130)), true);
 });
 
-test('nudge window is 13:30–15:00 Dubai, unique, then skip at 15:00', () => {
-  assert.equal(NUDGE_AT, '13:30');
-  assert.equal(SKIP_AT, '15:00');
-  const nowOf = (iso: string) => dubaiNow(Date.parse(iso));
-  assert.equal(inNudgeWindow(nowOf('2026-11-21T13:29:00+04:00')), false);
-  assert.equal(inNudgeWindow(nowOf('2026-11-21T13:30:00+04:00')), true);
-  assert.equal(inNudgeWindow(nowOf('2026-11-21T14:59:00+04:00')), true);
-  assert.equal(inNudgeWindow(nowOf('2026-11-21T15:00:00+04:00')), false);
-  const r = row({
-    id: 1, day: '2026-11-21', scheduled_at: '2026-11-21T13:15:00+04:00',
+test('11:30 sends every bubble of the day once; 13:30 and 15:00 schedule nothing, and an old live row is not a separate send', () => {
+  const at = (iso: string) => dubaiNow(Date.parse(iso));
+  const live = row({
+    id: 3, day: '2026-11-21', slot: 'bubble3', scheduled_at: '2026-11-21T20:35:00+04:00',
+    report: { mode: 'live', subject: 'Setting up the live, 2 hours before', points: ['Show the desk.'], duration: '30 s' },
+  });
+  const prog = row({
+    id: 1, day: '2026-11-21', slot: 'bubble1', scheduled_at: '2026-11-21T13:15:00+04:00',
     report: { mode: 'prog', subject: 'A Saturday in Dubai' },
   });
-  assert.deepEqual(pendingNudge([r]).map((x) => x.id), [1]);
-  assert.deepEqual(pendingNudge([row({ ...r, report: { ...(r.report as object), nudge_sent_at: 'x' } })]), []);
-  assert.equal(inSkipWindow(nowOf('2026-11-21T14:59:00+04:00'), '2026-11-21'), false);
-  assert.equal(inSkipWindow(nowOf('2026-11-21T15:00:00+04:00'), '2026-11-21'), true);
-  assert.equal(inSkipWindow(nowOf('2026-11-22T11:00:00+04:00'), '2026-11-21'), true);
-  const skip = pendingSkip([r], nowOf('2026-11-21T15:00:00+04:00'));
-  assert.deepEqual(skip.map((x) => x.id), [1]);
-  assert.equal(SKIP_REASON, 'sans réponse après la relance de 13:30');
-  // un horaire déjà choisi, ou Faite, ou Pas cette fois : pas de relance ni de skip
-  const chosen = row({ ...r, report: { ...(r.report as object), chosen_at: 'x', chosen_hm: '16:30' } });
-  const faite = row({ ...r, report: { ...(r.report as object), faite: true } });
-  const no = row({ ...r, report: { ...(r.report as object), fallback_approved: true } });
-  const t = nowOf('2026-11-21T15:05:00+04:00');
-  assert.equal(isUnanswered(chosen), false);
-  assert.deepEqual(pendingNudge([chosen, faite, no]), []);
-  assert.deepEqual(pendingSkip([chosen, faite, no], t), []);
-});
-
-test('skip does not approve or publish a replacement (status skipped, text untouched)', () => {
-  const r = row({
-    id: 9, day: '2026-11-23', text: 'My Monday rule', status: 'info',
-    scheduled_at: '2026-11-23T16:30:00+04:00',
-    report: { mode: 'prog', fallback: 'Monday rule: do the hardest thing first.', subject: 'My Monday rule' },
-  });
-  const due = pendingSkip([r], dubaiNow(Date.parse('2026-11-23T15:00:00+04:00')));
-  assert.equal(due.length, 1);
-  assert.equal(due[0].status, 'info');
-  assert.equal(due[0].text, 'My Monday rule');
-  assert.equal((due[0].report as { fallback?: string }).fallback, 'Monday rule: do the hardest thing first.');
-});
-
-test('LIVE window is the 10 minutes before the slot, not after', () => {
-  const at = '2026-11-18T20:35:00+04:00';
-  assert.equal(inLiveWindow(at, Date.parse('2026-11-18T20:25:00+04:00')), true);
-  assert.equal(inLiveWindow(at, Date.parse('2026-11-18T20:24:00+04:00')), false);
-  assert.equal(inLiveWindow(at, Date.parse('2026-11-18T20:35:00+04:00')), false);
-});
-
-test('pending PROG/LIVE ignore rows already sent or marked faite; LIVE only after a chosen time', () => {
-  const prog = row({
-    id: 1, slot: 'bubble1', scheduled_at: '2026-11-18T11:24:00+04:00',
-    report: { mode: 'prog', subject: 'A live day in Dubai', duration: '30 s', points: ['A'] },
-  });
-  const sent = row({ id: 2, slot: 'bubble2', scheduled_at: '2026-11-18T14:22:00+04:00', report: { mode: 'prog', sent_at: 'x' } });
-  const live = row({
-    id: 3, slot: 'bubble3', scheduled_at: '2026-11-18T20:35:00+04:00',
-    report: { mode: 'live', subject: 'Setting up the live, 2 hours before', points: ['Desk'], duration: '30 s' },
-  });
-  assert.deepEqual(pendingProg([prog, sent, live]).map((r) => r.id), [1, 3]);
-  const now = Date.parse('2026-11-18T20:25:00+04:00');
-  // sans horaire choisi, le rappel LIVE ne part pas (même pour un mode live)
-  assert.deepEqual(pendingLive([prog, live], now), []);
-  const chosen = row({
-    ...live,
-    scheduled_at: '2026-11-18T20:35:00+04:00',
-    report: { ...(live.report as object), chosen_at: '2026-11-18T11:35:00.000Z', chosen_hm: '20:35' },
-  });
-  assert.deepEqual(pendingLive([prog, chosen], now).map((r) => r.id), [3]);
-  assert.deepEqual(pendingLive([row({ ...chosen, report: { ...(chosen.report as object), faite: true } })], now), []);
-  assert.deepEqual(pendingLive([row({ ...chosen, report: { ...(chosen.report as object), live_sent_at: 'x' } })], now), []);
+  assert.deepEqual(briefingDue(at('2026-11-21T11:29:00+04:00'), [prog, live]).map((x) => x.id), []);
+  assert.deepEqual(briefingDue(at('2026-11-21T11:30:00+04:00'), [prog, live]).map((x) => x.id), [1, 3]);
+  assert.deepEqual(briefingDue(at('2026-11-21T13:30:00+04:00'), [prog, live]), []);
+  assert.deepEqual(briefingDue(at('2026-11-21T15:00:00+04:00'), [prog, live]), []);
+  const sent = row({ ...prog, report: { ...(prog.report as object), prog_sent_at: 'x' } });
+  const faite = row({ ...live, report: { ...(live.report as object), faite: true } });
+  const replaced = row({ ...prog, id: 4, report: { ...(prog.report as object), fallback_approved: true } });
+  assert.deepEqual(briefingDue(at('2026-11-21T11:35:00+04:00'), [sent, faite, replaced]), []);
+  // un horaire déjà choisi ne retire pas la bulle du message de 11:30 : Mathieu les enregistre toutes d'un coup
+  const chosen = row({ ...prog, report: { ...(prog.report as object), chosen_at: 'x', chosen_hm: '16:30' } });
+  assert.deepEqual(briefingDue(at('2026-11-21T11:30:00+04:00'), [chosen]).map((x) => x.id), [1]);
+  // 15:00 ne change pas la ligne : pas d'abandon, le texte de remplacement reste en place
+  assert.equal(prog.status, 'info');
+  assert.equal(prog.text, 'A live day in Dubai');
 });
 
 test('3 slots prefer 13:00 / 15:30 / 18:00, never before 13:00, and avoid CM posts and other bubbles by 30 min', () => {
@@ -163,36 +116,75 @@ test('3 slots prefer 13:00 / 15:30 / 18:00, never before 13:00, and avoid CM pos
   void taken;
 });
 
-test('PROG DM has 3 time buttons per bubble plus Faite / Pas cette fois ; callback_data stays under 64 bytes', () => {
+test('11:30 briefing is one French-labelled script per bubble, with the lines to say in quotes', () => {
   const rows = [
     row({
-      id: 11, slot: 'bubble1', scheduled_at: '2026-11-18T11:24:00+04:00',
-      report: { mode: 'prog', subject: 'A live day in Dubai', duration: '30 s', points: ['Morning', 'Why I still do these lives'] },
+      id: 11, slot: 'bubble1', scheduled_at: '2026-11-18T13:00:00+04:00',
+      report: {
+        mode: 'prog', theme: 'Vie à Dubaï', duration: '30 à 45 secondes',
+        subject: 'Je montre à quoi ressemble un matin ici, en une phrase.',
+        why: 'Le canal n\'a pas eu de coulisses depuis deux jours.',
+        hook: 'Morning in Dubai, and this is what the day looks like before I open the app.',
+        points: ['I walk the marina, then I read the messages from overnight.', 'Dis où tu es en ce moment, en une phrase.'],
+        closing: 'Any question, write to me at @mathieu_algoria.',
+      },
     }),
     row({
-      id: 12, slot: 'bubble2', scheduled_at: '2026-11-18T14:22:00+04:00',
-      report: { mode: 'prog', subject: 'Why I show the product live', duration: '40 s', points: ['An ad shows 20 seconds'] },
+      id: 12, slot: 'bubble2', scheduled_at: '2026-11-18T21:50:00+04:00',
+      report: {
+        mode: 'prog', duration: '30 à 60 secondes',
+        subject: 'Demain la journée est chargée sur l\'or, j\'explique simplement quoi surveiller.',
+        why: 'Demain à 17:30, heure de Dubaï, trois chiffres américains sortent ensemble.',
+        hook: 'If you follow gold, tomorrow is a big day, so here is what I am watching.',
+        points: ['At 17:30 Dubai time, inflation, GDP and durable goods come out together.'],
+        closing: 'That is why I do not trade by hand on days like this. Any question, write to me at @mathieu_algoria.',
+      },
     }),
   ];
-  const dm = formatProgDm(rows, []);
-  assert.equal(dm.title, '🎥 Bulles à programmer aujourd\'hui');
-  // 2 rangées de créneaux + 2 rangées Faite/Pas cette fois
-  assert.equal(dm.buttonRows.length, 4);
-  assert.deepEqual(dm.buttonRows[0].map((b) => b.text), ['13:00', '15:30', '18:00']);
-  assert.deepEqual(dm.buttonRows[0].map((b) => b.data), ['cmb:at:11:1300', 'cmb:at:11:1530', 'cmb:at:11:1800']);
-  assert.deepEqual(dm.buttonRows[1].map((b) => b.data), ['cmb:ok:11', 'cmb:no:11']);
-  assert.ok(dm.buttonRows[1][0].text.includes('Faite'));
-  assert.ok(dm.buttonRows[1][1].text.includes('Pas cette fois'));
-  // la 2e bulle n'offre pas les mêmes créneaux
-  assert.ok(dm.buttonRows[2].every((b) => !['13:00', '15:30', '18:00'].includes(b.text)));
-  assert.ok(dm.buttonRows.flat().every((b) => b.data.length <= 64));
-  assert.match(dm.lines.join('\n'), /A live day in Dubai/);
-  const nudge = formatNudgeDm(rows, []);
-  assert.match(nudge.title, /Relance/);
-  assert.equal(nudge.buttonRows[0].length, 3);
+  const msgs = formatBriefingMessages(rows);
+  assert.equal(msgs.length, 1);
+  const text = msgs[0];
+  assert.match(text, /Bulles à enregistrer aujourd'hui/);
+  assert.match(text, /Bulle 1 — 13:00 Dubaï — 30 à 45 secondes/);
+  assert.match(text, /Bulle 2 — 21:50 Dubaï — 30 à 60 secondes/);
+  assert.match(text, /Sujet :/);
+  assert.match(text, /Pourquoi aujourd'hui :/);
+  assert.match(text, /Accroche à dire telle quelle :/);
+  assert.match(text, /"Morning in Dubai, and this is what the day looks like before I open the app\."/);
+  assert.match(text, /1\. "I walk the marina, then I read the messages from overnight\."/);
+  assert.match(text, /2\. Dis où tu es en ce moment, en une phrase\./);
+  assert.match(text, /Fin :/);
+  assert.match(text, /@mathieu_algoria/);
+  assert.doesNotMatch(text, /Relance|C'est le moment|cmb:/);
+  assert.ok(text.length <= TELEGRAM_TEXT_MAX);
 });
 
-test('choosing a slot writes scheduled_at and later arms the LIVE reminder 10 min before', () => {
+test('a long briefing splits on bubble boundaries and stays under the Telegram limit', () => {
+  const long = 'Phrase à dire telle quelle, assez longue pour remplir le bloc. '.repeat(4);
+  const rows = [1, 2, 3, 4].map((n) => row({
+    id: n, slot: `bubble${n}`, scheduled_at: `2026-11-18T${12 + n}:00:00+04:00`,
+    report: {
+      mode: 'prog', duration: '30 à 45 secondes', subject: `Sujet ${n} en une phrase claire.`,
+      why: long, hook: `Hook number ${n} for the camera.`,
+      points: [`Point ${n} is a full sentence to say out loud.`],
+      closing: 'Any question, write to me at @mathieu_algoria.',
+    },
+  }));
+  const msgs = formatBriefingMessages(rows, 1200);
+  assert.ok(msgs.length >= 2);
+  assert.ok(msgs.every((m) => m.length <= 1200));
+  assert.match(msgs[0], /Bulle 1/);
+  assert.match(msgs[1], /suite/);
+  const joined = msgs.join('\n');
+  for (const n of [1, 2, 3, 4]) assert.match(joined, new RegExp(`Bulle ${n}`));
+  // une bulle n'est pas coupée entre deux messages
+  for (const m of msgs) {
+    const heads = m.match(/Bulle \d/g) ?? [];
+    if (heads.length === 1) assert.match(m, /@mathieu_algoria/);
+  }
+});
+
+test('choosing a slot writes scheduled_at and does not schedule a live reminder or a 15:00 skip', () => {
   const r = row({
     id: 329, day: '2026-11-21', text: 'A Saturday in Dubai', scheduled_at: '2026-11-21T13:15:00+04:00',
     report: { mode: 'prog', subject: 'A Saturday in Dubai' },
@@ -211,10 +203,10 @@ test('choosing a slot writes scheduled_at and later arms the LIVE reminder 10 mi
   assert.equal(ok.report.chosen_at, '2026-11-21T11:35:00.000Z');
   assert.equal(r.text, 'A Saturday in Dubai'); // le texte de la ligne n'est pas touché
   const updated = row({ ...r, scheduled_at: ok.scheduled_at, report: ok.report });
-  const lead = Date.parse('2026-11-21T16:20:00+04:00');
-  assert.deepEqual(pendingLive([updated], lead).map((x) => x.id), [329]);
-  assert.deepEqual(pendingLive([updated], Date.parse('2026-11-21T16:19:00+04:00')), []);
-  assert.deepEqual(pendingSkip([updated], dubaiNow(Date.parse('2026-11-21T15:00:00+04:00'))), []);
+  // choisir un horaire ne programme plus de rappel 10 min avant, ni d'abandon à 15:00
+  assert.equal((updated.report as { chosen_hm?: string }).chosen_hm, '16:30');
+  assert.equal(updated.status, 'info');
+  assert.deepEqual(briefingDue(dubaiNow(Date.parse('2026-11-21T15:00:00+04:00')), [updated]), []);
   assert.equal(atCallbackData(329, '16:30'), 'cmb:at:329:1630');
   assert.deepEqual(parseAtCallback('cmb:at:329:1630'), { id: 329, hm: '16:30' });
   assert.equal(parseAtCallback('cmb:ok:329'), null);
@@ -234,18 +226,6 @@ test('occupiedScheduledAt keeps approved/draft/info and ignores skipped', () => 
   ]);
 });
 
-test('LIVE DM wording and buttons', () => {
-  const dm = formatLiveDm(row({
-    id: 33, slot: 'bubble3', scheduled_at: '2026-11-18T20:35:00+04:00',
-    report: { mode: 'live', subject: 'Setting up the live, 2 hours before', points: ['Show the desk'], duration: '30 s' },
-  }));
-  assert.match(dm.title, /C'est le moment de faire une bulle/);
-  assert.match(dm.lines.join(' '), /Parle de Setting up the live/);
-  assert.match(dm.lines.join(' '), /30 s/);
-  assert.deepEqual(dm.buttonRows[0].map((b) => b.text), ['✅ Faite', '⏭ Pas cette fois']);
-  assert.deepEqual(dm.buttonRows[0].map((b) => b.data), ['cmb:ok:33', 'cmb:no:33']);
-});
-
 test('plan section lists tomorrow\'s bubbles and replaces the single video idea', () => {
   const idea = { slot: 'video', kind: 'video', scheduled_at: '2026-11-18T22:30:00+04:00', text: 'How do I connect?', report: {} };
   const b1 = row({
@@ -254,8 +234,36 @@ test('plan section lists tomorrow\'s bubbles and replaces the single video idea'
   });
   const sec = renderBubblesPlanSection([idea, b1]);
   assert.match(sec ?? '', /Bulles de demain/);
-  assert.match(sec ?? '', /11:24 · PROG · Vie à Dubaï — A live day in Dubai/);
+  assert.match(sec ?? '', /11:24 Dubaï · Vie à Dubaï — A live day in Dubai/);
+  assert.doesNotMatch(sec ?? '', /LIVE/);
   assert.equal(renderBubblesPlanSection([idea]), null);
   assert.equal(isBubbleRow(idea), false);
   assert.equal(isBubbleRow(b1), true);
+  const oldLive = row({
+    id: 9, slot: 'bubble3', scheduled_at: '2026-11-18T20:35:00+04:00',
+    report: { mode: 'live', subject: 'Setting up' },
+  });
+  assert.equal(isBubbleRow(oldLive), true);
+});
+
+test('new bubble rows are prog only, with the CM fields, at Dubai slots after 13:00', () => {
+  const script = {
+    theme: 'Or et marché',
+    subject: 'Demain je dis simplement quoi surveiller.',
+    why: 'Trois chiffres américains sortent demain.',
+    duration: '30 à 45 secondes',
+    hook: 'Here is what I am watching.',
+    points: ['Inflation, GDP and durable goods come out together.', 'Dis où tu es, en une phrase.'],
+    closing: 'Any question, write to me at @mathieu_algoria.',
+  };
+  const rows = bubbleRowsFromScripts('2026-11-25', [script, script, script, script], []);
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows.map((r) => r.slot), ['bubble1', 'bubble2', 'bubble3', 'bubble4']);
+  assert.ok(rows.every((r) => r.kind === 'video' && r.status === 'info' && r.report.mode === 'prog'));
+  assert.deepEqual(rows.map((r) => r.scheduled_at.slice(11, 16)), ['13:00', '16:00', '18:30', '21:00']);
+  assert.equal(rows[0].report.why, script.why);
+  assert.equal(rows[0].report.hook, script.hook);
+  assert.equal(rows[0].report.closing, script.closing);
+  assert.equal(rows[0].text, script.hook);
+  assert.deepEqual(pickBubbleSlots('2026-11-25', [], 4), ['13:00', '16:00', '18:30', '21:00']);
 });
