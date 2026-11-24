@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { sdb, verifySession, SESSION_COOKIE, isAdmin } from '@/lib/member/server';
-import { HOWTO, CTAS, planDay, planTarget, renderPlan, runDue, sendPlan } from '@/lib/channel/cm';
+import { HOWTO, CTAS, planBubblesFor, planDay, planTarget, renderPlan, runDue, sendPlan } from '@/lib/channel/cm';
+import { dubaiNow } from '@/lib/channel/bubbles';
 import { tradingDayOf } from '@/lib/display/tradingDay';
 import { snapshotMembersIfDue } from '@/lib/channel/members';
 
@@ -29,6 +30,10 @@ export async function GET(req: NextRequest) {
     // le plan du lendemain à partir de 23h15 (Paris), sinon celui du jour s'il manque encore (premier jour, panne)
     const day = planTarget();
     const planned = await planDay(db, day);
+    // Si le plan du jour existe déjà, planDay ne réécrit rien : les bulles manquantes se créent ici, avant l'envoi.
+    await planBubblesFor(db, day).catch((e) => console.error('[cm] bubbles:', (e as Error).message));
+    const dubaiDay = dubaiNow().day;
+    if (dubaiDay !== day) await planBubblesFor(db, dubaiDay).catch((e) => console.error('[cm] bubbles:', (e as Error).message));
     const dm = planned ? await sendPlan(db, day) : 0;
     const run = await runDue(db);
     return NextResponse.json({ ok: true, day, planned, dm, members, ...run });

@@ -433,7 +433,7 @@ export async function POST(req: Request) {
     try {
       if (await handleBusinessCallback(db, cq)) return NextResponse.json({ ok: true });
       if (await handleRecapCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 récap du soir (lib/channel/recap.ts)
-      if (await handleBubbleCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles : horaires / Faite / Pas cette fois
+      if (await handleBubbleCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles : anciens boutons (horaire, Faite, Pas cette fois)
       if (await handleCmCallback(db, cq)) return NextResponse.json({ ok: true }); // 📣 posts du jour du canal (lib/channel/cm.ts)
       if (await handleSupportAssetCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎥 bulles d'accueil (lib/member/supportAuto.ts)
       if (await handleVoiceRecorderCallback(db, cq)) return NextResponse.json({ ok: true }); // 🎙 enregistrement guidé des vocaux (SUPPORT_VOICE_RECORDER)

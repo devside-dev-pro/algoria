@@ -52,8 +52,8 @@ import { driveWanted, listDrivePhotos, LOW_STOCK, pickFresh, readDriveEnv, sendD
 import { firstLine, normLine, rationedIn, similarity, SIMILAR } from './tone';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { appendAgentMemory } from '@/lib/member/agentDocs';
-import { amountsLine, check, dayContext, writePoll, writePost, type Brief, type DayContext, type TradeFacts } from './writer';
-import { renderBubblesPlanSection, sendDueBubbleDms } from './bubbles';
+import { amountsLine, check, dayContext, writeBubbleScripts, writePoll, writePost, type Brief, type BubbleScript, type DayContext, type TradeFacts } from './writer';
+import { bubbleRowsFromScripts, bubblesEnabled, ensureDayBubbles, renderBubblesPlanSection, sendDueBubbleDms } from './bubbles';
 import { fillApprovedVip, vipTemplateOf } from './vipFill';
 import { isTradeCardEnabled, resolvePublishPhoto, wantsBrandBanner } from './publishMedia';
 import { safeSlice, wellFormed } from './text';
@@ -364,6 +364,10 @@ export async function planDay(db: Db, day: string): Promise<number> {
   const write = (b: Brief | 'poll' | null, openings: string[] = []) => (!ctx || !b ? Promise.resolve(null)
     : b === 'poll' ? writePoll(ctx, openings).then((p) => (p ? JSON.stringify(p) : null)).catch(() => null)
     : writePost(ctx, b, { openings }).catch(() => null));
+  // Les briefs des bulles partent en même temps que les posts : la cron a 60 s, on n'additionne pas les deux attentes.
+  const bubbleScripts: Promise<BubbleScript[] | null> = (ctx && await bubblesEnabled(db))
+    ? writeBubbleScripts(ctx).catch((e) => { console.error('[cm] bubbles:', (e as Error).message); return null; })
+    : Promise.resolve(null);
   const written: Array<string | null> = await Promise.all(briefs.map((b) => write(b)));
   // dans la journée aussi : deux posts écrits en parallèle ne s'ouvrent pas pareil (le second est réécrit une fois,
   // en connaissant les ouvertures des autres), et 🙏 / 🙌 ne passent qu'une fois
@@ -399,9 +403,37 @@ export async function planDay(db: Db, day: string): Promise<number> {
   if (error) return 0;
   // 📸 stock de photos bas ou nul : une alerte par plan (donc une par jour), par le canal d'alerte admin habituel
   if (photoAlert) await notifyOwner({ title: '📸 Photos du CM', lines: [photoAlert], tag: 'cm-photos' }).catch(() => null);
-  const idea = await videoIdea(db).catch(() => null);
-  if (idea) await db.from('channel_posts').insert({ day, slot: 'video', kind: 'video', text: idea, scheduled_at: new Date(tradingTimeMs(day, VIDEO_AT)).toISOString(), status: 'info' });
+  const scripts = await bubbleScripts;
+  let haveBubbles = false;
+  if (scripts?.length) {
+    const built = bubbleRowsFromScripts(day, scripts, rows.map((r) => String(r.scheduled_at)));
+    if (built.length) {
+      const { error: berr } = await db.from('channel_posts').insert(built);
+      if (berr) console.error('[cm] bubbles insert:', berr.message);
+      else haveBubbles = true;
+    }
+  }
+  // Secours : l'idée d'une seule bulle, seulement si les 3 ou 4 briefs n'ont pas pu être écrits.
+  if (!haveBubbles) {
+    const idea = await videoIdea(db).catch(() => null);
+    if (idea) await db.from('channel_posts').insert({ day, slot: 'video', kind: 'video', text: idea, scheduled_at: new Date(tradingTimeMs(day, VIDEO_AT)).toISOString(), status: 'info' });
+  }
   return rows.length;
+}
+
+/** Bulles du jour si le plan existe déjà (le passage suivant de la cron). Idempotent. */
+export async function planBubblesFor(db: Db, day: string): Promise<{ have: boolean; inserted: number }> {
+  let webinar: string | undefined;
+  try {
+    const wb = (await upcomingSessions(db, 1).catch(() => []))[0] as WebinarSession | undefined;
+    if (wb) {
+      const wbDay = tradingDayOf(Date.parse(wb.starts_at));
+      if (wbDay === day || wbDay === addDaysCm(day, 1) || wbDay === addDaysCm(day, 2)) {
+        webinar = `Mathieu's free live webinar on Zoom is on ${ukDay(wb.starts_at)} at ${webinarTimesInline(wb.starts_at)}, 45 minutes in English. One bubble may mention it in one warm line. Never a Zoom link, never a promise of gains.`;
+      }
+    }
+  } catch { /* sans webinaire, les bulles s'écrivent quand même */ }
+  return ensureDayBubbles(db, day, webinar);
 }
 
 /** LA QUESTION DU JOUR POUR LA BULLE VIDÉO : la question concrète qui revient le plus dans les messages reçus

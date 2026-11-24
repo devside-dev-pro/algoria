@@ -1,5 +1,6 @@
-/** Les 24 bulles du calendrier 18–24 nov 2026 (partie D). Source de vérité du script d'insertion, jamais exécuté tout seul. */
-export type BubbleMode = 'prog' | 'live';
+/** Les 24 bulles du calendrier 18–24 nov 2026 (partie D). Source de vérité du script d'insertion, jamais exécuté tout seul.
+ *  Depuis le 24/11/2026 elles sont toutes « prog » : plus de bulle live demandée à part. */
+export type BubbleMode = 'prog';
 
 export type WeekBubble = {
   day: string;
@@ -21,7 +22,7 @@ export const WEEK_BUBBLES: WeekBubble[] = [
   { day: '2026-11-18', slot: 'bubble2', time: '14:22', mode: 'prog', theme: 'Entrepreneuriat', subject: 'Why I show the product live instead of just running ads',
     points: ['An ad shows 20 seconds, a live shows everything.', 'Questions make the product better.', "It's how I'd want to be sold to."],
     duration: '40 s', fallback: "An ad shows you 20 seconds. A live shows you the whole thing, questions included. That's why I keep doing them." },
-  { day: '2026-11-18', slot: 'bubble3', time: '20:35', mode: 'live', theme: 'Coulisses', subject: 'Setting up the live, 2 hours before',
+  { day: '2026-11-18', slot: 'bubble3', time: '20:35', mode: 'prog', theme: 'Coulisses', subject: 'Setting up the live, 2 hours before',
     points: ['Show the desk and the screen.', "What we'll cover tonight.", 'The times for your country are in the post.'],
     duration: '30 s', fallback: 'Setting up for tonight. Screen ready, questions ready. See you at 23:00 Dubai, 19:00 UK. Full times in the post above.' },
   // jeudi 19
@@ -33,11 +34,11 @@ export const WEEK_BUBBLES: WeekBubble[] = [
     subject: 'The question I got most at the live: is my money really in my account?',
     points: ['Yes, your account, your name, your broker.', 'Algoria only places the trades.', 'You can see everything in the app.'],
     duration: '35 s', fallback: 'Most asked question last night: is my money in my own account? Yes. Your account, your name, at your broker. Algoria only places the trades.' },
-  { day: '2026-11-19', slot: 'bubble3', time: '17:40', mode: 'live', theme: 'Or & marché',
+  { day: '2026-11-19', slot: 'bubble3', time: '17:40', mode: 'prog', theme: 'Or & marché',
     subject: "South Africa's rate decision and the US jobless claims: why they matter for gold",
     points: ['What a central bank decision is, in one sentence.', 'Why gold reacts to US job numbers.', 'No prediction: the AI deals with it, not me.'],
     duration: '40 s', fallback: 'Rate decision in South Africa, jobless claims in the US. News days are when gold moves the most, and Algoria AI was on it the whole time.' },
-  { day: '2026-11-19', slot: 'bubble4', time: '21:37', mode: 'live', theme: 'Vie à Dubaï', subject: 'Evening in Dubai',
+  { day: '2026-11-19', slot: 'bubble4', time: '21:37', mode: 'prog', theme: 'Vie à Dubaï', subject: 'Evening in Dubai',
     points: ['Where I am right now.', 'What a normal working day looks like for me.', 'Short "good evening" to the community.'],
     duration: '30 s', fallback: 'Evening in Dubai. Good night to the UK, good morning to Sydney.' },
   // vendredi 20
@@ -49,7 +50,7 @@ export const WEEK_BUBBLES: WeekBubble[] = [
     subject: "What I'd tell myself on day one of Algoria",
     points: ["Start before it's perfect.", 'Listen to the people using it.', 'Keep going on the boring days.'],
     duration: '40 s', fallback: "If I could tell myself one thing on day one: start before it's perfect, and listen to the people using it." },
-  { day: '2026-11-20', slot: 'bubble3', time: '19:15', mode: 'live', theme: 'Or & marché',
+  { day: '2026-11-20', slot: 'bubble3', time: '19:15', mode: 'prog', theme: 'Or & marché',
     subject: 'Fed speech + US consumer sentiment, explained in 30 seconds',
     points: ["Who's speaking and why markets listen.", 'What consumer sentiment measures.', 'No forecast: "the AI handles the chart".'],
     duration: '30 s', fallback: 'Fed speech, consumer sentiment: plenty of headlines for gold this Friday. Algoria AI took the week as it came.' },
@@ -81,10 +82,10 @@ export const WEEK_BUBBLES: WeekBubble[] = [
   { day: '2026-11-23', slot: 'bubble2', time: '13:09', mode: 'prog', theme: 'Algoria', subject: 'What you see in the app when a trade opens',
     points: ['The notification.', 'The trade at your own size.', "You don't have to do anything."],
     duration: '35 s', fallback: 'When Algoria AI opens a trade, you see it in the app at your own size. Nothing for you to click.' },
-  { day: '2026-11-23', slot: 'bubble3', time: '18:55', mode: 'live', theme: 'Or & marché', subject: 'US PMI just out: what it is, in plain words',
+  { day: '2026-11-23', slot: 'bubble3', time: '18:55', mode: 'prog', theme: 'Or & marché', subject: 'US PMI just out: what it is, in plain words',
     points: ['A survey of businesses.', 'Why markets watch it.', 'No forecast.'],
     duration: '30 s', fallback: 'The US business survey just came out. Algoria AI is on the chart.' },
-  { day: '2026-11-23', slot: 'bubble4', time: '21:52', mode: 'live', theme: 'Leadership', subject: 'What I learned from your messages this week',
+  { day: '2026-11-23', slot: 'bubble4', time: '21:52', mode: 'prog', theme: 'Leadership', subject: 'What I learned from your messages this week',
     points: ['The most common question.', 'What we changed because of it.', 'Thank you to the community.'],
     duration: '40 s', fallback: 'Your messages shape the app. Two things changed this month because of what you told me.' },
   // mardi 24
@@ -95,11 +96,11 @@ export const WEEK_BUBBLES: WeekBubble[] = [
   { day: '2026-11-24', slot: 'bubble2', time: '12:31', mode: 'prog', theme: 'Coulisses', subject: "Preparing tomorrow's live",
     points: ["What's new since last week.", "The question I'll answer first.", 'All the times are in the channel.'],
     duration: '30 s', fallback: "Preparing tomorrow's live: something new to show you. All times are in the channel." },
-  { day: '2026-11-24', slot: 'bubble3', time: '19:10', mode: 'live', theme: 'Or & marché',
+  { day: '2026-11-24', slot: 'bubble3', time: '19:10', mode: 'prog', theme: 'Or & marché',
     subject: "Consumer confidence just out + tomorrow's big data",
     points: ['What consumer confidence is.', 'PCE and GDP tomorrow at 17:30 Dubai.', 'Thanksgiving Thursday.'],
     duration: '35 s', fallback: 'Consumer confidence is out. Tomorrow at 17:30 Dubai: PCE and GDP. Then Thanksgiving.' },
-  { day: '2026-11-24', slot: 'bubble4', time: '22:15', mode: 'live', theme: 'Vie à Dubaï',
+  { day: '2026-11-24', slot: 'bubble4', time: '22:15', mode: 'prog', theme: 'Vie à Dubaï',
     subject: 'Tuesday night in Dubai, the day before the live',
     points: ['Where I am.', "What I'm looking forward to tomorrow.", 'Good night to the UK, good morning to Sydney.'],
     duration: '30 s', fallback: 'Tuesday night in Dubai. Tomorrow we meet on Zoom.' },

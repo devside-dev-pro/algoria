@@ -5,8 +5,8 @@
  * Pour écrire en base : `npx tsx scripts/insert-bubbles-18-24.ts --apply`
  *   — seulement avec l'OK de Mathieu. Jamais de DELETE. WHERE NOT EXISTS sur (day, slot).
  *
- * Ne lance PAS ce script au déploiement. Les DMs PROG/LIVE ne partent que si les lignes
- * existent et que le kill-switch n'est pas à off.
+ * Ne lance PAS ce script au déploiement. Le message de 11:30 ne part que si les lignes
+ * existent et que le kill-switch n'est pas à off. Pas de DM live, pas de relance.
  */
 import { bubbleInsertRows } from '../lib/channel/bubbles.week';
 

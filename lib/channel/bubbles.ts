@@ -1,22 +1,20 @@
-// DEMANDES DE BULLES VIDÉO À MATHIEU (calendrier 18–24/11, partie D, décision du 17/11/2026 ;
-// horaires du 19/11/2026 : Mathieu, « OK pour la nouvelle organisation des bulles et de l'info du matin, réglages et PR »).
+// DEMANDES DE BULLES VIDÉO À MATHIEU.
+// 19/11/2026 : un DM à 11:30, une relance à 13:30, un abandon à 15:00, et des bulles « live » à part.
+// 24/11/2026, Mathieu : « Oui, Dev prépare la PR pour un seul message de bulles à 11:30, bien expliqué,
+// sans bulles live ni abandon à 15:00 ».
 //
-// Les lignes (slot bubble1…bubble4, kind=video, status=info) sont insérées par le script
-// scripts/insert-bubbles-18-24.ts — livré, pas exécuté tout seul.
-//
-//   · PROG : un seul DM « 🎥 Bulles à programmer aujourd'hui » à 11:30 Dubaï tous les jours, week-end compris.
-//   · Dans ce DM, chaque bulle du jour a 3 boutons d'horaire (≥ 13:00 Dubaï, 30 min d'écart avec les posts CM
-//     et les autres bulles). L'horaire choisi est écrit dans scheduled_at.
-//   · Relance unique à 13:30 si une bulle n'a toujours pas de réponse (ni horaire, ni Faite, ni Pas cette fois).
-//   · Après 15:00 (fin de la fenêtre de relance) : status=skipped, raison claire, pas de texte de remplacement.
-//   · LIVE : un DM 10 minutes avant l'horaire choisi (« C'est le moment de faire une bulle… »).
-//   · Boutons « ✅ Faite » (rien d'autre ne part) et « ⏭ Pas cette fois » (le texte de remplacement
-//     passe en approved et part au créneau, kind reste video pour ne pas bousculer les numéros du plan CM).
-//   · Idempotent : report.prog_sent_at / nudge_sent_at / live_sent_at (sent_at reste lu pour l'ancien format).
-//   · Kill-switch : CHANNEL_BUBBLES=off (env) ou support_settings cm_bubbles=off. Pas de nouveau webhook.
-// Les DM vont seulement aux admins, via notifyOwner.
+//   · À 11:30 Dubaï, tous les jours, UN message (découpé seulement s'il dépasse 4096 caractères) avec
+//     les 3 ou 4 bulles du jour : sujet, pourquoi aujourd'hui, heure de Dubaï, durée, accroche,
+//     points à dire, phrase de fin avec @mathieu_algoria. Le texte vient du CM (lib/channel/writer.ts).
+//   · Plus de relance à 13:30, plus d'abandon à 15:00, plus de DM « live » 10 min avant.
+//   · Les anciens boutons (horaire, Faite, Pas cette fois) restent lus : un vocal déjà rangé ou un
+//     texte de remplacement déjà approuvé ne sont pas rejoués. Pas de nouveau webhook.
+//   · Idempotent : report.prog_sent_at (sent_at reste lu pour l'ancien format).
+//   · Kill-switch : CHANNEL_BUBBLES=off (env) ou support_settings cm_bubbles=off.
+// Les DM vont seulement aux admins.
 
-import { adminTgIds, notifyOwner } from '@/lib/member/notifyOwner';
+import { adminTgIds } from '@/lib/member/notifyOwner';
+import { dayContext, writeBubbleScripts, type BubbleScript } from './writer';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -24,10 +22,19 @@ type Db = any;
 export type BubbleReport = {
   mode?: 'prog' | 'live';
   theme?: string;
+  /** Phrase claire pour Mathieu, en français. */
   subject?: string;
+  /** Pourquoi on en parle aujourd'hui, en français. */
+  why?: string;
+  /** Accroche à dire telle quelle, en anglais. */
+  hook?: string;
+  /** 2 à 4 phrases à dire, ou une consigne (« Dis où tu es… »). */
   points?: string[];
+  /** Phrase de fin à dire, avec @mathieu_algoria. */
+  closing?: string;
   duration?: string;
   fallback?: string;
+  writer?: string;
   sent_at?: string;
   prog_sent_at?: string;
   nudge_sent_at?: string;
@@ -37,6 +44,7 @@ export type BubbleReport = {
   faite?: boolean;
   fallback_approved?: boolean;
   decided_by?: string;
+  decided_at?: string;
   reason?: string;
   skipped_at?: string;
 };
@@ -54,15 +62,13 @@ export type BubbleRow = {
 
 const TZ = 'Asia/Dubai';
 export const PROG_AT = '11:30'; // tous les jours, week-end compris
-export const NUDGE_AT = '13:30';
-export const SKIP_AT = '15:00'; // fin de la fenêtre de relance (13:30 + 90 min)
 export const SLOT_MIN = '13:00';
 export const SLOT_GAP_MIN = 30;
 export const SLOT_PREF = ['13:00', '15:30', '18:00'] as const;
-export const SKIP_REASON = 'sans réponse après la relance de 13:30';
+const SLOT_PREF4 = ['13:00', '16:00', '18:30', '21:00'] as const;
+/** Plafond d'un message Telegram. On reste en dessous : le HTML du titre compte dans les 4096. */
+export const TELEGRAM_TEXT_MAX = 4096;
 const PROG_WINDOW_MS = 90 * 60_000; // cron toutes les 5 min ; 90 min de marge si un passage est raté
-const NUDGE_WINDOW_MS = 90 * 60_000;
-const LIVE_LEAD_MS = 10 * 60_000;
 const asObj = (x: unknown): Record<string, unknown> => (x && typeof x === 'object' && !Array.isArray(x) ? (x as Record<string, unknown>) : {});
 const reportOf = (r: { report: unknown }): BubbleReport => asObj(r.report) as BubbleReport;
 
@@ -98,51 +104,23 @@ export function inProgWindow(now: { day: string; weekday: number; ms: number }):
   return now.ms >= start && now.ms < start + PROG_WINDOW_MS;
 }
 
-/** Premier passage dans [13:30, 15:00) Dubaï. */
-export function inNudgeWindow(now: { day: string; ms: number }): boolean {
-  const start = atHm(now.day, NUDGE_AT);
-  return now.ms >= start && now.ms < start + NUDGE_WINDOW_MS;
-}
-
-/** À partir de 15:00 Dubaï le jour J, ou le lendemain si la fenêtre a été manquée. */
-export function inSkipWindow(now: { day: string; ms: number }, rowDay: string): boolean {
-  const day = String(rowDay).slice(0, 10);
-  if (day < now.day) return true;
-  if (day > now.day) return false;
-  return now.ms >= atHm(now.day, SKIP_AT);
-}
-
-/** Premier passage dans [scheduled_at − 10 min, scheduled_at). */
-export function inLiveWindow(scheduledAt: string, nowMs: number): boolean {
-  const at = Date.parse(scheduledAt);
-  return nowMs >= at - LIVE_LEAD_MS && nowMs < at;
-}
-
-export function isUnanswered(r: BubbleRow): boolean {
-  const rep = reportOf(r);
-  return r.status === 'info' && !rep.faite && !rep.chosen_at && !rep.fallback_approved;
-}
-
 const progAlreadySent = (rep: BubbleReport) => !!(rep.prog_sent_at || rep.sent_at);
 
-export function pendingProg(rows: BubbleRow[]): BubbleRow[] {
-  return rows.filter((r) => isUnanswered(r) && !progAlreadySent(reportOf(r)));
-}
-
-export function pendingNudge(rows: BubbleRow[]): BubbleRow[] {
-  return rows.filter((r) => isUnanswered(r) && !reportOf(r).nudge_sent_at);
-}
-
-export function pendingSkip(rows: BubbleRow[], now: { day: string; ms: number }): BubbleRow[] {
-  return rows.filter((r) => isUnanswered(r) && inSkipWindow(now, r.day));
-}
-
-/** Rappel −10 min : seulement après un horaire choisi (le mécanisme inLiveWindow ne change pas). */
-export function pendingLive(rows: BubbleRow[], nowMs: number): BubbleRow[] {
+/** Bulles encore à mettre dans le message de 11:30. Un horaire déjà choisi ne les retire pas. */
+export function pendingBriefing(rows: BubbleRow[]): BubbleRow[] {
   return rows.filter((r) => {
+    if (!isBubbleRow(r) || r.status !== 'info') return false;
     const rep = reportOf(r);
-    return r.status === 'info' && !!rep.chosen_at && !rep.faite && !rep.live_sent_at && inLiveWindow(r.scheduled_at, nowMs);
+    if (progAlreadySent(rep) || rep.faite || rep.fallback_approved) return false;
+    return true;
   });
+}
+
+/** À 11:30 seulement. 13:30 et 15:00 ne renvoient rien : pas de relance, pas d'abandon. */
+export function briefingDue(now: { day: string; weekday: number; ms: number }, rows: BubbleRow[]): BubbleRow[] {
+  if (!inProgWindow(now)) return [];
+  return pendingBriefing(rows.filter((r) => String(r.day).slice(0, 10) === now.day))
+    .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at) || String(a.slot).localeCompare(String(b.slot)));
 }
 
 export function timesConflict(aMs: number, bMs: number, gapMin = SLOT_GAP_MIN): boolean {
@@ -161,12 +139,13 @@ export function slotGrid(minHm = SLOT_MIN, maxHm = '22:00', stepMin = 30): strin
   return out;
 }
 
-/** 3 créneaux Dubaï, préférés 13:00 / 15:30 / 18:00, jamais avant 13:00, 30 min d'écart avec les horaires occupés. */
+/** 3 créneaux Dubaï (13:00 / 15:30 / 18:00) ou 4 (13:00 / 16:00 / 18:30 / 21:00). Jamais avant 13:00, 30 min d'écart. */
 export function pickBubbleSlots(day: string, occupiedIso: string[], count = 3): string[] {
   const occ = occupiedIso.map((s) => Date.parse(s)).filter(Number.isFinite);
   const seen = new Set<string>();
   const ordered: string[] = [];
-  for (const hm of [...SLOT_PREF, ...slotGrid()]) {
+  const pref = count >= 4 ? SLOT_PREF4 : SLOT_PREF;
+  for (const hm of [...pref, ...slotGrid()]) {
     if (hm < SLOT_MIN || seen.has(hm)) continue;
     seen.add(hm);
     ordered.push(hm);
@@ -222,54 +201,92 @@ export const parseAtCallback = (data: string): { id: number; hm: string } | null
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const dubaiHHMM = (iso: string) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
+const STAGE = /^(dis|montre|filme|commence|regarde|raconte|cite|say|show|film|start|tell|mention)\b/i;
+const quoteSay = (s: string) => `"${esc(s.trim().replace(/^["“«]+|["”»]+$/g, ''))}"`;
+const formatPoint = (p: string) => (STAGE.test(p.trim()) ? esc(p.trim()) : quoteSay(p));
 
-const pointsLine = (rep: BubbleReport) => (rep.points ?? []).map((p, i) => `${i + 1}) ${p}`).join(' ');
-
-export function formatProgDm(rows: BubbleRow[], occupiedIso: string[] = []): { title: string; lines: string[]; buttonRows: Array<Array<{ text: string; data: string }>> } {
-  const lines: string[] = [];
-  const buttonRows: Array<Array<{ text: string; data: string }>> = [];
-  const reserved: string[] = [...occupiedIso];
-  for (const r of rows) {
-    const rep = reportOf(r);
-    const day = String(r.day).slice(0, 10);
-    const slots = pickBubbleSlots(day, reserved.filter((iso) => {
-      // ne pas bloquer un créneau avec l'horaire actuel de CETTE bulle (il va être remplacé)
-      return iso !== r.scheduled_at;
-    }));
-    for (const hm of slots) reserved.push(`${day}T${hm}:00+04:00`);
-    lines.push('', `PROG · ${rep.duration ?? ''}`.trim(), rep.subject ?? r.text ?? '', pointsLine(rep));
-    if (slots.length) {
-      buttonRows.push(slots.map((hm) => ({ text: hm, data: atCallbackData(r.id, hm) })));
-    }
-    buttonRows.push([
-      { text: '✅ Faite', data: `cmb:ok:${r.id}` },
-      { text: '⏭ Pas cette fois', data: `cmb:no:${r.id}` },
-    ]);
-  }
-  return { title: '🎥 Bulles à programmer aujourd\'hui', lines: lines.filter((l, i) => !(i === 0 && l === '')), buttonRows };
-}
-
-export function formatNudgeDm(rows: BubbleRow[], occupiedIso: string[] = []): { title: string; lines: string[]; buttonRows: Array<Array<{ text: string; data: string }>> } {
-  const dm = formatProgDm(rows, occupiedIso);
-  return { ...dm, title: '🎥 Relance : bulles du jour sans réponse' };
-}
-
-export function formatLiveDm(r: BubbleRow): { title: string; lines: string[]; buttonRows: Array<Array<{ text: string; data: string }>> } {
+export function formatBubbleBlock(r: BubbleRow, n: number): string {
   const rep = reportOf(r);
-  const when = dubaiHHMM(r.scheduled_at);
-  const pts = pointsLine(rep);
-  return {
-    title: '🎥 C\'est le moment de faire une bulle',
-    lines: [
-      `Parle de ${rep.subject ?? r.text ?? 'ce sujet'}.`,
-      pts ? `Points : ${pts} · ${rep.duration ?? ''}`.trim() : (rep.duration ?? ''),
-      `À publier à ${when} (Dubaï).`,
-    ].filter(Boolean),
-    buttonRows: [[
-      { text: '✅ Faite', data: `cmb:ok:${r.id}` },
-      { text: '⏭ Pas cette fois', data: `cmb:no:${r.id}` },
-    ]],
+  const when = r.scheduled_at ? dubaiHHMM(r.scheduled_at) : '';
+  const duration = (rep.duration ?? '').trim();
+  const head = `Bulle ${n} — ${when} Dubaï${duration ? ` — ${duration}` : ''}`;
+  const lines = [`<b>${esc(head)}</b>`];
+  const subject = (rep.subject ?? r.text ?? '').trim();
+  if (subject) lines.push(`<b>Sujet :</b> ${esc(subject)}`);
+  if (rep.why?.trim()) lines.push(`<b>Pourquoi aujourd'hui :</b> ${esc(rep.why.trim())}`);
+  if (rep.hook?.trim()) lines.push(`<b>Accroche à dire telle quelle :</b> ${quoteSay(rep.hook)}`);
+  const points = (rep.points ?? []).map((p) => p.trim()).filter(Boolean);
+  if (points.length) {
+    lines.push('<b>Points à dire :</b>');
+    points.forEach((p, i) => lines.push(`${i + 1}. ${formatPoint(p)}`));
+  }
+  if (rep.closing?.trim()) lines.push(`<b>Fin :</b> ${quoteSay(rep.closing)}`);
+  return lines.join('\n');
+}
+
+const BRIEF_INTRO = '<b>🎥 Bulles à enregistrer aujourd\'hui</b>\nEnregistre-les toutes maintenant, dans l\'ordre. Chacune est publiée à l\'heure indiquée (Dubaï).';
+const BRIEF_SUITE = '<b>🎥 Bulles à enregistrer aujourd\'hui (suite)</b>\n\n';
+
+/** Découpe sur les limites de bulles. Une bulle plus longue que la limite est coupée entre deux lignes. */
+export function packTelegramHtml(blocks: string[], limit: number): string[] {
+  const out: string[] = [];
+  let cur = '';
+  const push = (s: string) => { if (s.trim()) out.push(s); };
+  const take = (block: string) => {
+    if (block.length <= limit) return [block];
+    const pieces: string[] = [];
+    let acc = '';
+    for (const line of block.split('\n')) {
+      const one = line.length > limit ? line.slice(0, limit) : line;
+      const next = acc ? `${acc}\n${one}` : one;
+      if (acc && next.length > limit) { pieces.push(acc); acc = one; }
+      else acc = next;
+    }
+    if (acc) pieces.push(acc);
+    return pieces;
   };
+  for (const block of blocks) {
+    for (const piece of take(block)) {
+      const next = cur ? `${cur}\n\n${piece}` : piece;
+      if (cur && next.length > limit) { push(cur); cur = piece; }
+      else cur = next;
+    }
+  }
+  if (cur) push(cur);
+  return out;
+}
+
+/** Un ou plusieurs messages HTML, chacun sous la limite. Le second porte « (suite) ». */
+export function formatBriefingMessages(rows: BubbleRow[], limit = TELEGRAM_TEXT_MAX): string[] {
+  const sorted = [...rows].sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at) || String(a.slot).localeCompare(String(b.slot)));
+  if (!sorted.length) return [];
+  const budget = Math.max(400, limit - BRIEF_SUITE.length);
+  const packed = packTelegramHtml([BRIEF_INTRO, ...sorted.map((r, i) => formatBubbleBlock(r, i + 1))], budget);
+  return packed.map((p, i) => (i === 0 ? p : `${BRIEF_SUITE}${p}`));
+}
+
+/** Lignes channel_posts pour les scripts du CM. Jamais mode live. `text` = l'accroche anglaise, pas le sujet français. */
+export function bubbleRowsFromScripts(day: string, scripts: BubbleScript[], occupiedIso: string[]) {
+  const slots = pickBubbleSlots(day, occupiedIso, scripts.length);
+  return scripts.slice(0, slots.length).map((s, i) => ({
+    day,
+    slot: `bubble${i + 1}`,
+    kind: 'video' as const,
+    text: s.hook,
+    status: 'info' as const,
+    scheduled_at: `${day}T${slots[i]}:00+04:00`,
+    report: {
+      mode: 'prog' as const,
+      theme: s.theme,
+      subject: s.subject,
+      why: s.why,
+      duration: s.duration,
+      hook: s.hook,
+      points: s.points,
+      closing: s.closing,
+      writer: 'ai' as const,
+    },
+  }));
 }
 
 /** Section du plan de 21:00, à la place de « Idée de bulle » quand des bubble1–4 existent. */
@@ -280,8 +297,8 @@ export function renderBubblesPlanSection(rows: Array<{ slot?: string; kind?: str
   for (const r of bubbles) {
     const rep = reportOf(r as BubbleRow);
     const when = r.scheduled_at ? dubaiHHMM(r.scheduled_at) : '';
-    const mode = rep.mode === 'live' ? 'LIVE' : 'PROG';
-    lines.push(`${when} · ${mode} · ${esc(rep.theme ?? '')} — ${esc(rep.subject ?? r.text ?? '')}`);
+    const theme = rep.theme ? `${esc(rep.theme)} — ` : '';
+    lines.push(`${when} Dubaï · ${theme}${esc(rep.subject ?? r.text ?? '')}`);
   }
   return lines.join('\n');
 }
@@ -301,51 +318,68 @@ async function loadOpenBubbles(db: Db, day: string): Promise<{ bubbles: BubbleRo
   return { bubbles: posts.filter(isBubbleRow), posts };
 }
 
-/** Appelé au début de runDue (cron toutes les 5 min, suffisant pour un LIVE à −10 min). */
+async function deliverBriefing(parts: string[]): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const ids = await adminTgIds();
+  if (!token || !ids.length || !parts.length) return false;
+  let ok = 0;
+  await Promise.all(ids.map(async (chat_id) => {
+    for (const text of parts) {
+      try {
+        const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+          body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+        });
+        const j = (await r.json().catch(() => null)) as { ok?: boolean } | null;
+        if (j?.ok) ok++;
+      } catch { /* un admin injoignable ne bloque pas les autres */ }
+    }
+  }));
+  return ok > 0;
+}
+
+/** Crée les bulles du jour si le CM n'en a pas encore. N'écrit rien s'il y en a déjà, ni si le modèle refuse. */
+export async function ensureDayBubbles(db: Db, day: string, webinar?: string): Promise<{ have: boolean; inserted: number }> {
+  if (!(await bubblesEnabled(db))) return { have: false, inserted: 0 };
+  const { data: existing } = await db.from('channel_posts').select('id,slot,kind,status,scheduled_at,report').eq('day', day);
+  const rows = (existing ?? []) as Array<{ id: number; slot?: string; kind?: string; status?: string; scheduled_at?: string | null; report?: unknown }>;
+  if (rows.some((r) => isBubbleRow(r))) return { have: true, inserted: 0 };
+  const ctx = await dayContext(db, day).catch(() => null);
+  if (!ctx) return { have: false, inserted: 0 };
+  if (webinar) ctx.webinar = webinar;
+  const scripts = await writeBubbleScripts(ctx);
+  if (!scripts?.length) return { have: false, inserted: 0 };
+  const built = bubbleRowsFromScripts(day, scripts, occupiedScheduledAt(rows));
+  if (!built.length) return { have: false, inserted: 0 };
+  const { error } = await db.from('channel_posts').insert(built);
+  if (error) {
+    if (/duplicate|unique/i.test(String(error.message ?? ''))) return { have: true, inserted: 0 };
+    console.error('[cm] bubbles insert:', error.message);
+    return { have: false, inserted: 0 };
+  }
+  return { have: true, inserted: built.length };
+}
+
+/** Appelé au début de runDue (cron toutes les 5 min). Un seul envoi groupé, dans la fenêtre de 11:30. */
 export async function sendDueBubbleDms(db: Db, nowMs = Date.now()): Promise<{ prog: number; nudge: number; live: number; skipped: number }> {
-  if (!(await bubblesEnabled(db))) return { prog: 0, nudge: 0, live: 0, skipped: 0 };
+  const none = { prog: 0, nudge: 0, live: 0, skipped: 0 };
+  if (!(await bubblesEnabled(db))) return none;
   const now = dubaiNow(nowMs);
+  if (!inProgWindow(now)) return none;
+  let { bubbles } = await loadOpenBubbles(db, now.day);
+  let today = bubbles.filter((r) => String(r.day).slice(0, 10) === now.day);
+  if (!today.some(isBubbleRow)) {
+    await ensureDayBubbles(db, now.day).catch((e) => console.error('[cm] bubbles:', (e as Error).message));
+    ({ bubbles } = await loadOpenBubbles(db, now.day));
+    today = bubbles.filter((r) => String(r.day).slice(0, 10) === now.day);
+  }
+  const due = briefingDue(now, today);
+  if (!due.length) return none;
+  const parts = formatBriefingMessages(due);
+  if (!(await deliverBriefing(parts))) return none;
   const at = new Date(nowMs).toISOString();
-  const { bubbles, posts } = await loadOpenBubbles(db, now.day);
-  const todayPosts = posts.filter((p) => String(p.day).slice(0, 10) === now.day);
-  const occupied = occupiedScheduledAt(todayPosts);
-  let prog = 0, nudge = 0, live = 0, skipped = 0;
-  if (inProgWindow(now)) {
-    const due = pendingProg(bubbles.filter((r) => String(r.day).slice(0, 10) === now.day));
-    if (due.length) {
-      const dm = formatProgDm(due, occupied);
-      await notifyOwner({ title: dm.title, lines: dm.lines, tag: 'cm-bubbles-prog', buttonRows: dm.buttonRows });
-      await patchReport(db, due, (rep) => ({ ...rep, prog_sent_at: at, sent_at: at }));
-      prog = due.length;
-    }
-  }
-  if (inNudgeWindow(now)) {
-    const due = pendingNudge(bubbles.filter((r) => String(r.day).slice(0, 10) === now.day));
-    if (due.length) {
-      const dm = formatNudgeDm(due, occupied);
-      await notifyOwner({ title: dm.title, lines: dm.lines, tag: 'cm-bubbles-nudge', buttonRows: dm.buttonRows });
-      await patchReport(db, due, (rep) => ({ ...rep, nudge_sent_at: at }));
-      nudge = due.length;
-    }
-  }
-  const toSkip = pendingSkip(bubbles, now);
-  for (const r of toSkip) {
-    const report = { ...asObj(r.report), reason: SKIP_REASON, skipped_at: at };
-    const { data } = await db.from('channel_posts').update({ status: 'skipped', report }).eq('id', r.id).eq('status', 'info').select('id');
-    if (data?.length) {
-      r.status = 'skipped';
-      r.report = report;
-      skipped++;
-    }
-  }
-  const lives = pendingLive(bubbles, nowMs);
-  for (const r of lives) {
-    const dm = formatLiveDm(r);
-    await notifyOwner({ title: dm.title, lines: dm.lines, tag: 'cm-bubbles-live', buttonRows: dm.buttonRows });
-    await patchReport(db, [r], (rep) => ({ ...rep, live_sent_at: at }));
-    live++;
-  }
-  return { prog, nudge, live, skipped };
+  await patchReport(db, due, (rep) => ({ ...rep, prog_sent_at: at, sent_at: at }));
+  return { prog: due.length, nudge: 0, live: 0, skipped: 0 };
 }
 
 export async function handleBubbleCallback(db: Db, cq: { id: string; data?: string; from?: { id?: number; username?: string }; message?: { chat?: { id?: number }; message_id?: number } }): Promise<boolean> {
@@ -376,7 +410,7 @@ export async function handleBubbleCallback(db: Db, cq: { id: string; data?: stri
     const choice = applyTimeChoice(r, atPick.hm, occupied, by, new Date().toISOString());
     if (!choice.ok) { await answer(choice.reason); return true; }
     await db.from('channel_posts').update({ scheduled_at: choice.scheduled_at, report: choice.report }).eq('id', r.id).eq('status', 'info');
-    await answer(`Noté, prévue à ${atPick.hm} (Dubaï). Rappel 10 min avant.`);
+    await answer(`Noté, prévue à ${atPick.hm} (Dubaï).`);
     return true;
   }
   const rep = { ...asObj(r.report), decided_by: by, decided_at: new Date().toISOString() };
