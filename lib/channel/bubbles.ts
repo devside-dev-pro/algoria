@@ -2,14 +2,20 @@
 // 19/11/2026 : un DM à 11:30, une relance à 13:30, un abandon à 15:00, et des bulles « live » à part.
 // 24/11/2026, Mathieu : « Oui, Dev prépare la PR pour un seul message de bulles à 11:30, bien expliqué,
 // sans bulles live ni abandon à 15:00 ».
+// 26/11/2026, Mathieu : « fait en sorte que tout les jours je fasse 4 bulles vidéos, meme si il faut
+// m'envoyer des rappelles je doit me forcer, c'est ce qui convertie le plus ».
 //
-//   · À 11:30 Dubaï, tous les jours, UN message (découpé seulement s'il dépasse 4096 caractères) avec
-//     les 3 ou 4 bulles du jour : sujet, pourquoi aujourd'hui, heure de Dubaï, durée, accroche,
-//     points à dire, phrase de fin avec @mathieu_algoria. Le texte vient du CM (lib/channel/writer.ts).
+//   · À 11:30 Dubaï, tous les jours, UN message (découpé seulement s'il dépasse 4096 caractères, avec
+//     « (suite) ») et exactement 4 video notes : sujet, pourquoi aujourd'hui, heure de Dubaï (jamais
+//     avant 13:00, 30 min des autres posts), durée (60 s max), cadrage, accroche, points, fin avec
+//     @mathieu_algoria. Le texte vient du CM (lib/channel/writer.ts).
+//   · Un rappel ~30 min avant chaque bulle, puis UNE relance si aucune video note du canal source n'a
+//     été vue pour ce créneau. Idempotent d'un passage de cron à l'autre (remind_sent_at, chase_sent_at).
+//   · La publication est le channel_post.video_note déjà reçu par /api/telegram (allowed_updates inchangé,
+//     pas de setWebhook). Bouton « Postée ✅ » si ce post n'est pas celui du créneau.
+//   · Les anciens boutons (horaire, Faite, Pas cette fois) restent lus. Le suivi tient dans report,
+//     comme prog_sent_at : pas de nouvelle colonne.
 //   · Plus de relance à 13:30, plus d'abandon à 15:00, plus de DM « live » 10 min avant.
-//   · Les anciens boutons (horaire, Faite, Pas cette fois) restent lus : un vocal déjà rangé ou un
-//     texte de remplacement déjà approuvé ne sont pas rejoués. Pas de nouveau webhook.
-//   · Idempotent : report.prog_sent_at (sent_at reste lu pour l'ancien format).
 //   · Kill-switch : CHANNEL_BUBBLES=off (env) ou support_settings cm_bubbles=off.
 // Les DM vont seulement aux admins.
 
@@ -39,6 +45,14 @@ export type BubbleReport = {
   prog_sent_at?: string;
   nudge_sent_at?: string;
   live_sent_at?: string;
+  /** Rappel ~30 min avant le créneau. Une fois. */
+  remind_sent_at?: string;
+  /** Relance unique si la video note n'a pas été vue sur le canal. */
+  chase_sent_at?: string;
+  /** Video note vue sur le canal, ou bouton « Postée ✅ ». */
+  posted_at?: string;
+  posted_via?: 'channel' | 'button';
+  posted_message_id?: number;
   chosen_at?: string;
   chosen_hm?: string;
   faite?: boolean;
@@ -68,6 +82,16 @@ export const SLOT_PREF = ['13:00', '15:30', '18:00'] as const;
 const SLOT_PREF4 = ['13:00', '16:00', '18:30', '21:00'] as const;
 /** Plafond d'un message Telegram. On reste en dessous : le HTML du titre compte dans les 4096. */
 export const TELEGRAM_TEXT_MAX = 4096;
+/** Consigne commune : video note ronde, pas un vocal, pas une vidéo paysage. */
+export const VIDEO_NOTE_CUE = 'Video note ronde, visage cadré au centre, regard caméra. 60 secondes maximum.';
+export const POSTED_BUTTON = 'Postée ✅';
+export const REMIND_LEAD_MS = 30 * 60_000;
+/** On laisse le webhook arriver avant de conclure que la bulle n'est pas sur le canal. */
+export const CHASE_GRACE_MS = 10 * 60_000;
+export const CHASE_WINDOW_MS = 80 * 60_000;
+/** Du rappel (30 min avant) jusqu'à 40 min après l'heure : au-delà, ce n'est plus ce créneau. */
+export const POSTED_BEFORE_MS = REMIND_LEAD_MS;
+export const POSTED_AFTER_MS = 40 * 60_000;
 const PROG_WINDOW_MS = 90 * 60_000; // cron toutes les 5 min ; 90 min de marge si un passage est raté
 const asObj = (x: unknown): Record<string, unknown> => (x && typeof x === 'object' && !Array.isArray(x) ? (x as Record<string, unknown>) : {});
 const reportOf = (r: { report: unknown }): BubbleReport => asObj(r.report) as BubbleReport;
@@ -158,7 +182,7 @@ export function pickBubbleSlots(day: string, occupiedIso: string[], count = 3): 
     picked.push(hm);
     if (picked.length === count) break;
   }
-  return picked;
+  return picked.sort();
 }
 
 export function occupiedScheduledAt(posts: Array<{ id: number; scheduled_at?: string | null; status?: string }>, exceptId?: number): string[] {
@@ -205,15 +229,12 @@ const STAGE = /^(dis|montre|filme|commence|regarde|raconte|cite|say|show|film|st
 const quoteSay = (s: string) => `"${esc(s.trim().replace(/^["“«]+|["”»]+$/g, ''))}"`;
 const formatPoint = (p: string) => (STAGE.test(p.trim()) ? esc(p.trim()) : quoteSay(p));
 
-export function formatBubbleBlock(r: BubbleRow, n: number): string {
+function spokenLines(r: BubbleRow, withWhy: boolean): string[] {
   const rep = reportOf(r);
-  const when = r.scheduled_at ? dubaiHHMM(r.scheduled_at) : '';
-  const duration = (rep.duration ?? '').trim();
-  const head = `Bulle ${n} — ${when} Dubaï${duration ? ` — ${duration}` : ''}`;
-  const lines = [`<b>${esc(head)}</b>`];
+  const lines: string[] = [];
   const subject = (rep.subject ?? r.text ?? '').trim();
   if (subject) lines.push(`<b>Sujet :</b> ${esc(subject)}`);
-  if (rep.why?.trim()) lines.push(`<b>Pourquoi aujourd'hui :</b> ${esc(rep.why.trim())}`);
+  if (withWhy && rep.why?.trim()) lines.push(`<b>Pourquoi aujourd'hui :</b> ${esc(rep.why.trim())}`);
   if (rep.hook?.trim()) lines.push(`<b>Accroche à dire telle quelle :</b> ${quoteSay(rep.hook)}`);
   const points = (rep.points ?? []).map((p) => p.trim()).filter(Boolean);
   if (points.length) {
@@ -221,11 +242,19 @@ export function formatBubbleBlock(r: BubbleRow, n: number): string {
     points.forEach((p, i) => lines.push(`${i + 1}. ${formatPoint(p)}`));
   }
   if (rep.closing?.trim()) lines.push(`<b>Fin :</b> ${quoteSay(rep.closing)}`);
-  return lines.join('\n');
+  return lines;
 }
 
-const BRIEF_INTRO = '<b>🎥 Bulles à enregistrer aujourd\'hui</b>\nEnregistre-les toutes maintenant, dans l\'ordre. Chacune est publiée à l\'heure indiquée (Dubaï).';
-const BRIEF_SUITE = '<b>🎥 Bulles à enregistrer aujourd\'hui (suite)</b>\n\n';
+export function formatBubbleBlock(r: BubbleRow, n: number): string {
+  const rep = reportOf(r);
+  const when = r.scheduled_at ? dubaiHHMM(r.scheduled_at) : '';
+  const duration = (rep.duration ?? '').trim();
+  const head = `Bulle ${n} — ${when} Dubaï${duration ? ` — ${duration}` : ''}`;
+  return [`<b>${esc(head)}</b>`, `<b>Cadrage :</b> video note ronde, regard caméra, 60 s max.`, ...spokenLines(r, true)].join('\n');
+}
+
+const BRIEF_INTRO = `<b>🎥 Bulles vidéo à poster aujourd'hui</b>\n${VIDEO_NOTE_CUE}\nPrépare-les dans l'ordre. Chacune est publiée à l'heure indiquée (Dubaï), jamais avant 13:00. Un rappel part 30 min avant.`;
+const BRIEF_SUITE = `<b>🎥 Bulles vidéo (suite)</b>\n${VIDEO_NOTE_CUE}\n\n`;
 
 /** Découpe sur les limites de bulles. Une bulle plus longue que la limite est coupée entre deux lignes. */
 export function packTelegramHtml(blocks: string[], limit: number): string[] {
@@ -254,6 +283,112 @@ export function packTelegramHtml(blocks: string[], limit: number): string[] {
   }
   if (cur) push(cur);
   return out;
+}
+
+export function formatReminderMessage(r: BubbleRow, nowMs?: number): string {
+  const when = r.scheduled_at ? dubaiHHMM(r.scheduled_at) : '';
+  const ms = Date.parse(r.scheduled_at);
+  const mins = nowMs != null && Number.isFinite(ms) ? Math.max(1, Math.round((ms - nowMs) / 60_000)) : 30;
+  return [
+    `<b>🎥 Rappel — bulle à ${esc(when)} Dubaï</b>`,
+    `Dans environ ${mins} min. ${esc(VIDEO_NOTE_CUE)}`,
+    ...spokenLines(r, false),
+    'Poste-la sur le canal à l\'heure. Si elle y est déjà, touche Postée.',
+  ].join('\n');
+}
+
+export function formatChaseMessage(r: BubbleRow): string {
+  const when = r.scheduled_at ? dubaiHHMM(r.scheduled_at) : '';
+  return [
+    `<b>🎥 Relance — bulle de ${esc(when)} Dubaï</b>`,
+    `Je n'ai pas vu la video note sur le canal à l'heure prévue. ${esc(VIDEO_NOTE_CUE)}`,
+    ...spokenLines(r, false),
+    'Une seule relance. Touche Postée une fois que c\'est en ligne.',
+  ].join('\n');
+}
+
+const bySchedule = (a: BubbleRow, b: BubbleRow) =>
+  Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at) || String(a.slot).localeCompare(String(b.slot));
+
+function stillToPost(r: BubbleRow): boolean {
+  if (!isBubbleRow(r) || r.status !== 'info') return false;
+  const rep = reportOf(r);
+  if (rep.posted_at || rep.faite || rep.fallback_approved) return false;
+  return Number.isFinite(Date.parse(r.scheduled_at));
+}
+
+/** Premier passage dans [heure − 30 min, heure). Un rappel déjà parti ne revient pas. */
+export function reminderDue(nowMs: number, rows: BubbleRow[]): BubbleRow[] {
+  return rows.filter((r) => {
+    if (!stillToPost(r) || reportOf(r).remind_sent_at) return false;
+    const ms = Date.parse(r.scheduled_at);
+    return nowMs >= ms - REMIND_LEAD_MS && nowMs < ms;
+  }).sort(bySchedule);
+}
+
+/** Une fois, dans la fenêtre qui suit l'heure, et seulement tant que la bulle n'est pas marquée postée. */
+export function chaseDue(nowMs: number, rows: BubbleRow[]): BubbleRow[] {
+  return rows.filter((r) => {
+    if (!stillToPost(r) || reportOf(r).chase_sent_at) return false;
+    const ms = Date.parse(r.scheduled_at);
+    return nowMs >= ms + CHASE_GRACE_MS && nowMs < ms + CHASE_GRACE_MS + CHASE_WINDOW_MS;
+  }).sort(bySchedule);
+}
+
+/** Pas de relance si on ne sait pas quel canal surveiller : un faux « tu n'as pas posté » est pire qu'un silence. */
+export function chaseConfigured(sourceChannelId: string | null | undefined): boolean {
+  return String(sourceChannelId ?? '').trim().length > 0;
+}
+
+export const postedCallbackData = (id: number) => `cmb:posted:${id}`;
+export const parsePostedCallback = (data: string): number | null => {
+  const m = /^cmb:posted:(\d+)$/.exec(data);
+  if (!m) return null;
+  const id = Number(m[1]);
+  return Number.isFinite(id) && id > 0 ? id : null;
+};
+
+export type ChannelPostLike = {
+  message_id?: number;
+  date?: number;
+  chat?: { id?: number | string | null } | null;
+  video_note?: unknown;
+  /** Vidéo classique ou vocal : ignorés. Seule une video note compte. */
+  video?: unknown;
+  voice?: unknown;
+  forward_origin?: unknown;
+  forward_from?: unknown;
+  forward_from_chat?: unknown;
+  forward_sender_name?: unknown;
+};
+
+/** Video note du canal source, pas un transfert (témoignage) ni un vocal ni une vidéo classique. */
+export function bubblePostFromUpdate(post: ChannelPostLike | null | undefined, sourceChannelId: string): { messageId: number; atMs: number } | null {
+  const src = String(sourceChannelId ?? '').trim();
+  if (!src || !post?.video_note) return null;
+  if (post.forward_origin || post.forward_from || post.forward_from_chat || post.forward_sender_name) return null;
+  if (String(post.chat?.id ?? '') !== src) return null;
+  const messageId = Number(post.message_id) || 0;
+  const dateSec = Number(post.date) || 0;
+  if (!messageId || !dateSec) return null;
+  return { messageId, atMs: dateSec * 1000 };
+}
+
+/** Le créneau le plus proche dans la fenêtre. À distance égale, le plus tôt (l'ordre du jour). */
+export function matchBubbleForChannelVideo(rows: BubbleRow[], postedAtMs: number): BubbleRow | null {
+  const open = rows.filter((r) => {
+    if (!stillToPost(r)) return false;
+    const ms = Date.parse(r.scheduled_at);
+    return postedAtMs >= ms - POSTED_BEFORE_MS && postedAtMs <= ms + POSTED_AFTER_MS;
+  });
+  if (!open.length) return null;
+  open.sort((a, b) => {
+    const da = Math.abs(Date.parse(a.scheduled_at) - postedAtMs);
+    const db = Math.abs(Date.parse(b.scheduled_at) - postedAtMs);
+    if (da !== db) return da - db;
+    return bySchedule(a, b);
+  });
+  return open[0];
 }
 
 /** Un ou plusieurs messages HTML, chacun sous la limite. Le second porte « (suite) ». */
@@ -318,17 +453,25 @@ async function loadOpenBubbles(db: Db, day: string): Promise<{ bubbles: BubbleRo
   return { bubbles: posts.filter(isBubbleRow), posts };
 }
 
-async function deliverBriefing(parts: string[]): Promise<boolean> {
+type DmPart = { text: string; button?: { text: string; data: string } };
+
+async function deliverAdminHtml(parts: DmPart[]): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const ids = await adminTgIds();
   if (!token || !ids.length || !parts.length) return false;
   let ok = 0;
   await Promise.all(ids.map(async (chat_id) => {
-    for (const text of parts) {
+    for (const part of parts) {
       try {
+        const reply_markup = part.button
+          ? { inline_keyboard: [[{ text: part.button.text, callback_data: part.button.data.slice(0, 64) }]] }
+          : undefined;
         const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
-          body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+          body: JSON.stringify({
+            chat_id, text: part.text, parse_mode: 'HTML', disable_web_page_preview: true,
+            ...(reply_markup ? { reply_markup } : {}),
+          }),
         });
         const j = (await r.json().catch(() => null)) as { ok?: boolean } | null;
         if (j?.ok) ok++;
@@ -336,6 +479,89 @@ async function deliverBriefing(parts: string[]): Promise<boolean> {
     }
   }));
   return ok > 0;
+}
+
+async function deliverBriefing(parts: string[]): Promise<boolean> {
+  return deliverAdminHtml(parts.map((text) => ({ text })));
+}
+
+type FollowFlag = 'remind_sent_at' | 'chase_sent_at';
+
+/** Pose le drapeau avant l'envoi. Un second passage du cron (5 min) ne renvoie pas. */
+async function claimReportFlag(db: Db, row: BubbleRow, field: FollowFlag, at: string): Promise<boolean> {
+  const { data, error } = await db.from('channel_posts').select('status,report').eq('id', row.id).limit(1);
+  if (error) return false;
+  const fresh = (data ?? [])[0] as { status?: string; report?: unknown } | undefined;
+  if (!fresh || fresh.status !== 'info') return false;
+  const rep = reportOf(fresh as BubbleRow);
+  if (rep[field] || rep.posted_at || rep.faite || rep.fallback_approved) return false;
+  const next: BubbleReport = { ...rep, [field]: at };
+  const wrote = await db.from('channel_posts').update({ report: next }).eq('id', row.id).eq('status', 'info').is('report->>posted_at', null).is(`report->>${field}`, null).select('id');
+  if (wrote.error || !wrote.data?.length) return false;
+  row.report = next;
+  return true;
+}
+
+async function releaseReportFlag(db: Db, row: BubbleRow, field: FollowFlag, at: string): Promise<void> {
+  const rep = reportOf(row);
+  if (rep[field] !== at) return;
+  const rest: BubbleReport = { ...rep };
+  delete rest[field];
+  const { error } = await db.from('channel_posts').update({ report: rest }).eq('id', row.id).eq(`report->>${field}`, at);
+  if (error) {
+    console.error('[cm] bubble flag:', error.message);
+    return;
+  }
+  row.report = rest;
+}
+
+async function sendOneFollowUp(db: Db, row: BubbleRow, field: FollowFlag, text: string, at: string): Promise<boolean> {
+  if (!(await claimReportFlag(db, row, field, at))) return false;
+  const sent = await deliverAdminHtml([{ text, button: { text: POSTED_BUTTON, data: postedCallbackData(row.id) } }]);
+  if (!sent) await releaseReportFlag(db, row, field, at);
+  return sent;
+}
+
+async function sendBubbleFollowUps(db: Db, nowMs: number): Promise<{ remind: number; chase: number }> {
+  const { bubbles } = await loadOpenBubbles(db, dubaiNow(nowMs).day);
+  const at = new Date(nowMs).toISOString();
+  let remind = 0;
+  let chase = 0;
+  for (const r of reminderDue(nowMs, bubbles)) {
+    if (await sendOneFollowUp(db, r, 'remind_sent_at', formatReminderMessage(r, nowMs), at)) remind++;
+  }
+  if (chaseConfigured(process.env.TELEGRAM_CHANNEL_EN)) {
+    for (const r of chaseDue(nowMs, bubbles)) {
+      if (await sendOneFollowUp(db, r, 'chase_sent_at', formatChaseMessage(r), at)) chase++;
+    }
+  }
+  return { remind, chase };
+}
+
+/** Marque la bulle du créneau quand le canal source reçoit une video note. Idempotent sur le message_id. */
+export async function noteChannelBubblePost(db: Db, post: ChannelPostLike | null | undefined, sourceChannelId: string): Promise<{ marked: boolean }> {
+  const hit = bubblePostFromUpdate(post, sourceChannelId);
+  if (!hit) return { marked: false };
+  const { bubbles } = await loadOpenBubbles(db, dubaiNow(hit.atMs).day);
+  if (bubbles.some((b) => reportOf(b).posted_message_id === hit.messageId)) return { marked: false };
+  const match = matchBubbleForChannelVideo(bubbles, hit.atMs);
+  if (!match) return { marked: false };
+  const { data: freshRows, error: readErr } = await db.from('channel_posts').select('status,report').eq('id', match.id).limit(1);
+  if (readErr) return { marked: false };
+  const fresh = (freshRows ?? [])[0] as { status?: string; report?: unknown } | undefined;
+  if (!fresh || fresh.status !== 'info') return { marked: false };
+  const rep = reportOf(fresh as BubbleRow);
+  if (rep.posted_at || rep.posted_message_id) return { marked: false };
+  const next: BubbleReport = {
+    ...rep,
+    posted_at: new Date(hit.atMs).toISOString(),
+    posted_via: 'channel',
+    posted_message_id: hit.messageId,
+  };
+  const { data, error } = await db.from('channel_posts').update({ report: next }).eq('id', match.id).eq('status', 'info').is('report->>posted_at', null).select('id');
+  if (error || !data?.length) return { marked: false };
+  match.report = next;
+  return { marked: true };
 }
 
 /** Crée les bulles du jour si le CM n'en a pas encore. N'écrit rien s'il y en a déjà, ni si le modèle refuse. */
@@ -360,33 +586,43 @@ export async function ensureDayBubbles(db: Db, day: string, webinar?: string): P
   return { have: true, inserted: built.length };
 }
 
-/** Appelé au début de runDue (cron toutes les 5 min). Un seul envoi groupé, dans la fenêtre de 11:30. */
-export async function sendDueBubbleDms(db: Db, nowMs = Date.now()): Promise<{ prog: number; nudge: number; live: number; skipped: number }> {
-  const none = { prog: 0, nudge: 0, live: 0, skipped: 0 };
+/** Appelé au début de runDue (cron toutes les 5 min). Le brief de 11:30, puis rappel et relance des créneaux. */
+export async function sendDueBubbleDms(db: Db, nowMs = Date.now()): Promise<{ prog: number; nudge: number; live: number; skipped: number; chase: number }> {
+  const none = { prog: 0, nudge: 0, live: 0, skipped: 0, chase: 0 };
   if (!(await bubblesEnabled(db))) return none;
   const now = dubaiNow(nowMs);
-  if (!inProgWindow(now)) return none;
-  let { bubbles } = await loadOpenBubbles(db, now.day);
-  let today = bubbles.filter((r) => String(r.day).slice(0, 10) === now.day);
-  if (!today.some(isBubbleRow)) {
-    await ensureDayBubbles(db, now.day).catch((e) => console.error('[cm] bubbles:', (e as Error).message));
-    ({ bubbles } = await loadOpenBubbles(db, now.day));
-    today = bubbles.filter((r) => String(r.day).slice(0, 10) === now.day);
+  let prog = 0;
+  if (inProgWindow(now)) {
+    let { bubbles } = await loadOpenBubbles(db, now.day);
+    let today = bubbles.filter((r) => String(r.day).slice(0, 10) === now.day);
+    if (!today.some(isBubbleRow)) {
+      await ensureDayBubbles(db, now.day).catch((e) => console.error('[cm] bubbles:', (e as Error).message));
+      ({ bubbles } = await loadOpenBubbles(db, now.day));
+      today = bubbles.filter((r) => String(r.day).slice(0, 10) === now.day);
+    }
+    const due = briefingDue(now, today);
+    if (due.length) {
+      const parts = formatBriefingMessages(due);
+      if (await deliverBriefing(parts)) {
+        const at = new Date(nowMs).toISOString();
+        await patchReport(db, due, (rep) => ({ ...rep, prog_sent_at: at, sent_at: at }));
+        prog = due.length;
+      }
+    }
   }
-  const due = briefingDue(now, today);
-  if (!due.length) return none;
-  const parts = formatBriefingMessages(due);
-  if (!(await deliverBriefing(parts))) return none;
-  const at = new Date(nowMs).toISOString();
-  await patchReport(db, due, (rep) => ({ ...rep, prog_sent_at: at, sent_at: at }));
-  return { prog: due.length, nudge: 0, live: 0, skipped: 0 };
+  const follow = await sendBubbleFollowUps(db, nowMs).catch((e) => {
+    console.error('[cm] bubble follow:', (e as Error).message);
+    return { remind: 0, chase: 0 };
+  });
+  return { prog, nudge: follow.remind, live: 0, skipped: 0, chase: follow.chase };
 }
 
 export async function handleBubbleCallback(db: Db, cq: { id: string; data?: string; from?: { id?: number; username?: string }; message?: { chat?: { id?: number }; message_id?: number } }): Promise<boolean> {
   const raw = String(cq?.data ?? '');
-  const atPick = parseAtCallback(raw);
-  const m = atPick ? null : /^cmb:(ok|no):(\d+)$/.exec(raw);
-  if (!atPick && !m) return false;
+  const postedId = parsePostedCallback(raw);
+  const atPick = postedId == null ? parseAtCallback(raw) : null;
+  const m = postedId != null || atPick ? null : /^cmb:(ok|no):(\d+)$/.exec(raw);
+  if (postedId == null && !atPick && !m) return false;
   const tg = async (method: string, payload: Record<string, unknown>) => {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token) return null;
@@ -398,11 +634,21 @@ export async function handleBubbleCallback(db: Db, cq: { id: string; data?: stri
   const answer = (text: string) => tg('answerCallbackQuery', { callback_query_id: cq.id, text: text.slice(0, 190) });
   if (!(await adminTgIds()).includes(Number(cq.from?.id))) { await answer('Réservé aux admins.'); return true; }
   if (!(await bubblesEnabled(db))) { await answer('Bulles coupées (CHANNEL_BUBBLES / cm_bubbles).'); return true; }
-  const id = atPick ? atPick.id : Number(m![2]);
+  const id = postedId ?? (atPick ? atPick.id : Number(m![2]));
   const { data } = await db.from('channel_posts').select('id,day,slot,kind,text,status,scheduled_at,report').eq('id', id).limit(1);
   const r = (data ?? [])[0] as BubbleRow | undefined;
   if (!r || !isBubbleRow(r)) { await answer('Introuvable.'); return true; }
   const by = cq.from?.username ? `@${cq.from.username}` : String(cq.from?.id ?? 'admin');
+  if (postedId != null) {
+    const rep = reportOf(r);
+    if (rep.posted_at) { await answer('Déjà notée comme postée.'); return true; }
+    const decided_at = new Date().toISOString();
+    await db.from('channel_posts').update({
+      report: { ...rep, posted_at: decided_at, posted_via: 'button', decided_by: by, decided_at },
+    }).eq('id', r.id);
+    await answer('Noté, bulle postée.');
+    return true;
+  }
   if (atPick) {
     const day = String(r.day).slice(0, 10);
     const { data: dayRows } = await db.from('channel_posts').select('id,scheduled_at,status').eq('day', day);

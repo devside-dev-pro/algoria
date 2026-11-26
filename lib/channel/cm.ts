@@ -3,7 +3,7 @@
 // 🔁 REFONTE DU 10/11/2026 (Mathieu : le canal sonne répétitif et robotique, il veut que ça sonne comme s'il postait
 // lui-même). Ce qui suit dans ce commentaire décrit la version du 15/10 ; ce qui a changé :
 //   · plus de séquence fixe : un plan de 4 à 5 posts par jour, heures tirées au hasard dans des fenêtres larges, formats
-//     pondérés jamais deux fois de suite (lib/channel/plan.ts), pour laisser la place aux 3 à 4 bulles vidéo de Mathieu ;
+//     pondérés jamais deux fois de suite (lib/channel/plan.ts), pour laisser la place aux 4 bulles vidéo de Mathieu ;
 //   · plus d'en-tête « 🔵💙 HOW IT WORKS », plus de 👇 obligatoire, 1 ou 2 CTA par jour (les seuls boutons, 2 au plus) ;
 //   · la carte de gain fixe (« ✅ +$X at 0.10 lot … Closed by Algoria AI ») devient un trade commenté à la 1re personne ;
 //   · le guide de ton est contrôlé par le code (lib/channel/tone.ts) : un texte refusé est réécrit une fois, puis le
@@ -413,7 +413,7 @@ export async function planDay(db: Db, day: string): Promise<number> {
       else haveBubbles = true;
     }
   }
-  // Secours : l'idée d'une seule bulle, seulement si les 3 ou 4 briefs n'ont pas pu être écrits.
+  // Secours : l'idée d'une seule bulle, seulement si les 4 briefs n'ont pas pu être écrits.
   if (!haveBubbles) {
     const idea = await videoIdea(db).catch(() => null);
     if (idea) await db.from('channel_posts').insert({ day, slot: 'video', kind: 'video', text: idea, scheduled_at: new Date(tradingTimeMs(day, VIDEO_AT)).toISOString(), status: 'info' });

@@ -578,7 +578,7 @@ function bubbleHardIssue(text: string): string | null {
 
 const oneLine = (s: unknown) => humanize(String(s ?? '').replace(/<[^>]+>/g, ''), false).replace(/\s+/g, ' ').trim();
 
-/** Valide le JSON du CM. `expected` = 3 le week-end, 4 en semaine. */
+/** Valide le JSON du CM. En production `expected` vaut 4, week-end compris. */
 export function validateBubbleScripts(raw: unknown, expected: 3 | 4): { ok: true; bubbles: BubbleScript[] } | { ok: false; why: string } {
   const list = Array.isArray(raw) ? raw : (raw as { bubbles?: unknown })?.bubbles;
   if (!Array.isArray(list)) return { ok: false, why: `expected ${expected} bubbles, got 0` };
@@ -602,6 +602,10 @@ export function validateBubbleScripts(raw: unknown, expected: 3 | 4): { ok: true
     if (subject.length < 12 || subject.length > 220 || !FRENCH_HINT.test(subject)) return { ok: false, why: 'subject is one French sentence for Mathieu' };
     if (why.length < 20 || why.length > 480 || !FRENCH_HINT.test(why)) return { ok: false, why: 'why is one or two French sentences for Mathieu' };
     if (!/^\d{1,2}\s*à\s*\d{1,2}\s*secondes$/i.test(duration)) return { ok: false, why: 'duration looks like "30 à 45 secondes"' };
+    const durParts = duration.match(/(\d{1,2})/g) ?? [];
+    const lo = Number(durParts[0]);
+    const hi = Number(durParts[1]);
+    if (!(lo >= 1 && lo < hi && hi <= 60)) return { ok: false, why: 'a video note is at most 60 seconds' };
     if (hook.length < 12 || hook.length > 240 || SPOKEN_FR.test(hook)) return { ok: false, why: 'the lines to say are in English' };
     if (points.length < 2 || points.length > 4) return { ok: false, why: 'each bubble needs 2 to 4 points' };
     for (const p of points) {
@@ -632,7 +636,7 @@ async function loadBubbleEvents(day: string): Promise<EcoHit[]> {
 async function bubbleSystem(): Promise<string> {
   const [rawKnowledge, memory] = await Promise.all([getAgentDoc('knowledge'), getAgentDoc('cm_memory')]);
   const knowledge = rawKnowledge ? rawKnowledge.split('\n').filter((l) => !/myfxbook/i.test(l)).join('\n') : rawKnowledge;
-  return `You prepare the spoken briefs for Mathieu's short video bubbles on Algoria's public Telegram channel. Algoria is an AI that trades gold; members copy it on their own broker account. Mathieu records the bubbles himself.
+  return `You prepare the spoken briefs for Mathieu's round Telegram video notes on Algoria's public channel. A video note is the round bubble, at most 60 seconds, filmed with his face centred and his eyes on the camera. Algoria is an AI that trades gold; members copy it on their own broker account. Mathieu records the notes himself.
 
 The notes (subject, why, theme, duration) are in French. The lines he says (hook, points, closing) are in English, first person, plain words, short.
 
@@ -648,7 +652,7 @@ OUTPUT: only JSON.
 ${knowledge ? `\nMATHIEU'S KNOWLEDGE (French, source of truth):\n${safeSlice(knowledge, AGENT_DOC_MAX)}` : ''}${memory ? `\n\nLESSONS FROM MATHIEU (French; they win over the style, never over the hard rules):\n${safeSlice(memory, 6000)}` : ''}`;
 }
 
-function bubbleUser(c: DayContext, hits: EcoHit[], n: number): string {
+export function bubbleUser(c: DayContext, hits: EcoHit[], n: number): string {
   const cal = hits.length
     ? `CALENDAR (Dubai clock, the ONLY releases you may mention; never a forecast, never a previous figure, never a number that is not one of these clocks):\n${hits.map((h) => `- ${h.when} ${h.hhmm}: ${h.plain}`).join('\n')}`
     : 'CALENDAR: no listed US release today or tomorrow. Do not invent a data release, a central-bank event, a holiday, or a clock time.';
@@ -659,15 +663,16 @@ function bubbleUser(c: DayContext, hits: EcoHit[], n: number): string {
   return `${lines.join('\n\n')}
 
 TASK:
-Write ${n} video-bubble briefs. Mathieu records them all at 11:30 Dubai. You do NOT choose when each one is published.
+Write ${n} round Telegram video notes (the round video bubble, not a voice message and not a landscape video). Mathieu films each one himself, face centred, eyes on the camera. A video note is at most 60 seconds.
+He reads this brief at 11:30 Dubai and posts each note at its own time. You do NOT choose when a note is published.
 
 For each bubble:
 - theme: short French label (Vie à Dubaï, Entrepreneuriat, Algoria, Or et marché, Discipline, Leadership, Citation, Coulisses). At most one "Or et marché" unless the calendar has a release.
 - subject: ONE sentence in French, for Mathieu, saying what the bubble is about.
 - why: ONE or TWO sentences in French, why this bubble is for today. Mention a release only if it is in the CALENDAR, in the plain words given, at that Dubai clock.
-- duration: French, exactly "30 à 45 secondes" or "30 à 60 secondes".
+- duration: French, exactly "30 à 45 secondes" or "30 à 60 secondes". Never more than 60 seconds.
 - hook: ONE English sentence he says first, as-is.
-- points: 2 to 4 items. Each is a complete English sentence he says as-is, or a French stage direction that starts with "Dis ". No fragments.
+- points: 2 to 4 items. Each is a complete English sentence he says as-is, or a French stage direction that starts with "Dis ", "Filme " or "Regarde ". No fragments.
 - closing: ONE or TWO English sentences he says last. Include @mathieu_algoria. Invite a question. No promise, no deposit, no negative word, no forecast.
 
 Vary the themes.
@@ -692,9 +697,14 @@ async function askBubbleJson(system: string, user: string): Promise<unknown> {
   }
 }
 
-/** 4 bulles en semaine, 3 le week-end. null si la clé manque ou si les garde-fous refusent deux fois. */
+/** 4 video notes tous les jours, week-end compris (26/11/2026). L'argument reste lu par les appelants. */
+export function bubblesPerDay(_c?: { weekend?: boolean }): 4 {
+  return 4;
+}
+
+/** 4 bulles tous les jours. null si la clé manque ou si les garde-fous refusent deux fois. */
 export async function writeBubbleScripts(c: DayContext): Promise<BubbleScript[] | null> {
-  const expected: 3 | 4 = c.weekend ? 3 : 4;
+  const expected = bubblesPerDay(c);
   const hits = await loadBubbleEvents(c.day);
   const sys = await bubbleSystem();
   let prompt = bubbleUser(c, hits, expected);

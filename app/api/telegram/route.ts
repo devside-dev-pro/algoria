@@ -15,7 +15,7 @@ import { handleWebinarAdmin, handleWebinarCallback, isLiveKeyword, noteBotBlocke
 import { logFunnelEvent } from '@/lib/member/funnel';
 import { handleRecapCallback } from '@/lib/channel/recap';
 import { handleCmCallback, handleCmPhoto, handleCmPhotoRemove, handleCmReply } from '@/lib/channel/cm';
-import { handleBubbleCallback } from '@/lib/channel/bubbles';
+import { handleBubbleCallback, noteChannelBubblePost } from '@/lib/channel/bubbles';
 import { extraMirrors } from '@/lib/channel/mirrors';
 import { recordMemberEvent } from '@/lib/channel/members';
 
@@ -319,6 +319,11 @@ export async function POST(req: Request) {
   // Le miroir d'abord : il est instantané, alors que la traduction attend le modèle. Les deux ont leur
   // propre verrou, donc l'échec de l'un ne rejoue jamais l'autre.
   if (db && update?.channel_post) {
+    // 🎥 BULLE POSTÉE (26/11/2026) : une video note sur le canal source marque le créneau.
+    // Pas de setWebhook et pas de changement d'allowed_updates : channel_post est déjà traité ici
+    // (miroir, pont italien) et déjà listé dans lib/member/tgWebhook.ts.
+    await noteChannelBubblePost(db, update.channel_post, (process.env.TELEGRAM_CHANNEL_EN ?? '').trim())
+      .catch((e) => console.error('[telegram] bubble posted:', (e as Error).message));
     const mirror = (process.env.TELEGRAM_CHANNEL_MIRROR ?? '').trim();
     const it = (process.env.TELEGRAM_CHANNEL_IT ?? '').trim();
     if (mirror) await mirrorChannelPost(db, update.channel_post, mirror);

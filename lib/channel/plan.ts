@@ -6,7 +6,7 @@
 //
 // Maintenant (pur, sans base, testé par scripts/checks/cm-plan.ts) :
 //   · 4 ou 5 posts du CM par jour (en semaine 4 + le récap de 23h05 = 5 ; le week-end 4 ou 5), parce que Mathieu poste
-//     lui-même 3 à 4 bulles vidéo : ~8 posts par jour au total, à peu près un par heure ;
+//     lui-même 4 bulles vidéo : ~8 posts par jour au total, à peu près un par heure ;
 //   · des FENÊTRES larges, et dans chacune une heure tirée VRAIMENT au hasard au moment du plan (puis figée dans
 //     scheduled_at), avec au moins MIN_GAP_MIN minutes entre deux posts du CM : la place d'une bulle entre les deux ;
 //   · des FORMATS pondérés, jamais le même deux fois de suite (ni d'un jour sur l'autre), au plus un de chaque par jour
