@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { eventsForBubbleDays, validateBubbleScripts, type BubbleScript } from './writer';
+import { readFileSync } from 'node:fs';
+import { eventsForBubbleDays, validateBubbleScripts, bubbleUser, bubblesPerDay, type BubbleScript, type DayContext } from './writer';
 
 const good = (over: Partial<BubbleScript> = {}): BubbleScript => ({
   theme: 'Or et marché',
@@ -49,6 +50,37 @@ test('a CM bubble script keeps the channel guardrails and the fields Mathieu rea
 
   const wrongCount = validateBubbleScripts({ bubbles: [good(), good(), good()] }, 4);
   assert.equal(wrongCount.ok, false);
+
+  const four = validateBubbleScripts({ bubbles: [good(), good(), good(), good()] }, 4);
+  assert.equal(four.ok, true, four.ok ? '' : four.why);
+
+  const tooLong = validateBubbleScripts({ bubbles: [good({ duration: '30 à 90 secondes' }), good(), good(), good()] }, 4);
+  assert.equal(tooLong.ok, false);
+  if (!tooLong.ok) assert.match(tooLong.why, /60/);
+
+  const upsideDown = validateBubbleScripts({ bubbles: [good({ duration: '50 à 30 secondes' }), good(), good(), good()] }, 4);
+  assert.equal(upsideDown.ok, false);
+});
+
+test('every day asks for 4 round video notes, weekend included, with no temperature parameter', () => {
+  const day = (weekend: boolean): DayContext => ({
+    day: weekend ? '2026-11-28' : '2026-11-26',
+    dateLabel: weekend ? 'Saturday 28 November' : 'Thursday 26 November',
+    weekend,
+    news: [], lastSession: null, week: null, recent: [], openings: [], rationedUsed: new Set(), questions: [],
+  });
+  assert.equal(bubblesPerDay(day(true)), 4);
+  assert.equal(bubblesPerDay(day(false)), 4);
+  const saturday = bubbleUser(day(true), [], bubblesPerDay(day(true)));
+  assert.match(saturday, /Write 4 round Telegram video notes/);
+  assert.match(saturday, /eyes on the camera/);
+  assert.match(saturday, /at most 60 seconds/);
+  assert.match(saturday, /Weekend: the gold market is closed/);
+  assert.match(saturday, /30 à 60 secondes/);
+  const src = readFileSync(new URL('./writer.ts', import.meta.url), 'utf8');
+  const ask = src.slice(src.indexOf('async function askBubbleJson'), src.indexOf('export function bubblesPerDay'));
+  const call = ask.slice(ask.indexOf('messages.create'), ask.indexOf('timeout'));
+  assert.doesNotMatch(call, /temperature/);
 });
 
 test('calendar lines for a bubble use Dubai time and drop forecasts, lows and other countries', () => {

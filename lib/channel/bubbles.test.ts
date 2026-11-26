@@ -4,7 +4,10 @@ import {
   briefingDue, formatBriefingMessages, inProgWindow,
   isBubbleRow, renderBubblesPlanSection, dubaiNow, pickBubbleSlots, applyTimeChoice, atCallbackData, parseAtCallback,
   occupiedScheduledAt, bubbleRowsFromScripts, SLOT_PREF, SLOT_MIN, PROG_AT, TELEGRAM_TEXT_MAX,
-  type BubbleRow,
+  reminderDue, chaseDue, chaseConfigured, formatReminderMessage, formatChaseMessage,
+  matchBubbleForChannelVideo, noteChannelBubblePost, postedCallbackData, parsePostedCallback,
+  POSTED_BUTTON, VIDEO_NOTE_CUE,
+  type BubbleRow, type BubbleReport,
 } from './bubbles';
 import { WEEK_BUBBLES, bubbleInsertRows as bubbleRows } from './bubbles.week';
 
@@ -144,7 +147,11 @@ test('11:30 briefing is one French-labelled script per bubble, with the lines to
   const msgs = formatBriefingMessages(rows);
   assert.equal(msgs.length, 1);
   const text = msgs[0];
-  assert.match(text, /Bulles à enregistrer aujourd'hui/);
+  assert.match(text, /Bulles vidéo à poster aujourd'hui/);
+  assert.match(text, new RegExp(VIDEO_NOTE_CUE.replace(/[.]/g, '\\.')));
+  assert.match(text, /Cadrage :/);
+  assert.match(text, /regard caméra/);
+  assert.match(text, /60 s max/);
   assert.match(text, /Bulle 1 — 13:00 Dubaï — 30 à 45 secondes/);
   assert.match(text, /Bulle 2 — 21:50 Dubaï — 30 à 60 secondes/);
   assert.match(text, /Sujet :/);
@@ -173,7 +180,7 @@ test('a long briefing splits on bubble boundaries and stays under the Telegram l
   const msgs = formatBriefingMessages(rows, 1200);
   assert.ok(msgs.length >= 2);
   assert.ok(msgs.every((m) => m.length <= 1200));
-  assert.match(msgs[0], /Bulle 1/);
+  assert.match(msgs[0], /Bulles vidéo/);
   assert.match(msgs[1], /suite/);
   const joined = msgs.join('\n');
   for (const n of [1, 2, 3, 4]) assert.match(joined, new RegExp(`Bulle ${n}`));
@@ -266,4 +273,156 @@ test('new bubble rows are prog only, with the CM fields, at Dubai slots after 13
   assert.equal(rows[0].report.closing, script.closing);
   assert.equal(rows[0].text, script.hook);
   assert.deepEqual(pickBubbleSlots('2026-11-25', [], 4), ['13:00', '16:00', '18:30', '21:00']);
+  const shifted = pickBubbleSlots('2026-11-25', ['2026-11-25T13:10:00+04:00'], 4);
+  assert.equal(shifted.length, 4);
+  assert.ok(shifted.every((hm) => hm >= SLOT_MIN));
+  const taken = ['2026-11-25T13:10:00+04:00', ...shifted.map((hm) => `2026-11-25T${hm}:00+04:00`)];
+  for (let i = 0; i < taken.length; i++) {
+    for (let j = i + 1; j < taken.length; j++) {
+      assert.ok(Math.abs(Date.parse(taken[i]) - Date.parse(taken[j])) >= 30 * 60_000, `${taken[i]} / ${taken[j]}`);
+    }
+  }
 });
+
+test('a reminder fires in the 30 minutes before the slot, once, and a chase fires once after a grace if it is still unposted', () => {
+  const slot = Date.parse('2026-11-26T16:00:00+04:00');
+  const open = row({
+    id: 7, day: '2026-11-26', slot: 'bubble2', scheduled_at: '2026-11-26T16:00:00+04:00',
+    report: {
+      mode: 'prog', subject: 'Je montre le bureau avant la séance.',
+      hook: 'This is the desk before I open the app.',
+      points: ['I read the overnight messages first.', 'Dis où tu es, en une phrase.'],
+      closing: 'Any question, write to me at @mathieu_algoria.',
+    },
+  });
+  assert.deepEqual(reminderDue(slot - 31 * 60_000, [open]).map((x) => x.id), []);
+  assert.deepEqual(reminderDue(slot - 30 * 60_000, [open]).map((x) => x.id), [7]);
+  assert.deepEqual(reminderDue(slot - 5 * 60_000, [open]).map((x) => x.id), [7]);
+  assert.deepEqual(reminderDue(slot, [open]).map((x) => x.id), []);
+  const reminded = row({ ...open, report: { ...(open.report as BubbleReport), remind_sent_at: 'x' } });
+  assert.deepEqual(reminderDue(slot - 10 * 60_000, [reminded]), []);
+  const posted = row({ ...open, report: { ...(open.report as BubbleReport), posted_at: 'x' } });
+  assert.deepEqual(reminderDue(slot - 10 * 60_000, [posted]), []);
+  assert.deepEqual(chaseDue(slot + 9 * 60_000, [open]), []);
+  assert.deepEqual(chaseDue(slot + 10 * 60_000, [open]).map((x) => x.id), [7]);
+  assert.deepEqual(chaseDue(slot + 10 * 60_000 + 80 * 60_000 - 1, [open]).map((x) => x.id), [7]);
+  assert.deepEqual(chaseDue(slot + 10 * 60_000 + 80 * 60_000, [open]), []);
+  const chased = row({ ...open, report: { ...(open.report as BubbleReport), chase_sent_at: 'x' } });
+  assert.deepEqual(chaseDue(slot + 15 * 60_000, [chased]), []);
+  assert.deepEqual(chaseDue(slot + 15 * 60_000, [posted]), []);
+  const faite = row({ ...open, report: { ...(open.report as BubbleReport), faite: true } });
+  const replaced = row({ ...open, report: { ...(open.report as BubbleReport), fallback_approved: true } });
+  assert.deepEqual(chaseDue(slot + 15 * 60_000, [faite]), []);
+  assert.deepEqual(chaseDue(slot + 15 * 60_000, [replaced]), []);
+  assert.equal(chaseConfigured(''), false);
+  assert.equal(chaseConfigured('   '), false);
+  assert.equal(chaseConfigured(' -100123 '), true);
+  const reminder = formatReminderMessage(open);
+  assert.match(reminder, /Rappel/);
+  assert.match(reminder, /Je montre le bureau/);
+  assert.match(reminder, /This is the desk before I open the app/);
+  assert.match(reminder, /I read the overnight messages first/);
+  assert.match(reminder, /regard caméra/);
+  assert.match(reminder, /@mathieu_algoria/);
+  assert.ok(reminder.length <= TELEGRAM_TEXT_MAX);
+  const chase = formatChaseMessage(open);
+  assert.match(chase, /Relance/);
+  assert.match(chase, /Je n'ai pas vu la video note/);
+  assert.match(chase, /Une seule relance/);
+  assert.equal(postedCallbackData(7), 'cmb:posted:7');
+  assert.equal(parsePostedCallback('cmb:posted:7'), 7);
+  assert.equal(parsePostedCallback('cmb:ok:7'), null);
+  assert.equal(parseAtCallback('cmb:posted:7'), null);
+  assert.equal(POSTED_BUTTON, 'Postée ✅');
+  assert.ok(postedCallbackData(7).length <= 64);
+});
+
+test('a channel video note matches the nearest open slot, and a tie goes to the earlier bubble', () => {
+  const a = row({
+    id: 1, day: '2026-11-26', slot: 'bubble1', scheduled_at: '2026-11-26T13:00:00+04:00',
+    report: { mode: 'prog', subject: 'Première bulle.' },
+  });
+  const b = row({
+    id: 2, day: '2026-11-26', slot: 'bubble2', scheduled_at: '2026-11-26T13:30:00+04:00',
+    report: { mode: 'prog', subject: 'Deuxième bulle.' },
+  });
+  const at = (hm: string) => Date.parse(`2026-11-26T${hm}:00+04:00`);
+  assert.equal(matchBubbleForChannelVideo([a, b], at('13:00'))?.id, 1);
+  assert.equal(matchBubbleForChannelVideo([a, b], at('13:20'))?.id, 2);
+  assert.equal(matchBubbleForChannelVideo([a, b], at('13:15'))?.id, 1);
+  assert.equal(matchBubbleForChannelVideo([a, b], at('12:29')), null);
+  assert.equal(matchBubbleForChannelVideo([a, b], at('14:11')), null);
+  const done = row({ ...a, report: { ...(a.report as BubbleReport), posted_at: 'x' } });
+  assert.equal(matchBubbleForChannelVideo([done, b], at('13:05'))?.id, 2);
+});
+
+test('seeing the video note on the source channel marks that bubble once and ignores voice, forwards and other chats', async () => {
+  const rows: BubbleRow[] = [
+    row({
+      id: 1, day: '2026-11-26', slot: 'bubble1', scheduled_at: '2026-11-26T13:00:00+04:00',
+      report: { mode: 'prog', subject: 'Première bulle du jour.' },
+    }),
+    row({
+      id: 2, day: '2026-11-26', slot: 'bubble2', scheduled_at: '2026-11-26T16:00:00+04:00',
+      report: { mode: 'prog', subject: 'Deuxième bulle du jour.' },
+    }),
+  ];
+  const db = fakePosts(rows);
+  const unix = (hm: string) => Math.floor(Date.parse(`2026-11-26T${hm}:00+04:00`) / 1000);
+  const note = (id: number, hm: string, extra: Record<string, unknown> = {}) => ({
+    message_id: id, date: unix(hm), chat: { id: '-1001' }, video_note: { file_id: 'v' }, ...extra,
+  });
+  assert.equal((await noteChannelBubblePost(db, note(9, '14:30'), '-1001')).marked, false);
+  assert.equal((rows[0].report as BubbleReport).posted_at, undefined);
+  assert.equal((await noteChannelBubblePost(db, note(10, '13:02'), '-1001')).marked, true);
+  assert.equal((rows[0].report as BubbleReport).posted_via, 'channel');
+  assert.equal((rows[0].report as BubbleReport).posted_message_id, 10);
+  assert.equal((await noteChannelBubblePost(db, note(10, '13:02'), '-1001')).marked, false);
+  assert.equal((await noteChannelBubblePost(db, note(11, '16:05'), '-1001')).marked, true);
+  assert.equal((rows[1].report as BubbleReport).posted_message_id, 11);
+  assert.equal((await noteChannelBubblePost(db, { ...note(12, '16:10'), video_note: undefined, voice: { file_id: 'a' } }, '-1001')).marked, false);
+  assert.equal((await noteChannelBubblePost(db, { ...note(13, '16:10'), forward_origin: { type: 'user' } }, '-1001')).marked, false);
+  assert.equal((await noteChannelBubblePost(db, note(14, '16:10'), '-1009')).marked, false);
+  assert.equal((await noteChannelBubblePost(db, { ...note(15, '16:10'), video: { file_id: 'mp4' }, video_note: undefined }, '-1001')).marked, false);
+});
+
+function fakePosts(rows: BubbleRow[]) {
+  return {
+    from() {
+      let mode: 'select' | 'update' = 'select';
+      let patch: { report?: unknown } | null = null;
+      let id: number | null = null;
+      const result = () => {
+        if (mode === 'update' && patch && id != null) {
+          const found = rows.find((r) => r.id === id);
+          const rep = (found?.report ?? {}) as BubbleReport;
+          if (!found || rep.posted_at) return { data: [], error: null };
+          found.report = patch.report;
+          return { data: [{ id }], error: null };
+        }
+        if (id != null) {
+          const found = rows.find((r) => r.id === id);
+          return { data: found ? [found] : [], error: null };
+        }
+        return { data: rows, error: null };
+      };
+      const api = {
+        select() { return api; },
+        gte() { return api; },
+        lte() { return api; },
+        eq(col: string, val: unknown) {
+          if (col === 'id') id = Number(val);
+          return api;
+        },
+        is() { return api; },
+        limit() { return api; },
+        order() { return Promise.resolve(result()); },
+        update(p: { report: unknown }) { mode = 'update'; patch = p; return api; },
+        then(onOk: (v: unknown) => unknown, onErr?: (e: unknown) => unknown) {
+          return Promise.resolve(result()).then(onOk, onErr);
+        },
+      };
+      return api;
+    },
+  };
+}
