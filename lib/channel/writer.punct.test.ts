@@ -19,6 +19,16 @@ test('channel check() keeps English punctuation without a space before ? and !',
   }
 });
 
+test('channel check() strips a space before ? ! : ; including a French no-break space', () => {
+  const raw = 'Which broker\u00A0? Ready ! Note : this ; done.';
+  const r = check(raw, { tokens: {}, noButton: true, allowedUsd: [], maxChars: 760 });
+  assert.equal(r.ok, true, r.ok ? '' : r.why);
+  if (r.ok) {
+    assert.equal(r.text, 'Which broker? Ready! Note: this; done.');
+    assert.doesNotMatch(r.text, / [?!;:]/);
+  }
+});
+
 test('channel check() does not insert a space before ? stuck to a closing italic tag', () => {
   const raw = '<i>Want the next one on your account?</i>';
   const r = check(raw, { tokens: {}, noButton: true, allowedUsd: [], maxChars: 760 });
