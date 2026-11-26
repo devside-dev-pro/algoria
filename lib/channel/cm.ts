@@ -32,11 +32,15 @@
 // en RÉPONDANT au message du matin (« 2 plus court », « # jamais d'emoji fusée ») : le post est réécrit et la leçon
 // entre dans la mémoire du CM (agent_docs « cm_memory »), relue à chaque rédaction.
 //
-// RIEN NE PART SANS UN CLIC. LA VEILLE À 18h (Paris), les admins reçoivent les posts du lendemain dans un seul message
-// (Mathieu, 15/10 : « je me lève pas aussi tôt » ; 23/10 : 23h15 lui arrivait à 1 h du matin à Dubaï) :
-// « ✅ Tout valider », ou ❌ sur un post précis. Un post non validé à son heure expire. Les cartes de gain sont
-// validées comme créneau : leur contenu est choisi à l'heure dite, selon une règle fixe (un vrai trade copié, gagnant,
-// au moins +150 $ à 1 lot comme les cartes du VIP), et le créneau saute s'il n'y en a pas.
+// LA VEILLE À 18h (Paris), les admins reçoivent les posts du lendemain dans un seul message
+// (Mathieu, 15/10 : « je me lève pas aussi tôt » ; 23/10 : 23h15 lui arrivait à 1 h du matin à Dubaï).
+// VALIDATION AUTOMATIQUE (26/11/2026, Mathieu : « valide le plan tout seul tous les jours ») : la cron passe les
+// brouillons en approved (decided_by = 'auto') avant la première heure, si les garde-fous les acceptent
+// (lib/channel/autoApprove.ts). Un texte refusé reste brouillon et expire. CHANNEL_CM_AUTO_APPROVE=off ou
+// support_settings cm_auto_approve=off rend le clic « ✅ Tout valider » obligatoire, comme avant. Mathieu peut
+// toujours retirer un post (❌) ou le corriger en répondant, avant son heure. Les bulles vidéo ne sont pas concernées.
+// Les cartes de gain sont validées comme créneau : leur contenu est choisi à l'heure dite, selon une règle fixe
+// (un vrai trade copié, gagnant, au moins +150 $ à 1 lot comme les cartes du VIP), et le créneau saute s'il n'y en a pas.
 //
 // Règles de contenu (Mathieu) : anglais, pas de tiret long, une espace avant ? et !, aucune négativité dans le canal
 // public, montants à 0.10 lot (et 0.01), jamais de taille de compte, résultats passés avec la phrase de risque,
@@ -55,6 +59,7 @@ import { appendAgentMemory } from '@/lib/member/agentDocs';
 import { amountsLine, check, dayContext, writeBubbleScripts, writePoll, writePost, type Brief, type BubbleScript, type DayContext, type TradeFacts } from './writer';
 import { bubbleRowsFromScripts, bubblesEnabled, ensureDayBubbles, renderBubblesPlanSection, sendDueBubbleDms } from './bubbles';
 import { fillApprovedVip, vipTemplateOf } from './vipFill';
+import { autoApproveSetting, CM_POST_KINDS as POST_KINDS, guardRefusal, statusAfterGuardedEdit, statusAfterPhotoChange } from './autoApprove';
 import { isTradeCardEnabled, resolvePublishPhoto, wantsBrandBanner } from './publishMedia';
 import { safeSlice, wellFormed } from './text';
 import { atOneLot, atRef } from '@/lib/display/scale';
@@ -148,7 +153,7 @@ export const planTarget = (now = Date.now()) => {
 };
 const TP_MIN_AT_ONE_LOT = 150; // le seuil des cartes de gain du VIP (runner/metaapi/trades.ts, VIP_WIN_MIN_USD)
 const STALE_MS = 90 * 60_000; // un post validé mais raté de plus de 1 h 30 (panne) ne part plus : il serait hors sujet
-const GRACE_MS = 60 * 60_000; // un brouillon validé jusqu'à 1 h après son heure part tout de suite ; au-delà il expire
+export const GRACE_MS = 60 * 60_000; // un brouillon validé jusqu'à 1 h après son heure part tout de suite ; au-delà il expire
 // L'ANCIEN « JITTER » (hash(jour:créneau) % 21 − 10 min) est retiré : il glissait de −2 min par jour sur cta2 et cta3.
 // Les heures sont tirées au hasard au moment du plan (lib/channel/plan.ts) puis figées dans scheduled_at.
 const CTA_GOAL: Record<string, string> = {
@@ -254,8 +259,7 @@ function nextIn<T>(list: T[], from: number, ok: (x: T) => boolean): number {
   return -1;
 }
 
-/** Les formats publiables (les anciens noms restent lisibles pour les plans d'avant le 10/11/2026). */
-const POST_KINDS = ['backstage', 'gold', 'qa', 'story', 'trade', 'poll', 'lesson', 'cta', 'morning', 'howto', 'tp'];
+// Les formats publiables sont CM_POST_KINDS (autoApprove.ts) : anciens noms compris, pour les plans d'avant le 10/11/2026.
 /** Une fiche « How it works » sans son en-tête : les faits seulement (la pédagogie reformulée). */
 const cardFacts = (t: string) => t.split('\n').filter((l) => !l.includes(HOW)).join('\n').trim();
 /** Écart minimal entre le dernier appel du webinaire et un autre post du CM. */
@@ -474,11 +478,17 @@ const HEADS: Record<string, string> = {
 const headOf = (r: { kind: string; ref: string | null }) => (r.kind === 'cta' ? (r.ref?.startsWith('webinar-') ? 'CTA 🎤 WEBINAIRE' : 'CTA 🔘') : HEADS[r.kind] ?? r.kind.toUpperCase());
 
 /** Le message du matin, régénéré depuis la base à chaque clic : il dit toujours l'état réel. */
-export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: Array<Array<Record<string, string>>> } {
+export function renderPlan(day: string, rows: Row[], opts?: { autoApprove?: boolean }): { text: string; keyboard: Array<Array<Record<string, string>>> } {
   const posts = rows.filter((r) => POST_KINDS.includes(r.kind));
   const idea = rows.find((r) => r.kind === 'video')?.text;
   const tomorrow = day > tradingDayOf(Date.now());
-  const parts: string[] = [`📣 <b>Canal public · ${tomorrow ? 'demain, ' : ''}${esc(dayLabel(day))}</b>`, tomorrow ? '<i>Valide ce soir : les posts partiront demain à leur heure, même si tu dors. Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>' : '<i>Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>'];
+  const manualLead = tomorrow
+    ? '<i>Valide ce soir : les posts partiront demain à leur heure, même si tu dors. Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>'
+    : '<i>Rien ne part sans ton clic. Source + miroir UK + canal IT (traduit).</i>';
+  const lead = opts?.autoApprove
+    ? '<i>Validé tout seul : les posts partiront à leur heure. Tu peux en retirer un ou le corriger avant son heure. Source + miroir UK + canal IT (traduit).</i>'
+    : manualLead;
+  const parts: string[] = [`📣 <b>Canal public · ${tomorrow ? 'demain, ' : ''}${esc(dayLabel(day))}</b>`, lead];
   posts.forEach((r, i) => {
     const head = headOf(r);
     const by = (r.report as { writer?: string } | null)?.writer;
@@ -517,6 +527,10 @@ export function renderPlan(day: string, rows: Row[]): { text: string; keyboard: 
   return { text, keyboard };
 }
 
+async function viewPlan(db: Db, day: string, rows: Row[]) {
+  return renderPlan(day, rows, { autoApprove: await autoApproveSetting(db) });
+}
+
 const tg = async (method: string, payload: Record<string, unknown>) => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return null;
@@ -529,7 +543,7 @@ const tg = async (method: string, payload: Record<string, unknown>) => {
 /** Envoie le plan du jour à chaque admin. */
 export async function sendPlan(db: Db, day: string): Promise<number> {
   const rows = await rowsOf(db, day);
-  const { text, keyboard } = renderPlan(day, rows);
+  const { text, keyboard } = await viewPlan(db, day, rows);
   const msgs: Array<{ chat: number; id: number }> = [];
   const admins = await adminTgIds();
   // LA PHOTO DRIVE : téléchargée une fois et envoyée au premier admin ; le file_id Telegram rendu sert ensuite partout
@@ -572,17 +586,21 @@ export async function handleCmCallback(db: Db, cq: { id: string; data?: string; 
     await db.from('channel_posts').update({ status: 'skipped', ...decided }).eq('day', day).in('status', ['draft', 'approved']);
     note = 'OK, rien ne part ce jour-là.';
   } else {
-    const { data } = await db.from('channel_posts').select('id,day,status,scheduled_at').eq('id', Number(day)).limit(1);
-    const r = (data ?? [])[0] as { id: number; day: string; status: string; scheduled_at: string } | undefined;
+    const { data } = await db.from('channel_posts').select('id,day,slot,kind,ref,text,button_text,status,scheduled_at,report').eq('id', Number(day)).limit(1);
+    const r = (data ?? [])[0] as { id: number; day: string; slot: string; kind: string; ref: string | null; text: string | null; button_text: string | null; status: string; scheduled_at: string; report: unknown } | undefined;
     if (!r) { await answer('Introuvable.'); return true; }
     day = String(r.day).slice(0, 10);
     if (Date.parse(r.scheduled_at) <= Date.now()) note = 'Trop tard pour celui-là.';
-    else if (r.status === 'skipped') { await db.from('channel_posts').update({ status: 'draft', ...decided }).eq('id', r.id).eq('status', 'skipped'); note = 'Remis en brouillon : valide-le avec ✅.'; }
+    else if (r.status === 'skipped') {
+      const back = (await autoApproveSetting(db)) && guardRefusal(r) == null ? 'approved' : 'draft';
+      await db.from('channel_posts').update({ status: back, ...decided }).eq('id', r.id).eq('status', 'skipped');
+      note = back === 'approved' ? 'Remis. Il partira à son heure.' : 'Remis en brouillon : valide-le avec ✅.';
+    }
     else if (['draft', 'approved'].includes(r.status)) { await db.from('channel_posts').update({ status: 'skipped', ...decided }).eq('id', r.id).in('status', ['draft', 'approved']); note = 'Retiré ✓'; }
     else note = 'Déjà parti.';
   }
   if (cq.message?.chat?.id && cq.message?.message_id) {
-    const { text, keyboard } = renderPlan(day, await rowsOf(db, day));
+    const { text, keyboard } = await viewPlan(db, day, await rowsOf(db, day));
     await tg('editMessageText', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard } });
   }
   await answer(note);
@@ -736,8 +754,8 @@ function briefOf(r: Row): Brief | null {
   return null; // trade (écrit à son heure) et sondage (pas de réécriture par réponse, ❌ pour le retirer)
 }
 
-/** RÉPONSE DE MATHIEU AU MESSAGE DU MATIN. « 2 plus court » : le post 2 est réécrit par le rédacteur (puis à revalider)
- *  et la remarque entre dans la mémoire du CM. « # règle » : la règle entre dans la mémoire, rien n'est réécrit.
+/** RÉPONSE DE MATHIEU AU MESSAGE DU MATIN. « 2 plus court » : le post 2 est réécrit par le rédacteur
+ *  (il repart à l'heure si la validation auto est allumée, sinon il redevient brouillon) et la remarque entre dans la mémoire du CM. « # règle » : la règle entre dans la mémoire, rien n'est réécrit.
  *  `defer` repousse la réécriture après la réponse au webhook (Telegram n'attend pas un modèle).
  *  Renvoie false si le message ne répond pas à un message du matin : le webhook poursuit alors son traitement. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -754,6 +772,7 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
   const by = msg.from?.username ? `@${msg.from.username}` : String(msg.from?.id ?? 'admin');
   const reply = (t: string) => tg('sendMessage', { chat_id: chat, text: t, reply_to_message_id: msg.message_id });
   const day = String(plan.day).slice(0, 10);
+  const auto = await autoApproveSetting(db);
 
   if (text.startsWith('#')) {
     const rule = text.replace(/^#+\s*/, '');
@@ -793,11 +812,17 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
     todo.push({ n: a.n, r, brief, instruction: a.text });
   }
   for (const sw of swaps) {
-    const why = await swapImage(db, sw.r, chat, msg.message_id, `${NUM[sw.n - 1] ?? sw.n} nouvelle photo, à revalider avec ✅ Tout valider`);
+    const next = statusAfterPhotoChange(auto, sw.r.status);
+    const caption = next === 'approved'
+      ? `${NUM[sw.n - 1] ?? sw.n} nouvelle photo. Elle part à l'heure. ❌ pour retirer le post.`
+      : next === 'skipped'
+        ? `${NUM[sw.n - 1] ?? sw.n} nouvelle photo. Le post reste retiré.`
+        : `${NUM[sw.n - 1] ?? sw.n} nouvelle photo, à revalider avec ✅ Tout valider`;
+    const why = await swapImage(db, sw.r, chat, msg.message_id, caption, auto);
     if (why) notes.push(`${sw.n} : ${why}`);
   }
   if (swaps.length) {
-    const view = renderPlan(day, await rowsOf(db, day));
+    const view = await viewPlan(db, day, await rowsOf(db, day));
     await tg('editMessageText', { chat_id: chat, message_id: replyTo, text: view.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: view.keyboard } });
   }
   if (!todo.length) { if (!swaps.length || notes.length) await reply(`${swaps.length ? '📸 Image changée.' : '🧠 Noté.'}${notes.length ? `\n${notes.join('\n')}` : ''}`); return true; }
@@ -813,16 +838,18 @@ export async function handleCmReply(db: Db, msg: any, defer: (fn: () => Promise<
       // version identique (vécu 15/10 : « on dit 106 $ mais la notif a dit 141 $ ») : le rédacteur n'a rien pu changer,
       // le plus souvent parce que la demande porte sur un chiffre, qui vient du code. On le dit au lieu d'annoncer « réécrit ».
       if (norm(String(fresh[k])) === norm(todo[k].r.text ?? '')) { same.push(todo[k].n); continue; }
-      // le post corrigé redevient un brouillon : il repart seulement après un nouveau ✅
-      await db.from('channel_posts').update({ text: fresh[k], status: 'draft', report: { ...((todo[k].r.report as object) ?? {}), writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', todo[k].r.id);
+      // le texte a déjà passé writePost. En auto il reste validé (Mathieu peut encore le retirer). Sinon il redevient brouillon.
+      await db.from('channel_posts').update({ text: fresh[k], status: statusAfterGuardedEdit(auto), report: { ...((todo[k].r.report as object) ?? {}), writer: 'fixed' }, decided_by: by, decided_at: new Date().toISOString() }).eq('id', todo[k].r.id);
       done.push(todo[k].n);
     }
     if (done.length) {
-      const view = renderPlan(day, await rowsOf(db, day));
+      const view = await viewPlan(db, day, await rowsOf(db, day));
       await tg('editMessageText', { chat_id: chat, message_id: replyTo, text: view.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: view.keyboard } });
     }
     await reply([
-      done.length ? `✅ ${done.length > 1 ? `Posts ${done.join(', ')} réécrits` : `Post ${done[0]} réécrit`}, mis à jour dans le message : revalide avec ✅ Tout valider.` : '',
+      done.length ? (auto
+        ? `✅ ${done.length > 1 ? `Posts ${done.join(', ')} réécrits` : `Post ${done[0]} réécrit`}. Il partira à son heure. ❌ pour le retirer avant.`
+        : `✅ ${done.length > 1 ? `Posts ${done.join(', ')} réécrits` : `Post ${done[0]} réécrit`}, mis à jour dans le message : revalide avec ✅ Tout valider.`) : '',
       failed.length ? `⨯ Pas réussi à réécrire proprement ${failed.join(', ')} (ou la version ne respectait pas les règles du canal) : le texte reste tel quel, ❌ pour le retirer.` : '',
       same.length ? `⚠️ ${same.join(', ')} : rien changé, la nouvelle version était identique. Si ta demande porte sur un chiffre : les chiffres viennent du code (journée de Paris, mêmes trades que le récap et l’app) et ne se modifient pas, mais je peux les retirer du post, dis-le-moi (« 1 enlève les chiffres »).` : '',
       '🧠 Remarques notées.',
@@ -914,8 +941,8 @@ async function choosePhoto(db: Db, _day: string, excludeKey?: string | null): Pr
 }
 
 /** « 1 change la photo » : une autre photo pour les coulisses (Drive ou banque), montrée tout de suite à l'admin.
- *  Le post redevient un brouillon. Les autres posts n'ont plus d'image (10/11/2026). */
-async function swapImage(db: Db, r: Row, chat: number, replyTo: number, caption: string): Promise<string> {
+ *  En validation manuelle le post redevient un brouillon. En auto, un post déjà validé le reste, un post retiré reste retiré. */
+async function swapImage(db: Db, r: Row, chat: number, replyTo: number, caption: string, auto: boolean): Promise<string> {
   const rep = (r.report as { photo_key?: string; drive_file_id?: string } | null) ?? {};
   if (r.kind !== 'backstage' && r.kind !== 'morning') return 'pas d’image sur ce post (une image seulement pour une vraie photo, le matin)';
   const ph = await choosePhoto(db, String(r.day).slice(0, 10), rep.photo_key).catch(() => null);
@@ -926,7 +953,7 @@ async function swapImage(db: Db, r: Row, chat: number, replyTo: number, caption:
   else if (fid) await tg('sendPhoto', { chat_id: chat, photo: fid, caption, reply_to_message_id: replyTo });
   if (!fid) return 'la photo n’a pas pu être chargée, réessaie';
   const { drive_file_id: _d, ...rest } = rep;
-  await db.from('channel_posts').update({ photo_url: fid, status: 'draft', report: { ...rest, photo_key: ph.key, ...(ph.driveId ? { drive_file_id: ph.driveId } : {}) } }).eq('id', r.id);
+  await db.from('channel_posts').update({ photo_url: fid, status: statusAfterPhotoChange(auto, r.status), report: { ...rest, photo_key: ph.key, ...(ph.driveId ? { drive_file_id: ph.driveId } : {}) } }).eq('id', r.id);
   return '';
 }
 
