@@ -279,6 +279,23 @@ export function check(raw: string, o: GuardOpts): { ok: true; text: string } | {
 }
 export const guard = (raw: string, o: GuardOpts): string | null => { const r = check(raw, o); return r.ok ? r.text : null; };
 
+/** Montant déjà produit par le code (`usd`, signe et $ collés par U+2060). Un `$5000` écrit à la main ne matche pas. */
+const CODE_AMOUNT = /[+\u2212-]\u2060\$[\d,]+(?:\.\d+)?/g;
+
+/** Les mêmes refus de fond que `check` (promesse, négatif, argent à mettre, lien, pourcentage, montant hors code),
+ *  sur un texte déjà stocké. Ne relâche aucune de ces règles. Le guide de ton reste dans toneIssue : il dépend
+ *  du bouton et des ouvertures récentes, que l'appelant a encore sous la main. */
+export function publicTextRefusal(text: string, o?: { allowNegative?: boolean; allowLinks?: boolean }): string | null {
+  if (/<(?!\/?(?:b|i)>)[^>]*>/i.test(text)) return 'only <b> and <i> tags are allowed';
+  if (!o?.allowLinks && /https?:\/\/|t\.me\/|\.tech\b|www\./i.test(text)) return 'no links in the text';
+  if (PROMISE.test(text.replace(RISK, ''))) return 'it sounds like a promise of gains';
+  if (!o?.allowNegative && NEGATIVE.test(text.replace(/stop[- ]?loss(?:es)?/gi, ''))) return 'negative words are not allowed in this public channel';
+  if (MONEY_IN.test(text)) return 'never talk about money to put in (deposit, fund, minimum, balance, invest): say create / connect your trading account';
+  if (/\d\s?%/.test(text.replace(/\b100\s?%/g, ''))) return 'no percentages';
+  if (/\$\s?[\d]/.test(text.replace(CODE_AMOUNT, ''))) return 'an amount was written outside the figures the code inserts';
+  return null;
+}
+
 // ── L'APPEL ───────────────────────────────────────────────────────────────────────────────────────────
 
 async function ask(system: string, user: string): Promise<string | null> {
