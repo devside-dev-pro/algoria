@@ -52,7 +52,7 @@ import { driveWanted, listDrivePhotos, LOW_STOCK, pickFresh, readDriveEnv, sendD
 import { firstLine, normLine, rationedIn, similarity, SIMILAR } from './tone';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { appendAgentMemory } from '@/lib/member/agentDocs';
-import { amountsLine, check, dayContext, writeBubbleScripts, writePoll, writePost, type Brief, type BubbleScript, type DayContext, type TradeFacts } from './writer';
+import { amountsLine, check, dayContext, englishPunct, writeBubbleScripts, writePoll, writePost, type Brief, type BubbleScript, type DayContext, type TradeFacts } from './writer';
 import { bubbleRowsFromScripts, bubblesEnabled, ensureDayBubbles, renderBubblesPlanSection, sendDueBubbleDms } from './bubbles';
 import { fillApprovedVip, vipTemplateOf } from './vipFill';
 import { isTradeCardEnabled, resolvePublishPhoto, wantsBrandBanner } from './publishMedia';
@@ -221,20 +221,22 @@ export function webinarPost(s: WebinarSession, phase: WbPhase): CmPost & { goal:
   }
   const when = phase === 'soon' ? ukDay(s.starts_at) : phase === 'tomorrow' ? `Tomorrow, ${ukDay(s.starts_at)}` : 'Tonight';
   const key = `${s.id}:${phase}`;
-  return {
-    ...post(`webinar-${phase}`, [
-      pick(WB_OPEN[phase], key)(when),
-      '',
-      times,
-      '',
-      pick(WB_BODY, `${key}:body`),
-      '',
-      pick(WB_GIFT, `${key}:gift`),
-      '',
-      LIVE_DM_LINE,
-    ], '🎤 SAVE MY SEAT', `${WEBINAR_PAGE}?src=channel`),
+  const built = post(`webinar-${phase}`, [
+    pick(WB_OPEN[phase], key)(when),
+    '',
     times,
-    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'soon' ? `IN 2 DAYS, on ${ukDay(s.starts_at)}` : phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'} (${at}): 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now. The time is shown in 6 time zones by the token {{TIMES}}: put it exactly once, alone in its own block, and never write an hour or a time zone yourself. Vary it: do not reuse the first line or the structure of the reference version or of the RECENT POSTS, first person, relaxed, short sentences. Keep one line, in substance: or just DM @mathieu_algoria the single word LIVE (write LIVE in <b>bold</b>) and their seat is saved. One button only, the system adds it. No Zoom link in the text, no second button, no figure you were not given, nothing negative, no promise of gains`,
+    '',
+    pick(WB_BODY, `${key}:body`),
+    '',
+    pick(WB_GIFT, `${key}:gift`),
+    '',
+    LIVE_DM_LINE,
+  ], '🎤 SAVE MY SEAT', `${WEBINAR_PAGE}?src=channel`);
+  return {
+    ...built,
+    text: englishPunct(built.text),
+    times,
+    goal: `announce Mathieu's free live webinar on Zoom ${phase === 'soon' ? `IN 2 DAYS, on ${ukDay(s.starts_at)}` : phase === 'tomorrow' ? `TOMORROW, ${ukDay(s.starts_at)}` : 'TONIGHT'} (${at}): 45 minutes in English, his story, how the AI trades gold, the real app on screen, real past results, live questions. At the end something is reserved for the 10 people who are there live (never say what it is). Make them save their seat now. The time is shown in 6 time zones by the token {{TIMES}}: put it exactly once, alone in its own block, and never write an hour or a time zone yourself. Vary it: do not reuse the first line or the structure of the reference version or of the RECENT POSTS, first person, relaxed, short sentences. Keep one line, in substance: or just DM @mathieu_algoria the single word LIVE and their seat is saved. The only <b>bold</b> is the hook on the first line, so do not bold LIVE. One button only, the system adds it. No Zoom link in the text, no second button, no figure you were not given, nothing negative, no promise of gains`,
   };
 }
 
@@ -618,10 +620,17 @@ async function pickWin(db: Db, r: Row): Promise<{ trade: Trade; net10: number; f
 export function tradeFallback(f: TradeFacts, rand: () => number = Math.random): string {
   const dir = f.direction ? `${f.direction} ` : '';
   const move = f.entry && f.exit ? `, ${f.entry} to ${f.exit}` : '';
+  const hooks = [
+    'The AI just closed one on gold',
+    'One gold trade, closed',
+    'This one closed on gold',
+    'Gold, closed by the AI',
+    'A gold trade just closed',
+  ];
   const open = [
     `The AI just closed a ${dir}on gold${move}.`,
-    `That one went the right way : a gold ${dir}trade${move}.`,
-    `I was watching this one : gold ${dir}${move ? move.slice(2) : 'trade'}, and ${f.how}.`,
+    `That one went the right way: a gold ${dir}trade${move}.`,
+    `I was watching this one: gold ${dir}${move ? move.slice(2) : 'trade'}, and ${f.how}.`,
     `Gold ${dir}from the AI this afternoon, ${f.how}.`,
     `One more for the AI on gold, a ${dir}trade${move}.`,
   ];
@@ -632,7 +641,7 @@ export function tradeFallback(f: TradeFacts, rand: () => number = Math.random): 
     'Same trade on every account that copies Algoria, at its own size.',
   ];
   const pick = <T,>(a: T[]) => a[Math.floor(rand() * a.length)];
-  return [pick(open).replace(/\s+/g, ' ').replace(' ,', ','), '{{RESULT}}', pick(close)].join('\n\n');
+  return [`📈 <b>${pick(hooks)}</b>`, pick(open).replace(/\s+/g, ' ').replace(' ,', ','), '{{RESULT}}', `${pick(close)} 👌🏻`].join('\n\n');
 }
 
 /** support_settings 'cm_trade_card' : la carte de gain (/api/card/win) est recollée sur les posts VIP, y compris
@@ -716,7 +725,7 @@ export async function runDue(db: Db): Promise<{ published: number; skipped: numb
 /** Le secours du trade commenté, contrôlé comme un texte du modèle (ton, chiffres, risque). */
 export function guardTrade(raw: string, result: string, ctx: DayContext | null): string | null {
   const r = check(raw, { tokens: { RESULT: result }, required: ['RESULT'], noButton: true, allowedUsd: [], autoRisk: true, maxChars: 760,
-    tone: { openings: ctx?.openings ?? [], rationedUsed: ctx?.rationedUsed, hasButton: false } });
+    tone: { openings: ctx?.openings ?? [], rationedUsed: ctx?.rationedUsed, hasButton: false, requireHook: true } });
   return r.ok ? r.text : null;
 }
 

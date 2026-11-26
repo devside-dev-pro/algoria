@@ -20,7 +20,7 @@ import { tradingDayOf, tradingTimeMs } from '@/lib/display/tradingDay';
 import { liveTrades } from './recap';
 import { HISTORY_MAINTENANCE } from '@/lib/member/historyMaintenance';
 import { safeSlice, stripAppLines, wellFormed } from './text';
-import { firstLine, rationedIn, toneIssue, type ToneContext } from './tone';
+import { firstLine, isShapeIssue, rationedIn, shapeFallback, toneIssue, type ToneContext } from './tone';
 import { usd } from './usd';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,6 +28,48 @@ type Db = any;
 
 export const CM_MODEL = () => process.env.ALGORIA_CM_MODEL ?? 'claude-opus-5-5';
 const RISK = "Trading involves risk. Past results don't guarantee future results.";
+
+/** Typographie anglaise du canal (17/11 et 25/11/2026) : jamais d'espace avant ? ! : ; . L'espace insécable français aussi. */
+export function englishPunct(text: string): string {
+  return text.replace(/[ \t\u00A0\u202F\u2009\u2007]+([?!;:])/g, '$1');
+}
+
+/** Exemple cité par Mathieu, tiré des posts 344 à 351 du 25/11/2026. La forme à reproduire, pas un texte à recopier. */
+export const CHANNEL_SHAPE_EXAMPLE = `🌍 <b>Which broker? It depends on your country</b>
+
+Send me yours and I'll tell you where to create your trading account, then you connect it to Algoria.
+
+Just hit the button and write your country, that's all I need 👌🏻`;
+
+const SHAPE_TASK = `SHAPE (mandatory, a draft without it is rejected): the first line is one emoji then a short <b>bold hook</b>, for example 🌍 <b>Which broker? It depends on your country</b>. Then a blank line and 2 or 3 short paragraphs, with 1 to 3 natural emojis in them (👌🏻 🔒 💬 📲). Never zero emojis. Never a space before ? ! : ;.`;
+
+/** Emoji de repli si le modèle n'en met pas en tête. Un seul, sans 🙏 ni 🙌 (rationnés) et sans 👇. */
+function leadEmoji(kind: Brief['kind']): string {
+  switch (kind) {
+    case 'backstage':
+    case 'morning':
+      return '📸';
+    case 'gold':
+      return '🥇';
+    case 'qa':
+      return '💬';
+    case 'story':
+      return '🧠';
+    case 'lesson':
+    case 'howto':
+      return '💡';
+    case 'cta':
+      return '🌍';
+    case 'trade':
+      return '📈';
+    case 'recap':
+      return '🔵';
+    default: {
+      const _never: never = kind;
+      return _never;
+    }
+  }
+}
 
 export const amountsLine = (net10: number) => `${usd(net10 / 10)} at 0.01 lot · ${usd(net10)} at 0.10 lot`;
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -139,20 +181,30 @@ VOICE (10/11/2026, Mathieu: the channel must sound like HIM posting, not like a 
 
 STYLE GUIDE (a post that breaks one is thrown away):
 - Start with the actual point. Never open on the day of the week ("Tuesday…", "Happy Friday…"), never "Good morning family".
-- No header line, no title in capitals (never "🔵💙 HOW IT WORKS", never "YOU ASKED").
-- 0 to 2 emojis in the whole post (zero is often best). 🙏🏼 and 🙌🏻 at most once a week across the channel: assume they are already used.
-- Bold at most once in the whole post, or not at all.
+- No header in capitals (never "🔵💙 HOW IT WORKS", never "YOU ASKED"). The evening recap is the only exception: it keeps the 🔵💙 header the task gives it, and it does not use the hook shape below. A poll is not this shape either: no HTML, follow the poll task.
+- SHAPE (25/11/2026, Mathieu: do not send posts with zero emojis). The first line is ONE emoji, then a short hook in <b>bold</b>, and nothing else on that line. Then an empty line, then 2 or 3 short paragraphs. Put 1 to 3 natural emojis in those paragraphs (👌🏻 🔒 💬 📲 👇🏼). Zero emojis in the whole post is rejected. 🙏🏼 and 🙌🏻 at most once a week: if you are not sure they are free, pick another emoji.
+- Bold exactly once: that hook. Nowhere else.
 - Worn-out phrases, never: "quick one", "No pitch", "I reply myself", "already on gold", "while you live your day", "stuck halfway", "tap below", "nothing hidden".
-- Never end with 👇. A post without a button never points below.
+- Never end with 👇. A post without a button never points below and never says "hit the button".
 - Every post must feel different from the RECENT POSTS and from the OPENINGS USED IN THE LAST 14 DAYS: another first line, another structure, another rhythm.
+
+EXAMPLE (a post that has a button under it; if the task says there is NO button, do not mention a button):
+${CHANNEL_SHAPE_EXAMPLE}
+
+EXAMPLE (no button):
+🔒 <b>Your trading account stays in your name</b>
+
+You create it at the broker, then you connect it to Algoria. The copy runs on that account.
+
+I never hold it. You do 👌🏻
 
 AUDIENCE: beginners, mostly in South Africa and the UK. Many arrived from an ad and have not created their account yet. 90% of them are not traders and never will be: they want the AI to do it for them. So no charts, no jargon, nothing that could worry them; say BUY and SELL (never long or short). The only market event you may ever mention is one the task explicitly gives you.
 
 HARD RULES (a post that breaks one is thrown away):
 - English only. Telegram HTML only: <b>bold</b> and <i>italic</i>, nothing else. No markdown, no hashtags, no links in the text (when a post has a button, the system adds it).
-- Never an em dash or an en dash. Put a space before "?" and "!" (that's how Mathieu writes).
+- Never an em dash or an en dash. Never a space before "?" "!" ":" or ";" (English punctuation: "Which broker?" not "Which broker ?").
 - LAYOUT, AIR FIRST (Mathieu: a block of text with no space, nobody reads it). Telegram puts no space between two lines: the only air is an EMPTY line (\\n\\n). So:
-  · the first line is the hook, then an EMPTY line;
+  · the first line is the emoji and the bold hook, then an EMPTY line;
   · then short blocks of 1 or 2 lines, one idea each, with an EMPTY line between every block; NEVER 3 lines of text in a row;
   · a list stays in one block, with its intro line if it has one;
   · a token ({{AMOUNTS}}, {{YESTERDAY}}, {{RESULT}}) is a block of its own.
@@ -241,9 +293,9 @@ export const withRisk = (t: string, _hasFigure?: boolean) => stripRisk(t);
 
 /** Nettoie et contrôle un texte du modèle : le texte prêt, ou la raison du refus (renvoyée au modèle pour un 2e essai). */
 export function check(raw: string, o: GuardOpts): { ok: true; text: string } | { ok: false; why: string } {
-  // humanize : tiret long → virgule, gras markdown retiré. Le canal est en anglais : pas d'espace avant ? et !
-  // (décision Mathieu, 17/11/2026). L'espace typographique du support business reste dans humanize(..., true).
-  let t = humanize(raw.replace(/\r/g, ''), false);
+  // humanize : tiret long → virgule, gras markdown retiré. Puis la typographie anglaise : on RETIRE l'espace avant
+  // ? ! : ; (le prompt le demandait encore, le modèle le remet). L'espace du support business reste dans humanize(..., true).
+  let t = englishPunct(humanize(raw.replace(/\r/g, ''), false));
   if (o.fixLayout) t = airify(t);
   if (/<(?!\/?(?:b|i)>)[^>]*>/i.test(t)) return { ok: false, why: 'only <b> and <i> tags are allowed' };
   if (o.autoRisk) t = stripRisk(t);
@@ -344,18 +396,18 @@ ${NO_BUTTON} It informs, it does not sell.`,
 ONLY from what MATHIEU'S KNOWLEDGE or LESSONS say about him and Algoria. Never invent a date, a place, a person, a number or an event. If the knowledge does not give a story, write a simple true reflection instead.
 ${NO_BUTTON} It does not sell.`,
   // LA PÉDAGOGIE REFORMULÉE (les anciennes fiches « How it works », sans leur en-tête)
-  lesson: (b) => `Explain ONE thing about how Algoria works, in Mathieu's words, as if a friend asked him. No header. Rewrite this fact card completely (new first line, new order), keep exactly its facts, add no other fact. 2 or 3 short blocks (5 lines of text at most).
+  lesson: (b) => `Explain ONE thing about how Algoria works, in Mathieu's words, as if a friend asked him. No header in capitals. Rewrite this fact card completely (new first line, new order), keep exactly its facts, add no other fact. The first line is still one emoji and a short bold hook, in your own words. 2 or 3 short blocks (5 lines of text at most).
 ${NO_BUTTON} It informs, it does not sell.
 FACT CARD:
-${stripRisk((b as Extract<Brief, { kind: 'lesson' }>).card)}`,
+${englishPunct(stripRisk((b as Extract<Brief, { kind: 'lesson' }>).card))}`,
   cta: (b) => {
     const x = b as Extract<Brief, { kind: 'cta' }>;
     // la version de référence porte le jeton à la place des heures : le modèle le recopie au lieu de réécrire les heures
     const reference = x.times ? x.reference.split(x.times).join('{{TIMES}}') : x.reference;
     return `Write a short post that invites people to act. 2 or 3 short blocks (4 lines of text at most${x.times ? ', not counting the {{TIMES}} block' : ''}). Goal: ${x.goal}
 The button "${x.button}" is added under the post by the system. You may refer to it once, naturally, in your own words, but never "tap below" and never end with 👇. It must read like Mathieu, not like an ad.${x.times ? '\nPut the token {{TIMES}} exactly once, alone in its own block (an empty line before and after): the system replaces it with the time in 6 time zones. Never write an hour, a weekday for another country or a time zone yourself.' : ''}
-Facts you may use are in this reference version (do not copy its wording, its opening or its emojis):
-${stripRisk(reference)}`;
+Facts you may use are in this reference version (do not copy its wording, its opening or its exact emojis; keep the shape: emoji, bold hook, short paragraphs, English punctuation):
+${englishPunct(stripRisk(reference))}`;
   },
   // LE TRADE COMMENTÉ (écrit à l'heure de la publication, sur un vrai trade clos)
   trade: (b) => {
@@ -426,12 +478,14 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
   // (comme {{AMOUNTS}} dans le récap) ; le bloc vient d'Intl, il ne compte donc pas dans la longueur écrite par le modèle
   const times = b.kind === 'cta' && b.times ? b.times : null;
   const previous = extra?.previous && times ? extra.previous.split(times).join('{{TIMES}}') : extra?.previous;
-  const user = `${contextBlock(c)}\n\nTASK:\n${BRIEFS[b.kind](b)}${previous ? `\n\nTHE CURRENT VERSION OF THIS POST:\n${previous}` : ''}${extra?.instruction ? `\n\nMATHIEU ASKS (in French) FOR THIS CHANGE, apply it while keeping the rules:\n${extra.instruction}` : ''}`;
+  const shape = b.kind === 'recap' ? '' : `\n\n${SHAPE_TASK}`;
+  const user = `${contextBlock(c)}\n\nTASK:\n${BRIEFS[b.kind](b)}${shape}${previous ? `\n\nTHE CURRENT VERSION OF THIS POST:\n${previous}` : ''}${extra?.instruction ? `\n\nMATHIEU ASKS (in French) FOR THIS CHANGE, apply it while keeping the rules:\n${extra.instruction}` : ''}`;
   // une correction de Mathieu réécrit SON post : sa propre ouverture ne compte pas comme une répétition
   const own = extra?.previous ? firstLine(extra.previous) : '';
   const opts = optsFor(c, b, tokens, extra?.openings ?? []);
   if (times) { opts.tokens = { ...opts.tokens, TIMES: '{{TIMES}}' }; opts.required = [...(opts.required ?? []), 'TIMES']; }
   if (own && opts.tone?.openings) opts.tone.openings = opts.tone.openings.filter((o) => o !== own);
+  if (b.kind !== 'recap' && opts.tone) opts.tone.requireHook = true;
   const sys = await systemPrompt();
   // deux essais : un texte refusé par les garde-fous repart au modèle avec la raison du refus
   let prompt = user;
@@ -440,8 +494,18 @@ export async function writePost(c: DayContext, b: Brief, extra?: { instruction?:
     if (!raw) return null;
     // au 2e essai, un texte encore en pavé est aéré par le code plutôt que perdu (airify)
     // le récap : la ligne « 👉 app… » est remise par le code (recap.ts, withAppLine), on retire celle du modèle
-    const r = check(b.kind === 'recap' ? stripAppLines(raw) : raw, { ...opts, fixLayout: attempt === 1 });
+    const source = b.kind === 'recap' ? stripAppLines(raw) : raw;
+    const r = check(source, { ...opts, fixLayout: attempt === 1 });
     if (r.ok) return times ? withTimes(r.text, times) : r.text;
+    // 2e essai encore sans emoji ou sans accroche : on la pose nous-mêmes, puis les garde-fous de fond repassent.
+    if (attempt === 1 && b.kind !== 'recap' && isShapeIssue(r.why)) {
+      const prepared = airify(englishPunct(humanize(source.replace(/\r/g, ''), false)));
+      const fixed = shapeFallback(prepared, leadEmoji(b.kind));
+      if (fixed) {
+        const again = check(fixed, { ...opts, fixLayout: true });
+        if (again.ok) return times ? withTimes(again.text, times) : again.text;
+      }
+    }
     console.error(`[cm writer] ${b.kind} refusé (${r.why})`);
     prompt = `${user}\n\nYOUR PREVIOUS DRAFT WAS REJECTED BECAUSE ${r.why.toUpperCase()}. Write it again and fix that.\nPrevious draft:\n${raw}`;
   }
@@ -475,6 +539,7 @@ export function checkPoll(p: unknown, tone: ToneContext = {}): { ok: true; poll:
 /** Écrit le sondage du jour (une vraie question à l'audience, pas un quiz sur les gains). null → le post saute. */
 export async function writePoll(c: DayContext, extraOpenings: string[] = []): Promise<Poll | null> {
   const task = `Write ONE native Telegram poll for the channel, from Mathieu. A genuine, light question to the audience about THEM (where they are in their setup, what they want to understand first, how they follow the channel, what they would like Mathieu to explain in a video), never about results, gains, losses, money or amounts, never a forecast on gold.
+This is a poll, not a channel post: ignore the post shape (no bold hook, no required emoji).
 OUTPUT: only a JSON object {"question": "...", "options": ["...", "..."]} with 2 to 4 short options (under 80 characters each, at most one emoji in the whole poll). No HTML.`;
   const tone: ToneContext = { openings: [...c.openings, ...extraOpenings], rationedUsed: c.rationedUsed };
   const sys = await systemPrompt();
