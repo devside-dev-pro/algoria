@@ -46,6 +46,8 @@ import { tradingDayOf, tradingHour } from '../lib/display/tradingDay';
 import { goldFeedExpected } from '../lib/market/goldHours';
 import { ensureDeployed } from './metaapi/ensureDeployed';
 import { freshDeployGuard, isDeployedState } from './metaapi/deployGuard';
+import { masterConnectionStatus, noteBrokerFailure, noteBrokerUp, noteMasterHealth, startOwnerAlertReminders } from './metaapi/ownerAlertRun';
+import { ownerAlertsEnabled } from './metaapi/ownerAlert';
 import { logEvents, logSignal, pushState, logCandle, logCandles, logNarration, logNote, recordTradeOpen, recordTradeClose, listGhostOpenTrades, closeGhostTrades, latestCandleTime, broadcastTick, watchCommands, fetchDayTradeStats, hasOpenSwingTrade, listOpenSwingTrades, listOpenTrendTrades, listOpenZoneTrades, updateTradeStop, listOpenTradesWithInitialStop, fetchOwnerDigest, recordLiveComment, fetchNudgeCandidates, fetchPendingNudgeCandidates, runnerSwitch, recordNudge, listCopierMembers, addMemberNote, fetchDayAnchor, saveDayAnchor, fetchDayScoreboard, fetchTopTrade, fetchFleetDailyNets, fetchLatestContext, funnelHealth, fetchDayDiscipline } from '../lib/supabase/sync';
 import { ctaKeyboard, humanKeyboard, type Locale } from '../lib/member/i18n';
 import { ACTIVATION_LEGS, ACTIVATION_SYMBOL } from '../lib/member/activation';
@@ -111,7 +113,15 @@ async function main() {
   // après cet await — dont l'approbation des adhésions — ne tourne pas. La file est indépendante du
   // prix et du déploiement : même lot de 25, mêmes interrupteurs, un seul runner.
   startJoinApproval({ secondary: SECONDARY });
-  const { account, stream, terminal } = await connectMaster();
+  console.log(`[algoria] alertes MetaApi propriétaire : ${ownerAlertsEnabled() && !SECONDARY ? 'ON' : 'OFF'}`);
+  let stopOwnerReminders: () => void = () => {};
+  const { account, stream, terminal } = await connectMaster({
+    // DM immédiat si le broker ne joint pas. N'attend rien : la boucle de reconnexion ne bloque pas dessus.
+    onStart: () => { stopOwnerReminders = startOwnerAlertReminders(); },
+    onStop: () => stopOwnerReminders(),
+    onBrokerFailure: (e) => noteBrokerFailure(e),
+    onBrokerUp: () => noteBrokerUp(),
+  });
 
   const instruments = activeInstruments();
   if (!instruments.length) throw new Error('[algoria] aucun instrument actif dans le registre (lib/engine/instruments.ts)');
@@ -1041,8 +1051,21 @@ async function main() {
       try {
         const now = new Date();
         const expected = engines.filter((e) => marketShouldBeOpen(e.inst, now));
-        if (!expected.length) { wasExpected = false; return; }
-        if (!wasExpected) { wasExpected = true; expectedSince = Date.now(); }
+        if (!expected.length) wasExpected = false;
+        else if (!wasExpected) { wasExpected = true; expectedSince = Date.now(); }
+        // Alerte propriétaire seulement. Ne réabonne pas, ne redéploie pas, ne sort pas.
+        const gold = engines.find((e) => e.inst.display === 'XAUUSD');
+        const px = gold ? terminal.price(gold.inst.broker) : undefined;
+        const quoteRaw = px?.time ? new Date(px.time).getTime() : NaN;
+        noteMasterHealth({
+          now: Date.now(),
+          quoteAt: Number.isFinite(quoteRaw) ? quoteRaw : null,
+          silenceFloor: Math.max(startedAt, expectedSince),
+          connectionStatus: masterConnectionStatus(account),
+          accountId: String(process.env.METAAPI_ACCOUNT_ID ?? ''),
+          watchGold: Boolean(gold),
+        });
+        if (!expected.length) return;
         let freshest = 0;
         for (const e of expected) {
           const p = terminal.price(e.inst.broker);
