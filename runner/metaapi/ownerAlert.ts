@@ -426,8 +426,37 @@ export interface OwnerAlertDeps {
   /** undefined = illisible : on n'invente pas un incident et on n'écrase rien. */
   load: () => Promise<string | null | undefined>;
   save: (value: string) => Promise<boolean>;
-  send: (effect: Exclude<OwnerAlertEffect, { kind: 'none' }>) => Promise<{ dm: number; push: number }>;
+  send: (effect: Exclude<OwnerAlertEffect, { kind: 'none' }>) => Promise<{ dm: number; push: number; diagnostic?: string }>;
   log?: (msg: string) => void;
+}
+
+/** Même plafond que notifyOwner : une ligne identique au plus toutes les 30 minutes. */
+export const DELIVERY_LOG_MS = 30 * 60_000;
+
+const deliveryLoggedAt = new Map<string, number>();
+
+export function claimDeliveryLog(line: string, now: number): boolean {
+  for (const [key, at] of deliveryLoggedAt) {
+    if (now - at >= DELIVERY_LOG_MS) deliveryLoggedAt.delete(key);
+  }
+  const prev = deliveryLoggedAt.get(line);
+  if (prev != null && now - prev < DELIVERY_LOG_MS) return false;
+  deliveryLoggedAt.set(line, now);
+  return true;
+}
+
+export function resetDeliveryLog(): void {
+  deliveryLoggedAt.clear();
+}
+
+function safeFailureText(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  return raw
+    .replace(/\b\d{5,}:[A-Za-z0-9_-]{8,}\b/g, '[token]')
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .replace(/\d{7,}/g, (m) => `••••${m.slice(-4)}`)
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, 180);
 }
 
 /**
@@ -449,12 +478,15 @@ export async function runOwnerAlertStep(input: OwnerAlertInput, deps: OwnerAlert
     if (step.effect.kind === 'none' || !step.acknowledged) return;
     const sent = await deps.send(step.effect);
     if ((sent?.dm ?? 0) + (sent?.push ?? 0) <= 0) {
-      deps.log?.('alerte MetaApi propriétaire non délivrée, nouvel essai au prochain passage');
+      const detail = sent?.diagnostic ? ` · ${sent.diagnostic}` : '';
+      const line = `alerte MetaApi propriétaire non délivrée, nouvel essai au prochain passage${detail}`;
+      if (claimDeliveryLog(line, Date.now())) deps.log?.(line);
       return;
     }
     await deps.save(serializeOwnerAlert(step.acknowledged));
     deps.log?.(`alerte MetaApi propriétaire envoyée (${step.effect.kind})`);
   } catch (e) {
-    deps.log?.(`alerte MetaApi propriétaire échouée: ${e instanceof Error ? e.message : String(e)}`);
+    const line = `alerte MetaApi propriétaire échouée: ${safeFailureText(e)}`;
+    if (claimDeliveryLog(line, Date.now())) deps.log?.(line);
   }
 }

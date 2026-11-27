@@ -18,6 +18,9 @@ import {
   parseOwnerAlert,
   reduceOwnerAlert,
   reminderGapMs,
+  DELIVERY_LOG_MS,
+  claimDeliveryLog,
+  resetDeliveryLog,
   runOwnerAlertStep,
   serializeOwnerAlert,
   type OwnerAlertDeps,
@@ -427,6 +430,47 @@ test('un envoi qui lance, une base illisible ou l’interrupteur coupé ne sorte
     save: async () => true,
     send: async () => ({ dm: 1, push: 0 }),
   });
+});
+
+test('le motif d’un échec d’envoi est logué une fois, pas à chaque minute', async () => {
+  resetDeliveryLog();
+  assert.equal(claimDeliveryLog('a', 0), true);
+  assert.equal(claimDeliveryLog('a', DELIVERY_LOG_MS - 1), false);
+  assert.equal(claimDeliveryLog('b', 1_000), true);
+  assert.equal(claimDeliveryLog('a', DELIVERY_LOG_MS), true);
+  resetDeliveryLog();
+
+  const logs: string[] = [];
+  const diag = 'token=non · owner_ids=0 · admin_resolus=0/0 · tg=aucun_envoi · push_subs=0 · push_codes=vapid_absent';
+  const box = memoryDeps({
+    send: async (effect) => { box.sends.push(effect); return { dm: 0, push: 0, diagnostic: diag }; },
+    log: (m) => logs.push(m),
+  });
+  await runOwnerAlertStep(timeout(OPEN), box.deps);
+  await runOwnerAlertStep(timeout(OPEN + 15 * 60_000), box.deps);
+  await runOwnerAlertStep(clock(OPEN + 16 * 60_000), box.deps);
+  const fails = logs.filter((l) => l.includes('non délivrée'));
+  assert.equal(fails.length, 1);
+  assert.equal(fails[0].includes('token=non'), true);
+  assert.equal(fails[0].includes('vapid_absent'), true);
+  assert.equal(fails[0].includes('nouvel essai au prochain passage'), true);
+  assert.equal(fails[0].includes(ID), false);
+});
+
+test('une exception d’envoi ne recopie ni token, ni URL, ni identifiant complet', async () => {
+  const logs: string[] = [];
+  const secret = '123456:AAHabcdefghij';
+  const box = memoryDeps({
+    send: async () => { throw new Error(`failed ${secret} https://api.telegram.org/bot${secret}/sendMessage chat 111222333`); },
+    log: (m) => logs.push(m),
+  });
+  await runOwnerAlertStep(timeout(OPEN), box.deps);
+  await runOwnerAlertStep(timeout(OPEN + 60_000), box.deps);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].includes(secret), false);
+  assert.equal(logs[0].includes('api.telegram.org'), false);
+  assert.equal(logs[0].includes('111222333'), false);
+  assert.equal(logs[0].includes('échouée'), true);
 });
 
 test('le push de secours compte comme délivré ; après rétablissement la ligne d’état est vide', async () => {

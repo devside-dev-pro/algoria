@@ -21,7 +21,12 @@ function productionDeps(): OwnerAlertDeps {
     active: () => ownerAlertsEnabled() && !SECONDARY,
     load: () => getSetting(OWNER_ALERT_SETTING_KEY),
     save: (value) => setSetting(OWNER_ALERT_SETTING_KEY, value),
-    send: (effect) => notifyOwner({ title: effect.title, lines: effect.lines, tag: effect.tag, path: '/' }),
+    // silent : notifyOwner ne logue pas l'échec total. C'est cette boucle qui écrit la ligne, au plus
+    // toutes les 30 minutes, pour ne pas répéter le motif à chaque passage de 60 s.
+    send: async (effect) => {
+      const r = await notifyOwner({ title: effect.title, lines: effect.lines, tag: effect.tag, path: '/' }, { silent: true });
+      return { dm: r.dm, push: r.push, diagnostic: r.diagnostic };
+    },
     log: (msg) => {
       const line = `[algoria] ${msg}`;
       if (msg.startsWith('alerte MetaApi propriétaire envoyée')) console.warn(line);
