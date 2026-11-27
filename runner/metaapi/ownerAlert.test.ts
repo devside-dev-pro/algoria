@@ -125,6 +125,9 @@ test('un timeout ne suffit pas ; le deuxième ouvre une seule alerte, heure de D
   assert.match(blob, /Compte : f9c8…/);
   assert.ok(blob.includes(IMPACT_LINE));
   assert.ok(blob.includes(ACTION_LINE));
+  assert.match(blob, /ne redéploie pas en boucle \(chaque essai est facturé\)/);
+  assert.match(blob, /mets un stop dans MT5 sur chaque trade manuel/);
+  assert.doesNotMatch(blob, /Undeploy puis Deploy/);
   assert.equal(serializeOwnerAlert(second.pending).includes('1234-5678'), false);
 
   const sent = ack(second);
@@ -198,6 +201,8 @@ test('rappels à 30 min, puis 1 h, puis toutes les 3 h — pas avant, et pas le 
   assert.match(text(r1.effect), /⏳ MetaApi toujours en panne — 45 min/);
   assert.match(text(r1.effect), /En panne depuis 45 min/);
   assert.doesNotMatch(text(r1.effect), /🚨 MetaApi en panne/);
+  assert.ok(text(r1.effect).includes(ACTION_LINE));
+  assert.doesNotMatch(text(r1.effect), /Undeploy puis Deploy/);
   assertSafe(text(r1.effect));
   state = ack(r1);
   assert.equal(state.incident?.remindersSent, 1);

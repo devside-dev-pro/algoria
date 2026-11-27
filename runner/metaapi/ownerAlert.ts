@@ -31,7 +31,9 @@ export const OWNER_ALERTS_ENV = 'RUNNER_OWNER_ALERTS';
 export const OWNER_ALERT_SETTING_KEY = 'metaapi_owner_incident';
 
 export const IMPACT_LINE = "Ce que ça casse : le bot ne trade pas, l'app n'est pas à jour, pas de TP au VIP.";
-export const ACTION_LINE = "Quoi faire : ouvre le compte master sur le tableau de bord MetaApi et regarde l'état de la connexion au broker. Si une erreur indique l'identifiant ou le serveur MT5, corrige-les. Sinon, fais Undeploy puis Deploy.";
+// Incident général MetaApi (ticket metaapi/metaapi-javascript-sdk#20) : Undeploy/Deploy ne répare rien
+// et chaque déploiement raté est facturé. On ne le conseille pas par défaut.
+export const ACTION_LINE = 'Quoi faire : ouvre le compte master sur le tableau de bord MetaApi et lis l\'état et le message d\'erreur. Si une erreur indique l\'identifiant ou le serveur MT5, corrige-les. Si c\'est seulement "Disconnected" sans erreur, ne redéploie pas en boucle (chaque essai est facturé) : vérifie s\'il y a un incident MetaApi et contacte leur support. Le bot se reconnecte tout seul dès que MetaApi revient. Pendant la panne, le bot ne protège plus les trades : mets un stop dans MT5 sur chaque trade manuel.';
 
 const DUBAI = new Intl.DateTimeFormat('fr-FR', {
   timeZone: 'Asia/Dubai',
